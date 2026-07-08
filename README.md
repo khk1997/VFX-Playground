@@ -8,7 +8,7 @@
 
 | 特效 | 技術 | 連結 |
 | --- | --- | --- |
-| 能量光環 Energy Ring | Canvas 2D · Additive Blending · Value Noise · Domain Warping · PNG 序列輸出 | [energy-ring/](energy-ring/index.html) |
+| 能量光環 Energy Ring | HTML5 · CSS3 · JavaScript · Canvas 2D API | [energy-ring/](energy-ring/index.html) |
 
 ## 使用方式
 
