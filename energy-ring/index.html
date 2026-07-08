@@ -147,6 +147,7 @@
     <h3>光感 Glow</h3>
     <div class="row"><label>光暈強度</label><input type="range" id="glow" min="0" max="2" step="0.01" value="1"><span class="val" id="glow_v"></span></div>
     <div class="row"><label>白熱亮點</label><input type="range" id="hotspots" min="0" max="5" step="1" value="2"><span class="val" id="hotspots_v"></span></div>
+    <div class="row"><label>亮點大小</label><input type="range" id="hotspotSize" min="0.2" max="3" step="0.05" value="1"><span class="val" id="hotspotSize_v"></span></div>
     <div class="row"><label>閃爍</label><input type="range" id="flicker" min="0" max="1" step="0.01" value="0.25"><span class="val" id="flicker_v"></span></div>
     <div class="row"><label>拖尾殘影</label><input type="range" id="trail" min="0" max="0.95" step="0.01" value="0.55"><span class="val" id="trail_v"></span></div>
   </div>
@@ -224,13 +225,13 @@ resize();
 
 /* ===== 參數 ===== */
 const DEFAULTS = {
-  speed: 0.20, pulse: 0, loopSec: 5,
+  speed: 1, pulse: 0, loopSec: 5,
   radius: 0.26, ringCount: 7, ringGap: 2, thickness: 1.0, wobble: 0.79, warp: 0.5, widthVar: 1, filaments: 1, fray: 0, crackle: 0,
   spikeAmount: 0, spikeLength: 0.5, spikeWidth: 1,
-  glow: 2, hotspots: 5, flicker: 0.26, trail: 0.34,
+  glow: 0.5, hotspots: 5, hotspotSize: 1, flicker: 0.26, trail: 0.34,
   granule: 0, granuleSize: 0.5, granuleSpeed: 1,
-  smoke: 0.14, smokeScale: 1, smokeSpeed: 1, smokeReach: 1,
-  fps: 60, exportSec: 3,
+  smoke: 0, smokeScale: 1, smokeSpeed: 1, smokeReach: 1,
+  fps: 30, exportSec: 3,
   hue: 116, hueShift: -33, sat: 100,
   sparkAmount: 0, sparkSpeed: 0.2, sparkArc: 25, sparkReach: 0.25, turbulence: 1,
   starCount: 15, starMinSize: 0.4, starMaxSize: 2.5, starSharpness: 0.5, starSpread: 0.4, starSpeed: 0.2,
@@ -239,6 +240,8 @@ const P = { ...DEFAULTS, ccw: false };
 // Q 是渲染程式碼實際讀取的參數來源：即時預覽時等於 P；匯出時暫時指向一份快照，
 // 這樣使用者在匯出途中調整滑桿只會改到 P，不會污染正在進行中的那次匯出（見 exportBtn 的處理）。
 let Q = P;
+// 暫停中調整參數時標記為 true，讓主迴圈用同一個凍結的時間點重畫一張反映新參數的靜態畫面
+let paramsDirty = false;
 
 const fmt = {
   speed: v => v.toFixed(2), radius: v => v.toFixed(2), thickness: v => v.toFixed(1),
@@ -252,12 +255,13 @@ function bindControls() {
     const update = () => {
       P[key] = parseFloat(el.value);
       if (valEl) valEl.textContent = (fmt[key] || (v => v.toFixed ? +v.toFixed(2) : v))(P[key]);
+      paramsDirty = true;
     };
     el.addEventListener('input', update);
     el.value = P[key];
     update();
   }
-  document.getElementById('ccw').addEventListener('change', e => P.ccw = e.target.checked);
+  document.getElementById('ccw').addEventListener('change', e => { P.ccw = e.target.checked; paramsDirty = true; });
   updateEffSpeedHint();
 }
 // 顯示轉速滑桿貼齊整數圈之後的實際數值，滑桿寫的是「目標值」，這裡才是真正跑出來的速度
@@ -572,6 +576,13 @@ function frame(now) {
   // 面板開合時，畫面圓心平滑地滑往目標偏移（跟面板的滑動動畫節奏一致），避免瞬間跳動。
   // 用 realDt（不受暫停影響）驅動，暫停時也能繼續完成這個純 UI 過渡
   panelInsetX += (panelInsetTarget - panelInsetX) * Math.min(1, realDt * 10);
+  const insetSettled = Math.abs(panelInsetTarget - panelInsetX) < 0.05;
+  // 暫停、畫面已經完全靜止、而且沒有人在調參數時，直接跳過整幀重繪 —— 反正 dt=0 算出來的結果
+  // 會跟上一幀逐像素相同，沒必要每 1/FPS 秒就重算一次幾百個漸層跟環束多邊形，白白吃 GPU/CPU。
+  // 但暫停中調整滑桿會把 paramsDirty 標記起來，讓它用同一個凍結的時間點重畫「這一張」反映新參數的畫面，
+  // 畫完立刻清掉標記，畫面依然停在原地，不會恢復播放
+  if (paused && insetSettled && !paramsDirty) return;
+  paramsDirty = false;
   renderFrame(ctx, W, H, dt, false, undefined, panelInsetX);
 }
 
@@ -651,8 +662,28 @@ function renderFrame(ctx, W, H, dt, transparent, atTime, centerOffsetX = 0) {
     const s = RING_SEEDS[ri];
     const rr = R + (ri - (Q.ringCount - 1) / 2) * Q.ringGap + s.radiusJitter * 3;
     const ringRot = ringAngle(s.speedMul);
-    // 副色（黃綠）交錯在部分環上
-    const hue = ri % 2 === 0 ? Q.hue : (Q.hue + Q.hueShift + 360) % 360;
+
+    // 顏色沿著環的角度變化，跟亮度共用同一條曲線：亮部（跟白熱亮核同源）偏向副色相，暗部維持主色相，
+    // 呼應參考圖那種「同一條線本身沿途變色」而非整條線固定一色的效果。
+    // 用 conic gradient 一次性做完整圈的顏色分佈（起始角對齊 ringRot，天生跟著環旋轉且無縫循環），
+    // 不用像亮度/寬度那樣逐段（220 個點）計算，效能開銷幾乎跟原本的單色 fillStyle 一樣。
+    const colorBrightnessAt = (t, freq, fSeed) => {
+      let bf = 0.5 + 0.5 * Math.sin(t * freq + fSeed);
+      bf = Math.pow(Math.max(0, bf), 1.6);
+      bf *= 0.55 + 0.45 * pn(t, 3, fSeed * 2 + lst(0.6));
+      return Math.max(0, Math.min(1, bf));
+    };
+    const HUE_GRAD_STOPS = 32;
+    const makeHueGradient = (freq, fSeed, hueOffset, styleFn) => {
+      const grad = ctx.createConicGradient(ringRot, cx, cy);
+      for (let i = 0; i <= HUE_GRAD_STOPS; i++) {
+        const frac = i / HUE_GRAD_STOPS;
+        const bf = colorBrightnessAt(frac * Math.PI * 2, freq, fSeed);
+        const hue = (Q.hue + bf * Q.hueShift + hueOffset + 360) % 360;
+        grad.addColorStop(frac, styleFn(hue));
+      }
+      return grad;
+    };
 
     // 低頻形變：讓環不是正圓，微微歪扭（noise texture 感）
     // 以 t（環座標）索引 → 形變跟著環一起旋轉；循環相位讓形狀緩慢演化且首尾無縫
@@ -667,9 +698,10 @@ function renderFrame(ctx, W, H, dt, transparent, atTime, centerOffsetX = 0) {
     // 整環柔光暈：一次性 shadowBlur，取代逐段外光暈，效能較佳（沿形變路徑）
     if (Q.glow > 0.01) {
       ctx.save();
-      ctx.shadowColor = `hsla(${hue},${Q.sat}%,50%,${0.9})`;
+      ctx.shadowColor = `hsla(${Q.hue},${Q.sat}%,50%,0.9)`;
       ctx.shadowBlur = Q.thickness * 3.2 * Q.glow;
-      ctx.strokeStyle = `hsla(${hue},${Q.sat}%,50%,${0.16 * Q.glow * flick})`;
+      ctx.strokeStyle = makeHueGradient(s.freq, s.phase * 3.7, 0,
+        hue => `hsla(${hue},${Q.sat}%,50%,${0.16 * Q.glow * flick})`);
       ctx.lineWidth = Q.thickness * 1.6;
       ctx.beginPath();
       const GSEGS = 72;
@@ -689,8 +721,8 @@ function renderFrame(ctx, W, H, dt, transparent, atTime, centerOffsetX = 0) {
       const fSeed = s.phase * 3.7 + k * 11.3;
       const fSpread = fCount > 1 ? (k / (fCount - 1) - 0.5) : 0; // -0.5..0.5
       const strandBase = rr + fSpread * Q.thickness * 1.3;
-      const strandHue = (hue + fSpread * 10) % 360;
       const freq = s.freq + (k % 3);
+      const hueOffset = fSpread * 10;
 
       // 先算出整條絲線的路徑點與每點半寬 → 再填成連續變寬絲帶（避免逐段圓頭造成珠珠感）
       const pts = new Array(SEGS + 1);
@@ -745,12 +777,15 @@ function renderFrame(ctx, W, H, dt, transparent, atTime, centerOffsetX = 0) {
         ctx.fill();
       };
 
-      // 同一條絲帶畫三層：外圈微光 → 主體 → 白熱核心
-      ctx.fillStyle = `hsla(${strandHue},${Q.sat}%,50%,${0.22 * flick})`;
+      // 同一條絲帶畫三層：外圈微光 → 主體 → 白熱核心，三層都套用同一條沿角度變化的色彩漸層
+      ctx.fillStyle = makeHueGradient(freq, fSeed, hueOffset,
+        hue => `hsla(${hue},${Q.sat}%,50%,${0.22 * flick})`);
       ribbon(1.9);
-      ctx.fillStyle = `hsla(${strandHue},${Q.sat}%,58%,${0.5 * flick})`;
+      ctx.fillStyle = makeHueGradient(freq, fSeed, hueOffset,
+        hue => `hsla(${hue},${Q.sat}%,58%,${0.5 * flick})`);
       ribbon(1.0);
-      ctx.fillStyle = `hsla(${strandHue},${Math.max(0, Q.sat - 45)}%,92%,${0.55 * flick})`;
+      ctx.fillStyle = makeHueGradient(freq, fSeed, hueOffset,
+        hue => `hsla(${hue},${Math.max(0, Q.sat - 45)}%,92%,${0.55 * flick})`);
       ribbon(0.32);
     }
   }
@@ -781,13 +816,14 @@ function renderFrame(ctx, W, H, dt, transparent, atTime, centerOffsetX = 0) {
     }
   }
 
-  /* --- 白熱亮點（沿環移動的過曝高光）--- */
+  /* --- 白熱亮點（沿環移動的過曝高光）：全部共用同一個轉速基準，只用角度均分區分彼此，
+     確保任何時刻都精確等距（2 顆永遠對角、3 顆永遠 120° 等分），不會各自飄移而散開 --- */
+  const hotspotRot = ringAngle(1);
   for (let h = 0; h < Q.hotspots; h++) {
-    const s = RING_SEEDS[h % RING_SEEDS.length];
-    const a = ringAngle(0.9 + h * 0.13) + h * (Math.PI * 2 / Math.max(1, Q.hotspots)) + s.phase;
+    const a = hotspotRot + h * (Math.PI * 2 / Math.max(1, Q.hotspots));
     const rr = R + (h % Math.max(1, Q.ringCount) - (Q.ringCount - 1) / 2) * Q.ringGap;
     const hx = cx + Math.cos(a) * rr, hy = cy + Math.sin(a) * rr;
-    const len = R * 0.35; // 高光沿切線方向拉長
+    const len = R * 0.35 * Q.hotspotSize; // 高光沿切線方向拉長
     const ta = a + Math.PI / 2 * (Q.ccw ? -1 : 1);
 
     const grad = ctx.createRadialGradient(hx, hy, 0, hx, hy, len);
