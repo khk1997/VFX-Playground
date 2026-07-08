@@ -9,17 +9,17 @@
   html, body { width: 100%; height: 100%; background: #000; overflow: hidden; font-family: "SF Pro", "PingFang TC", "Microsoft JhengHei", sans-serif; }
   #stage { position: absolute; inset: 0; display: block; }
 
-  /* ===== 控制面板 ===== */
+  /* ===== 控制面板：左側縱向抽屜。開啟時特效會自動把圓心往右偏，避開面板佔用的區域 ===== */
   #panel {
-    position: fixed; top: 12px; right: 12px; width: 600px;
-    max-height: calc(100vh - 24px); overflow-y: auto;
-    background: rgba(10, 16, 12, 0.82); backdrop-filter: blur(10px);
+    position: fixed; left: 12px; top: 64px; bottom: 12px; width: 340px;
+    overflow-y: auto;
+    background: rgba(10, 16, 12, 0.86); backdrop-filter: blur(10px);
     border: 1px solid rgba(0, 255, 120, 0.25); border-radius: 12px;
     color: #cfe8d8; padding: 14px 16px 18px; z-index: 10;
-    box-shadow: 0 4px 30px rgba(0,0,0,0.6);
+    box-shadow: 4px 0 30px rgba(0,0,0,0.6);
     transition: transform .25s ease, opacity .25s ease;
   }
-  #panel.collapsed { transform: translateX(calc(100% - 0px)); opacity: 0; pointer-events: none; }
+  #panel.collapsed { transform: translateX(calc(-100% - 24px)); opacity: 0; pointer-events: none; }
   #panel::-webkit-scrollbar { width: 6px; }
   #panel::-webkit-scrollbar-thumb { background: rgba(0,255,120,.3); border-radius: 3px; }
 
@@ -40,18 +40,30 @@
     font-family: inherit;
   }
   #homeBtn:hover { background: rgba(0,255,120,.15); }
-  #panel:not(.collapsed) ~ #toggleBtn { right: 628px; }
+
+  /* ===== 獨立浮動的播放/暫停 —— 隨時可點，不跟著設定面板一起收合 ===== */
+  #playCtl {
+    position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 11;
+    background: rgba(10,16,12,.85); color: #8fffbe;
+    border: 1px solid rgba(0,255,120,.35); border-radius: 999px;
+    padding: 8px 20px; cursor: pointer; font-size: 13px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  }
+  #playCtl:hover { background: rgba(0,255,120,.18); }
+
+  html.preview-mode #homeBtn,
+  html.preview-mode #toggleBtn,
+  html.preview-mode #playCtl,
+  html.preview-mode #panel { display: none !important; }
   @media (max-width: 760px) {
-    #panel { width: 300px; }
-    .groups { flex-direction: column; }
-    #panel:not(.collapsed) ~ #toggleBtn { right: 328px; }
+    #panel { left: 8px; top: 56px; bottom: 8px; width: calc(100vw - 16px); max-width: 340px; }
   }
 
   #panel h2 { font-size: 14px; letter-spacing: 2px; color: #7bffb0; margin-bottom: 4px; font-weight: 600; }
   #panel .sub { font-size: 11px; color: #6f8f7d; margin-bottom: 12px; }
-  .groups { display: flex; gap: 18px; align-items: flex-start; }
-  .groups .col { flex: 1; min-width: 0; }
-  .group { margin-bottom: 8px; border-top: 1px solid rgba(0,255,120,.12); padding-top: 6px; break-inside: avoid; }
+  /* 左側縱向面板：群組直向堆疊成單欄 */
+  .groups { display: block; }
+  .group { margin-bottom: 8px; border-top: 1px solid rgba(0,255,120,.12); padding-top: 6px; }
   .group h3 { font-size: 11px; color: #55d98a; letter-spacing: 1.5px; margin-bottom: 8px; text-transform: uppercase; }
   .row { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; min-width: 0; }
   .row label { flex: 0 0 78px; font-size: 12px; color: #b8d6c4; white-space: nowrap; }
@@ -96,12 +108,13 @@
   <div class="sub">旋轉能量光環特效 — 參數調整</div>
 
   <div class="groups">
-  <div class="col">
   <div class="group">
     <h3>旋轉 Rotation</h3>
     <div class="row"><label>轉速 (圈/秒)</label><input type="range" id="speed" min="0" max="2" step="0.01" value="0.25"><span class="val" id="speed_v"></span></div>
     <div class="row"><label>逆時針</label><input type="checkbox" id="ccw"><span class="val"></span></div>
     <div class="row"><label>速度脈動</label><input type="range" id="pulse" min="0" max="1" step="0.01" value="0"><span class="val" id="pulse_v"></span></div>
+    <div class="row"><label>循環秒數</label><input type="range" id="loopSec" min="1" max="30" step="0.5" value="5"><span class="val" id="loopSec_v"></span></div>
+    <div class="row"><label style="opacity:.6">實際轉速</label><span id="effSpeedHint" style="font-size:11px;color:#7bffb0;">—</span></div>
   </div>
 
   <div class="group">
@@ -109,26 +122,27 @@
     <div class="row"><label>半徑</label><input type="range" id="radius" min="0.1" max="0.48" step="0.005" value="0.33"><span class="val" id="radius_v"></span></div>
     <div class="row"><label>環數</label><input type="range" id="ringCount" min="1" max="20" step="1" value="4"><span class="val" id="ringCount_v"></span></div>
     <div class="row"><label>環距</label><input type="range" id="ringGap" min="0" max="30" step="1" value="12"><span class="val" id="ringGap_v"></span></div>
-    <div class="row"><label>線寬</label><input type="range" id="thickness" min="1" max="12" step="0.5" value="3.5"><span class="val" id="thickness_v"></span></div>
+    <div class="row"><label>線寬</label><input type="range" id="thickness" min="0.1" max="12" step="0.1" value="3.5"><span class="val" id="thickness_v"></span></div>
     <div class="row"><label>不均勻感</label><input type="range" id="wobble" min="0" max="1" step="0.01" value="0.5"><span class="val" id="wobble_v"></span></div>
     <div class="row"><label>扭曲變形</label><input type="range" id="warp" min="0" max="1" step="0.01" value="0.35"><span class="val" id="warp_v"></span></div>
     <div class="row"><label>粗細變化</label><input type="range" id="widthVar" min="0" max="1" step="0.01" value="0.5"><span class="val" id="widthVar_v"></span></div>
     <div class="row"><label>絲線數</label><input type="range" id="filaments" min="1" max="6" step="1" value="3"><span class="val" id="filaments_v"></span></div>
     <div class="row"><label>細節毛絲感</label><input type="range" id="fray" min="0" max="1" step="0.01" value="0.45"><span class="val" id="fray_v"></span></div>
     <div class="row"><label>裂紋斷點</label><input type="range" id="crackle" min="0" max="1" step="0.01" value="0.35"><span class="val" id="crackle_v"></span></div>
+    <div class="row"><label>放射毛刺</label><input type="range" id="spikeAmount" min="0" max="1" step="0.01" value="0"><span class="val" id="spikeAmount_v"></span></div>
+    <div class="row"><label>毛刺長度</label><input type="range" id="spikeLength" min="0" max="1" step="0.01" value="0.5"><span class="val" id="spikeLength_v"></span></div>
+    <div class="row"><label>毛刺粗細</label><input type="range" id="spikeWidth" min="0.2" max="4" step="0.1" value="1"><span class="val" id="spikeWidth_v"></span></div>
   </div>
 
   <div class="group">
     <h3>輸出 Export</h3>
     <div class="row"><label>FPS 上限</label><input type="number" id="fps" min="1" max="240" step="1" value="60"><span class="val"></span></div>
-    <div class="row"><label>輸出秒數</label><input type="number" id="exportSec" min="0.1" max="30" step="0.1" value="3"><span class="val"></span></div>
+    <div class="row"><label>輸出秒數</label><input type="number" id="exportSec" min="0.1" max="30" step="0.1" value="3"><button class="linkbtn" id="syncLoopBtn" title="設為循環秒數，確保輸出無縫循環">= 循環</button></div>
     <div class="row"><label>尺寸 W×H</label><input type="number" class="dim" id="expW" min="16" max="4096" step="1" value="1080"><button class="linkbtn" id="linkBtn" title="連動長寬比">🔗</button><input type="number" class="dim" id="expH" min="16" max="4096" step="1" value="1080"></div>
     <button class="mini" id="exportBtn">⬇ 匯出去背 PNG 序列 (zip)</button>
     <span id="exportStatus"></span>
   </div>
-  </div>
 
-  <div class="col">
   <div class="group">
     <h3>光感 Glow</h3>
     <div class="row"><label>光暈強度</label><input type="range" id="glow" min="0" max="2" step="0.01" value="1"><span class="val" id="glow_v"></span></div>
@@ -147,9 +161,20 @@
   <div class="group">
     <h3>電漿火花 Plasma</h3>
     <div class="row"><label>火花數量</label><input type="range" id="sparkAmount" min="0" max="1" step="0.01" value="0.6"><span class="val" id="sparkAmount_v"></span></div>
+    <div class="row"><label>火花轉速</label><input type="range" id="sparkSpeed" min="0" max="2" step="0.01" value="0.2"><span class="val" id="sparkSpeed_v"></span></div>
     <div class="row"><label>噴發範圍°</label><input type="range" id="sparkArc" min="10" max="360" step="5" value="110"><span class="val" id="sparkArc_v"></span></div>
     <div class="row"><label>飄散距離</label><input type="range" id="sparkReach" min="0.2" max="2" step="0.05" value="1"><span class="val" id="sparkReach_v"></span></div>
     <div class="row"><label>紊流</label><input type="range" id="turbulence" min="0" max="2" step="0.05" value="1"><span class="val" id="turbulence_v"></span></div>
+  </div>
+
+  <div class="group">
+    <h3>星辰 Starfield</h3>
+    <div class="row"><label>數量</label><input type="range" id="starCount" min="0" max="400" step="1" value="120"><span class="val" id="starCount_v"></span></div>
+    <div class="row"><label>最小顆粒</label><input type="range" id="starMinSize" min="0.2" max="6" step="0.1" value="0.6"><span class="val" id="starMinSize_v"></span></div>
+    <div class="row"><label>最大顆粒</label><input type="range" id="starMaxSize" min="0.2" max="10" step="0.1" value="2.5"><span class="val" id="starMaxSize_v"></span></div>
+    <div class="row"><label>清晰度</label><input type="range" id="starSharpness" min="0" max="1" step="0.01" value="0.5"><span class="val" id="starSharpness_v"></span></div>
+    <div class="row"><label>散布範圍</label><input type="range" id="starSpread" min="0.05" max="1.5" step="0.01" value="0.4"><span class="val" id="starSpread_v"></span></div>
+    <div class="row"><label>星辰轉速</label><input type="range" id="starSpeed" min="0" max="2" step="0.01" value="0.2"><span class="val" id="starSpeed_v"></span></div>
   </div>
 
   <div class="group">
@@ -167,17 +192,21 @@
     <div class="row"><label>擴散範圍</label><input type="range" id="smokeReach" min="0.3" max="2" step="0.05" value="1"><span class="val" id="smokeReach_v"></span></div>
   </div>
   </div>
-  </div>
 
   <div class="btns">
-    <button id="pauseBtn">⏸ 暫停</button>
     <button id="resetBtn">↺ 重設</button>
   </div>
 </div>
 <button id="toggleBtn">⚙ 面板</button>
+<button id="playCtl">⏸ 暫停</button>
 
 <script>
 'use strict';
+
+// 預覽嵌入模式（?preview=1）：供首頁卡片用 iframe 嵌入，隱藏面板與導覽按鈕，只留純畫面
+if (new URLSearchParams(location.search).has('preview')) {
+  document.documentElement.classList.add('preview-mode');
+}
 
 const canvas = document.getElementById('stage');
 const ctx = canvas.getContext('2d');
@@ -195,20 +224,26 @@ resize();
 
 /* ===== 參數 ===== */
 const DEFAULTS = {
-  speed: 0.20, pulse: 0,
+  speed: 0.20, pulse: 0, loopSec: 5,
   radius: 0.26, ringCount: 7, ringGap: 2, thickness: 1.0, wobble: 0.79, warp: 0.5, widthVar: 1, filaments: 1, fray: 0, crackle: 0,
+  spikeAmount: 0, spikeLength: 0.5, spikeWidth: 1,
   glow: 2, hotspots: 5, flicker: 0.26, trail: 0.34,
   granule: 0, granuleSize: 0.5, granuleSpeed: 1,
-  smoke: 0.45, smokeScale: 1, smokeSpeed: 1, smokeReach: 1,
+  smoke: 0.14, smokeScale: 1, smokeSpeed: 1, smokeReach: 1,
   fps: 60, exportSec: 3,
   hue: 116, hueShift: -33, sat: 100,
-  sparkAmount: 0.56, sparkArc: 25, sparkReach: 0.25, turbulence: 1,
+  sparkAmount: 0, sparkSpeed: 0.2, sparkArc: 25, sparkReach: 0.25, turbulence: 1,
+  starCount: 15, starMinSize: 0.4, starMaxSize: 2.5, starSharpness: 0.5, starSpread: 0.4, starSpeed: 0.2,
 };
 const P = { ...DEFAULTS, ccw: false };
+// Q 是渲染程式碼實際讀取的參數來源：即時預覽時等於 P；匯出時暫時指向一份快照，
+// 這樣使用者在匯出途中調整滑桿只會改到 P，不會污染正在進行中的那次匯出（見 exportBtn 的處理）。
+let Q = P;
 
 const fmt = {
   speed: v => v.toFixed(2), radius: v => v.toFixed(2), thickness: v => v.toFixed(1),
   hue: v => v + '°', hueShift: v => v + '°', sat: v => v + '%', sparkArc: v => v + '°',
+  loopSec: v => v.toFixed(1) + 's',
 };
 function bindControls() {
   for (const key of Object.keys(DEFAULTS)) {
@@ -223,8 +258,20 @@ function bindControls() {
     update();
   }
   document.getElementById('ccw').addEventListener('change', e => P.ccw = e.target.checked);
+  updateEffSpeedHint();
+}
+// 顯示轉速滑桿貼齊整數圈之後的實際數值，滑桿寫的是「目標值」，這裡才是真正跑出來的速度
+function updateEffSpeedHint() {
+  const el = document.getElementById('effSpeedHint');
+  if (!el) return;
+  const turns = P.speed > 0 ? Math.max(1, Math.round(P.speed * P.loopSec)) : 0;
+  const eff = turns / P.loopSec;
+  const diffPct = P.speed > 0 ? Math.abs(eff - P.speed) / P.speed * 100 : 0;
+  el.textContent = `${eff.toFixed(3)} 圈/秒（每循環 ${turns} 圈）` + (diffPct > 3 ? ` ⚠ 偏離 ${diffPct.toFixed(0)}%` : '');
 }
 bindControls();
+document.getElementById('speed').addEventListener('input', updateEffSpeedHint);
+document.getElementById('loopSec').addEventListener('input', updateEffSpeedHint);
 
 document.getElementById('resetBtn').addEventListener('click', () => {
   Object.assign(P, DEFAULTS);
@@ -233,14 +280,26 @@ document.getElementById('resetBtn').addEventListener('click', () => {
 });
 
 let paused = false;
-const pauseBtn = document.getElementById('pauseBtn');
+const pauseBtn = document.getElementById('playCtl');
 pauseBtn.addEventListener('click', () => {
   paused = !paused;
   pauseBtn.textContent = paused ? '▶ 播放' : '⏸ 暫停';
 });
 
+// 面板開啟時，特效畫面的圓心會平滑往右偏移，避開面板佔用的左側區域（見 renderFrame 的 panelInsetX）
 const panel = document.getElementById('panel');
-document.getElementById('toggleBtn').addEventListener('click', () => panel.classList.toggle('collapsed'));
+let panelOpen = true, panelInsetX = 0, panelInsetTarget = 0;
+const PANEL_OCCUPIED_W = 340 + 12 + 24; // 面板寬度 + 左右邊距，跟 CSS 的數值對應
+function updatePanelInset() {
+  panelInsetTarget = (panelOpen && window.innerWidth > 760) ? PANEL_OCCUPIED_W / 2 : 0;
+}
+document.getElementById('toggleBtn').addEventListener('click', () => {
+  panelOpen = !panelOpen;
+  panel.classList.toggle('collapsed');
+  updatePanelInset();
+});
+window.addEventListener('resize', updatePanelInset);
+updatePanelInset();
 
 /* ===== 雜訊工具（層疊正弦，穩定又便宜）===== */
 function n1(x) { // 1D pseudo-noise, ~[-1,1]
@@ -253,6 +312,21 @@ function pn(t, f, seed) {
          Math.sin(t * f * 5 + seed * 2.3 + 0.4) * 0.15;
 }
 
+/* ===== Loop Animation 核心：把「一直往前跑的時間」換成「繞一圈精確歸零的相位」=====
+   loopPhase 每經過 P.loopSec 秒就精確增加 2π，只要所有雜訊呼叫都用它的整數倍當引數，
+   動畫在 t=0 與 t=loopSec 的畫面就會逐像素完全相同 → 天生無縫循環，不用再找「第幾幀開始重複」。 */
+const TWO_PI = Math.PI * 2;
+// CASE 1／3：時間項直接當 pn()/vn4() 的「t」或「角度」引數 → 只需是 loopPhase 的整數倍即可安全循環
+function loopN(loopSec, coef) {
+  return Math.max(1, Math.round(coef * loopSec / TWO_PI));
+}
+// CASE 2：時間項是加進 pn() 的「seed」引數（seed 內部會被乘上 1.7 / 2.3 兩個諧波係數）
+// 兩者的最小公倍分母是 10，因此時間項必須是 20π 的整數倍，才能讓三個諧波同時精確回到原值
+function loopSeedTerm(loopSec, loopPhase, coef) {
+  const n = Math.max(1, Math.round(Math.abs(coef) * loopSec / (TWO_PI * 10)));
+  return Math.sign(coef || 1) * loopPhase * 10 * n;
+}
+
 /* ===== 環的每一圈固定屬性（避免每幀隨機跳動）===== */
 const RING_SEEDS = Array.from({ length: 24 }, (_, i) => ({
   radiusJitter: (Math.random() - 0.5) * 2,     // 半徑微偏
@@ -262,25 +336,74 @@ const RING_SEEDS = Array.from({ length: 24 }, (_, i) => ({
   widthMul: 0.7 + Math.random() * 0.7,
 }));
 
-/* ===== 電漿火花粒子 ===== */
-const sparks = [];
-function spawnSpark(cx, cy, R, rot) {
-  // 噴發集中在一個隨環旋轉的扇區（模仿原圖右側的電漿羽流）
-  const arcRad = (P.sparkArc * Math.PI / 180);
-  const baseA = rot + Math.PI * 0.15; // 扇區跟著環轉
-  const a = baseA + (Math.random() - 0.5) * arcRad;
-  const speed = (20 + Math.random() * 60) * P.sparkReach;
-  sparks.push({
-    x: cx + Math.cos(a) * R, y: cy + Math.sin(a) * R,
-    vx: Math.cos(a) * speed * (0.4 + Math.random() * 0.8),
-    vy: Math.sin(a) * speed * (0.4 + Math.random() * 0.8),
-    life: 0, maxLife: 0.7 + Math.random() * 1.4,
-    size: 1.5 + Math.random() * 4.5,
-    seed: Math.random() * 100,
-    tangent: (Math.random() - 0.5) * 40, // 切線速度 → 掃過去的感覺
-    angle: a,
-  });
+/* ===== 電漿火花粒子（確定性排程版：可無縫循環）=====
+   不用 Math.random() 即時噴發，改用固定種子預先生成一批「虛擬火花」：
+   每顆有固定的出生時刻（均勻散佈在循環內）與壽命，渲染時以 (目前時間 mod 循環秒數) 算年齡，
+   位置用封閉式公式從年齡直接算出（不逐幀積分）→ 每一循環的火花軌跡逐幀完全相同。 */
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
+const SPARK_MAX_RATE = 360; // sparkAmount=1 時每秒的火花數（對齊舊版「每幀 6 顆 × 60fps」的密度）
+let sparkPool = [], sparkPoolKey = '';
+function getSparkPool(loopSec) {
+  const key = loopSec.toFixed(3);
+  if (sparkPoolKey === key) return sparkPool;
+  sparkPoolKey = key;
+  const count = Math.ceil(SPARK_MAX_RATE * loopSec);
+  const rnd = mulberry32(1234567);
+  sparkPool = Array.from({ length: count }, (_, i) => ({
+    birth: (i + rnd() * 0.9) / count * loopSec, // 均勻散佈 + 些許抖動
+    maxLife: 0.7 + rnd() * 1.4,
+    size: 1.5 + rnd() * 4.5,
+    seed: rnd() * 100,
+    angJitter: rnd() - 0.5,          // 在噴發扇區內的位置（-0.5..0.5，乘上即時的扇區角）
+    speed0: 20 + rnd() * 60,         // 徑向初速（未乘 sparkReach）
+    velScale: 0.4 + rnd() * 0.8,
+    tangent: (rnd() - 0.5) * 40,     // 切線加速 → 掃過去的感覺
+  }));
+  return sparkPool;
+}
+
+/* ===== 星辰粒子（固定不消散版）=====
+   跟電漿火花是獨立的一層：沒有生命週期，單純固定分佈在環外側、跟著環旋轉。
+   同樣用固定種子池 + 封閉式角度公式 → 每顆星星的位置只取決於「目前時間」，天生無縫循環。 */
+// 星辰的獨立畫布：每幀清空重畫，跟主畫布的拖尾殘影完全隔離（見下方渲染區塊的說明）
+const starCanvas = document.createElement('canvas');
+const starCtx = starCanvas.getContext('2d');
+let starPool = [], starPoolKey = -1;
+function getStarPool(count) {
+  if (starPoolKey === count) return starPool;
+  starPoolKey = count;
+  const rnd = mulberry32(7654321);
+  starPool = Array.from({ length: count }, () => ({
+    angle0: rnd() * Math.PI * 2,
+    radiusFactor: Math.sqrt(rnd()),   // 開根號 → 面積均勻分布，不會擠在內圈
+    sizeT: rnd(),                     // 0..1，配合當下的最小/最大顆粒插值
+    briT: 0.35 + rnd() * 0.65,        // 每顆星星固定的亮度差異（靜態，不影響循環）
+    seed: rnd() * 100,
+  }));
+  return starPool;
+}
+
+/* ===== 放射毛刺：垂直於環面、往外炸開的短小光絲（固定位置，跟著環一起轉）=====
+   數量是密度滑桿（0-1），所以池子固定生成夠多筆，密度只決定要畫前面幾筆，不需要重新生成。 */
+const SPIKE_POOL_MAX = 240;
+const SPIKE_POOL = (() => {
+  const rnd = mulberry32(2468013);
+  return Array.from({ length: SPIKE_POOL_MAX }, () => ({
+    angle0: rnd() * Math.PI * 2,
+    lenT: rnd(),     // 0..1，配合當下的毛刺長度插值
+    widT: rnd(),     // 0..1，粗細的個體差異
+    briT: 0.4 + rnd() * 0.6,
+  }));
+})();
 
 /* ===== 太陽米粒組織：低解析 3D FBM 雜訊逐格重算 → 放大成翻騰的對流紋理 ===== */
 const SUN_N = 128; // 雜訊紋理解析度（放大後靠平滑內插，故意低解析以求效能與柔和感）
@@ -288,26 +411,29 @@ const sunCanvas = document.createElement('canvas');
 sunCanvas.width = sunCanvas.height = SUN_N;
 const sunCtx = sunCanvas.getContext('2d');
 const sunImg = sunCtx.createImageData(SUN_N, SUN_N);
-let sunT = 0;
 
-// 3D value noise（時間當第三維 → 對流胞會融合、分裂、翻騰而非平移）
+// 4D value noise（時間用 (cos,sin) 兩維繞圓圈取樣 → 對流胞會融合、分裂、翻騰而非平移，且可無縫循環）
 const PERM = new Uint8Array(512);
 {
   const p = Array.from({ length: 256 }, (_, i) => i);
   for (let i = 255; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [p[i], p[j]] = [p[j], p[i]]; }
   for (let i = 0; i < 512; i++) PERM[i] = p[i & 255];
 }
-function vn3(x, y, z) {
-  const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
-  const xf = x - xi, yf = y - yi, zf = z - zi;
-  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf), w = zf * zf * (3 - 2 * zf);
-  const h = (a, b, c) => PERM[(PERM[(PERM[a & 255] + b) & 255] + c) & 255] / 255;
-  const l = (a, b, t) => a + (b - a) * t;
-  return l(
-    l(l(h(xi, yi, zi),     h(xi + 1, yi, zi),     u), l(h(xi, yi + 1, zi),     h(xi + 1, yi + 1, zi),     u), v),
-    l(l(h(xi, yi, zi + 1), h(xi + 1, yi, zi + 1), u), l(h(xi, yi + 1, zi + 1), h(xi + 1, yi + 1, zi + 1), u), v),
-    w
+// 4D value noise：多一維 w，時間可用 (cos θ, sin θ) 當 (z,w) 沿圓圈取樣 → 繞一圈後座標精確歸位，
+// 天生無縫循環（比起讓 z 隨時間一直增加，繞圈取樣不需要「回頭銜接」，起點終點本來就是同一點）。
+function vn4(x, y, z, w) {
+  const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z), wi = Math.floor(w);
+  const xf = x - xi, yf = y - yi, zf = z - zi, wf = w - wi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const s = zf * zf * (3 - 2 * zf), t = wf * wf * (3 - 2 * wf);
+  const h = (a, b, c, d) => PERM[(PERM[(PERM[(PERM[a & 255] + b) & 255] + c) & 255] + d) & 255] / 255;
+  const l = (a, b, k) => a + (b - a) * k;
+  const corner = (dz, dw) => l(
+    l(h(xi, yi, zi + dz, wi + dw),     h(xi + 1, yi, zi + dz, wi + dw),     u),
+    l(h(xi, yi + 1, zi + dz, wi + dw), h(xi + 1, yi + 1, zi + dz, wi + dw), u),
+    v
   );
+  return l(l(corner(0, 0), corner(1, 0), s), l(corner(0, 1), corner(1, 1), s), t);
 }
 
 // 亮度 → RGB 色階表（暗紅 → 橙 → 亮黃白），色相跟主色走，換色時才重算
@@ -319,25 +445,29 @@ function hsl2rgb(h, s, l) {
   return [f(0) * 255, f(8) * 255, f(4) * 255];
 }
 function buildSunLUT() {
-  const key = P.hue + '_' + P.sat;
+  const key = Q.hue + '_' + Q.sat;
   if (sunLUTKey === key) return;
   sunLUTKey = key;
   sunLUT = new Uint8ClampedArray(256 * 3);
   for (let i = 0; i < 256; i++) {
     const q = i / 255;
     // 暗部偏深色低亮度、亮部色相微偏暖並拉高亮度 → 對流胞的立體感
-    const [r, g, b] = hsl2rgb(P.hue + q * 18 - 6, P.sat, 8 + q * 64);
+    const [r, g, b] = hsl2rgb(Q.hue + q * 18 - 6, Q.sat, 8 + q * 64);
     sunLUT[i * 3] = r; sunLUT[i * 3 + 1] = g; sunLUT[i * 3 + 2] = b;
   }
 }
 
 const SUN_EXT = 1.38; // 紋理涵蓋範圍（環半徑的倍數）
-function drawSunTexture(rotA) {
+const SUN_TURNS = [3, 5, 8]; // 3 個八度各自每循環繞的圈數（取相異整數避免同步重複）
+function drawSunTexture(rotA, loopPhase) {
   buildSunLUT();
   const data = sunImg.data;
-  const freq = 3.5 + (1 - P.granuleSize) * 10.5; // 米粒大小 → 雜訊頻率（越大顆頻率越低）
-  const inten = Math.min(1, P.granule);
+  const freq = 3.5 + (1 - Q.granuleSize) * 10.5; // 米粒大小 → 雜訊頻率（越大顆頻率越低）
+  const inten = Math.min(1, Q.granule);
   const ca = Math.cos(rotA), sa = Math.sin(rotA); // 表層跟著環旋轉
+  // 對流翻騰的時間軸改成繞圓圈取樣（circle-embedding）：半徑決定一次循環內變化的幅度（翻騰速度）
+  const gRad = 1.6 * Math.max(0.15, Q.granuleSpeed);
+  const octCirc = SUN_TURNS.map(nT => { const a = loopPhase * nT; return [Math.cos(a) * gRad, Math.sin(a) * gRad]; });
   for (let py = 0; py < SUN_N; py++) {
     const ny = ((py / SUN_N) * 2 - 1) * SUN_EXT;
     for (let px = 0; px < SUN_N; px++) {
@@ -353,7 +483,8 @@ function drawSunTexture(rotA) {
       // 3 個八度的 billow 亂流：亮胞平原 + 細窄暗縫（米粒組織的特徵）
       let tv = 0, amp = 0.55, f = 1;
       for (let o = 0; o < 3; o++) {
-        tv += amp * Math.abs(2 * vn3(rx * freq * f + 37, ry * freq * f + 19, sunT * (0.6 + f * 0.35)) - 1);
+        const [zc, zs] = octCirc[o];
+        tv += amp * Math.abs(2 * vn4(rx * freq * f + 37, ry * freq * f + 19, zc, zs) - 1);
         f *= 2.15; amp *= 0.5;
       }
       let c = 1 - tv * 1.4;          // 反轉：胞內亮、縫隙暗
@@ -374,20 +505,30 @@ const smokeCanvas = document.createElement('canvas');
 smokeCanvas.width = smokeCanvas.height = SMOKE_N;
 const smokeCtx = smokeCanvas.getContext('2d');
 const smokeImg = smokeCtx.createImageData(SMOKE_N, SMOKE_N);
-let smokeT = 0, smokeTick = 0;
+let smokeTick = 0;
+const SMOKE_TURNS = [4, 6, 10, 13]; // fbm4 四個八度各自每循環繞的圈數（大略對應原本 1x/1.6x/2.4x/3.2x 的相對演化速度)
 
-function fbm3(x, y, z) { // 4 個八度的平滑雜訊（末段高頻讓絲縷更銳利）
-  return vn3(x, y, z) * 0.5 + vn3(x * 2.1, y * 2.1, z * 1.6) * 0.27 +
-         vn3(x * 4.3, y * 4.3, z * 2.4) * 0.15 + vn3(x * 8.7, y * 8.7, z * 3.2) * 0.08;
+function fbm4(x, y, circles) { // 4 個八度的平滑雜訊（末段高頻讓絲縷更銳利），時間軸皆為圓圈取樣
+  return vn4(x, y, circles[0][0], circles[0][1]) * 0.5 +
+         vn4(x * 2.1, y * 2.1, circles[1][0], circles[1][1]) * 0.27 +
+         vn4(x * 4.3, y * 4.3, circles[2][0], circles[2][1]) * 0.15 +
+         vn4(x * 8.7, y * 8.7, circles[3][0], circles[3][1]) * 0.08;
 }
 
-function drawSmokeTexture(rotA) {
+function drawSmokeTexture(rotA, loopPhase) {
   buildSunLUT(); // 共用色階表
   const data = smokeImg.data;
-  const sc = 1.6 * P.smokeScale;
-  const inten = Math.min(1, P.smoke);
-  const kDecay = 1.7 / Math.max(0.2, P.smokeReach); // 擴散範圍 → 徑向衰減
+  const sc = 1.6 * Q.smokeScale;
+  const inten = Math.min(1, Q.smoke);
+  const kDecay = 1.7 / Math.max(0.2, Q.smokeReach); // 擴散範圍 → 徑向衰減
   const ca = Math.cos(rotA), sa = Math.sin(rotA);
+  const spd = Math.max(0.15, Q.smokeSpeed);
+  // domain warping 與 fbm 的時間軸都改成繞圓圈取樣，半徑＝一次循環內的變化幅度（取代原本的翻騰速度）
+  const wRad = 1.2 * spd, fRad = 1.3 * spd;
+  const wAngX = loopPhase * 5, wAngY = loopPhase * 6 + 13;
+  const wcx = Math.cos(wAngX) * wRad, wcy = Math.sin(wAngX) * wRad;
+  const wdx = Math.cos(wAngY) * wRad, wdy = Math.sin(wAngY) * wRad;
+  const fCircles = SMOKE_TURNS.map(nT => { const a = loopPhase * nT; return [Math.cos(a) * fRad, Math.sin(a) * fRad]; });
   for (let py = 0; py < SMOKE_N; py++) {
     const ny = ((py / SMOKE_N) * 2 - 1) * SMOKE_EXT;
     for (let px = 0; px < SMOKE_N; px++) {
@@ -400,9 +541,9 @@ function drawSmokeTexture(rotA) {
       if (rise < 0.03) { data[idx + 3] = 0; continue; }
       const rx = nx * ca + ny * sa, ry = -nx * sa + ny * ca;
       // domain warping：先取一次低頻雜訊當座標偏移 → 流體的拉絲、捲曲感
-      const wx = vn3(rx * sc * 0.9 + 11, ry * sc * 0.9 + 71, smokeT * 0.5);
-      const wy = vn3(rx * sc * 0.9 + 41, ry * sc * 0.9 + 23, smokeT * 0.45 + 13);
-      let v = fbm3(rx * sc + (wx - 0.5) * 2.6, ry * sc + (wy - 0.5) * 2.6, smokeT * 0.4);
+      const wx = vn4(rx * sc * 0.9 + 11, ry * sc * 0.9 + 71, wcx, wcy);
+      const wy = vn4(rx * sc * 0.9 + 41, ry * sc * 0.9 + 23, wdx, wdy);
+      let v = fbm4(rx * sc + (wx - 0.5) * 2.6, ry * sc + (wy - 0.5) * 2.6, fCircles);
       v = (v - 0.32) * 2.2;
       if (v < 0) v = 0; else if (v > 1) v = 1;
       const a = v * rise * inten;
@@ -417,7 +558,7 @@ function drawSmokeTexture(rotA) {
 }
 
 /* ===== 主迴圈 ===== */
-let rot = 0, last = performance.now(), noiseT = 0, lastDraw = 0, exporting = false;
+let last = performance.now(), noiseT = 0, lastDraw = 0, exporting = false;
 
 function frame(now) {
   requestAnimationFrame(frame);
@@ -425,59 +566,77 @@ function frame(now) {
   const interval = 1000 / Math.max(1, P.fps || 60);
   if (now - lastDraw < interval - 1) return; // FPS 上限
   lastDraw = now;
-  let dt = Math.min((now - last) / 1000, 0.25);
+  const realDt = Math.min((now - last) / 1000, 0.25);
   last = now;
-  if (paused) dt = 0;
-  renderFrame(ctx, W, H, dt, false);
+  let dt = paused ? 0 : realDt;
+  // 面板開合時，畫面圓心平滑地滑往目標偏移（跟面板的滑動動畫節奏一致），避免瞬間跳動。
+  // 用 realDt（不受暫停影響）驅動，暫停時也能繼續完成這個純 UI 過渡
+  panelInsetX += (panelInsetTarget - panelInsetX) * Math.min(1, realDt * 10);
+  renderFrame(ctx, W, H, dt, false, undefined, panelInsetX);
 }
 
 // transparent=true 時以去背模式繪製（拖尾用 destination-out 淡出而非疊黑）
-function renderFrame(ctx, W, H, dt, transparent) {
-  noiseT += dt;
+// atTime 有給值時（匯出用）：直接用「幀索引/幀率」精確設定時間，不用累加 dt，完全沒有浮點誤差累積
+// centerOffsetX：即時預覽在面板開啟時，把畫面圓心往右偏移避開面板；匯出時永遠是 0（維持正中央）
+function renderFrame(ctx, W, H, dt, transparent, atTime, centerOffsetX = 0) {
+  noiseT = atTime !== undefined ? atTime : noiseT + dt;
 
-  const cx = W / 2, cy = H / 2;
+  // 循環相位：每經過 loopSec 秒精確繞完一圈 2π，之後所有雜訊都用它的整數倍當引數 → 無縫循環
+  const LOOP_SEC = Math.max(0.5, Q.loopSec || 5);
+  const loopPhase = (noiseT / LOOP_SEC) * TWO_PI;
+  const lst = coef => loopSeedTerm(LOOP_SEC, loopPhase, coef); // CASE2 用（嵌入 pn 的 seed 引數）
+  const ltN = coef => loopN(LOOP_SEC, coef);                    // CASE1/3 用（直接當 t/角度引數）
+
+  const cx = W / 2 + centerOffsetX, cy = H / 2;
   const minDim = Math.min(W, H);
-  const R = P.radius * minDim;
-  const dir = P.ccw ? -1 : 1;
+  const R = Q.radius * minDim;
+  const dir = Q.ccw ? -1 : 1;
 
-  // 速度脈動（預設 0 = 均速）
-  const speedNow = P.speed * (1 + P.pulse * 0.6 * n1(noiseT * 1.5));
-  rot += dir * speedNow * Math.PI * 2 * dt;
+  // 轉速對齊循環：四捨五入成整數圈，確保旋轉在循環邊界完全銜接（無縫循環的必要條件）。
+  // 轉速 > 0 時至少 1 圈，避免「短循環 × 慢轉速」被四捨五入成 0 圈而完全靜止
+  const turnsPerLoop = Q.speed > 0 ? Math.max(1, Math.round(Q.speed * LOOP_SEC)) : 0;
+  // 速度脈動：以角度擺盪（而非速度累加）表示，在整數圈內平均為 0，不影響每循環的總圈數，
+  // 且是 loopPhase 的封閉式函數 → 天生無縫，不需要逐幀累加
+  const pulseWobble = Q.pulse > 0 ? Q.pulse * 0.5 * pn(loopPhase * ltN(1.5), 1, 0) : 0;
+  // 任何「旋轉的倍率」（各環自轉速度差異、煙霧/太陽紋理跟轉、白熱亮點公轉）都要各自對齊整數圈，
+  // 否則個別倍率非整數時，該元素在循環邊界會轉到不同角度，看起來就是接縫跳動
+  const ringAngle = mult => {
+    const turns = Math.round(turnsPerLoop * mult);
+    return loopPhase * dir * turns + dir * pulseWobble * turns;
+  };
 
   // 整體閃爍
-  const flick = 1 + P.flicker * 0.35 * n1(noiseT * 13.7);
+  const flick = 1 + Q.flicker * 0.35 * pn(loopPhase * ltN(13.7), 1, 0);
 
   /* --- 拖尾：trail 越高殘影越長；去背模式用 destination-out 淡出 --- */
   ctx.globalCompositeOperation = transparent ? 'destination-out' : 'source-over';
-  ctx.fillStyle = `rgba(0,0,0,${1 - P.trail})`;
+  ctx.fillStyle = `rgba(0,0,0,${1 - Q.trail})`;
   ctx.fillRect(0, 0, W, H);
 
   ctx.globalCompositeOperation = 'lighter';
 
   /* --- 外圈柔光暈 --- */
-  if (P.glow > 0.01) {
+  if (Q.glow > 0.01) {
     const g = ctx.createRadialGradient(cx, cy, R * 0.55, cx, cy, R * 1.5);
     g.addColorStop(0, 'rgba(0,0,0,0)');
-    g.addColorStop(0.45, `hsla(${P.hue},${P.sat}%,50%,${0.10 * P.glow * flick})`);
-    g.addColorStop(0.62, `hsla(${P.hue},${P.sat}%,45%,${0.05 * P.glow * flick})`);
+    g.addColorStop(0.45, `hsla(${Q.hue},${Q.sat}%,50%,${0.10 * Q.glow * flick})`);
+    g.addColorStop(0.62, `hsla(${Q.hue},${Q.sat}%,45%,${0.05 * Q.glow * flick})`);
     g.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = g;
     ctx.fillRect(cx - R * 1.6, cy - R * 1.6, R * 3.2, R * 3.2);
   }
 
   /* --- 流體煙霧：環外圍漂流的墨霧（畫在最底層，讓主環蓋在上面）--- */
-  if (P.smoke > 0.005) {
-    smokeT += dt * P.smokeSpeed * 0.5;
+  if (Q.smoke > 0.005) {
     smokeTick++;
-    if (smokeTick % 2 === 1) drawSmokeTexture(rot * 0.35); // 隔幀重算（煙霧流動慢，看不出差異）
+    if (smokeTick % 2 === 1) drawSmokeTexture(ringAngle(0.35), loopPhase); // 隔幀重算（煙霧流動慢，看不出差異）
     const sext = R * SMOKE_EXT;
     ctx.drawImage(smokeCanvas, cx - sext, cy - sext, sext * 2, sext * 2);
   }
 
   /* --- 太陽米粒組織：翻騰的對流層貼在環的外層表面 --- */
-  if (P.granule > 0.005) {
-    sunT += dt * P.granuleSpeed * 0.55;
-    drawSunTexture(rot * 0.6);
+  if (Q.granule > 0.005) {
+    drawSunTexture(ringAngle(0.6), loopPhase);
     const ext = R * SUN_EXT;
     ctx.drawImage(sunCanvas, cx - ext, cy - ext, ext * 2, ext * 2);
   }
@@ -486,32 +645,32 @@ function renderFrame(ctx, W, H, dt, transparent) {
   const SEGS = 220;
   const segA = (Math.PI * 2) / SEGS;
   ctx.lineCap = 'round';
-  const jitterAmp = P.fray * R * 0.022;
+  const jitterAmp = Q.fray * R * 0.022;
 
-  for (let ri = 0; ri < P.ringCount; ri++) {
+  for (let ri = 0; ri < Q.ringCount; ri++) {
     const s = RING_SEEDS[ri];
-    const rr = R + (ri - (P.ringCount - 1) / 2) * P.ringGap + s.radiusJitter * 3;
-    const ringRot = rot * s.speedMul;
+    const rr = R + (ri - (Q.ringCount - 1) / 2) * Q.ringGap + s.radiusJitter * 3;
+    const ringRot = ringAngle(s.speedMul);
     // 副色（黃綠）交錯在部分環上
-    const hue = ri % 2 === 0 ? P.hue : (P.hue + P.hueShift + 360) % 360;
+    const hue = ri % 2 === 0 ? Q.hue : (Q.hue + Q.hueShift + 360) % 360;
 
     // 低頻形變：讓環不是正圓，微微歪扭（noise texture 感）
-    // 以 t（環座標）索引 → 形變跟著環一起旋轉；noiseT 讓形狀緩慢演化
-    const warpAmp = P.warp * R * 0.045;
+    // 以 t（環座標）索引 → 形變跟著環一起旋轉；循環相位讓形狀緩慢演化且首尾無縫
+    const warpAmp = Q.warp * R * 0.045;
     const wSeed = s.phase * 5.3 + ri * 7.1;
     const warpFn = t =>
       warpAmp * (
-        pn(t, 2, wSeed + noiseT * 0.18) * 0.6 +
-        pn(t, 5, -wSeed * 1.4 + noiseT * 0.12) * 0.4
+        pn(t, 2, wSeed + lst(0.18)) * 0.6 +
+        pn(t, 5, -wSeed * 1.4 + lst(0.12)) * 0.4
       );
 
     // 整環柔光暈：一次性 shadowBlur，取代逐段外光暈，效能較佳（沿形變路徑）
-    if (P.glow > 0.01) {
+    if (Q.glow > 0.01) {
       ctx.save();
-      ctx.shadowColor = `hsla(${hue},${P.sat}%,50%,${0.9})`;
-      ctx.shadowBlur = P.thickness * 3.2 * P.glow;
-      ctx.strokeStyle = `hsla(${hue},${P.sat}%,50%,${0.16 * P.glow * flick})`;
-      ctx.lineWidth = P.thickness * 1.6;
+      ctx.shadowColor = `hsla(${hue},${Q.sat}%,50%,${0.9})`;
+      ctx.shadowBlur = Q.thickness * 3.2 * Q.glow;
+      ctx.strokeStyle = `hsla(${hue},${Q.sat}%,50%,${0.16 * Q.glow * flick})`;
+      ctx.lineWidth = Q.thickness * 1.6;
       ctx.beginPath();
       const GSEGS = 72;
       for (let i = 0; i <= GSEGS; i++) {
@@ -525,17 +684,17 @@ function renderFrame(ctx, W, H, dt, transparent) {
       ctx.restore();
     }
 
-    const fCount = P.filaments;
+    const fCount = Q.filaments;
     for (let k = 0; k < fCount; k++) {
       const fSeed = s.phase * 3.7 + k * 11.3;
       const fSpread = fCount > 1 ? (k / (fCount - 1) - 0.5) : 0; // -0.5..0.5
-      const strandBase = rr + fSpread * P.thickness * 1.3;
+      const strandBase = rr + fSpread * Q.thickness * 1.3;
       const strandHue = (hue + fSpread * 10) % 360;
       const freq = s.freq + (k % 3);
 
       // 先算出整條絲線的路徑點與每點半寬 → 再填成連續變寬絲帶（避免逐段圓頭造成珠珠感）
       const pts = new Array(SEGS + 1);
-      const wBase = P.thickness * (0.85 / Math.max(1, Math.sqrt(fCount)));
+      const wBase = Q.thickness * (0.85 / Math.max(1, Math.sqrt(fCount)));
       for (let i = 0; i <= SEGS; i++) {
         const t = i * segA;
         const a0 = t + ringRot;
@@ -543,30 +702,31 @@ function renderFrame(ctx, W, H, dt, transparent) {
         // 沿圓周的亮度分佈：波瓣 + 雜訊 → 不均勻的流光
         let b = 0.5 + 0.5 * Math.sin(t * freq + fSeed);
         b = Math.pow(Math.max(0, b), 1.6);
-        b *= 0.55 + 0.45 * pn(t, 3, fSeed * 2 + noiseT * 0.6);
+        b *= 0.55 + 0.45 * pn(t, 3, fSeed * 2 + lst(0.6));
         b = Math.max(0, b) * flick;
-        b = b * P.wobble + (1 - P.wobble) * 0.65 * flick; // wobble=0 → 均勻圓環
+        b = b * Q.wobble + (1 - Q.wobble) * 0.65 * flick; // wobble=0 → 均勻圓環
 
         // 裂紋斷點：把寬度掐到近乎 0，形成細小暗縫
-        if (P.crackle > 0.01) {
-          let gap = 0.5 + 0.5 * pn(t, 42, fSeed * 5 + noiseT * 0.15);
+        if (Q.crackle > 0.01) {
+          let gap = 0.5 + 0.5 * pn(t, 42, fSeed * 5 + lst(0.15));
           gap = Math.pow(Math.max(0, gap), 4);
-          b *= (1 - P.crackle) + P.crackle * gap;
+          b *= (1 - Q.crackle) + Q.crackle * gap;
         }
 
         // 細節毛絲：徑向微抖動，讓路徑不是完美圓，模擬手繪流線
         const jitter = jitterAmp * (
-          pn(t, 26, fSeed * 4.1 + noiseT * 0.5) * 0.7 +
-          pn(t, 61, fSeed * 7.7 - noiseT * 0.3) * 0.3
+          pn(t, 26, fSeed * 4.1 + lst(0.5)) * 0.7 +
+          pn(t, 61, fSeed * 7.7 - lst(0.3)) * 0.3
         );
         // 每條絲線對整環形變的跟隨程度略不同 → 絲線間會微微分岔再合攏
         const rj = strandBase + warpFn(t) * (0.85 + fSpread * 0.5) + jitter;
 
-        // 粗細變化：低頻雜訊沿環調變寬度，同一環有粗有細（筆觸壓力感）
-        const wn = 1 + P.widthVar * 0.85 * pn(t, 3, fSeed * 2.9 + noiseT * 0.25);
-        const hw = wBase * (0.5 + b * 0.9) * Math.max(0.06, wn) * 0.95;
+        // 粗細變化：低頻雜訊沿環調變寬度，同一環有粗有細（筆觸壓力感）。
+        // widthVar=1 時最細處逼近 0（幾乎看不見線），最粗處變 2 倍，差距拉到最大
+        const wn = 1 + Q.widthVar * 0.98 * pn(t, 3, fSeed * 2.9 + lst(0.25));
+        const hw = wBase * (0.5 + b * 0.9) * Math.max(0, wn) * 0.95;
 
-        pts[i] = { cos: Math.cos(a0), sin: Math.sin(a0), r: rj, hw: Math.max(0.1, hw) };
+        pts[i] = { cos: Math.cos(a0), sin: Math.sin(a0), r: rj, hw: Math.max(0.01, hw) };
       }
 
       // 絲帶填色：外緣順走 + 內緣倒走圍成封閉多邊形 → 寬度連續平滑無接縫
@@ -586,27 +746,53 @@ function renderFrame(ctx, W, H, dt, transparent) {
       };
 
       // 同一條絲帶畫三層：外圈微光 → 主體 → 白熱核心
-      ctx.fillStyle = `hsla(${strandHue},${P.sat}%,50%,${0.22 * flick})`;
+      ctx.fillStyle = `hsla(${strandHue},${Q.sat}%,50%,${0.22 * flick})`;
       ribbon(1.9);
-      ctx.fillStyle = `hsla(${strandHue},${P.sat}%,58%,${0.5 * flick})`;
+      ctx.fillStyle = `hsla(${strandHue},${Q.sat}%,58%,${0.5 * flick})`;
       ribbon(1.0);
-      ctx.fillStyle = `hsla(${strandHue},${Math.max(0, P.sat - 45)}%,92%,${0.55 * flick})`;
+      ctx.fillStyle = `hsla(${strandHue},${Math.max(0, Q.sat - 45)}%,92%,${0.55 * flick})`;
       ribbon(0.32);
     }
   }
 
+  /* --- 放射毛刺：垂直穿過環面、往外炸開的短小光絲，跟著主環一起旋轉 --- */
+  if (Q.spikeAmount > 0.005) {
+    const activeSpikes = Math.round(Q.spikeAmount * SPIKE_POOL_MAX);
+    const spikeRot = ringAngle(1); // 跟主環同步旋轉
+    // 環束的視覺總寬度（含環距與線寬），毛刺要能穿過整束環才看得出「垂直於環」的感覺
+    const bundleHalf = (Math.max(0, Q.ringCount - 1) * Q.ringGap + Q.thickness * 4) * 0.5;
+    for (let i = 0; i < activeSpikes; i++) {
+      const sp = SPIKE_POOL[i];
+      const a = sp.angle0 + spikeRot;
+      const cosA = Math.cos(a), sinA = Math.sin(a);
+      const outLen = Q.spikeLength * R * (0.05 + 0.22 * sp.lenT);
+      const rIn = R - bundleHalf * 0.6;
+      const rOut = R + bundleHalf * 0.6 + outLen;
+      const x0 = cx + cosA * rIn, y0 = cy + sinA * rIn;
+      const x1 = cx + cosA * rOut, y1 = cy + sinA * rOut;
+      const alpha = sp.briT * flick;
+      const grad = ctx.createLinearGradient(x0, y0, x1, y1);
+      grad.addColorStop(0, `hsla(${Q.hue},${Q.sat}%,80%,0)`);
+      grad.addColorStop(0.5, `hsla(${Q.hue},${Q.sat}%,88%,${alpha})`);
+      grad.addColorStop(1, `hsla(${Q.hue},${Q.sat}%,70%,0)`);
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = Q.spikeWidth * (0.6 + 0.7 * sp.widT);
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+    }
+  }
+
   /* --- 白熱亮點（沿環移動的過曝高光）--- */
-  for (let h = 0; h < P.hotspots; h++) {
+  for (let h = 0; h < Q.hotspots; h++) {
     const s = RING_SEEDS[h % RING_SEEDS.length];
-    const a = rot * (0.9 + h * 0.13) + h * (Math.PI * 2 / Math.max(1, P.hotspots)) + s.phase;
-    const rr = R + (h % Math.max(1, P.ringCount) - (P.ringCount - 1) / 2) * P.ringGap;
+    const a = ringAngle(0.9 + h * 0.13) + h * (Math.PI * 2 / Math.max(1, Q.hotspots)) + s.phase;
+    const rr = R + (h % Math.max(1, Q.ringCount) - (Q.ringCount - 1) / 2) * Q.ringGap;
     const hx = cx + Math.cos(a) * rr, hy = cy + Math.sin(a) * rr;
     const len = R * 0.35; // 高光沿切線方向拉長
-    const ta = a + Math.PI / 2 * (P.ccw ? -1 : 1);
+    const ta = a + Math.PI / 2 * (Q.ccw ? -1 : 1);
 
     const grad = ctx.createRadialGradient(hx, hy, 0, hx, hy, len);
-    grad.addColorStop(0, `hsla(${P.hue},30%,97%,${0.75 * flick})`);
-    grad.addColorStop(0.25, `hsla(${P.hue},${P.sat}%,70%,${0.4 * flick})`);
+    grad.addColorStop(0, `hsla(${Q.hue},30%,97%,${0.75 * flick})`);
+    grad.addColorStop(0.25, `hsla(${Q.hue},${Q.sat}%,70%,${0.4 * flick})`);
     grad.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.save();
     ctx.translate(hx, hy);
@@ -619,36 +805,90 @@ function renderFrame(ctx, W, H, dt, transparent) {
     ctx.restore();
   }
 
-  /* --- 電漿火花 --- */
-  if (dt > 0) {
-    const spawnCount = P.sparkAmount * 6;
-    const whole = Math.floor(spawnCount);
-    for (let i = 0; i < whole; i++) spawnSpark(cx, cy, R, rot);
-    if (Math.random() < spawnCount - whole) spawnSpark(cx, cy, R, rot);
+  /* --- 星辰：固定不消散、散布在環外側、跟著環轉的粒子層（與電漿火花是獨立系統）---
+     畫在獨立畫布上、每幀清空重畫，不共用主畫布的拖尾殘影 —— 星辰轉得慢，若跟環共用
+     拖尾，舊位置還沒淡出新位置就畫上去，會變成一串串殘影小珠子（見使用者回報的匯出圖）。*/
+  if (Q.starCount > 0) {
+    // 用跟主畫布相同的實際像素尺寸與縮放矩陣（含 DPR），避免疊回主畫布時被二次縮放而模糊
+    if (starCanvas.width !== ctx.canvas.width || starCanvas.height !== ctx.canvas.height) {
+      starCanvas.width = ctx.canvas.width; starCanvas.height = ctx.canvas.height;
+    }
+    starCtx.setTransform(ctx.getTransform());
+    starCtx.clearRect(0, 0, W, H);
+    starCtx.globalCompositeOperation = 'lighter';
+
+    const stars = getStarPool(Math.round(Q.starCount));
+    const starTurns = Q.starSpeed > 0 ? Math.max(1, Math.round(Q.starSpeed * LOOP_SEC)) : 0;
+    const starRot = loopPhase * dir * starTurns;
+    // 清晰度：0 = 柔和瀰漫的光暈點；1 = 邊緣分明的銳利小光點
+    const haloMul = 1.2 + (1 - Q.starSharpness) * 4.8;
+    const coreStop = Math.min(0.92, 0.15 + Q.starSharpness * 0.55);
+    const minSz = Math.min(Q.starMinSize, Q.starMaxSize);
+    const maxSz = Math.max(Q.starMinSize, Q.starMaxSize);
+
+    for (let i = 0; i < stars.length; i++) {
+      const st = stars[i];
+      const a = st.angle0 + starRot;
+      const sr = R * (1 + Q.starSpread * st.radiusFactor);
+      const x = cx + Math.cos(a) * sr, y = cy + Math.sin(a) * sr;
+      const size = minSz + (maxSz - minSz) * st.sizeT;
+      const alpha = st.briT * flick;
+      if (alpha <= 0.01 || size <= 0.02) continue;
+      const rad = size * haloMul;
+      const g = starCtx.createRadialGradient(x, y, 0, x, y, rad);
+      g.addColorStop(0, `hsla(${Q.hue},${Math.max(0, Q.sat - 20)}%,92%,${alpha})`);
+      g.addColorStop(coreStop, `hsla(${Q.hue},${Q.sat}%,65%,${alpha * 0.7})`);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      starCtx.fillStyle = g;
+      starCtx.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+    }
+    // 疊回主畫布：暫時歸零主畫布的變形矩陣，讓兩張畫布做 1:1 實際像素合成
+    const prevTransform = ctx.getTransform();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.drawImage(starCanvas, 0, 0);
+    ctx.setTransform(prevTransform);
   }
 
-  for (let i = sparks.length - 1; i >= 0; i--) {
-    const sp = sparks[i];
-    sp.life += dt;
-    if (sp.life > sp.maxLife) { sparks.splice(i, 1); continue; }
-    const lt = sp.life / sp.maxLife;
+  /* --- 電漿火花（確定性排程：年齡取模循環，位置由封閉式公式算出）--- */
+  if (Q.sparkAmount > 0.005) {
+    const pool = getSparkPool(LOOP_SEC);
+    const activeCount = Math.round(Q.sparkAmount * SPARK_MAX_RATE * LOOP_SEC);
+    const tLoop = ((noiseT % LOOP_SEC) + LOOP_SEC) % LOOP_SEC;
+    const arcRad = (Q.sparkArc * Math.PI / 180);
+    const turb = Q.turbulence * 60;
+    // 火花羽流有獨立轉速（與環的轉速脫鉤），同樣貼齊整數圈以維持無縫循環
+    const sparkTurns = Q.sparkSpeed > 0 ? Math.max(1, Math.round(Q.sparkSpeed * LOOP_SEC)) : 0;
 
-    // 紊流 + 切線漂移
-    const turb = P.turbulence * 60;
-    sp.vx += (n1(sp.seed + noiseT * 2.4) * turb - Math.sin(sp.angle) * sp.tangent * 0.1) * dt;
-    sp.vy += (n1(sp.seed * 1.7 + noiseT * 2.1) * turb + Math.cos(sp.angle) * sp.tangent * 0.1) * dt;
-    sp.x += sp.vx * dt;
-    sp.y += sp.vy * dt;
+    for (let i = 0; i < activeCount && i < pool.length; i++) {
+      const sp = pool[i];
+      const age = ((tLoop - sp.birth) % LOOP_SEC + LOOP_SEC) % LOOP_SEC;
+      if (age > sp.maxLife) continue;
+      const lt = age / sp.maxLife;
 
-    const alpha = (1 - lt) * (0.5 + 0.5 * n1(sp.seed + noiseT * 8)) * flick;
-    if (alpha <= 0.02) continue;
-    const size = sp.size * (1 + lt * 2.5) * P.sparkReach;
-    const g = ctx.createRadialGradient(sp.x, sp.y, 0, sp.x, sp.y, size * 3);
-    g.addColorStop(0, `hsla(${P.hue},${P.sat}%,85%,${alpha * 0.5})`);
-    g.addColorStop(0.35, `hsla(${P.hue},${P.sat}%,55%,${alpha * 0.3})`);
-    g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(sp.x - size * 3, sp.y - size * 3, size * 6, size * 6);
+      // 出生角：出生時刻的羽流旋轉角（每循環轉整數圈 → 模 2π 後每一循環都相同）+ 扇區內抖動
+      const birthRot = dir * sparkTurns * TWO_PI * (sp.birth / LOOP_SEC);
+      const a = birthRot + Math.PI * 0.15 + sp.angJitter * arcRad;
+      const cosA = Math.cos(a), sinA = Math.sin(a);
+
+      // 封閉式位置：起點(環上) + 徑向等速漂移 + 切線等加速(0.5·k·age²) + 紊流擾動(年齡驅動、可循環)
+      const drift = sp.speed0 * Q.sparkReach * sp.velScale * age;
+      const tanDisp = sp.tangent * 0.05 * age * age;
+      const turbX = pn(age * 2.4, 1, sp.seed) * turb * age * 0.5;
+      const turbY = pn(age * 2.1, 1, sp.seed * 1.7) * turb * age * 0.5;
+      const x = cx + cosA * (R + drift) - sinA * tanDisp + turbX;
+      const y = cy + sinA * (R + drift) + cosA * tanDisp + turbY;
+
+      const alpha = (1 - lt) * (0.5 + 0.5 * pn(age * 8, 1, sp.seed)) * flick;
+      if (alpha <= 0.02) continue;
+      const size = sp.size * (1 + lt * 2.5) * Q.sparkReach;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, size * 3);
+      g.addColorStop(0, `hsla(${Q.hue},${Q.sat}%,85%,${alpha * 0.5})`);
+      g.addColorStop(0.35, `hsla(${Q.hue},${Q.sat}%,55%,${alpha * 0.3})`);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(x - size * 3, y - size * 3, size * 6, size * 6);
+    }
   }
 }
 requestAnimationFrame(frame);
@@ -713,25 +953,45 @@ expHEl.addEventListener('input', () => {
   if (linkOn && h > 0) expWEl.value = Math.max(16, Math.round(h * linkRatio));
 });
 
+document.getElementById('syncLoopBtn').addEventListener('click', () => {
+  document.getElementById('exportSec').value = P.loopSec.toFixed(1);
+});
+
 document.getElementById('exportBtn').addEventListener('click', async () => {
   if (exporting) return;
   const btn = document.getElementById('exportBtn');
   const status = document.getElementById('exportStatus');
   exporting = true;
   btn.disabled = true;
-  const fps = Math.max(1, Math.round(P.fps || 60));
-  const total = Math.max(1, Math.round((P.exportSec || 3) * fps));
-  const ew = Math.min(4096, Math.max(16, Math.round(parseFloat(expWEl.value) || 1080)));
-  const eh = Math.min(4096, Math.max(16, Math.round(parseFloat(expHEl.value) || 1080)));
-  const ec = document.createElement('canvas');
-  ec.width = ew; ec.height = eh;
-  const ectx = ec.getContext('2d');
-  const files = [];
   try {
-    // 先暖機一小段，讓拖尾殘影達到穩定狀態，第一張就不會太乾淨
-    for (let i = 0; i < 30; i++) renderFrame(ectx, ew, eh, 1 / fps, true);
+    const fps = Math.max(1, Math.round(P.fps || 60));
+    // 循環秒數對齊幀數：四捨五入到整數幀，差異通常 <半幀時長，不可察覺，
+    // 但能保證「幀數 ÷ fps」剛好等於循環秒數，不會因為除不盡而在接縫處留下極小的跳動
+    const framesPerLoop = Math.max(1, Math.round((P.loopSec || 5) * fps));
+    const correctedLoopSec = framesPerLoop / fps;
+    // 輸出秒數可以是循環秒數的整數倍（例如想要 3 個循環接在一起），四捨五入取最接近的整數倍
+    const loopsRequested = Math.max(1, Math.round((P.exportSec || P.loopSec || 5) / (P.loopSec || 5)));
+    const total = framesPerLoop * loopsRequested;
+    const ew = Math.min(4096, Math.max(16, Math.round(parseFloat(expWEl.value) || 1080)));
+    const eh = Math.min(4096, Math.max(16, Math.round(parseFloat(expHEl.value) || 1080)));
+
+    // 匯出快照：把當下所有參數複製一份給 Q 讀取，跟使用者接下來在面板上的操作完全隔離，
+    // 匯出途中調整滑桿只會改到 P，不會污染正在進行中的這次匯出
+    const snapshot = { ...P, loopSec: correctedLoopSec };
+    Q = snapshot;
+
+    const ec = document.createElement('canvas');
+    ec.width = ew; ec.height = eh;
+    const ectx = ec.getContext('2d');
+    const files = [];
+
+    // 暖機：完整渲染「前一個循環」（用負數時間，靠三角函數天生的週期性直接銜接），
+    // 而不是渲染任意 N 幀再假設拖尾已經穩定 —— 這樣暖機後的狀態保證跟無限循環播放時完全一致
+    for (let i = -framesPerLoop; i < 0; i++) {
+      renderFrame(ectx, ew, eh, 1 / fps, true, i / fps);
+    }
     for (let i = 0; i < total; i++) {
-      renderFrame(ectx, ew, eh, 1 / fps, true);
+      renderFrame(ectx, ew, eh, 1 / fps, true, i / fps);
       const blob = await new Promise(r => ec.toBlob(r, 'image/png'));
       files.push({ name: `frame_${String(i).padStart(4, '0')}.png`, data: new Uint8Array(await blob.arrayBuffer()) });
       status.textContent = `輸出中… ${i + 1}/${total}`;
@@ -743,13 +1003,15 @@ document.getElementById('exportBtn').addEventListener('click', async () => {
     a.download = `energy-ring_${ew}x${eh}_${fps}fps_${total}f.zip`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
-    status.textContent = `完成：${total} 張去背 PNG（${ew}×${eh}）`;
+    status.textContent = `完成：${total} 張去背 PNG（${ew}×${eh}，${loopsRequested} 個循環）`;
   } catch (e) {
     status.textContent = '輸出失敗：' + e.message;
+  } finally {
+    Q = P; // 還原即時預覽讀取的來源
+    btn.disabled = false;
+    exporting = false;
+    last = performance.now(); // 避免恢復播放時 dt 暴衝
   }
-  btn.disabled = false;
-  exporting = false;
-  last = performance.now(); // 避免恢復播放時 dt 暴衝
 });
 </script>
 </body>

@@ -73,6 +73,12 @@
   }
   .card-preview canvas { width: 100%; height: 100%; display: block; }
   .card-preview .soon { font-size: 12px; letter-spacing: 2px; color: #3d5347; }
+  /* 真實效果頁用 iframe 嵌入並縮放，畫面跟點進去的預設狀態完全一致 */
+  .card-preview iframe {
+    position: absolute; top: 0; left: 0;
+    border: 0; pointer-events: none;
+    transform-origin: top left;
+  }
 
   .card-body { padding: 12px 14px 14px; background: rgba(0,0,0,.35); }
   .card-title { font-size: 15px; font-weight: 600; letter-spacing: .5px; margin-bottom: 8px; }
@@ -133,11 +139,14 @@ const EFFECTS = [
     title: '能量光環 Energy Ring',
     href: 'energy-ring/index.html',
     tags: ['HTML5', 'CSS3', 'JavaScript', 'Canvas 2D API'],
-    preview: previewEnergyRing,
+    previewSrc: 'energy-ring/index.html?preview=1',
   },
-  { title: '敬請期待', href: null, tags: ['Coming Soon'], preview: null },
-  { title: '敬請期待', href: null, tags: ['Coming Soon'], preview: null },
+  { title: '敬請期待', href: null, tags: ['Coming Soon'] },
+  { title: '敬請期待', href: null, tags: ['Coming Soon'] },
 ];
+
+// iframe 內部渲染解析度（與卡片預覽框同比例 220:190，放大 3 倍後縮小顯示以求清晰）
+const PREVIEW_W = 660, PREVIEW_H = 570;
 
 const cardsEl = document.getElementById('cards');
 let active = 0;
@@ -151,11 +160,17 @@ function buildCards() {
 
     const preview = document.createElement('div');
     preview.className = 'card-preview';
-    if (fx.preview) {
-      const canvas = document.createElement('canvas');
-      canvas.width = 220; canvas.height = 190;
-      preview.appendChild(canvas);
-      fx.preview(canvas);
+    if (fx.previewSrc) {
+      const iframe = document.createElement('iframe');
+      iframe.src = fx.previewSrc;
+      iframe.width = PREVIEW_W;
+      iframe.height = PREVIEW_H;
+      iframe.tabIndex = -1;
+      iframe.setAttribute('scrolling', 'no');
+      iframe.setAttribute('aria-hidden', 'true');
+      const scale = 220 / PREVIEW_W;
+      iframe.style.transform = `scale(${scale})`;
+      preview.appendChild(iframe);
     } else {
       const soon = document.createElement('div');
       soon.className = 'soon';
@@ -208,50 +223,6 @@ window.addEventListener('keydown', (e) => {
 
 buildCards();
 setActive(0);
-
-/* ===== 卡片縮圖：能量光環的輕量版即時預覽 ===== */
-function previewEnergyRing(canvas) {
-  const ctx = canvas.getContext('2d');
-  const W = canvas.width, H = canvas.height;
-  let rot = 0, last = performance.now();
-
-  function n1(x) {
-    return Math.sin(x) * 0.55 + Math.sin(x * 2.13 + 1.7) * 0.3 + Math.sin(x * 4.7 + 0.4) * 0.15;
-  }
-
-  function frame(now) {
-    const dt = Math.min((now - last) / 1000, 0.05);
-    last = now;
-    rot += dt * 0.6 * Math.PI * 2;
-
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = 'rgba(0,0,0,0.35)';
-    ctx.fillRect(0, 0, W, H);
-    ctx.globalCompositeOperation = 'lighter';
-
-    const cx = W / 2, cy = H / 2, R = Math.min(W, H) * 0.28;
-    const SEGS = 60, segA = (Math.PI * 2) / SEGS;
-    for (let ring = 0; ring < 2; ring++) {
-      const rr = R + (ring - 0.5) * 8;
-      const hue = ring === 0 ? 128 : 80;
-      for (let i = 0; i < SEGS; i++) {
-        const t = i * segA;
-        const a0 = t + rot * (ring === 0 ? 1 : 0.8);
-        let b = 0.5 + 0.5 * Math.sin(t * 3 + ring * 2);
-        b *= 0.6 + 0.4 * n1(t * 3 + now * 0.001);
-        if (b < 0.1) continue;
-        const x0 = cx + Math.cos(a0) * rr, y0 = cy + Math.sin(a0) * rr;
-        const x1 = cx + Math.cos(a0 + segA * 1.3) * rr, y1 = cy + Math.sin(a0 + segA * 1.3) * rr;
-        ctx.strokeStyle = `hsla(${hue},100%,60%,${b * 0.7})`;
-        ctx.lineWidth = 2.2;
-        ctx.lineCap = 'round';
-        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-      }
-    }
-    if (canvas.isConnected) requestAnimationFrame(frame);
-  }
-  requestAnimationFrame(frame);
-}
 </script>
 </body>
 </html>
