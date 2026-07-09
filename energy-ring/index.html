@@ -110,7 +110,7 @@
   <div class="groups">
   <div class="group">
     <h3>旋轉 Rotation</h3>
-    <div class="row"><label>轉速 (圈/秒)</label><input type="range" id="speed" min="0" max="2" step="0.01" value="0.25"><span class="val" id="speed_v"></span></div>
+    <div class="row"><label>轉速 (圈/秒)</label><input type="range" id="speed" min="0" max="2" step="0.01" value="0.2"><span class="val" id="speed_v"></span></div>
     <div class="row"><label>逆時針</label><input type="checkbox" id="ccw"><span class="val"></span></div>
     <div class="row"><label>速度脈動</label><input type="range" id="pulse" min="0" max="1" step="0.01" value="0"><span class="val" id="pulse_v"></span></div>
     <div class="row"><label>循環秒數</label><input type="range" id="loopSec" min="1" max="30" step="0.5" value="5"><span class="val" id="loopSec_v"></span></div>
@@ -171,19 +171,19 @@
 
   <div class="group">
     <h3>電弧 Arc</h3>
-    <div class="row"><label>電弧數量</label><input type="range" id="arcAmount" min="0" max="1" step="0.01" value="0.5"><span class="val" id="arcAmount_v"></span></div>
+    <div class="row"><label>電弧數量</label><input type="range" id="arcAmount" min="0" max="1" step="0.01" value="0.85"><span class="val" id="arcAmount_v"></span></div>
     <div class="row"><label>跨幅</label><input type="range" id="arcSpan" min="0.1" max="1" step="0.01" value="0.45"><span class="val" id="arcSpan_v"></span></div>
     <div class="row"><label>鋸齒感</label><input type="range" id="arcJag" min="0" max="1" step="0.01" value="0.6"><span class="val" id="arcJag_v"></span></div>
-    <div class="row"><label>粗細</label><input type="range" id="arcThickness" min="0.3" max="3" step="0.05" value="1"><span class="val" id="arcThickness_v"></span></div>
+    <div class="row"><label>粗細</label><input type="range" id="arcThickness" min="0.3" max="3" step="0.05" value="2.65"><span class="val" id="arcThickness_v"></span></div>
   </div>
 
   <div class="group">
     <h3>脈衝波 Shockwave</h3>
-    <div class="row"><label>強度</label><input type="range" id="waveAmount" min="0" max="2" step="0.02" value="0.5"><span class="val" id="waveAmount_v"></span></div>
+    <div class="row"><label>強度</label><input type="range" id="waveAmount" min="0" max="2" step="0.02" value="1.4"><span class="val" id="waveAmount_v"></span></div>
     <div class="row"><label>每循環波數</label><input type="range" id="waveCount" min="1" max="8" step="1" value="2"><span class="val" id="waveCount_v"></span></div>
-    <div class="row"><label>速度</label><input type="range" id="waveSpeed" min="0.1" max="4" step="0.05" value="1"><span class="val" id="waveSpeed_v"></span></div>
-    <div class="row"><label>擴散距離</label><input type="range" id="waveReach" min="0.1" max="1.5" step="0.05" value="0.6"><span class="val" id="waveReach_v"></span></div>
-    <div class="row"><label>波環寬度</label><input type="range" id="waveWidth" min="0.1" max="2" step="0.05" value="0.5"><span class="val" id="waveWidth_v"></span></div>
+    <div class="row"><label>速度</label><input type="range" id="waveSpeed" min="0.1" max="4" step="0.05" value="0.45"><span class="val" id="waveSpeed_v"></span></div>
+    <div class="row"><label>擴散距離</label><input type="range" id="waveReach" min="0.1" max="1.5" step="0.05" value="0.4"><span class="val" id="waveReach_v"></span></div>
+    <div class="row"><label>波環寬度</label><input type="range" id="waveWidth" min="0.1" max="2" step="0.05" value="2"><span class="val" id="waveWidth_v"></span></div>
   </div>
 
   <div class="group">
@@ -243,7 +243,7 @@ resize();
 
 /* ===== 參數 ===== */
 const DEFAULTS = {
-  speed: 1, pulse: 0, loopSec: 5,
+  speed: 0.2, pulse: 0, loopSec: 5,
   radius: 0.26, ringCount: 7, ringGap: 2, thickness: 1.0, wobble: 0.79, warp: 0.5, widthVar: 1, filaments: 1, fray: 0, crackle: 0,
   spikeAmount: 0, spikeLength: 0.5, spikeWidth: 1, spikeBlur: 0.5,
   glow: 0.5, hotspots: 2, hotspotSize: 2, flicker: 0.26, trail: 0.34,
@@ -252,8 +252,8 @@ const DEFAULTS = {
   fps: 30, exportSec: 3,
   hue: 116, hueShift: -33, sat: 100,
   sparkAmount: 0, sparkSpeed: 0.2, sparkArc: 25, sparkReach: 0.25, turbulence: 1,
-  arcAmount: 0.5, arcSpan: 0.45, arcJag: 0.6, arcThickness: 1,
-  waveAmount: 0.5, waveCount: 2, waveSpeed: 1, waveReach: 0.6, waveWidth: 0.5,
+  arcAmount: 0.85, arcSpan: 0.45, arcJag: 0.6, arcThickness: 2.65,
+  waveAmount: 1.4, waveCount: 2, waveSpeed: 0.45, waveReach: 0.4, waveWidth: 2,
   starCount: 15, starMinSize: 0.4, starMaxSize: 2.5, starSharpness: 0.5, starSpread: 0.4, starSpeed: 0.2,
 };
 const P = { ...DEFAULTS, ccw: false };
