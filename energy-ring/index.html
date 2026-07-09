@@ -181,6 +181,7 @@
     <h3>脈衝波 Shockwave</h3>
     <div class="row"><label>強度</label><input type="range" id="waveAmount" min="0" max="1" step="0.01" value="0.5"><span class="val" id="waveAmount_v"></span></div>
     <div class="row"><label>每循環波數</label><input type="range" id="waveCount" min="1" max="8" step="1" value="2"><span class="val" id="waveCount_v"></span></div>
+    <div class="row"><label>速度</label><input type="range" id="waveSpeed" min="0.1" max="4" step="0.05" value="1"><span class="val" id="waveSpeed_v"></span></div>
     <div class="row"><label>擴散距離</label><input type="range" id="waveReach" min="0.1" max="1.5" step="0.05" value="0.6"><span class="val" id="waveReach_v"></span></div>
     <div class="row"><label>波環寬度</label><input type="range" id="waveWidth" min="0.1" max="2" step="0.05" value="0.5"><span class="val" id="waveWidth_v"></span></div>
   </div>
@@ -252,7 +253,7 @@ const DEFAULTS = {
   hue: 116, hueShift: -33, sat: 100,
   sparkAmount: 0, sparkSpeed: 0.2, sparkArc: 25, sparkReach: 0.25, turbulence: 1,
   arcAmount: 0.5, arcSpan: 0.45, arcJag: 0.6, arcThickness: 1,
-  waveAmount: 0.5, waveCount: 2, waveReach: 0.6, waveWidth: 0.5,
+  waveAmount: 0.5, waveCount: 2, waveSpeed: 1, waveReach: 0.6, waveWidth: 0.5,
   starCount: 15, starMinSize: 0.4, starMaxSize: 2.5, starSharpness: 0.5, starSpread: 0.4, starSpeed: 0.2,
 };
 const P = { ...DEFAULTS, ccw: false };
@@ -731,7 +732,10 @@ function renderFrame(outputCtx, W, H, dt, transparent, atTime, centerOffsetX = 0
     const wc = Math.max(1, Math.round(Q.waveCount));
     const rStart = R * 0.22;
     const rEnd = R * (1 + Q.waveReach);
-    const basePhase = (loopPhase / TWO_PI) % 1; // 0..1
+    // 速度：把「每秒幾次擴散-淡出」對齊成每循環整數次，跟轉速對齊循環的做法（turnsPerLoop）同理，
+    // 確保循環邊界精確銜接，不會在接縫處看到波紋位置跳動
+    const waveTurns = Math.max(1, Math.round(Q.waveSpeed * LOOP_SEC));
+    const basePhase = ((loopPhase / TWO_PI) * waveTurns) % 1; // 0..1
     for (let wi = 0; wi < wc; wi++) {
       const prog0 = (basePhase + wi / wc) % 1; // 每顆波錯開 1/wc 個循環起跑
       // 進度用 ease-out：出生時衝很快、遠處減速淡出（爆發感）
