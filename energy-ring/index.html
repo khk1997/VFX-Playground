@@ -154,6 +154,13 @@
   </div>
 
   <div class="group">
+    <h3>全域輝光 Bloom</h3>
+    <div class="row"><label>強度</label><input type="range" id="bloomAmount" min="0" max="1.5" step="0.02" value="0"><span class="val" id="bloomAmount_v"></span></div>
+    <div class="row"><label>門檻</label><input type="range" id="bloomThreshold" min="0" max="1" step="0.01" value="0.5"><span class="val" id="bloomThreshold_v"></span></div>
+    <div class="row"><label>範圍</label><input type="range" id="bloomRadius" min="0.2" max="3" step="0.05" value="1"><span class="val" id="bloomRadius_v"></span></div>
+  </div>
+
+  <div class="group">
     <h3>色彩 Color</h3>
     <div class="row"><label>主色相</label><input type="range" id="hue" min="0" max="360" step="1" value="130"><span class="val" id="hue_v"></span></div>
     <div class="row"><label>副色相偏移</label><input type="range" id="hueShift" min="-90" max="90" step="1" value="-45"><span class="val" id="hueShift_v"></span></div>
@@ -247,6 +254,7 @@ const DEFAULTS = {
   radius: 0.26, ringCount: 7, ringGap: 2, thickness: 1.0, wobble: 0.79, warp: 0.5, widthVar: 1, filaments: 1, fray: 0, crackle: 0,
   spikeAmount: 0, spikeLength: 0.5, spikeWidth: 1, spikeBlur: 0.5,
   glow: 0.5, hotspots: 2, hotspotSize: 2, flicker: 0.26, trail: 0.34,
+  bloomAmount: 0, bloomThreshold: 0.5, bloomRadius: 1,
   granule: 0, granuleSize: 0.5, granuleSpeed: 1,
   smoke: 0, smokeScale: 1, smokeSpeed: 1, smokeReach: 1,
   fps: 30, exportSec: 3,
@@ -456,6 +464,11 @@ const SPIKE_POOL = (() => {
 // 放射光芒的獨立緩衝畫布：先畫銳利的錐形，再整層模糊做出柔邊 god-ray 質感
 const spikeCanvas = document.createElement('canvas');
 const spikeCtx = spikeCanvas.getContext('2d');
+
+// 全域 Bloom 的獨立緩衝畫布：故意用縮小的解析度畫，放大回去時自帶柔化，
+// 疊加 CSS filter 的模糊只是再加強一點，同時大幅省下模糊運算的成本
+const bloomCanvas = document.createElement('canvas');
+const bloomCtx = bloomCanvas.getContext('2d');
 
 /* ===== 太陽米粒組織：低解析 3D FBM 雜訊逐格重算 → 放大成翻騰的對流紋理 ===== */
 const SUN_N = 128; // 雜訊紋理解析度（放大後靠平滑內插，故意低解析以求效能與柔和感）
@@ -1153,6 +1166,32 @@ function renderFrame(outputCtx, W, H, dt, transparent, atTime, centerOffsetX = 0
     outputCtx.globalCompositeOperation = 'lighter';
     outputCtx.drawImage(starCanvas, 0, 0);
   }
+
+  /* --- 全域 Bloom：對「已經合成好的最終畫面」（環、電弧、脈衝波、火花、放射光芒、星辰全部在內）
+     萃取亮部、模糊、疊加回去，讓所有元素的高光一起產生溢出光暈，而不是逐元素各自加光暈。
+     用 CSS filter 的 contrast+brightness 粗略模擬「亮部萃取」：門檻越高，中低亮度被壓得越接近黑，
+     模糊後幾乎不貢獻光量，只留下真正的亮部散開；縮小解析度畫也是一種便宜的模糊，同時省效能。 --- */
+  if (Q.bloomAmount > 0.005) {
+    const bw = outputCtx.canvas.width, bh = outputCtx.canvas.height;
+    const bloomScale = 0.4;
+    const dw = Math.max(1, Math.round(bw * bloomScale)), dh = Math.max(1, Math.round(bh * bloomScale));
+    if (bloomCanvas.width !== dw || bloomCanvas.height !== dh) { bloomCanvas.width = dw; bloomCanvas.height = dh; }
+    bloomCtx.clearRect(0, 0, dw, dh);
+    const contrastPct = 100 + Q.bloomThreshold * 260;
+    bloomCtx.filter = `contrast(${contrastPct}%) brightness(${60 - Q.bloomThreshold * 20}%)`;
+    bloomCtx.drawImage(outputCtx.canvas, 0, 0, dw, dh);
+    bloomCtx.filter = 'none';
+
+    const pxScale = outputTransform.a || 1;
+    const blurPx = Q.bloomRadius * Math.min(W, H) * 0.02 * pxScale;
+    outputCtx.globalCompositeOperation = 'lighter';
+    outputCtx.filter = blurPx > 0.3 ? `blur(${blurPx}px)` : 'none';
+    outputCtx.globalAlpha = Math.min(1, Q.bloomAmount);
+    outputCtx.drawImage(bloomCanvas, 0, 0, bw, bh);
+    outputCtx.globalAlpha = 1;
+    outputCtx.filter = 'none';
+  }
+
   outputCtx.setTransform(outputTransform);
 }
 requestAnimationFrame(frame);
