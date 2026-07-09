@@ -724,20 +724,23 @@ function renderFrame(outputCtx, W, H, dt, transparent, atTime, centerOffsetX = 0
   }
 
   /* --- 能量脈衝波：從核心向外擴散的柔邊圓形波紋（畫在環的下層）---
-     進度是 loopPhase 的封閉式函數（每循環精確重複 waveCount 次）→ 天生無縫循環。
+     waveCount 顆波以等間隔相位錯開，同時獨立擴散 → 畫面上真的會同時看到 N 圈，
+     不是同一顆波更頻繁重播。每顆波的進度仍是 loopPhase 的封閉式函數 → 天生無縫循環。
      畫在拖尾緩衝區上，殘影會自然留下一點「波過去了」的餘韻。 --- */
   if (Q.waveAmount > 0.005) {
     const wc = Math.max(1, Math.round(Q.waveCount));
-    const prog0 = (loopPhase / TWO_PI * wc) % 1; // 0..1，每循環重複 wc 次
     const rStart = R * 0.22;
     const rEnd = R * (1 + Q.waveReach);
-    // 進度用 ease-out：出生時衝很快、遠處減速淡出（爆發感）
-    const eased = 1 - Math.pow(1 - prog0, 2.2);
-    const wr = rStart + (rEnd - rStart) * eased;
-    // 淡入極快、隨距離淡出；乘 flick 跟全域閃爍同步
-    const aIn = Math.min(1, prog0 * 12);
-    const wAlpha = Q.waveAmount * 0.55 * aIn * Math.pow(1 - prog0, 1.6) * flick;
-    if (wAlpha > 0.01) {
+    const basePhase = (loopPhase / TWO_PI) % 1; // 0..1
+    for (let wi = 0; wi < wc; wi++) {
+      const prog0 = (basePhase + wi / wc) % 1; // 每顆波錯開 1/wc 個循環起跑
+      // 進度用 ease-out：出生時衝很快、遠處減速淡出（爆發感）
+      const eased = 1 - Math.pow(1 - prog0, 2.2);
+      const wr = rStart + (rEnd - rStart) * eased;
+      // 淡入極快、隨距離淡出；乘 flick 跟全域閃爍同步
+      const aIn = Math.min(1, prog0 * 12);
+      const wAlpha = Q.waveAmount * 0.55 * aIn * Math.pow(1 - prog0, 1.6) * flick;
+      if (wAlpha <= 0.01) continue;
       const band = R * 0.05 * Q.waveWidth * (0.6 + eased * 1.4); // 波環越遠越寬、越淡
       const g = ctx.createRadialGradient(cx, cy, Math.max(0, wr - band), cx, cy, wr + band);
       g.addColorStop(0, 'rgba(0,0,0,0)');
