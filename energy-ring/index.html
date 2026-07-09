@@ -132,6 +132,7 @@
     <div class="row"><label>放射毛刺</label><input type="range" id="spikeAmount" min="0" max="1" step="0.01" value="0"><span class="val" id="spikeAmount_v"></span></div>
     <div class="row"><label>毛刺長度</label><input type="range" id="spikeLength" min="0" max="1" step="0.01" value="0.5"><span class="val" id="spikeLength_v"></span></div>
     <div class="row"><label>毛刺粗細</label><input type="range" id="spikeWidth" min="0.2" max="4" step="0.1" value="1"><span class="val" id="spikeWidth_v"></span></div>
+    <div class="row"><label>毛刺柔邊</label><input type="range" id="spikeBlur" min="0" max="1" step="0.01" value="0.5"><span class="val" id="spikeBlur_v"></span></div>
   </div>
 
   <div class="group">
@@ -227,8 +228,8 @@ resize();
 const DEFAULTS = {
   speed: 1, pulse: 0, loopSec: 5,
   radius: 0.26, ringCount: 7, ringGap: 2, thickness: 1.0, wobble: 0.79, warp: 0.5, widthVar: 1, filaments: 1, fray: 0, crackle: 0,
-  spikeAmount: 0, spikeLength: 0.5, spikeWidth: 1,
-  glow: 0.5, hotspots: 5, hotspotSize: 1, flicker: 0.26, trail: 0.34,
+  spikeAmount: 0, spikeLength: 0.5, spikeWidth: 1, spikeBlur: 0.5,
+  glow: 0.5, hotspots: 2, hotspotSize: 2, flicker: 0.26, trail: 0.34,
   granule: 0, granuleSize: 0.5, granuleSpeed: 1,
   smoke: 0, smokeScale: 1, smokeSpeed: 1, smokeReach: 1,
   fps: 30, exportSec: 3,
@@ -396,18 +397,23 @@ function getStarPool(count) {
   return starPool;
 }
 
-/* ===== 放射毛刺：垂直於環面、往外炸開的短小光絲（固定位置，跟著環一起轉）=====
+/* ===== 放射狀光芒（god rays）：從環面往外放射的錐形光束，基部亮、往外收尖淡出 =====
    數量是密度滑桿（0-1），所以池子固定生成夠多筆，密度只決定要畫前面幾筆，不需要重新生成。 */
-const SPIKE_POOL_MAX = 240;
+const SPIKE_POOL_MAX = 260;
 const SPIKE_POOL = (() => {
   const rnd = mulberry32(2468013);
   return Array.from({ length: SPIKE_POOL_MAX }, () => ({
     angle0: rnd() * Math.PI * 2,
-    lenT: rnd(),     // 0..1，配合當下的毛刺長度插值
-    widT: rnd(),     // 0..1，粗細的個體差異
-    briT: 0.4 + rnd() * 0.6,
+    // 長度用非線性分布：多數中短、少數特別長 → 放射光芒的長短交錯質感
+    lenT: Math.pow(rnd(), 2.2),
+    widT: rnd(),                    // 0..1，基部粗細的個體差異
+    baseJitter: (rnd() - 0.5) * 2,  // 基部沿半徑的微偏，讓起點不是死板同一圈
+    briT: 0.35 + rnd() * 0.65,
   }));
 })();
+// 放射光芒的獨立緩衝畫布：先畫銳利的錐形，再整層模糊做出柔邊 god-ray 質感
+const spikeCanvas = document.createElement('canvas');
+const spikeCtx = spikeCanvas.getContext('2d');
 
 /* ===== 太陽米粒組織：低解析 3D FBM 雜訊逐格重算 → 放大成翻騰的對流紋理 ===== */
 const SUN_N = 128; // 雜訊紋理解析度（放大後靠平滑內插，故意低解析以求效能與柔和感）
@@ -586,10 +592,34 @@ function frame(now) {
   renderFrame(ctx, W, H, dt, false, undefined, panelInsetX);
 }
 
+/* ===== 拖尾持久緩衝區 =====
+   環/火花/煙霧等「應該有拖尾流動感」的內容都畫在這張獨立、跨幀保留內容的畫布上；
+   星辰則完全不進來，畫完直接疊在最終輸出畫布上，兩者的持久性從架構上就分開，
+   不必依賴「清得夠不夠快」這種容易漏洞的做法（見星辰殘影問題的最終修法）。
+   用 WeakMap 依照輸出目標（即時預覽的 ctx／每次匯出新建的 ectx）各自保留一份，
+   避免即時預覽和匯出共用同一份緩衝區而互相污染。 */
+const TRAIL_BUFFERS = new WeakMap();
+function getTrailBuffer(outputCtx) {
+  let buf = TRAIL_BUFFERS.get(outputCtx);
+  const ow = outputCtx.canvas.width, oh = outputCtx.canvas.height;
+  if (!buf) {
+    const canvas = document.createElement('canvas');
+    canvas.width = ow; canvas.height = oh;
+    buf = { canvas, ctx: canvas.getContext('2d') };
+    TRAIL_BUFFERS.set(outputCtx, buf);
+  } else if (buf.canvas.width !== ow || buf.canvas.height !== oh) {
+    buf.canvas.width = ow; buf.canvas.height = oh; // 尺寸變動時視窗本來就會重置畫面，跟現有 resize() 行為一致
+  }
+  buf.ctx.setTransform(outputCtx.getTransform());
+  return buf.ctx;
+}
+
 // transparent=true 時以去背模式繪製（拖尾用 destination-out 淡出而非疊黑）
 // atTime 有給值時（匯出用）：直接用「幀索引/幀率」精確設定時間，不用累加 dt，完全沒有浮點誤差累積
 // centerOffsetX：即時預覽在面板開啟時，把畫面圓心往右偏移避開面板；匯出時永遠是 0（維持正中央）
-function renderFrame(ctx, W, H, dt, transparent, atTime, centerOffsetX = 0) {
+function renderFrame(outputCtx, W, H, dt, transparent, atTime, centerOffsetX = 0) {
+  if (W <= 0 || H <= 0) return; // 畫布尚未有尺寸（例如分頁在背景 innerWidth=0）時直接跳過，避免對 0×0 畫布操作
+  const ctx = getTrailBuffer(outputCtx); // 以下所有 ctx.xxx 都畫在持久緩衝區上，星辰除外（見函式尾端）
   noiseT = atTime !== undefined ? atTime : noiseT + dt;
 
   // 循環相位：每經過 loopSec 秒精確繞完一圈 2π，之後所有雜訊都用它的整數倍當引數 → 無縫循環
@@ -790,66 +820,54 @@ function renderFrame(ctx, W, H, dt, transparent, atTime, centerOffsetX = 0) {
     }
   }
 
-  /* --- 放射毛刺：垂直穿過環面、往外炸開的短小光絲，跟著主環一起旋轉 --- */
-  if (Q.spikeAmount > 0.005) {
-    const activeSpikes = Math.round(Q.spikeAmount * SPIKE_POOL_MAX);
-    const spikeRot = ringAngle(1); // 跟主環同步旋轉
-    // 環束的視覺總寬度（含環距與線寬），毛刺要能穿過整束環才看得出「垂直於環」的感覺
-    const bundleHalf = (Math.max(0, Q.ringCount - 1) * Q.ringGap + Q.thickness * 4) * 0.5;
-    for (let i = 0; i < activeSpikes; i++) {
-      const sp = SPIKE_POOL[i];
-      const a = sp.angle0 + spikeRot;
-      const cosA = Math.cos(a), sinA = Math.sin(a);
-      const outLen = Q.spikeLength * R * (0.05 + 0.22 * sp.lenT);
-      const rIn = R - bundleHalf * 0.6;
-      const rOut = R + bundleHalf * 0.6 + outLen;
-      const x0 = cx + cosA * rIn, y0 = cy + sinA * rIn;
-      const x1 = cx + cosA * rOut, y1 = cy + sinA * rOut;
-      const alpha = sp.briT * flick;
-      const grad = ctx.createLinearGradient(x0, y0, x1, y1);
-      grad.addColorStop(0, `hsla(${Q.hue},${Q.sat}%,80%,0)`);
-      grad.addColorStop(0.5, `hsla(${Q.hue},${Q.sat}%,88%,${alpha})`);
-      grad.addColorStop(1, `hsla(${Q.hue},${Q.sat}%,70%,0)`);
-      ctx.strokeStyle = grad;
-      ctx.lineWidth = Q.spikeWidth * (0.6 + 0.7 * sp.widT);
-      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-    }
-  }
-
   /* --- 白熱亮點（沿環移動的過曝高光）：全部共用同一個轉速基準，只用角度均分區分彼此，
-     確保任何時刻都精確等距（2 顆永遠對角、3 顆永遠 120° 等分），不會各自飄移而散開 --- */
+     確保任何時刻都精確等距（2 顆永遠對角、3 顆永遠 120° 等分），不會各自飄移而散開。
+     高光本體改成沿著環的真實弧線取樣多個小光斑疊起來（而不是單一壓扁橢圓），
+     這樣尺寸開很大時形狀會跟著環的弧度彎曲，不會變成一條戳出去的直線切線。 --- */
   const hotspotRot = ringAngle(1);
+  const HOTSPOT_SUB = 10; // 弧形高光的取樣點數，越多過渡越平滑
   for (let h = 0; h < Q.hotspots; h++) {
     const a = hotspotRot + h * (Math.PI * 2 / Math.max(1, Q.hotspots));
     const rr = R + (h % Math.max(1, Q.ringCount) - (Q.ringCount - 1) / 2) * Q.ringGap;
-    const hx = cx + Math.cos(a) * rr, hy = cy + Math.sin(a) * rr;
-    const len = R * 0.35 * Q.hotspotSize; // 高光沿切線方向拉長
-    const ta = a + Math.PI / 2 * (Q.ccw ? -1 : 1);
+    const len = R * 0.35 * Q.hotspotSize; // 高光沿弧長方向的總長度
+    const angHalfWidth = Math.min(Math.PI * 0.8, len / rr); // 弧長換算成半張角，避免包裹超過半圈
 
-    const grad = ctx.createRadialGradient(hx, hy, 0, hx, hy, len);
-    grad.addColorStop(0, `hsla(${Q.hue},30%,97%,${0.75 * flick})`);
-    grad.addColorStop(0.25, `hsla(${Q.hue},${Q.sat}%,70%,${0.4 * flick})`);
-    grad.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.save();
-    ctx.translate(hx, hy);
-    ctx.rotate(ta);
-    ctx.scale(1, 0.22); // 壓扁 → 沿環的細長高光
-    ctx.rotate(-ta);
-    ctx.translate(-hx, -hy);
-    ctx.fillStyle = grad;
-    ctx.fillRect(hx - len, hy - len, len * 2, len * 2);
-    ctx.restore();
+    for (let si = 0; si <= HOTSPOT_SUB; si++) {
+      const off = (si / HOTSPOT_SUB) * 2 - 1; // -1..1
+      const sa = a + off * angHalfWidth;
+      const sx = cx + Math.cos(sa) * rr, sy = cy + Math.sin(sa) * rr;
+      const fall = Math.exp(-(off * off) * 2.2); // 中心最亮、往兩端淡出
+      if (fall < 0.02) continue;
+      const subLen = Math.max(1, len * 0.5);
+      const sTa = sa + Math.PI / 2 * (Q.ccw ? -1 : 1); // 這一點自己的切線方向，讓壓扁跟著弧度轉
+
+      const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, subLen);
+      grad.addColorStop(0, `hsla(${Q.hue},30%,97%,${0.75 * flick * fall})`);
+      grad.addColorStop(0.25, `hsla(${Q.hue},${Q.sat}%,70%,${0.4 * flick * fall})`);
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(sTa);
+      ctx.scale(1, 0.3); // 沿當地切線方向壓扁，垂直於弧線的方向收窄
+      ctx.rotate(-sTa);
+      ctx.translate(-sx, -sy);
+      ctx.fillStyle = grad;
+      ctx.fillRect(sx - subLen, sy - subLen, subLen * 2, subLen * 2);
+      ctx.restore();
+    }
   }
 
   /* --- 星辰：固定不消散、散布在環外側、跟著環轉的粒子層（與電漿火花是獨立系統）---
-     畫在獨立畫布上、每幀清空重畫，不共用主畫布的拖尾殘影 —— 星辰轉得慢，若跟環共用
-     拖尾，舊位置還沒淡出新位置就畫上去，會變成一串串殘影小珠子（見使用者回報的匯出圖）。*/
+     畫在獨立畫布上、每幀清空重畫。這裡只準備好這一幀的星辰圖案，實際疊到畫面上是在
+     函式最尾端直接畫在「輸出畫布」上，完全繞過持久緩衝區的拖尾 —— 之前只是把星辰畫在
+     獨立畫布上還不夠，因為最後仍是疊回會拖尾的那張畫布，舊星星還是會被拖尾疊加殘留
+     （使用者回報的匯出殘影就是這個原因）；現在星辰從架構上就不會進入拖尾緩衝區。*/
   if (Q.starCount > 0) {
-    // 用跟主畫布相同的實際像素尺寸與縮放矩陣（含 DPR），避免疊回主畫布時被二次縮放而模糊
-    if (starCanvas.width !== ctx.canvas.width || starCanvas.height !== ctx.canvas.height) {
-      starCanvas.width = ctx.canvas.width; starCanvas.height = ctx.canvas.height;
+    // 用跟輸出畫布相同的實際像素尺寸與縮放矩陣（含 DPR），避免疊上去時被二次縮放而模糊
+    if (starCanvas.width !== outputCtx.canvas.width || starCanvas.height !== outputCtx.canvas.height) {
+      starCanvas.width = outputCtx.canvas.width; starCanvas.height = outputCtx.canvas.height;
     }
-    starCtx.setTransform(ctx.getTransform());
+    starCtx.setTransform(outputCtx.getTransform());
     starCtx.clearRect(0, 0, W, H);
     starCtx.globalCompositeOperation = 'lighter';
 
@@ -878,12 +896,8 @@ function renderFrame(ctx, W, H, dt, transparent, atTime, centerOffsetX = 0) {
       starCtx.fillStyle = g;
       starCtx.fillRect(x - rad, y - rad, rad * 2, rad * 2);
     }
-    // 疊回主畫布：暫時歸零主畫布的變形矩陣，讓兩張畫布做 1:1 實際像素合成
-    const prevTransform = ctx.getTransform();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.drawImage(starCanvas, 0, 0);
-    ctx.setTransform(prevTransform);
+    // 注意：這裡刻意不疊回 ctx（拖尾緩衝區），星辰圖案先留在 starCanvas 裡，
+    // 等函式最尾端把緩衝區貼到輸出畫布之後，再直接畫在輸出畫布上（見函式最後）
   }
 
   /* --- 電漿火花（確定性排程：年齡取模循環，位置由封閉式公式算出）--- */
@@ -926,6 +940,70 @@ function renderFrame(ctx, W, H, dt, transparent, atTime, centerOffsetX = 0) {
       ctx.fillRect(x - size * 3, y - size * 3, size * 6, size * 6);
     }
   }
+
+  // 把拖尾緩衝區（環、火花、煙霧、太陽米粒等會拖尾流動的內容）貼到真正的輸出畫布上；
+  // 星辰在這之後才畫，直接畫在輸出畫布上、完全不進入緩衝區，所以永遠不會被拖尾疊加殘影。
+  // 注意：貼圖要用 1:1 實際像素（歸零變形矩陣），貼完務必還原成原本的 DPR 縮放矩陣，
+  // 否則下一幀開始所有座標都會少縮放一次 DPR，環會越畫越小、拖尾也只淡到畫布左上角一小塊
+  // （這正是稍早發現的「兩個環+黑色矩形接縫」那個 bug 的成因）。
+  const outputTransform = outputCtx.getTransform();
+  outputCtx.setTransform(1, 0, 0, 1, 0, 0);
+  outputCtx.globalCompositeOperation = 'source-over';
+  outputCtx.clearRect(0, 0, outputCtx.canvas.width, outputCtx.canvas.height);
+  outputCtx.drawImage(ctx.canvas, 0, 0);
+
+  // 放射光芒：先在獨立緩衝畫銳利的錐形光束，再整層模糊 → 柔邊 god-ray 質感。
+  // 跟星辰一樣不進拖尾緩衝區，直接疊在輸出畫布上（旋轉時才不會被拖尾抹成一圈糊光）。
+  if (Q.spikeAmount > 0.005) {
+    if (spikeCanvas.width !== outputCtx.canvas.width || spikeCanvas.height !== outputCtx.canvas.height) {
+      spikeCanvas.width = outputCtx.canvas.width; spikeCanvas.height = outputCtx.canvas.height;
+    }
+    spikeCtx.setTransform(outputTransform);
+    spikeCtx.clearRect(0, 0, W, H);
+    spikeCtx.globalCompositeOperation = 'lighter';
+    const activeSpikes = Math.round(Q.spikeAmount * SPIKE_POOL_MAX);
+    const spikeRot = ringAngle(1); // 跟主環同步旋轉
+    for (let i = 0; i < activeSpikes; i++) {
+      const sp = SPIKE_POOL[i];
+      const a = sp.angle0 + spikeRot;
+      const cosA = Math.cos(a), sinA = Math.sin(a);
+      const tanX = -sinA, tanY = cosA; // 切線方向（錐形基部沿此展開）
+      // 基部緊貼環面（帶微偏），往外放射；長度非線性分布，有長有短
+      const rBase = R + sp.baseJitter * Q.thickness * 1.5;
+      const outLen = R * (0.04 + Q.spikeLength * (0.12 + 0.9 * sp.lenT));
+      const rTip = rBase + outLen;
+      const halfW = Q.spikeWidth * (0.5 + 0.8 * sp.widT);
+      const bx = cx + cosA * rBase, by = cy + sinA * rBase;
+      const tx = cx + cosA * rTip, ty = cy + sinA * rTip;
+      const alpha = sp.briT * flick;
+      const grad = spikeCtx.createLinearGradient(bx, by, tx, ty);
+      grad.addColorStop(0, `hsla(${Q.hue},${Q.sat}%,88%,${alpha})`);   // 基部最亮
+      grad.addColorStop(0.35, `hsla(${Q.hue},${Q.sat}%,72%,${alpha * 0.5})`);
+      grad.addColorStop(1, `hsla(${Q.hue},${Q.sat}%,65%,0)`);          // 尖端淡出
+      spikeCtx.fillStyle = grad;
+      // 錐形：基部寬、尖端收成一點
+      spikeCtx.beginPath();
+      spikeCtx.moveTo(bx - tanX * halfW, by - tanY * halfW);
+      spikeCtx.lineTo(bx + tanX * halfW, by + tanY * halfW);
+      spikeCtx.lineTo(tx, ty);
+      spikeCtx.closePath();
+      spikeCtx.fill();
+    }
+    // 整層模糊做出柔邊；柔邊=0 時完全銳利，往上調越糊越像光暈。
+    // 用實際畫布縮放（outputTransform.a）換算成物理像素，讓即時預覽與匯出的模糊比例一致
+    const pxScale = outputTransform.a || 1;
+    const blurPx = Q.spikeBlur * Math.min(W, H) * 0.012 * pxScale;
+    outputCtx.globalCompositeOperation = 'lighter';
+    outputCtx.filter = blurPx > 0.3 ? `blur(${blurPx}px)` : 'none';
+    outputCtx.drawImage(spikeCanvas, 0, 0);
+    outputCtx.filter = 'none';
+  }
+
+  if (Q.starCount > 0) {
+    outputCtx.globalCompositeOperation = 'lighter';
+    outputCtx.drawImage(starCanvas, 0, 0);
+  }
+  outputCtx.setTransform(outputTransform);
 }
 requestAnimationFrame(frame);
 
