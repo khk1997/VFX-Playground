@@ -110,7 +110,7 @@
   <div class="groups">
   <div class="group">
     <h3>旋轉 Rotation</h3>
-    <div class="row"><label>轉速 (圈/秒)</label><input type="range" id="speed" min="0" max="2" step="0.01" value="0.25"><span class="val" id="speed_v"></span></div>
+    <div class="row"><label>轉速 (圈/秒)</label><input type="range" id="speed" min="0" max="2" step="0.01" value="0.2"><span class="val" id="speed_v"></span></div>
     <div class="row"><label>逆時針</label><input type="checkbox" id="ccw"><span class="val"></span></div>
     <div class="row"><label>速度脈動</label><input type="range" id="pulse" min="0" max="1" step="0.01" value="0"><span class="val" id="pulse_v"></span></div>
     <div class="row"><label>循環秒數</label><input type="range" id="loopSec" min="1" max="30" step="0.5" value="5"><span class="val" id="loopSec_v"></span></div>
@@ -170,6 +170,23 @@
   </div>
 
   <div class="group">
+    <h3>電弧 Arc</h3>
+    <div class="row"><label>電弧數量</label><input type="range" id="arcAmount" min="0" max="1" step="0.01" value="0.85"><span class="val" id="arcAmount_v"></span></div>
+    <div class="row"><label>跨幅</label><input type="range" id="arcSpan" min="0.1" max="1" step="0.01" value="0.45"><span class="val" id="arcSpan_v"></span></div>
+    <div class="row"><label>鋸齒感</label><input type="range" id="arcJag" min="0" max="1" step="0.01" value="0.6"><span class="val" id="arcJag_v"></span></div>
+    <div class="row"><label>粗細</label><input type="range" id="arcThickness" min="0.3" max="3" step="0.05" value="2.65"><span class="val" id="arcThickness_v"></span></div>
+  </div>
+
+  <div class="group">
+    <h3>脈衝波 Shockwave</h3>
+    <div class="row"><label>強度</label><input type="range" id="waveAmount" min="0" max="2" step="0.02" value="1.4"><span class="val" id="waveAmount_v"></span></div>
+    <div class="row"><label>每循環波數</label><input type="range" id="waveCount" min="1" max="8" step="1" value="2"><span class="val" id="waveCount_v"></span></div>
+    <div class="row"><label>速度</label><input type="range" id="waveSpeed" min="0.1" max="4" step="0.05" value="0.45"><span class="val" id="waveSpeed_v"></span></div>
+    <div class="row"><label>擴散距離</label><input type="range" id="waveReach" min="0.1" max="1.5" step="0.05" value="0.4"><span class="val" id="waveReach_v"></span></div>
+    <div class="row"><label>波環寬度</label><input type="range" id="waveWidth" min="0.1" max="2" step="0.05" value="2"><span class="val" id="waveWidth_v"></span></div>
+  </div>
+
+  <div class="group">
     <h3>星辰 Starfield</h3>
     <div class="row"><label>數量</label><input type="range" id="starCount" min="0" max="400" step="1" value="120"><span class="val" id="starCount_v"></span></div>
     <div class="row"><label>最小顆粒</label><input type="range" id="starMinSize" min="0.2" max="6" step="0.1" value="0.6"><span class="val" id="starMinSize_v"></span></div>
@@ -226,7 +243,7 @@ resize();
 
 /* ===== 參數 ===== */
 const DEFAULTS = {
-  speed: 1, pulse: 0, loopSec: 5,
+  speed: 0.2, pulse: 0, loopSec: 5,
   radius: 0.26, ringCount: 7, ringGap: 2, thickness: 1.0, wobble: 0.79, warp: 0.5, widthVar: 1, filaments: 1, fray: 0, crackle: 0,
   spikeAmount: 0, spikeLength: 0.5, spikeWidth: 1, spikeBlur: 0.5,
   glow: 0.5, hotspots: 2, hotspotSize: 2, flicker: 0.26, trail: 0.34,
@@ -235,6 +252,8 @@ const DEFAULTS = {
   fps: 30, exportSec: 3,
   hue: 116, hueShift: -33, sat: 100,
   sparkAmount: 0, sparkSpeed: 0.2, sparkArc: 25, sparkReach: 0.25, turbulence: 1,
+  arcAmount: 0.85, arcSpan: 0.45, arcJag: 0.6, arcThickness: 2.65,
+  waveAmount: 1.4, waveCount: 2, waveSpeed: 0.45, waveReach: 0.4, waveWidth: 2,
   starCount: 15, starMinSize: 0.4, starMaxSize: 2.5, starSharpness: 0.5, starSpread: 0.4, starSpeed: 0.2,
 };
 const P = { ...DEFAULTS, ccw: false };
@@ -374,6 +393,29 @@ function getSparkPool(loopSec) {
     tangent: (rnd() - 0.5) * 40,     // 切線加速 → 掃過去的感覺
   }));
   return sparkPool;
+}
+
+/* ===== 環間電弧（確定性排程版：可無縫循環）=====
+   跟火花同一套思路：固定種子池預生成整循環的電弧事件，每道有固定出生時刻與短壽命，
+   渲染時以年齡取模判斷是否活著。鋸齒路徑的「重擲」用 floor(age × 頻率) 當亂數種子 →
+   同一道電弧在生命期內會頻閃換形，但形狀只取決於年齡，天生無縫循環。 */
+const ARC_MAX_RATE = 5; // arcAmount=1 時每秒的電弧數
+let arcPool = [], arcPoolKey = '';
+function getArcPool(loopSec) {
+  const key = loopSec.toFixed(3);
+  if (arcPoolKey === key) return arcPool;
+  arcPoolKey = key;
+  const count = Math.ceil(ARC_MAX_RATE * loopSec);
+  const rnd = mulberry32(9182736);
+  arcPool = Array.from({ length: count }, (_, i) => ({
+    birth: (i + rnd() * 0.9) / count * loopSec, // 均勻散佈 + 些許抖動
+    maxLife: 0.15 + rnd() * 0.25,
+    angle0: rnd() * Math.PI * 2,
+    spanT: 0.4 + rnd() * 0.6,        // 個體跨幅差異（乘上跨幅滑桿）
+    ringA: rnd(), ringB: rnd(),      // 0..1，映射到當下的環索引（環數改變也不用重生池）
+    seed: Math.floor(rnd() * 1e9),
+  }));
+  return arcPool;
 }
 
 /* ===== 星辰粒子（固定不消散版）=====
@@ -682,6 +724,40 @@ function renderFrame(outputCtx, W, H, dt, transparent, atTime, centerOffsetX = 0
     ctx.drawImage(sunCanvas, cx - ext, cy - ext, ext * 2, ext * 2);
   }
 
+  /* --- 能量脈衝波：從核心向外擴散的柔邊圓形波紋（畫在環的下層）---
+     waveCount 顆波以等間隔相位錯開，同時獨立擴散 → 畫面上真的會同時看到 N 圈，
+     不是同一顆波更頻繁重播。每顆波的進度仍是 loopPhase 的封閉式函數 → 天生無縫循環。
+     畫在拖尾緩衝區上，殘影會自然留下一點「波過去了」的餘韻。 --- */
+  if (Q.waveAmount > 0.005) {
+    const wc = Math.max(1, Math.round(Q.waveCount));
+    const rStart = R * 0.22;
+    const rEnd = R * (1 + Q.waveReach);
+    // 速度：把「每秒幾次擴散-淡出」對齊成每循環整數次，跟轉速對齊循環的做法（turnsPerLoop）同理，
+    // 確保循環邊界精確銜接，不會在接縫處看到波紋位置跳動
+    const waveTurns = Math.max(1, Math.round(Q.waveSpeed * LOOP_SEC));
+    const basePhase = ((loopPhase / TWO_PI) * waveTurns) % 1; // 0..1
+    for (let wi = 0; wi < wc; wi++) {
+      const prog0 = (basePhase + wi / wc) % 1; // 每顆波錯開 1/wc 個循環起跑
+      // 進度用 ease-out：出生時衝很快、遠處減速淡出（爆發感）
+      const eased = 1 - Math.pow(1 - prog0, 2.2);
+      const wr = rStart + (rEnd - rStart) * eased;
+      // 淡入極快、隨距離淡出；乘 flick 跟全域閃爍同步
+      const aIn = Math.min(1, prog0 * 12);
+      const wAlpha = Q.waveAmount * 0.55 * aIn * Math.pow(1 - prog0, 1.6) * flick;
+      if (wAlpha <= 0.01) continue;
+      const band = R * 0.05 * Q.waveWidth * (0.6 + eased * 1.4); // 波環越遠越寬、越淡
+      const g = ctx.createRadialGradient(cx, cy, Math.max(0, wr - band), cx, cy, wr + band);
+      g.addColorStop(0, 'rgba(0,0,0,0)');
+      g.addColorStop(0.45, `hsla(${Q.hue},${Q.sat}%,60%,${wAlpha * 0.5})`);
+      g.addColorStop(0.55, `hsla(${Q.hue},${Math.max(0, Q.sat - 30)}%,85%,${wAlpha})`);
+      g.addColorStop(0.65, `hsla(${Q.hue},${Q.sat}%,55%,${wAlpha * 0.4})`);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      const ext = wr + band;
+      ctx.fillRect(cx - ext, cy - ext, ext * 2, ext * 2);
+    }
+  }
+
   /* --- 多層旋轉光弧（多絲線 + 細節毛絲 + 裂紋斷點） --- */
   const SEGS = 220;
   const segA = (Math.PI * 2) / SEGS;
@@ -938,6 +1014,80 @@ function renderFrame(outputCtx, W, H, dt, transparent, atTime, centerOffsetX = 0
       g.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = g;
       ctx.fillRect(x - size * 3, y - size * 3, size * 6, size * 6);
+    }
+  }
+
+  /* --- 環間電弧：相鄰兩環之間閃現的鋸齒閃電（確定性排程，無縫循環）---
+     路徑端點釘在兩個環的半徑上，中段用亂數中點位移出鋸齒；亂數種子含 floor(age×45)，
+     所以同一道電弧在短短的生命期內會頻閃換形好幾次 —— 閃電的抖動感。 --- */
+  if (Q.arcAmount > 0.005) {
+    const pool = getArcPool(LOOP_SEC);
+    const activeArcs = Math.round(Q.arcAmount * ARC_MAX_RATE * LOOP_SEC);
+    const tLoop = ((noiseT % LOOP_SEC) + LOOP_SEC) % LOOP_SEC;
+    const arcRot = ringAngle(1); // 電弧的出生角跟著主環旋轉
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    const NSEG = 16;
+    for (let i = 0; i < activeArcs && i < pool.length; i++) {
+      const arc = pool[i];
+      const age = ((tLoop - arc.birth) % LOOP_SEC + LOOP_SEC) % LOOP_SEC;
+      if (age > arc.maxLife) continue;
+      const lt = age / arc.maxLife;
+
+      // 端點所在的兩個環：從池子的 0..1 值映射到目前環數，取相鄰一對；單環時往外跳一小段
+      const nRings = Math.max(1, Math.round(Q.ringCount));
+      const ringRadius = ri => R + (ri - (nRings - 1) / 2) * Q.ringGap;
+      let r1, r2;
+      if (nRings > 1) {
+        const riA = Math.min(nRings - 2, Math.floor(arc.ringA * (nRings - 1)));
+        r1 = ringRadius(riA); r2 = ringRadius(riA + 1);
+      } else {
+        r1 = R; r2 = R + (arc.ringB > 0.5 ? 1 : -1) * R * 0.12;
+      }
+      // 環距太小時電弧會扁到看不見 → 保底一個最小徑向落差
+      if (Math.abs(r2 - r1) < R * 0.05) r2 = r1 + Math.sign(r2 - r1 || 1) * R * 0.05;
+
+      const span = arc.spanT * Q.arcSpan * 1.1; // 角度跨幅（弧度）
+      const a0 = arc.angle0 + arcRot;
+      // 亮度包絡：快進快出 + 頻閃（種子隨 floor(age×45) 重擲 → 生命期內閃爍換形）
+      const strobe = Math.floor(age * 45);
+      const rnd = mulberry32(arc.seed + strobe * 131);
+      const env = Math.pow(Math.sin(Math.PI * Math.min(1, lt)), 0.5);
+      const alpha = env * (0.55 + rnd() * 0.45) * flick;
+      if (alpha < 0.03) continue;
+
+      // 鋸齒路徑：角度線性走完跨幅，半徑從 r1 走到 r2，徑向抖動兩端釘死、中段最大
+      const jagAmp = Q.arcJag * (Math.abs(r2 - r1) * 0.9 + R * 0.03);
+      let path = new Array(NSEG + 1);
+      for (let sIdx = 0; sIdx <= NSEG; sIdx++) {
+        const t = sIdx / NSEG;
+        const ang = a0 + span * (t - 0.5);
+        const pin = Math.sin(Math.PI * t); // 端點釘死
+        const rj = r1 + (r2 - r1) * t + (rnd() - 0.5) * 2 * jagAmp * pin;
+        path[sIdx] = [cx + Math.cos(ang) * rj, cy + Math.sin(ang) * rj];
+      }
+      const trace = () => {
+        ctx.beginPath();
+        ctx.moveTo(path[0][0], path[0][1]);
+        for (let sIdx = 1; sIdx <= NSEG; sIdx++) ctx.lineTo(path[sIdx][0], path[sIdx][1]);
+        ctx.stroke();
+      };
+      // 外層光暈 → 白熱核心，兩筆
+      ctx.strokeStyle = `hsla(${Q.hue},${Q.sat}%,65%,${alpha * 0.3})`;
+      ctx.lineWidth = Q.arcThickness * 4.5;
+      trace();
+      ctx.strokeStyle = `hsla(${Q.hue},${Math.max(0, Q.sat - 55)}%,95%,${alpha})`;
+      ctx.lineWidth = Q.arcThickness * 1.3;
+      trace();
+      // 兩端接觸點的小閃光
+      for (const [ex, ey] of [path[0], path[NSEG]]) {
+        const fr = Q.arcThickness * 7;
+        const g = ctx.createRadialGradient(ex, ey, 0, ex, ey, fr);
+        g.addColorStop(0, `hsla(${Q.hue},30%,97%,${alpha * 0.8})`);
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(ex - fr, ey - fr, fr * 2, fr * 2);
+      }
     }
   }
 
