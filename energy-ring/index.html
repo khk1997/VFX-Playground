@@ -180,6 +180,7 @@
   <div class="group">
     <h3>脈衝波 Shockwave</h3>
     <div class="row"><label>強度</label><input type="range" id="waveAmount" min="0" max="1" step="0.01" value="0.5"><span class="val" id="waveAmount_v"></span></div>
+    <div class="row"><label>亮度</label><input type="range" id="waveBrightness" min="0" max="2" step="0.05" value="1"><span class="val" id="waveBrightness_v"></span></div>
     <div class="row"><label>每循環波數</label><input type="range" id="waveCount" min="1" max="8" step="1" value="2"><span class="val" id="waveCount_v"></span></div>
     <div class="row"><label>速度</label><input type="range" id="waveSpeed" min="0.1" max="4" step="0.05" value="1"><span class="val" id="waveSpeed_v"></span></div>
     <div class="row"><label>擴散距離</label><input type="range" id="waveReach" min="0.1" max="1.5" step="0.05" value="0.6"><span class="val" id="waveReach_v"></span></div>
@@ -253,7 +254,7 @@ const DEFAULTS = {
   hue: 116, hueShift: -33, sat: 100,
   sparkAmount: 0, sparkSpeed: 0.2, sparkArc: 25, sparkReach: 0.25, turbulence: 1,
   arcAmount: 0.5, arcSpan: 0.45, arcJag: 0.6, arcThickness: 1,
-  waveAmount: 0.5, waveCount: 2, waveSpeed: 1, waveReach: 0.6, waveWidth: 0.5,
+  waveAmount: 0.5, waveBrightness: 1, waveCount: 2, waveSpeed: 1, waveReach: 0.6, waveWidth: 0.5,
   starCount: 15, starMinSize: 0.4, starMaxSize: 2.5, starSharpness: 0.5, starSpread: 0.4, starSpeed: 0.2,
 };
 const P = { ...DEFAULTS, ccw: false };
@@ -743,7 +744,7 @@ function renderFrame(outputCtx, W, H, dt, transparent, atTime, centerOffsetX = 0
       const wr = rStart + (rEnd - rStart) * eased;
       // 淡入極快、隨距離淡出；乘 flick 跟全域閃爍同步
       const aIn = Math.min(1, prog0 * 12);
-      const wAlpha = Q.waveAmount * 0.55 * aIn * Math.pow(1 - prog0, 1.6) * flick;
+      const wAlpha = Q.waveAmount * 0.55 * Q.waveBrightness * aIn * Math.pow(1 - prog0, 1.6) * flick;
       if (wAlpha <= 0.01) continue;
       const band = R * 0.05 * Q.waveWidth * (0.6 + eased * 1.4); // 波環越遠越寬、越淡
       const g = ctx.createRadialGradient(cx, cy, Math.max(0, wr - band), cx, cy, wr + band);
