@@ -65,6 +65,7 @@
   .groups { display: block; }
   .group { margin-bottom: 8px; border-top: 1px solid rgba(0,255,120,.12); padding-top: 6px; }
   .group h3 { font-size: 11px; color: #55d98a; letter-spacing: 1.5px; margin-bottom: 8px; text-transform: uppercase; }
+  .group .note { font-size: 10px; color: #5f7e6d; margin: -4px 0 8px; line-height: 1.4; }
   .row { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; min-width: 0; }
   .row label { flex: 0 0 78px; font-size: 12px; color: #b8d6c4; white-space: nowrap; }
   .row input[type=range] { flex: 1 1 110px; min-width: 60px; accent-color: #2ee06f; height: 14px; cursor: pointer; }
@@ -146,7 +147,8 @@
 
   <div class="group">
     <h3>光感 Glow</h3>
-    <div class="row"><label>光暈強度</label><input type="range" id="glow" min="0" max="2" step="0.01" value="1"><span class="val" id="glow_v"></span></div>
+    <div class="note">只作用於環體本身的貼身柔光與白熱亮點</div>
+    <div class="row"><label>環體光暈</label><input type="range" id="glow" min="0" max="2" step="0.01" value="1"><span class="val" id="glow_v"></span></div>
     <div class="row"><label>白熱亮點</label><input type="range" id="hotspots" min="0" max="5" step="1" value="2"><span class="val" id="hotspots_v"></span></div>
     <div class="row"><label>亮點大小</label><input type="range" id="hotspotSize" min="0.2" max="3" step="0.05" value="1"><span class="val" id="hotspotSize_v"></span></div>
     <div class="row"><label>閃爍</label><input type="range" id="flicker" min="0" max="1" step="0.01" value="0.25"><span class="val" id="flicker_v"></span></div>
@@ -155,6 +157,7 @@
 
   <div class="group">
     <h3>全域輝光 Bloom</h3>
+    <div class="note">後處理：對全畫面所有元素（環、電弧、脈衝波、火花、星辰）一起萃取亮部溢光</div>
     <div class="row"><label>強度</label><input type="range" id="bloomAmount" min="0" max="1.5" step="0.02" value="0"><span class="val" id="bloomAmount_v"></span></div>
     <div class="row"><label>門檻</label><input type="range" id="bloomThreshold" min="0" max="1" step="0.01" value="0.5"><span class="val" id="bloomThreshold_v"></span></div>
     <div class="row"><label>範圍</label><input type="range" id="bloomRadius" min="0.2" max="3" step="0.05" value="1"><span class="val" id="bloomRadius_v"></span></div>
