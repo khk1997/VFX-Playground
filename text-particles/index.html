@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Text Particles VFX</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: #000; overflow: hidden; font-family: "SF Pro", "PingFang TC", "Microsoft JhengHei", sans-serif; }
+  #stage { position: absolute; inset: 0; display: block; }
+
+  /* ===== 控制面板：左側縱向抽屜 ===== */
+  #panel {
+    position: fixed; left: 12px; top: 64px; bottom: 12px; width: 340px;
+    overflow-y: auto;
+    background: rgba(10, 16, 12, 0.86); backdrop-filter: blur(10px);
+    border: 1px solid rgba(0, 255, 120, 0.25); border-radius: 12px;
+    color: #cfe8d8; padding: 14px 16px 18px; z-index: 10;
+    box-shadow: 4px 0 30px rgba(0,0,0,0.6);
+    transition: transform .25s ease, opacity .25s ease;
+  }
+  #panel.collapsed { transform: translateX(calc(-100% - 24px)); opacity: 0; pointer-events: none; }
+  #panel::-webkit-scrollbar { width: 6px; }
+  #panel::-webkit-scrollbar-thumb { background: rgba(0,255,120,.3); border-radius: 3px; }
+
+  #toggleBtn {
+    position: fixed; top: 12px; right: 12px; z-index: 11;
+    background: rgba(10,16,12,.85); color: #6cf3a0;
+    border: 1px solid rgba(0,255,120,.35); border-radius: 8px;
+    padding: 6px 12px; cursor: pointer; font-size: 13px;
+  }
+  #toggleBtn:hover { background: rgba(0,255,120,.15); }
+
+  #homeBtn {
+    position: fixed; top: 12px; left: 12px; z-index: 11;
+    background: rgba(10,16,12,.85); color: #6cf3a0; text-decoration: none;
+    border: 1px solid rgba(0,255,120,.35); border-radius: 8px;
+    padding: 6px 12px; cursor: pointer; font-size: 13px;
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: inherit;
+  }
+  #homeBtn:hover { background: rgba(0,255,120,.15); }
+
+  /* ===== 獨立浮動的播放/暫停 ===== */
+  #playCtl {
+    position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 11;
+    background: rgba(10,16,12,.85); color: #8fffbe;
+    border: 1px solid rgba(0,255,120,.35); border-radius: 999px;
+    padding: 8px 20px; cursor: pointer; font-size: 13px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  }
+  #playCtl:hover { background: rgba(0,255,120,.18); }
+
+  html.preview-mode #homeBtn,
+  html.preview-mode #toggleBtn,
+  html.preview-mode #playCtl,
+  html.preview-mode #panel { display: none !important; }
+  @media (max-width: 760px) {
+    #panel { left: 8px; top: 56px; bottom: 8px; width: calc(100vw - 16px); max-width: 340px; }
+  }
+
+  #panel h2 { font-size: 14px; letter-spacing: 2px; color: #7bffb0; margin-bottom: 4px; font-weight: 600; }
+  #panel .sub { font-size: 11px; color: #6f8f7d; margin-bottom: 12px; }
+  .groups { display: block; }
+  .group { margin-bottom: 8px; border-top: 1px solid rgba(0,255,120,.12); padding-top: 6px; }
+  .group h3 { font-size: 11px; color: #55d98a; letter-spacing: 1.5px; margin-bottom: 8px; text-transform: uppercase; }
+  .group .note { font-size: 10px; color: #5f7e6d; margin: -4px 0 8px; line-height: 1.4; }
+  .row { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; min-width: 0; }
+  .row label { flex: 0 0 78px; font-size: 12px; color: #b8d6c4; white-space: nowrap; }
+  .row input[type=range] { flex: 1 1 110px; min-width: 60px; accent-color: #2ee06f; height: 14px; cursor: pointer; }
+  .row .val { flex: 0 0 44px; text-align: right; font-size: 11px; color: #7bffb0; font-variant-numeric: tabular-nums; }
+  .row input[type=text] {
+    flex: 1 1 auto; min-width: 0; background: rgba(0,255,120,.08); color: #cfe8d8;
+    border: 1px solid rgba(0,255,120,.3); border-radius: 5px;
+    padding: 4px 8px; font-size: 12px; font-family: inherit;
+  }
+  .row input[type=text]:focus { outline: none; border-color: rgba(0,255,120,.6); }
+  .stylebtns { display: flex; gap: 6px; margin: 2px 0 4px; }
+  .stylebtns button {
+    flex: 1; background: rgba(0,255,120,.08); color: #8fffbe;
+    border: 1px solid rgba(0,255,120,.3); border-radius: 7px;
+    padding: 6px 0; font-size: 12px; cursor: pointer;
+  }
+  .stylebtns button:hover { background: rgba(0,255,120,.2); }
+  .stylebtns button.active { background: rgba(0,255,120,.28); border-color: rgba(0,255,120,.7); color: #d8ffe8; }
+  .btns { display: flex; gap: 8px; margin-top: 12px; }
+  .btns button {
+    flex: 1; background: rgba(0,255,120,.1); color: #8fffbe;
+    border: 1px solid rgba(0,255,120,.3); border-radius: 7px;
+    padding: 7px 0; font-size: 12px; cursor: pointer;
+  }
+  .btns button:hover { background: rgba(0,255,120,.22); }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+
+<a id="homeBtn" href="../index.html">← 首頁</a>
+
+<div id="panel">
+  <h2>TEXT PARTICLES</h2>
+  <div class="sub">文字粒子特效 — 粒子聚合成字、爆散、再重組</div>
+
+  <div class="groups">
+  <div class="group">
+    <h3>文字 Text</h3>
+    <div class="note">多組詞句以「|」分隔，會自動循環：聚合 → 停留 → 散開 → 下一句</div>
+    <div class="row"><label>內容</label><input type="text" id="textInput" value="VFX|PLAYGROUND|你好世界"></div>
+    <div class="row"><label>字級</label><input type="range" id="fontSize" min="60" max="320" step="2" value="170"><span class="val" id="fontSize_v"></span></div>
+    <div class="row"><label>取樣間距</label><input type="range" id="gap" min="2" max="10" step="1" value="4"><span class="val" id="gap_v"></span></div>
+    <div class="row"><label>停留秒數</label><input type="range" id="hold" min="0.5" max="8" step="0.1" value="2.2"><span class="val" id="hold_v"></span></div>
+  </div>
+
+  <div class="group">
+    <h3>運動 Motion</h3>
+    <div class="row"><label>回歸彈性</label><input type="range" id="spring" min="1" max="30" step="0.5" value="9"><span class="val" id="spring_v"></span></div>
+    <div class="row"><label>阻尼</label><input type="range" id="damping" min="1" max="12" step="0.1" value="5"><span class="val" id="damping_v"></span></div>
+    <div class="row"><label>散開力度</label><input type="range" id="burst" min="0.2" max="3" step="0.05" value="1"><span class="val" id="burst_v"></span></div>
+    <div class="row"><label>轉場樣式</label><span class="val"></span></div>
+    <div class="stylebtns">
+      <button id="styleExplode" data-style="explode">爆炸</button>
+      <button id="styleSwirl" data-style="swirl">漩渦</button>
+      <button id="styleGravity" data-style="gravity">重力墜落</button>
+    </div>
+  </div>
+
+  <div class="group">
+    <h3>互動 Interaction</h3>
+    <div class="note">滑鼠 / 觸控滑過文字：粒子被推開後再流回原位</div>
+    <div class="row"><label>斥力半徑</label><input type="range" id="repelRadius" min="20" max="300" step="5" value="110"><span class="val" id="repelRadius_v"></span></div>
+    <div class="row"><label>斥力強度</label><input type="range" id="repelForce" min="0" max="3" step="0.05" value="1.2"><span class="val" id="repelForce_v"></span></div>
+  </div>
+
+  <div class="group">
+    <h3>色彩 Color</h3>
+    <div class="row"><label>主色相</label><input type="range" id="hue" min="0" max="360" step="1" value="160"><span class="val" id="hue_v"></span></div>
+    <div class="row"><label>色相偏移</label><input type="range" id="hueShift" min="-180" max="180" step="1" value="90"><span class="val" id="hueShift_v"></span></div>
+    <div class="row"><label>飽和度</label><input type="range" id="sat" min="0" max="100" step="1" value="100"><span class="val" id="sat_v"></span></div>
+  </div>
+
+  <div class="group">
+    <h3>光感 Glow</h3>
+    <div class="row"><label>光暈</label><input type="range" id="glow" min="0" max="2" step="0.01" value="1"><span class="val" id="glow_v"></span></div>
+    <div class="row"><label>拖尾</label><input type="range" id="trail" min="0" max="0.95" step="0.01" value="0.6"><span class="val" id="trail_v"></span></div>
+  </div>
+  </div>
+
+  <div class="btns">
+    <button id="resetBtn">↺ 重設</button>
+  </div>
+</div>
+<button id="toggleBtn">⚙ 面板</button>
+<button id="playCtl">⏸ 暫停</button>
+
+<script>
+'use strict';
+
+/* ===== 預覽嵌入模式（?preview=1）：隱藏 UI、粒子減量、自動循環照常 ===== */
+const PREVIEW = new URLSearchParams(location.search).has('preview');
+if (PREVIEW) document.documentElement.classList.add('preview-mode');
+
+const canvas = document.getElementById('stage');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+let needRetarget = true; // 尺寸 / 文字 / 取樣參數改變時，重新取樣目標點
+
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  needRetarget = true;
+}
+window.addEventListener('resize', resize);
+resize();
+
+/* ===== 參數 ===== */
+const DEFAULTS = {
+  fontSize: 170, gap: 4, hold: 2.2,
+  spring: 9, damping: 5, burst: 1,
+  repelRadius: 110, repelForce: 1.2,
+  hue: 160, hueShift: 90, sat: 100,
+  glow: 1, trail: 0.6,
+};
+const DEFAULT_TEXT = 'VFX|PLAYGROUND|你好世界';
+const DEFAULT_STYLE = 'explode';
+const P = { ...DEFAULTS, text: DEFAULT_TEXT, style: DEFAULT_STYLE };
+
+const fmt = {
+  hold: v => v.toFixed(1) + 's',
+  hue: v => v + '°', hueShift: v => v + '°', sat: v => v + '%',
+  gap: v => v + 'px', fontSize: v => v + 'px', repelRadius: v => v + 'px',
+};
+const RESAMPLE_KEYS = new Set(['fontSize', 'gap']);
+function bindControls() {
+  for (const key of Object.keys(DEFAULTS)) {
+    const el = document.getElementById(key);
+    const valEl = document.getElementById(key + '_v');
+    const update = () => {
+      P[key] = parseFloat(el.value);
+      if (valEl) valEl.textContent = (fmt[key] || (v => v.toFixed ? +v.toFixed(2) : v))(P[key]);
+      if (RESAMPLE_KEYS.has(key)) needRetarget = true;
+    };
+    el.addEventListener('input', update);
+    el.value = P[key];
+    update();
+  }
+}
+bindControls();
+
+const textInput = document.getElementById('textInput');
+textInput.addEventListener('input', () => {
+  P.text = textInput.value;
+  wordIndex = 0;
+  needRetarget = true;
+  phase = 'form'; phaseT = 0;
+});
+
+/* 轉場樣式按鈕 */
+const styleBtns = Array.from(document.querySelectorAll('.stylebtns button'));
+function setStyle(s) {
+  P.style = s;
+  styleBtns.forEach(b => b.classList.toggle('active', b.dataset.style === s));
+}
+styleBtns.forEach(b => b.addEventListener('click', () => setStyle(b.dataset.style)));
+setStyle(P.style);
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+  Object.assign(P, DEFAULTS);
+  P.text = DEFAULT_TEXT;
+  textInput.value = DEFAULT_TEXT;
+  setStyle(DEFAULT_STYLE);
+  bindControls();
+  wordIndex = 0;
+  needRetarget = true;
+  phase = 'form'; phaseT = 0;
+});
+
+/* ===== 播放 / 暫停 ===== */
+let paused = false;        // 使用者手動暫停
+let extPaused = false;     // 來自父頁 postMessage 或分頁隱藏的暫停
+const pauseBtn = document.getElementById('playCtl');
+pauseBtn.addEventListener('click', () => {
+  paused = !paused;
+  pauseBtn.textContent = paused ? '▶ 播放' : '⏸ 暫停';
+});
+window.addEventListener('message', e => {
+  if (e.data === 'vfx-pause') extPaused = true;
+  else if (e.data === 'vfx-play') { extPaused = false; last = performance.now(); }
+});
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) last = performance.now();
+});
+
+/* ===== 面板開合：畫面重心平滑右移避開面板 ===== */
+const panel = document.getElementById('panel');
+let panelOpen = !PREVIEW, panelInsetX = 0, panelInsetTarget = 0;
+const PANEL_OCCUPIED_W = 340 + 12 + 24;
+function updatePanelInset() {
+  panelInsetTarget = (panelOpen && !PREVIEW && window.innerWidth > 760) ? PANEL_OCCUPIED_W / 2 : 0;
+}
+document.getElementById('toggleBtn').addEventListener('click', () => {
+  panelOpen = !panelOpen;
+  panel.classList.toggle('collapsed');
+  updatePanelInset();
+});
+window.addEventListener('resize', updatePanelInset);
+updatePanelInset();
+
+/* ===== 滑鼠 / 觸控斥力 ===== */
+const pointer = { x: -9999, y: -9999, active: false };
+function setPointer(x, y) { pointer.x = x; pointer.y = y; pointer.active = true; }
+canvas.addEventListener('pointermove', e => setPointer(e.clientX, e.clientY));
+canvas.addEventListener('pointerdown', e => setPointer(e.clientX, e.clientY));
+canvas.addEventListener('pointerleave', () => { pointer.active = false; pointer.x = pointer.y = -9999; });
+canvas.addEventListener('touchmove', e => {
+  const t = e.touches[0];
+  if (t) setPointer(t.clientX, t.clientY);
+}, { passive: true });
+canvas.addEventListener('touchend', () => { pointer.active = false; pointer.x = pointer.y = -9999; });
+
+/* ===== 文字取樣：畫到離屏畫布 → 掃描不透明像素當目標點 ===== */
+const sampleCanvas = document.createElement('canvas');
+const sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
+
+function getWords() {
+  const words = (P.text || '').split('|').map(s => s.trim()).filter(s => s.length > 0);
+  return words.length ? words : ['VFX'];
+}
+
+// 回傳 [{x, y, t}]：畫面座標 + 橫向 0..1（供色相漸層用）
+function sampleText(word) {
+  const availW = Math.max(80, W - (panelInsetTarget > 0 ? PANEL_OCCUPIED_W : 0) - 60);
+  const availH = Math.max(80, H - 120);
+  let fs = P.fontSize;
+  const font = f => `700 ${f}px "SF Pro", "PingFang TC", "Microsoft JhengHei", sans-serif`;
+  sampleCtx.font = font(fs);
+  let tw = sampleCtx.measureText(word).width;
+  // 太寬 / 太高就縮字級，確保整句都在畫面內
+  const fit = Math.min(1, availW / Math.max(1, tw), availH / (fs * 1.3));
+  if (fit < 1) { fs = Math.max(16, Math.floor(fs * fit)); sampleCtx.font = font(fs); tw = sampleCtx.measureText(word).width; }
+
+  const sw = Math.ceil(tw) + 20, sh = Math.ceil(fs * 1.5) + 20;
+  sampleCanvas.width = sw; sampleCanvas.height = sh;
+  sampleCtx.clearRect(0, 0, sw, sh);
+  sampleCtx.font = font(fs);
+  sampleCtx.textBaseline = 'middle';
+  sampleCtx.textAlign = 'center';
+  sampleCtx.fillStyle = '#fff';
+  sampleCtx.fillText(word, sw / 2, sh / 2);
+
+  // 預覽模式取樣間距放大 → 粒子減量
+  const gap = Math.max(2, Math.round(P.gap * (PREVIEW ? 2 : 1)));
+  const data = sampleCtx.getImageData(0, 0, sw, sh).data;
+  const cx = W / 2 + panelInsetX, cy = H / 2;
+  const targets = [];
+  for (let y = 0; y < sh; y += gap) {
+    for (let x = 0; x < sw; x += gap) {
+      if (data[(y * sw + x) * 4 + 3] > 128) {
+        targets.push({
+          x: cx + (x - sw / 2),
+          y: cy + (y - sh / 2),
+          t: x / sw,
+        });
+      }
+    }
+  }
+  // 安全上限：極端參數下避免爆量
+  const cap = PREVIEW ? 1800 : 9000;
+  if (targets.length > cap) {
+    const step = targets.length / cap;
+    const out = [];
+    for (let i = 0; i < cap; i++) out.push(targets[Math.floor(i * step)]);
+    return out;
+  }
+  return targets;
+}
+
+/* ===== 粒子池 ===== */
+const particles = [];
+function retarget(word, scatterNew) {
+  const targets = sampleText(word);
+  // 打散配對順序 → 聚合時交錯飛行更有機
+  for (let i = targets.length - 1; i > 0; i--) {
+    const j = (Math.random() * (i + 1)) | 0;
+    [targets[i], targets[j]] = [targets[j], targets[i]];
+  }
+  // 補足 / 裁減粒子數
+  while (particles.length < targets.length) {
+    particles.push({
+      x: Math.random() * W, y: Math.random() * H,
+      vx: 0, vy: 0, tx: 0, ty: 0, hueT: 0,
+      size: 0.8 + Math.random() * 1.6,
+      jit: Math.random() * Math.PI * 2,
+    });
+  }
+  particles.length = targets.length;
+  for (let i = 0; i < targets.length; i++) {
+    const p = particles[i], t = targets[i];
+    p.tx = t.x; p.ty = t.y; p.hueT = t.t;
+    if (scatterNew) { // 首次進場：從畫面外圍飛入
+      const a = Math.random() * Math.PI * 2, r = Math.max(W, H) * (0.55 + Math.random() * 0.25);
+      p.x = W / 2 + Math.cos(a) * r; p.y = H / 2 + Math.sin(a) * r;
+      p.vx = p.vy = 0;
+    }
+  }
+}
+
+/* ===== 詞句循環狀態機：form（聚合）→ hold（停留）→ disperse（散開）→ 換詞 ===== */
+let wordIndex = 0;
+let phase = 'form';   // 'form' | 'hold' | 'disperse'
+let phaseT = 0;
+const FORM_SEC = 1.6, DISPERSE_SEC = 1.1;
+let firstEntry = true;
+
+function beginDisperse() {
+  phase = 'disperse'; phaseT = 0;
+  const cx = W / 2 + panelInsetX, cy = H / 2;
+  const B = P.burst;
+  for (const p of particles) {
+    if (P.style === 'explode') {
+      const dx = p.x - cx, dy = p.y - cy;
+      const d = Math.max(20, Math.hypot(dx, dy));
+      const s = (250 + Math.random() * 450) * B;
+      p.vx += (dx / d) * s + (Math.random() - 0.5) * 120 * B;
+      p.vy += (dy / d) * s + (Math.random() - 0.5) * 120 * B;
+    } else if (P.style === 'swirl') {
+      const dx = p.x - cx, dy = p.y - cy;
+      const d = Math.max(20, Math.hypot(dx, dy));
+      const s = (220 + Math.random() * 260) * B;
+      p.vx += (-dy / d) * s + (dx / d) * 60 * B;
+      p.vy += (dx / d) * s + (dy / d) * 60 * B;
+    } else { // gravity：先微微上拋，之後靠重力墜落
+      p.vx += (Math.random() - 0.5) * 140 * B;
+      p.vy += (-60 - Math.random() * 160) * B;
+    }
+  }
+}
+
+/* ===== 主迴圈 ===== */
+let last = performance.now();
+let rafId = null;
+
+function frame(now) {
+  rafId = requestAnimationFrame(frame);
+  const dt = Math.min((now - last) / 1000, 0.05); // dt 上限 50ms
+  last = now;
+  if (extPaused || document.hidden) return;
+
+  // 面板開合的畫面重心過渡（暫停時也繼續，純 UI 動作）
+  panelInsetX += (panelInsetTarget - panelInsetX) * Math.min(1, dt * 10);
+  if (Math.abs(panelInsetTarget - panelInsetX) < 0.5 && Math.abs(panelInsetTarget - panelInsetX) > 0.01) {
+    needRetarget = true; // 過渡結束時把目標點對齊新中心
+    panelInsetX = panelInsetTarget;
+  }
+
+  if (needRetarget) {
+    needRetarget = false;
+    const words = getWords();
+    wordIndex = wordIndex % words.length;
+    retarget(words[wordIndex], firstEntry);
+    firstEntry = false;
+  }
+
+  if (paused) { render(0); return; }
+
+  phaseT += dt;
+  if (phase === 'form' && phaseT >= FORM_SEC) { phase = 'hold'; phaseT = 0; }
+  else if (phase === 'hold' && phaseT >= P.hold) { beginDisperse(); }
+  else if (phase === 'disperse' && phaseT >= DISPERSE_SEC) {
+    phase = 'form'; phaseT = 0;
+    const words = getWords();
+    wordIndex = (wordIndex + 1) % words.length;
+    retarget(words[wordIndex], false);
+  }
+
+  step(dt);
+  render(dt);
+}
+
+function step(dt) {
+  const k = P.spring * P.spring;      // 彈性係數（滑桿取平方根尺度，手感較線性）
+  const damp = Math.exp(-P.damping * dt);
+  const rr = P.repelRadius, rr2 = rr * rr;
+  const rf = P.repelForce * 22000;
+  const seeking = phase !== 'disperse';
+  const gravity = P.style === 'gravity';
+
+  for (const p of particles) {
+    if (seeking) {
+      p.vx += (p.tx - p.x) * k * dt;
+      p.vy += (p.ty - p.y) * k * dt;
+    } else if (gravity) {
+      p.vy += 1400 * P.burst * dt;
+    } else if (P.style === 'swirl') {
+      // 散開期間持續一點切向力 → 漩渦感
+      const cx = W / 2 + panelInsetX, cy = H / 2;
+      const dx = p.x - cx, dy = p.y - cy;
+      const d = Math.max(30, Math.hypot(dx, dy));
+      p.vx += (-dy / d) * 500 * P.burst * dt;
+      p.vy += (dx / d) * 500 * P.burst * dt;
+    }
+
+    // 滑鼠斥力：距離內反比推開
+    if (pointer.active && rf > 0) {
+      const dx = p.x - pointer.x, dy = p.y - pointer.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < rr2 && d2 > 0.01) {
+        const d = Math.sqrt(d2);
+        const f = rf * (1 - d / rr) / Math.max(d, 8);
+        p.vx += (dx / d) * f * dt * 60;
+        p.vy += (dy / d) * f * dt * 60;
+      }
+    }
+
+    p.vx *= damp; p.vy *= damp;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+
+    // 重力墜落：落出畫面底部就停在外面等待重組（避免無限往下）
+    if (gravity && !seeking && p.y > H + 60) { p.y = H + 60; p.vy = 0; }
+  }
+}
+
+function render(dt) {
+  // 拖尾：半透明黑覆蓋，trail 越高殘影越長
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = `rgba(0,0,0,${Math.max(0.05, 1 - P.trail)})`;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.globalCompositeOperation = 'lighter';
+  const hue0 = P.hue, hs = P.hueShift, sat = P.sat;
+  const glow = P.glow;
+  const useGlow = glow > 0.02 && !PREVIEW; // 預覽模式跳過大光暈省效能
+
+  for (const p of particles) {
+    const h = (hue0 + p.hueT * hs + 360) % 360;
+    const spd = Math.hypot(p.vx, p.vy);
+    const bri = Math.min(1, 0.55 + spd / 900);
+    const r = p.size * (phase === 'disperse' ? 1.25 : 1);
+    // 柔和光暈（大而淡）
+    if (useGlow) {
+      ctx.fillStyle = `hsla(${h},${sat}%,60%,${0.08 * glow})`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r * (4 + glow * 3), 0, 6.2832);
+      ctx.fill();
+    }
+    // 核心亮點
+    ctx.fillStyle = `hsla(${h},${sat}%,${55 + bri * 30}%,${0.9})`;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, 6.2832);
+    ctx.fill();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+rafId = requestAnimationFrame(frame);
+</script>
+</body>
+</html>

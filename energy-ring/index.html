@@ -332,6 +332,15 @@ pauseBtn.addEventListener('click', () => {
   pauseBtn.textContent = paused ? '▶ 播放' : '⏸ 暫停';
 });
 
+// 首頁卡片用 postMessage 控制預覽播放：非 active 卡片會收到 vfx-pause 以節省效能。
+// previewPaused 與使用者的手動暫停互相獨立，任一為真都停止推進。
+let msgPaused = false;
+window.addEventListener('message', (e) => {
+  if (e.data === 'vfx-pause') msgPaused = true;
+  else if (e.data === 'vfx-play') msgPaused = false;
+});
+function previewPaused() { return msgPaused || document.hidden; }
+
 // 面板開啟時，特效畫面的圓心會平滑往右偏移，避開面板佔用的左側區域（見 renderFrame 的 panelInsetX）
 const panel = document.getElementById('panel');
 let panelOpen = true, panelInsetX = 0, panelInsetTarget = 0;
@@ -672,7 +681,8 @@ function frame(now) {
   lastDraw = now;
   const realDt = Math.min((now - last) / 1000, 0.25);
   last = now;
-  let dt = paused ? 0 : realDt;
+  const halted = paused || previewPaused();
+  let dt = halted ? 0 : realDt;
   // 面板開合時，畫面圓心平滑地滑往目標偏移（跟面板的滑動動畫節奏一致），避免瞬間跳動。
   // 用 realDt（不受暫停影響）驅動，暫停時也能繼續完成這個純 UI 過渡
   panelInsetX += (panelInsetTarget - panelInsetX) * Math.min(1, realDt * 10);
@@ -681,7 +691,7 @@ function frame(now) {
   // 會跟上一幀逐像素相同，沒必要每 1/FPS 秒就重算一次幾百個漸層跟環束多邊形，白白吃 GPU/CPU。
   // 但暫停中調整滑桿會把 paramsDirty 標記起來，讓它用同一個凍結的時間點重畫「這一張」反映新參數的畫面，
   // 畫完立刻清掉標記，畫面依然停在原地，不會恢復播放
-  if (paused && insetSettled && !paramsDirty) return;
+  if (halted && insetSettled && !paramsDirty) return;
   paramsDirty = false;
   renderFrame(ctx, W, H, dt, false, undefined, panelInsetX);
 }

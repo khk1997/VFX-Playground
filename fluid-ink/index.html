@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fluid Ink VFX</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: #000; overflow: hidden; font-family: "SF Pro", "PingFang TC", "Microsoft JhengHei", sans-serif; }
+  #stage { position: absolute; inset: 0; display: block; }
+
+  /* ===== 控制面板：左側縱向抽屜 ===== */
+  #panel {
+    position: fixed; left: 12px; top: 64px; bottom: 12px; width: 340px;
+    overflow-y: auto;
+    background: rgba(10, 16, 12, 0.86); backdrop-filter: blur(10px);
+    border: 1px solid rgba(0, 255, 120, 0.25); border-radius: 12px;
+    color: #cfe8d8; padding: 14px 16px 18px; z-index: 10;
+    box-shadow: 4px 0 30px rgba(0,0,0,0.6);
+    transition: transform .25s ease, opacity .25s ease;
+  }
+  #panel.collapsed { transform: translateX(calc(-100% - 24px)); opacity: 0; pointer-events: none; }
+  #panel::-webkit-scrollbar { width: 6px; }
+  #panel::-webkit-scrollbar-thumb { background: rgba(0,255,120,.3); border-radius: 3px; }
+
+  #toggleBtn {
+    position: fixed; top: 12px; right: 12px; z-index: 11;
+    background: rgba(10,16,12,.85); color: #6cf3a0;
+    border: 1px solid rgba(0,255,120,.35); border-radius: 8px;
+    padding: 6px 12px; cursor: pointer; font-size: 13px;
+  }
+  #toggleBtn:hover { background: rgba(0,255,120,.15); }
+
+  #homeBtn {
+    position: fixed; top: 12px; left: 12px; z-index: 11;
+    background: rgba(10,16,12,.85); color: #6cf3a0; text-decoration: none;
+    border: 1px solid rgba(0,255,120,.35); border-radius: 8px;
+    padding: 6px 12px; cursor: pointer; font-size: 13px;
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: inherit;
+  }
+  #homeBtn:hover { background: rgba(0,255,120,.15); }
+
+  /* ===== 獨立浮動的播放/暫停 ===== */
+  #playCtl {
+    position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 11;
+    background: rgba(10,16,12,.85); color: #8fffbe;
+    border: 1px solid rgba(0,255,120,.35); border-radius: 999px;
+    padding: 8px 20px; cursor: pointer; font-size: 13px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  }
+  #playCtl:hover { background: rgba(0,255,120,.18); }
+
+  html.preview-mode #homeBtn,
+  html.preview-mode #toggleBtn,
+  html.preview-mode #playCtl,
+  html.preview-mode #panel { display: none !important; }
+  @media (max-width: 760px) {
+    #panel { left: 8px; top: 56px; bottom: 8px; width: calc(100vw - 16px); max-width: 340px; }
+  }
+
+  #panel h2 { font-size: 14px; letter-spacing: 2px; color: #7bffb0; margin-bottom: 4px; font-weight: 600; }
+  #panel .sub { font-size: 11px; color: #6f8f7d; margin-bottom: 12px; }
+  .groups { display: block; }
+  .group { margin-bottom: 8px; border-top: 1px solid rgba(0,255,120,.12); padding-top: 6px; }
+  .group h3 { font-size: 11px; color: #55d98a; letter-spacing: 1.5px; margin-bottom: 8px; text-transform: uppercase; }
+  .group .note { font-size: 10px; color: #5f7e6d; margin: -4px 0 8px; line-height: 1.4; }
+  .row { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; min-width: 0; }
+  .row label { flex: 0 0 78px; font-size: 12px; color: #b8d6c4; white-space: nowrap; }
+  .row input[type=range] { flex: 1 1 110px; min-width: 60px; accent-color: #2ee06f; height: 14px; cursor: pointer; }
+  .row .val { flex: 0 0 44px; text-align: right; font-size: 11px; color: #7bffb0; font-variant-numeric: tabular-nums; }
+  .btns { display: flex; gap: 8px; margin-top: 12px; }
+  .btns button {
+    flex: 1; background: rgba(0,255,120,.1); color: #8fffbe;
+    border: 1px solid rgba(0,255,120,.3); border-radius: 7px;
+    padding: 7px 0; font-size: 12px; cursor: pointer;
+  }
+  .btns button:hover { background: rgba(0,255,120,.22); }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+
+<a id="homeBtn" href="../index.html">← 首頁</a>
+
+<div id="panel">
+  <h2>FLUID INK</h2>
+  <div class="sub">流體墨水 — 拖曳畫面注入彩色墨流</div>
+
+  <div class="groups">
+  <div class="group">
+    <h3>流體 Fluid</h3>
+    <div class="row"><label>黏滯度</label><input type="range" id="viscosity" min="0" max="1" step="0.01" value="0.15"><span class="val" id="viscosity_v"></span></div>
+    <div class="row"><label>渦度增強</label><input type="range" id="curl" min="0" max="1" step="0.01" value="0.35"><span class="val" id="curl_v"></span></div>
+    <div class="row"><label>消散速度</label><input type="range" id="dissipation" min="0" max="1" step="0.01" value="0.18"><span class="val" id="dissipation_v"></span></div>
+    <div class="row"><label>模擬解析度</label><input type="range" id="simRes" min="0" max="2" step="1" value="1"><span class="val" id="simRes_v"></span></div>
+    <div class="note">低 / 中 / 高 — 解析度越高細節越豐富，效能消耗越大</div>
+  </div>
+
+  <div class="group">
+    <h3>注入 Injection</h3>
+    <div class="row"><label>筆刷大小</label><input type="range" id="brushSize" min="0.02" max="0.25" step="0.005" value="0.08"><span class="val" id="brushSize_v"></span></div>
+    <div class="row"><label>注入力道</label><input type="range" id="force" min="0.1" max="3" step="0.05" value="1"><span class="val" id="force_v"></span></div>
+    <div class="row"><label>自動攪動強度</label><input type="range" id="autoSwirl" min="0" max="2" step="0.05" value="1"><span class="val" id="autoSwirl_v"></span></div>
+    <div class="note">數秒沒有互動時會自動注入隨機渦流，讓畫面保持流動</div>
+  </div>
+
+  <div class="group">
+    <h3>色彩 Color</h3>
+    <div class="row"><label>色相循環速度</label><input type="range" id="hueSpeed" min="0" max="120" step="1" value="24"><span class="val" id="hueSpeed_v"></span></div>
+    <div class="row"><label>飽和度</label><input type="range" id="sat" min="0" max="100" step="1" value="90"><span class="val" id="sat_v"></span></div>
+    <div class="row"><label>亮度</label><input type="range" id="bright" min="0.2" max="2" step="0.05" value="1.1"><span class="val" id="bright_v"></span></div>
+  </div>
+  </div>
+
+  <div class="btns">
+    <button id="resetBtn">↺ 重設</button>
+  </div>
+</div>
+<button id="toggleBtn">⚙ 面板</button>
+<button id="playCtl">⏸ 暫停</button>
+
+<script>
+'use strict';
+
+// 預覽嵌入模式（?preview=1）：供首頁卡片 iframe 嵌入，隱藏 UI，並強制使用最低模擬解析度
+const PREVIEW = new URLSearchParams(location.search).has('preview');
+if (PREVIEW) document.documentElement.classList.add('preview-mode');
+
+const canvas = document.getElementById('stage');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+function resize() {
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  allocGrid(); // 視窗長寬比改變時網格也要跟著調整
+}
+
+/* ===== 參數 ===== */
+const DEFAULTS = {
+  viscosity: 0.15, curl: 0.35, dissipation: 0.18, simRes: 1,
+  brushSize: 0.08, force: 1, autoSwirl: 1,
+  hueSpeed: 24, sat: 90, bright: 1.1,
+};
+const P = { ...DEFAULTS };
+const RES_NAMES = ['低', '中', '高'];
+const RES_HEIGHTS = [48, 72, 100]; // 模擬網格的目標高度，寬度依畫面長寬比縮放
+
+const fmt = {
+  simRes: v => RES_NAMES[v | 0],
+  hueSpeed: v => (v | 0) + '°/s',
+  sat: v => (v | 0) + '%',
+  brushSize: v => v.toFixed(3),
+};
+function bindControls() {
+  for (const key of Object.keys(DEFAULTS)) {
+    const el = document.getElementById(key);
+    const valEl = document.getElementById(key + '_v');
+    const update = () => {
+      P[key] = parseFloat(el.value);
+      if (valEl) valEl.textContent = (fmt[key] || (v => v.toFixed ? +v.toFixed(2) : v))(P[key]);
+      if (key === 'simRes') allocGrid();
+    };
+    el.addEventListener('input', update);
+    el.value = P[key];
+    update();
+  }
+}
+bindControls();
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+  Object.assign(P, DEFAULTS);
+  bindControls();
+  clearFields(); // 重設同時清空墨水場
+});
+
+/* ===== 播放 / 暫停（按鈕 + postMessage + 分頁隱藏）===== */
+let paused = false;        // 使用者手動暫停
+let extPaused = false;     // 首頁預覽卡片透過 postMessage 要求暫停
+const pauseBtn = document.getElementById('playCtl');
+pauseBtn.addEventListener('click', () => {
+  paused = !paused;
+  pauseBtn.textContent = paused ? '▶ 播放' : '⏸ 暫停';
+});
+window.addEventListener('message', e => {
+  if (e.data === 'vfx-pause') extPaused = true;
+  else if (e.data === 'vfx-play') { extPaused = false; last = performance.now(); }
+});
+document.addEventListener('visibilitychange', () => { if (!document.hidden) last = performance.now(); });
+
+/* ===== 面板開合 ===== */
+const panel = document.getElementById('panel');
+document.getElementById('toggleBtn').addEventListener('click', () => {
+  panel.classList.toggle('collapsed');
+});
+
+/* ===== 穩定流體模擬（stable fluids，低解析網格 + 雙線性半拉格朗日回溯）=====
+   場：速度 u/v、染料 dr/dg/db。每幀：注入 → 渦度增強 → 黏滯擴散（Jacobi）→
+   投影（散度移除）→ 平流速度 → 再投影 → 平流染料 → 消散。全部 Float32Array，迴圈內零配置。 */
+let NX = 0, NY = 0, CELLS = 0;
+let u, v, u2, v2, prs, prs2, div;
+let dr, dg, db, dr2, dg2, db2;
+let simCanvas = document.createElement('canvas');
+let simCtx = simCanvas.getContext('2d');
+let simImg = null;
+
+function allocGrid() {
+  if (!W || !H) return;
+  const resIdx = PREVIEW ? 0 : (P.simRes | 0); // 預覽模式固定用最低解析度
+  const gh = RES_HEIGHTS[Math.max(0, Math.min(2, resIdx))];
+  const gw = Math.max(16, Math.round(gh * W / H));
+  if (gw === NX && gh === NY) return;
+  NX = gw; NY = gh; CELLS = NX * NY;
+  u = new Float32Array(CELLS);  v = new Float32Array(CELLS);
+  u2 = new Float32Array(CELLS); v2 = new Float32Array(CELLS);
+  prs = new Float32Array(CELLS); prs2 = new Float32Array(CELLS);
+  div = new Float32Array(CELLS);
+  dr = new Float32Array(CELLS); dg = new Float32Array(CELLS); db = new Float32Array(CELLS);
+  dr2 = new Float32Array(CELLS); dg2 = new Float32Array(CELLS); db2 = new Float32Array(CELLS);
+  simCanvas.width = NX; simCanvas.height = NY;
+  simImg = simCtx.createImageData(NX, NY);
+  // alpha 通道恆為 255，只需設定一次
+  const d = simImg.data;
+  for (let i = 3; i < d.length; i += 4) d[i] = 255;
+}
+
+function clearFields() {
+  if (!u) return;
+  u.fill(0); v.fill(0); prs.fill(0);
+  dr.fill(0); dg.fill(0); db.fill(0);
+}
+
+const IX = (x, y) => x + y * NX;
+
+// 雙線性取樣（夾在網格內側）
+function sample(f, x, y) {
+  if (x < 0.5) x = 0.5; else if (x > NX - 1.5) x = NX - 1.5;
+  if (y < 0.5) y = 0.5; else if (y > NY - 1.5) y = NY - 1.5;
+  const x0 = x | 0, y0 = y | 0;
+  const tx = x - x0, ty = y - y0;
+  const i00 = IX(x0, y0), i10 = i00 + 1, i01 = i00 + NX, i11 = i01 + 1;
+  const a = f[i00] + (f[i10] - f[i00]) * tx;
+  const b = f[i01] + (f[i11] - f[i01]) * tx;
+  return a + (b - a) * ty;
+}
+
+// 半拉格朗日平流：沿速度場回溯取樣。decay = 每步保留比例
+function advect(src, dst, dt, decay) {
+  for (let y = 1; y < NY - 1; y++) {
+    for (let x = 1; x < NX - 1; x++) {
+      const i = IX(x, y);
+      const px = x - dt * u[i];
+      const py = y - dt * v[i];
+      dst[i] = sample(src, px, py) * decay;
+    }
+  }
+}
+
+// 黏滯擴散：Jacobi 迭代解隱式擴散
+function diffuse(f, tmp, a, iters) {
+  const c = 1 / (1 + 4 * a);
+  tmp.set(f); // 邊界列不會被迭代寫入，先整份複製避免讀到上一幀的殘值
+  let src = f, dst = tmp;
+  for (let k = 0; k < iters; k++) {
+    for (let y = 1; y < NY - 1; y++) {
+      for (let x = 1; x < NX - 1; x++) {
+        const i = IX(x, y);
+        dst[i] = (f[i] + a * (src[i - 1] + src[i + 1] + src[i - NX] + src[i + NX])) * c;
+      }
+    }
+    const t = src; src = dst; dst = t;
+  }
+  if (src !== f) f.set(src);
+}
+
+// 投影：算散度 → Jacobi 解壓力 → 從速度扣掉壓力梯度（讓速度場近似無散度 → 有漩渦感）
+function project(iters) {
+  for (let y = 1; y < NY - 1; y++) {
+    for (let x = 1; x < NX - 1; x++) {
+      const i = IX(x, y);
+      div[i] = -0.5 * (u[i + 1] - u[i - 1] + v[i + NX] - v[i - NX]);
+      prs[i] = 0;
+    }
+  }
+  let src = prs, dst = prs2;
+  for (let k = 0; k < iters; k++) {
+    for (let y = 1; y < NY - 1; y++) {
+      for (let x = 1; x < NX - 1; x++) {
+        const i = IX(x, y);
+        dst[i] = (div[i] + src[i - 1] + src[i + 1] + src[i - NX] + src[i + NX]) * 0.25;
+      }
+    }
+    const t = src; src = dst; dst = t;
+  }
+  for (let y = 1; y < NY - 1; y++) {
+    for (let x = 1; x < NX - 1; x++) {
+      const i = IX(x, y);
+      u[i] -= 0.5 * (src[i + 1] - src[i - 1]);
+      v[i] -= 0.5 * (src[i + NX] - src[i - NX]);
+    }
+  }
+}
+
+// 渦度增強（vorticity confinement）：把數值耗散掉的小漩渦補回來。curl 存進 prs2（此時閒置）
+function vorticity(dt, amount) {
+  const crl = prs2;
+  for (let y = 1; y < NY - 1; y++) {
+    for (let x = 1; x < NX - 1; x++) {
+      const i = IX(x, y);
+      crl[i] = 0.5 * (v[i + 1] - v[i - 1] - u[i + NX] + u[i - NX]);
+    }
+  }
+  for (let y = 2; y < NY - 2; y++) {
+    for (let x = 2; x < NX - 2; x++) {
+      const i = IX(x, y);
+      let gx = 0.5 * (Math.abs(crl[i + 1]) - Math.abs(crl[i - 1]));
+      let gy = 0.5 * (Math.abs(crl[i + NX]) - Math.abs(crl[i - NX]));
+      const len = Math.sqrt(gx * gx + gy * gy) + 1e-5;
+      gx /= len; gy /= len;
+      const c = crl[i];
+      u[i] += gy * c * amount * dt;
+      v[i] += -gx * c * amount * dt;
+    }
+  }
+}
+
+// 邊界：速度貼牆歸零（免得墨水黏在邊緣抖動）
+function setBounds() {
+  for (let x = 0; x < NX; x++) {
+    u[IX(x, 0)] = v[IX(x, 0)] = 0;
+    u[IX(x, NY - 1)] = v[IX(x, NY - 1)] = 0;
+  }
+  for (let y = 0; y < NY; y++) {
+    u[IX(0, y)] = v[IX(0, y)] = 0;
+    u[IX(NX - 1, y)] = v[IX(NX - 1, y)] = 0;
+  }
+}
+
+/* ===== 注入：在網格座標 (gx,gy) 加入速度與染料（高斯筆刷）===== */
+function splat(gx, gy, du, dv, cr, cg, cb, radiusCells) {
+  const r2 = radiusCells * radiusCells;
+  const x0 = Math.max(1, Math.floor(gx - radiusCells * 2));
+  const x1 = Math.min(NX - 2, Math.ceil(gx + radiusCells * 2));
+  const y0 = Math.max(1, Math.floor(gy - radiusCells * 2));
+  const y1 = Math.min(NY - 2, Math.ceil(gy + radiusCells * 2));
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const dx = x - gx, dy = y - gy;
+      const w = Math.exp(-(dx * dx + dy * dy) / r2);
+      if (w < 0.01) continue;
+      const i = IX(x, y);
+      u[i] += du * w;
+      v[i] += dv * w;
+      dr[i] += cr * w; dg[i] += cg * w; db[i] += cb * w;
+    }
+  }
+}
+
+function hue2rgb(h, s, l) { // h 0-360, s/l 0-1 → [r,g,b] 0-1
+  const a = s * Math.min(l, 1 - l);
+  const f = n => { const k = (n + h / 30) % 12; return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); };
+  return [f(0), f(8), f(4)];
+}
+
+/* ===== 滑鼠 / 觸控互動 ===== */
+let pointerDown = false, px = 0, py = 0, hasPrev = false;
+let lastInteract = -10; // 上次互動時刻（秒）；初始為負值 → 一開場就進入自動攪動
+let simTime = 0;
+
+function pointerPos(e) {
+  const t = e.touches ? e.touches[0] : e;
+  return [t.clientX, t.clientY];
+}
+function onDown(e) {
+  pointerDown = true; hasPrev = false;
+  const [x, y] = pointerPos(e);
+  px = x; py = y; hasPrev = true;
+  lastInteract = simTime;
+}
+function onMove(e) {
+  if (!pointerDown) return;
+  const [x, y] = pointerPos(e);
+  if (hasPrev && u) {
+    const gx = x / W * NX, gy = y / H * NY;
+    const dx = (x - px) / W * NX, dy = (y - py) / H * NY;
+    const spd = Math.sqrt(dx * dx + dy * dy);
+    if (spd > 0.001) {
+      const hue = (simTime * P.hueSpeed) % 360;
+      const [cr, cg, cb] = hue2rgb(hue, P.sat / 100, 0.55);
+      const rad = P.brushSize * NY;
+      const k = P.force * 2; // 速度單位：格/幀（dt≈1）
+      // 沿拖曳路徑分段注入，快速拖曳也不會斷線
+      const steps = Math.max(1, Math.ceil(spd / (rad * 0.5)));
+      const pgx = px / W * NX, pgy = py / H * NY;
+      for (let s = 1; s <= steps; s++) {
+        const t = s / steps;
+        splat(pgx + (gx - pgx) * t, pgy + (gy - pgy) * t,
+              dx * k, dy * k,
+              cr * 0.35, cg * 0.35, cb * 0.35, rad);
+      }
+    }
+  }
+  px = x; py = y; hasPrev = true;
+  lastInteract = simTime;
+  if (e.cancelable) e.preventDefault();
+}
+function onUp() { pointerDown = false; hasPrev = false; }
+canvas.addEventListener('mousedown', onDown);
+window.addEventListener('mousemove', onMove);
+window.addEventListener('mouseup', onUp);
+canvas.addEventListener('touchstart', onDown, { passive: true });
+canvas.addEventListener('touchmove', onMove, { passive: false });
+window.addEventListener('touchend', onUp);
+
+/* ===== 閒置自動攪動：數秒沒互動時注入柔和的隨機渦流 ===== */
+let nextSwirlAt = 0.5; // 開場很快來第一發
+function autoSwirl(dt) {
+  if (P.autoSwirl <= 0.001) return;
+  if (simTime - lastInteract < 3) return; // 互動後 3 秒內不打擾
+  if (simTime < nextSwirlAt) return;
+  nextSwirlAt = simTime + 0.55 + Math.random() * 1.1;
+  const gx = NX * (0.15 + Math.random() * 0.7);
+  const gy = NY * (0.15 + Math.random() * 0.7);
+  const ang = Math.random() * Math.PI * 2;
+  const mag = (1.2 + Math.random() * 1.6) * P.autoSwirl; // 格/幀
+  const hue = (simTime * P.hueSpeed + Math.random() * 40) % 360;
+  const [cr, cg, cb] = hue2rgb(hue, P.sat / 100, 0.55);
+  const rad = (0.06 + Math.random() * 0.07) * NY * (0.7 + P.autoSwirl * 0.3);
+  // 一對相對的推力 → 天生形成漩渦，比單向推更有「攪動」感
+  const ox = Math.cos(ang + Math.PI / 2) * rad * 0.9;
+  const oy = Math.sin(ang + Math.PI / 2) * rad * 0.9;
+  splat(gx + ox, gy + oy,  Math.cos(ang) * mag,  Math.sin(ang) * mag, cr * 0.5, cg * 0.5, cb * 0.5, rad);
+  splat(gx - ox, gy - oy, -Math.cos(ang) * mag, -Math.sin(ang) * mag, cr * 0.35, cg * 0.35, cb * 0.35, rad);
+}
+
+/* ===== 模擬一步 ===== */
+function step(dt) { // dt 為「幀」單位（60fps 時 ≈ 1）
+  autoSwirl(dt);
+
+  if (P.curl > 0.005) vorticity(dt, P.curl * 5);
+
+  if (P.viscosity > 0.005) {
+    const a = dt * P.viscosity;
+    diffuse(u, u2, a, 4);
+    diffuse(v, v2, a, 4);
+  }
+
+  setBounds();
+  project(PREVIEW ? 8 : 14);
+
+  // 平流速度（用平流前的速度場回溯 → 先複製到 u2/v2 當來源）
+  u2.set(u); v2.set(v);
+  const velDecay = Math.pow(0.995, dt);
+  for (let y = 1; y < NY - 1; y++) {
+    for (let x = 1; x < NX - 1; x++) {
+      const i = IX(x, y);
+      const bx = x - dt * u2[i];
+      const by = y - dt * v2[i];
+      u[i] = sample(u2, bx, by) * velDecay;
+      v[i] = sample(v2, bx, by) * velDecay;
+    }
+  }
+  setBounds();
+  project(PREVIEW ? 8 : 14);
+
+  // 平流染料 + 消散：dissipation → 每秒保留率（0=不消散，1=約 0.35/s）
+  const dyeDecay = Math.pow(1 - P.dissipation * 0.65, dt / 60);
+  advect(dr, dr2, dt, dyeDecay);
+  advect(dg, dg2, dt, dyeDecay);
+  advect(db, db2, dt, dyeDecay);
+  let t;
+  t = dr; dr = dr2; dr2 = t;
+  t = dg; dg = dg2; dg2 = t;
+  t = db; db = db2; db2 = t;
+}
+
+/* ===== 渲染：染料場 → ImageData → 放大到全螢幕 ===== */
+function render() {
+  const d = simImg.data;
+  const br = P.bright * 255;
+  for (let i = 0; i < CELLS; i++) {
+    const j = i * 4;
+    // 軟性 tone-map：1 - e^(-x)，高濃度不會死白
+    d[j]     = (1 - Math.exp(-dr[i] * br / 255 * 2.2)) * 255;
+    d[j + 1] = (1 - Math.exp(-dg[i] * br / 255 * 2.2)) * 255;
+    d[j + 2] = (1 - Math.exp(-db[i] * br / 255 * 2.2)) * 255;
+  }
+  simCtx.putImageData(simImg, 0, 0);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(simCanvas, 0, 0, NX, NY, 0, 0, W, H);
+}
+
+/* ===== 主迴圈 ===== */
+let last = performance.now();
+let rafId = 0;
+function frame(now) {
+  rafId = requestAnimationFrame(frame);
+  const dt = Math.min((now - last) / 1000, 0.05); // dt 上限 50ms
+  last = now;
+  if (paused || extPaused || document.hidden) return;
+  if (!u) return;
+  simTime += dt;
+  step(dt * 60); // 模擬用「每格/幀」尺度，換算成 60fps 基準的步長
+  render();
+}
+
+window.addEventListener('resize', resize);
+resize();
+rafId = requestAnimationFrame(frame);
+</script>
+</body>
+</html>

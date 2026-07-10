@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Particle Nebula VFX</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: #000; overflow: hidden; font-family: "SF Pro", "PingFang TC", "Microsoft JhengHei", sans-serif; }
+  #stage { position: absolute; inset: 0; display: block; }
+
+  /* ===== 控制面板：左側縱向抽屜 ===== */
+  #panel {
+    position: fixed; left: 12px; top: 64px; bottom: 12px; width: 340px;
+    overflow-y: auto;
+    background: rgba(10, 16, 12, 0.86); backdrop-filter: blur(10px);
+    border: 1px solid rgba(0, 255, 120, 0.25); border-radius: 12px;
+    color: #cfe8d8; padding: 14px 16px 18px; z-index: 10;
+    box-shadow: 4px 0 30px rgba(0,0,0,0.6);
+    transition: transform .25s ease, opacity .25s ease;
+  }
+  #panel.collapsed { transform: translateX(calc(-100% - 24px)); opacity: 0; pointer-events: none; }
+  #panel::-webkit-scrollbar { width: 6px; }
+  #panel::-webkit-scrollbar-thumb { background: rgba(0,255,120,.3); border-radius: 3px; }
+
+  #toggleBtn {
+    position: fixed; top: 12px; right: 12px; z-index: 11;
+    background: rgba(10,16,12,.85); color: #6cf3a0;
+    border: 1px solid rgba(0,255,120,.35); border-radius: 8px;
+    padding: 6px 12px; cursor: pointer; font-size: 13px;
+  }
+  #toggleBtn:hover { background: rgba(0,255,120,.15); }
+
+  #homeBtn {
+    position: fixed; top: 12px; left: 12px; z-index: 11;
+    background: rgba(10,16,12,.85); color: #6cf3a0; text-decoration: none;
+    border: 1px solid rgba(0,255,120,.35); border-radius: 8px;
+    padding: 6px 12px; cursor: pointer; font-size: 13px;
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: inherit;
+  }
+  #homeBtn:hover { background: rgba(0,255,120,.15); }
+
+  /* ===== 獨立浮動的播放/暫停 ===== */
+  #playCtl {
+    position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 11;
+    background: rgba(10,16,12,.85); color: #8fffbe;
+    border: 1px solid rgba(0,255,120,.35); border-radius: 999px;
+    padding: 8px 20px; cursor: pointer; font-size: 13px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  }
+  #playCtl:hover { background: rgba(0,255,120,.18); }
+
+  html.preview-mode #homeBtn,
+  html.preview-mode #toggleBtn,
+  html.preview-mode #playCtl,
+  html.preview-mode #panel { display: none !important; }
+  @media (max-width: 760px) {
+    #panel { left: 8px; top: 56px; bottom: 8px; width: calc(100vw - 16px); max-width: 340px; }
+  }
+
+  #panel h2 { font-size: 14px; letter-spacing: 2px; color: #7bffb0; margin-bottom: 4px; font-weight: 600; }
+  #panel .sub { font-size: 11px; color: #6f8f7d; margin-bottom: 12px; }
+  .groups { display: block; }
+  .group { margin-bottom: 8px; border-top: 1px solid rgba(0,255,120,.12); padding-top: 6px; }
+  .group h3 { font-size: 11px; color: #55d98a; letter-spacing: 1.5px; margin-bottom: 8px; text-transform: uppercase; }
+  .group .note { font-size: 10px; color: #5f7e6d; margin: -4px 0 8px; line-height: 1.4; }
+  .row { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; min-width: 0; }
+  .row label { flex: 0 0 78px; font-size: 12px; color: #b8d6c4; white-space: nowrap; }
+  .row input[type=range] { flex: 1 1 110px; min-width: 60px; accent-color: #2ee06f; height: 14px; cursor: pointer; }
+  .row .val { flex: 0 0 44px; text-align: right; font-size: 11px; color: #7bffb0; font-variant-numeric: tabular-nums; }
+  .row input[type=checkbox] { accent-color: #2ee06f; width: 15px; height: 15px; cursor: pointer; }
+  .modeBtns { display: flex; gap: 6px; margin-bottom: 6px; }
+  .modeBtns button {
+    flex: 1; background: rgba(0,255,120,.08); color: #8fffbe;
+    border: 1px solid rgba(0,255,120,.3); border-radius: 7px;
+    padding: 6px 0; font-size: 12px; cursor: pointer;
+  }
+  .modeBtns button:hover { background: rgba(0,255,120,.18); }
+  .modeBtns button.active { background: rgba(0,255,120,.28); border-color: rgba(0,255,120,.7); color: #d8ffe8; }
+  .btns { display: flex; gap: 8px; margin-top: 12px; }
+  .btns button {
+    flex: 1; background: rgba(0,255,120,.1); color: #8fffbe;
+    border: 1px solid rgba(0,255,120,.3); border-radius: 7px;
+    padding: 7px 0; font-size: 12px; cursor: pointer;
+  }
+  .btns button:hover { background: rgba(0,255,120,.22); }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+
+<a id="homeBtn" href="../index.html">← 首頁</a>
+
+<div id="panel">
+  <h2>PARTICLE NEBULA</h2>
+  <div class="sub">粒子星雲特效 — 流場驅動的加法混合粒子</div>
+
+  <div class="groups">
+  <div class="group">
+    <h3>模式 Mode</h3>
+    <div class="modeBtns">
+      <button id="modeNebula" class="active">星雲</button>
+      <button id="modeVortex">漩渦</button>
+      <button id="modeBurst">爆發</button>
+    </div>
+    <div class="note">星雲＝漂流流場｜漩渦＝繞心公轉｜爆發＝週期爆炸再聚攏</div>
+  </div>
+
+  <div class="group">
+    <h3>粒子 Particles</h3>
+    <div class="row"><label>數量</label><input type="range" id="count" min="500" max="8000" step="100" value="3500"><span class="val" id="count_v"></span></div>
+    <div class="row"><label>大小</label><input type="range" id="size" min="0.5" max="4" step="0.1" value="1.4"><span class="val" id="size_v"></span></div>
+    <div class="row"><label>速度</label><input type="range" id="speed" min="0.1" max="3" step="0.05" value="1"><span class="val" id="speed_v"></span></div>
+    <div class="row"><label>拖尾</label><input type="range" id="trail" min="0" max="0.97" step="0.01" value="0.88"><span class="val" id="trail_v"></span></div>
+  </div>
+
+  <div class="group">
+    <h3>流場 Flow</h3>
+    <div class="row"><label>紊流尺度</label><input type="range" id="flowScale" min="0.3" max="3" step="0.05" value="1"><span class="val" id="flowScale_v"></span></div>
+    <div class="row"><label>流場速度</label><input type="range" id="flowSpeed" min="0" max="2" step="0.02" value="0.35"><span class="val" id="flowSpeed_v"></span></div>
+    <div class="row"><label>強度</label><input type="range" id="flowStrength" min="0" max="3" step="0.05" value="1.2"><span class="val" id="flowStrength_v"></span></div>
+  </div>
+
+  <div class="group">
+    <h3>互動 Interaction</h3>
+    <div class="note">滑鼠移動或觸控可吸引 / 排斥粒子</div>
+    <div class="row"><label>滑鼠力強度</label><input type="range" id="mouseForce" min="0" max="3" step="0.05" value="1.2"><span class="val" id="mouseForce_v"></span></div>
+    <div class="row"><label>排斥模式</label><input type="checkbox" id="repel"><span class="val"></span></div>
+  </div>
+
+  <div class="group">
+    <h3>色彩 Color</h3>
+    <div class="row"><label>主色相</label><input type="range" id="hue" min="0" max="360" step="1" value="200"><span class="val" id="hue_v"></span></div>
+    <div class="row"><label>副色相偏移</label><input type="range" id="hueShift" min="-180" max="180" step="1" value="90"><span class="val" id="hueShift_v"></span></div>
+    <div class="row"><label>飽和度</label><input type="range" id="sat" min="0" max="100" step="1" value="90"><span class="val" id="sat_v"></span></div>
+  </div>
+  </div>
+
+  <div class="btns">
+    <button id="resetBtn">↺ 重設</button>
+  </div>
+</div>
+<button id="toggleBtn">⚙ 面板</button>
+<button id="playCtl">⏸ 暫停</button>
+
+<script>
+'use strict';
+
+// 預覽嵌入模式（?preview=1）：隱藏 UI，只留純畫面，並限制粒子數量以節省效能
+const PREVIEW = new URLSearchParams(location.search).has('preview');
+if (PREVIEW) document.documentElement.classList.add('preview-mode');
+const PREVIEW_MAX_COUNT = 1200;
+
+const canvas = document.getElementById('stage');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+}
+window.addEventListener('resize', resize);
+resize();
+
+/* ===== 參數 ===== */
+const DEFAULTS = {
+  count: 3500, size: 1.4, speed: 1, trail: 0.88,
+  flowScale: 1, flowSpeed: 0.35, flowStrength: 1.2,
+  mouseForce: 1.2,
+  hue: 200, hueShift: 90, sat: 90,
+};
+const P = { ...DEFAULTS, repel: false, mode: 'nebula' };
+
+const fmt = {
+  count: v => Math.round(v),
+  hue: v => v + '°', hueShift: v => v + '°', sat: v => v + '%',
+};
+function bindControls() {
+  for (const key of Object.keys(DEFAULTS)) {
+    const el = document.getElementById(key);
+    const valEl = document.getElementById(key + '_v');
+    const update = () => {
+      P[key] = parseFloat(el.value);
+      if (valEl) valEl.textContent = (fmt[key] || (v => v.toFixed ? +v.toFixed(2) : v))(P[key]);
+    };
+    el.addEventListener('input', update);
+    el.value = P[key];
+    update();
+  }
+  document.getElementById('repel').addEventListener('change', e => { P.repel = e.target.checked; });
+}
+bindControls();
+
+/* ===== 模式切換 ===== */
+const MODE_BTNS = { nebula: 'modeNebula', vortex: 'modeVortex', burst: 'modeBurst' };
+function setMode(mode) {
+  P.mode = mode;
+  for (const [m, id] of Object.entries(MODE_BTNS)) {
+    document.getElementById(id).classList.toggle('active', m === mode);
+  }
+  if (mode === 'burst') burstTimer = 0.5; // 進入爆發模式時很快先爆一次
+}
+for (const [m, id] of Object.entries(MODE_BTNS)) {
+  document.getElementById(id).addEventListener('click', () => setMode(m));
+}
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+  Object.assign(P, DEFAULTS);
+  document.getElementById('repel').checked = P.repel = false;
+  bindControls();
+  setMode('nebula');
+});
+
+/* ===== 播放 / 暫停 ===== */
+let paused = false, msgPaused = false;
+const pauseBtn = document.getElementById('playCtl');
+pauseBtn.addEventListener('click', () => {
+  paused = !paused;
+  pauseBtn.textContent = paused ? '▶ 播放' : '⏸ 暫停';
+});
+// 預覽卡片用 postMessage 控制暫停/續播（首頁滾出視野時省電）
+window.addEventListener('message', e => {
+  if (e.data === 'vfx-pause') msgPaused = true;
+  else if (e.data === 'vfx-play') { msgPaused = false; last = performance.now(); }
+});
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) last = performance.now(); // 回到前景時重設時鐘，避免大 dt
+});
+
+/* ===== 面板開關 ===== */
+const panel = document.getElementById('panel');
+document.getElementById('toggleBtn').addEventListener('click', () => {
+  panel.classList.toggle('collapsed');
+});
+
+/* ===== 滑鼠 / 觸控互動 ===== */
+const mouse = { x: 0, y: 0, active: false };
+function setPointer(x, y) { mouse.x = x; mouse.y = y; mouse.active = true; }
+window.addEventListener('mousemove', e => setPointer(e.clientX, e.clientY));
+window.addEventListener('mouseleave', () => { mouse.active = false; });
+window.addEventListener('touchstart', e => { const t = e.touches[0]; setPointer(t.clientX, t.clientY); }, { passive: true });
+window.addEventListener('touchmove', e => { const t = e.touches[0]; setPointer(t.clientX, t.clientY); }, { passive: true });
+window.addEventListener('touchend', () => { mouse.active = false; });
+
+/* ===== 廉價的 pseudo-curl 流場：層疊三角函數 value-noise =====
+   potential(x,y,t) 是一個平滑的純量場；取其偏導旋轉 90°（curl）→ 得到無散度的流向，
+   粒子沿著它走會形成自然的捲曲絲縷而不會全部堆積到同一處。偏導用中央差分近似。 */
+function potential(x, y, t) {
+  return Math.sin(x * 1.7 + t * 0.9) * Math.cos(y * 1.3 - t * 0.7)
+       + 0.55 * Math.sin(x * 3.1 - y * 2.3 + t * 1.3)
+       + 0.35 * Math.cos(x * 5.3 + y * 4.1 - t * 1.9)
+       + 0.7 * Math.sin(y * 2.1 + t * 0.5 + Math.sin(x * 1.1 + t * 0.3) * 1.5);
+}
+const EPS = 0.01;
+function curl(x, y, t, out) {
+  const dpdx = (potential(x + EPS, y, t) - potential(x - EPS, y, t)) / (2 * EPS);
+  const dpdy = (potential(x, y + EPS, t) - potential(x, y - EPS, t)) / (2 * EPS);
+  out.x = dpdy;   // 旋轉 90° → 沿等位線流動（divergence-free）
+  out.y = -dpdx;
+}
+
+/* ===== 粒子系統（typed arrays 以支撐 8000 顆）===== */
+const MAX_N = 8000;
+const px = new Float32Array(MAX_N), py = new Float32Array(MAX_N);
+const vx = new Float32Array(MAX_N), vy = new Float32Array(MAX_N);
+const pseed = new Float32Array(MAX_N);
+let aliveN = 0;
+
+function spawn(i) {
+  px[i] = Math.random() * W;
+  py[i] = Math.random() * H;
+  vx[i] = (Math.random() - 0.5) * 20;
+  vy[i] = (Math.random() - 0.5) * 20;
+  pseed[i] = Math.random();
+}
+function ensureCount(n) {
+  n = Math.min(MAX_N, Math.round(n));
+  if (PREVIEW) n = Math.min(n, PREVIEW_MAX_COUNT);
+  while (aliveN < n) { spawn(aliveN); aliveN++; }
+  if (aliveN > n) aliveN = n; // 縮減直接截斷即可
+  return aliveN;
+}
+
+/* ===== 爆發模式的排程 ===== */
+let burstTimer = 1.2;          // 距下次爆炸的秒數
+const BURST_PERIOD = 3.2;      // 爆炸週期
+let burstFlash = 0;            // 爆炸瞬間的核心閃光餘量
+
+/* ===== 主迴圈 ===== */
+let last = performance.now();
+let flowT = 0;
+const tmpV = { x: 0, y: 0 };
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (paused || msgPaused || document.hidden) { last = now; return; }
+  const dt = Math.min((now - last) / 1000, 0.05); // dt 上限 50ms
+  last = now;
+  step(dt);
+  draw();
+}
+
+function step(dt) {
+  const n = ensureCount(P.count);
+  flowT += dt * P.flowSpeed;
+  const cx = W / 2, cy = H / 2;
+  const minDim = Math.min(W, H) || 1;
+  const scale = (P.flowScale * 4) / minDim; // 螢幕座標 → 雜訊座標
+  const flowF = P.flowStrength * 90;        // 流場推力（px/s² 等級）
+  const spd = P.speed;
+  const mode = P.mode;
+  const mForce = P.mouseForce * 60000;
+  const repelSign = P.repel ? -1 : 1;
+
+  // 爆發模式排程
+  let burstKick = 0;
+  if (mode === 'burst') {
+    burstTimer -= dt;
+    if (burstTimer <= 0) {
+      burstTimer += BURST_PERIOD;
+      burstKick = 1;
+      burstFlash = 1;
+    }
+  }
+  burstFlash = Math.max(0, burstFlash - dt * 1.8);
+
+  const drag = Math.exp(-dt * 1.6); // 阻尼：速度自然衰減，讓流場主導
+
+  for (let i = 0; i < n; i++) {
+    let x = px[i], y = py[i];
+
+    // --- 流場力（三種模式都吃，星雲模式為主導） ---
+    curl(x * scale, y * scale, flowT + pseed[i] * 0.13, tmpV);
+    let ax = tmpV.x * flowF, ay = tmpV.y * flowF;
+
+    const dxC = x - cx, dyC = y - cy;
+    const distC = Math.sqrt(dxC * dxC + dyC * dyC) + 0.001;
+
+    if (mode === 'vortex') {
+      // 切線方向公轉 + 些許呼吸式的內外漂移
+      const tX = -dyC / distC, tY = dxC / distC;
+      const orbit = 140 * spd * (0.6 + pseed[i] * 0.8);
+      const breathe = Math.sin(flowT * 1.7 + pseed[i] * 6.28) * 30 - 12; // 平均微微向內
+      ax += tX * orbit * 2.2 + (dxC / distC) * breathe;
+      ay += tY * orbit * 2.2 + (dyC / distC) * breathe;
+      // 太靠近核心時輕推出去，避免全部塌縮成一點
+      if (distC < minDim * 0.05) { ax += dxC / distC * 400; ay += dyC / distC * 400; }
+    } else if (mode === 'burst') {
+      // 平時往核心緩緩聚攏，爆炸瞬間給一發強力徑向脈衝
+      ax += -dxC * 1.1; ay += -dyC * 1.1;
+      if (burstKick) {
+        const kick = (260 + pseed[i] * 420) * spd;
+        vx[i] += dxC / distC * kick;
+        vy[i] += dyC / distC * kick;
+      }
+    }
+
+    // --- 滑鼠吸引 / 排斥（反比衰減 + 內距避免爆衝） ---
+    if (mouse.active && P.mouseForce > 0) {
+      const dx = mouse.x - x, dy = mouse.y - y;
+      const d2 = dx * dx + dy * dy + 2500;
+      const f = repelSign * mForce / d2;
+      ax += dx * f / Math.sqrt(d2) * 40;
+      ay += dy * f / Math.sqrt(d2) * 40;
+    }
+
+    // --- 積分 ---
+    vx[i] = vx[i] * drag + ax * dt * spd;
+    vy[i] = vy[i] * drag + ay * dt * spd;
+    x += vx[i] * dt * (0.5 + spd);
+    y += vy[i] * dt * (0.5 + spd);
+
+    // --- 邊界環繞（帶一點緩衝避免邊緣閃現） ---
+    if (x < -20) x += W + 40; else if (x > W + 20) x -= W + 40;
+    if (y < -20) y += H + 40; else if (y > H + 20) y -= H + 40;
+    px[i] = x; py[i] = y;
+  }
+}
+
+function draw() {
+  // 拖尾：半透明黑覆蓋 → 絲滑殘影
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = `rgba(0,0,0,${1 - P.trail})`;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.globalCompositeOperation = 'lighter';
+  const n = aliveN;
+  const baseSize = P.size;
+  const hue = P.hue, hueShift = P.hueShift, sat = P.sat;
+
+  // 依速度分成 12 個色桶批次繪製，省下每顆粒子各設一次 fillStyle 的成本
+  const BUCKETS = 12;
+  const maxSpd = 220 * (0.5 + P.speed); // 映射用的參考速度上限
+  if (!draw.paths) draw.paths = [];
+  const counts = draw.counts || (draw.counts = new Uint16Array(BUCKETS));
+  const bx = draw.bx || (draw.bx = new Float32Array(MAX_N));
+  const by = draw.by || (draw.by = new Float32Array(MAX_N));
+  const bi = draw.bi || (draw.bi = new Uint8Array(MAX_N));
+  counts.fill(0);
+  for (let i = 0; i < n; i++) {
+    const s = Math.sqrt(vx[i] * vx[i] + vy[i] * vy[i]);
+    let t = s / maxSpd; if (t > 1) t = 1;
+    bi[i] = (t * (BUCKETS - 1)) | 0;
+    bx[i] = px[i]; by[i] = py[i];
+    counts[bi[i]]++;
+  }
+  for (let b = 0; b < BUCKETS; b++) {
+    if (!counts[b]) continue;
+    const t = b / (BUCKETS - 1);
+    const h = hue + hueShift * t;
+    const light = 45 + t * 25;
+    const alpha = 0.35 + t * 0.4;
+    ctx.fillStyle = `hsla(${h},${sat}%,${light}%,${alpha})`;
+    ctx.beginPath();
+    const r = baseSize * (0.7 + t * 0.9);
+    for (let i = 0; i < n; i++) {
+      if (bi[i] !== b) continue;
+      ctx.moveTo(bx[i] + r, by[i]);
+      ctx.arc(bx[i], by[i], r, 0, 6.2832);
+    }
+    ctx.fill();
+  }
+
+  // 爆發模式的核心閃光
+  if (burstFlash > 0.01) {
+    const cx = W / 2, cy = H / 2;
+    const R = Math.min(W, H) * 0.25 * (1.4 - burstFlash);
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(10, R));
+    g.addColorStop(0, `hsla(${hue + hueShift * 0.5},${sat}%,85%,${burstFlash * 0.8})`);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
+  }
+}
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Matrix Rain VFX</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: #000; overflow: hidden; font-family: "SF Pro", "PingFang TC", "Microsoft JhengHei", sans-serif; }
+  #stage { position: absolute; inset: 0; display: block; }
+
+  /* ===== 控制面板：左側縱向抽屜 ===== */
+  #panel {
+    position: fixed; left: 12px; top: 64px; bottom: 12px; width: 340px;
+    overflow-y: auto;
+    background: rgba(10, 16, 12, 0.86); backdrop-filter: blur(10px);
+    border: 1px solid rgba(0, 255, 120, 0.25); border-radius: 12px;
+    color: #cfe8d8; padding: 14px 16px 18px; z-index: 10;
+    box-shadow: 4px 0 30px rgba(0,0,0,0.6);
+    transition: transform .25s ease, opacity .25s ease;
+  }
+  #panel.collapsed { transform: translateX(calc(-100% - 24px)); opacity: 0; pointer-events: none; }
+  #panel::-webkit-scrollbar { width: 6px; }
+  #panel::-webkit-scrollbar-thumb { background: rgba(0,255,120,.3); border-radius: 3px; }
+
+  #toggleBtn {
+    position: fixed; top: 12px; right: 12px; z-index: 11;
+    background: rgba(10,16,12,.85); color: #6cf3a0;
+    border: 1px solid rgba(0,255,120,.35); border-radius: 8px;
+    padding: 6px 12px; cursor: pointer; font-size: 13px;
+  }
+  #toggleBtn:hover { background: rgba(0,255,120,.15); }
+
+  #homeBtn {
+    position: fixed; top: 12px; left: 12px; z-index: 11;
+    background: rgba(10,16,12,.85); color: #6cf3a0; text-decoration: none;
+    border: 1px solid rgba(0,255,120,.35); border-radius: 8px;
+    padding: 6px 12px; cursor: pointer; font-size: 13px;
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: inherit;
+  }
+  #homeBtn:hover { background: rgba(0,255,120,.15); }
+
+  /* ===== 獨立浮動的播放/暫停 ===== */
+  #playCtl {
+    position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 11;
+    background: rgba(10,16,12,.85); color: #8fffbe;
+    border: 1px solid rgba(0,255,120,.35); border-radius: 999px;
+    padding: 8px 20px; cursor: pointer; font-size: 13px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  }
+  #playCtl:hover { background: rgba(0,255,120,.18); }
+
+  html.preview-mode #homeBtn,
+  html.preview-mode #toggleBtn,
+  html.preview-mode #playCtl,
+  html.preview-mode #panel { display: none !important; }
+  @media (max-width: 760px) {
+    #panel { left: 8px; top: 56px; bottom: 8px; width: calc(100vw - 16px); max-width: 340px; }
+  }
+
+  #panel h2 { font-size: 14px; letter-spacing: 2px; color: #7bffb0; margin-bottom: 4px; font-weight: 600; }
+  #panel .sub { font-size: 11px; color: #6f8f7d; margin-bottom: 12px; }
+  .groups { display: block; }
+  .group { margin-bottom: 8px; border-top: 1px solid rgba(0,255,120,.12); padding-top: 6px; }
+  .group h3 { font-size: 11px; color: #55d98a; letter-spacing: 1.5px; margin-bottom: 8px; text-transform: uppercase; }
+  .group .note { font-size: 10px; color: #5f7e6d; margin: -4px 0 8px; line-height: 1.4; }
+  .row { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; min-width: 0; }
+  .row label { flex: 0 0 78px; font-size: 12px; color: #b8d6c4; white-space: nowrap; }
+  .row input[type=range] { flex: 1 1 110px; min-width: 60px; accent-color: #2ee06f; height: 14px; cursor: pointer; }
+  .row .val { flex: 0 0 44px; text-align: right; font-size: 11px; color: #7bffb0; font-variant-numeric: tabular-nums; }
+  .row input[type=text] {
+    flex: 1 1 110px; min-width: 60px; background: rgba(0,255,120,.08); color: #cfe8d8;
+    border: 1px solid rgba(0,255,120,.3); border-radius: 5px;
+    padding: 3px 6px; font-size: 12px; font-family: inherit;
+  }
+  .charsetBtns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .charsetBtns button {
+    background: rgba(0,255,120,.08); color: #8fffbe;
+    border: 1px solid rgba(0,255,120,.3); border-radius: 7px;
+    padding: 6px 0; font-size: 12px; cursor: pointer;
+  }
+  .charsetBtns button:hover { background: rgba(0,255,120,.2); }
+  .charsetBtns button.active { background: rgba(0,255,120,.28); color: #eafff2; border-color: rgba(0,255,120,.7); }
+  .btns { display: flex; gap: 8px; margin-top: 12px; }
+  .btns button {
+    flex: 1; background: rgba(0,255,120,.1); color: #8fffbe;
+    border: 1px solid rgba(0,255,120,.3); border-radius: 7px;
+    padding: 7px 0; font-size: 12px; cursor: pointer;
+  }
+  .btns button:hover { background: rgba(0,255,120,.22); }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+
+<a id="homeBtn" href="../index.html">← 首頁</a>
+
+<div id="panel">
+  <h2>MATRIX RAIN</h2>
+  <div class="sub">數位雨特效 — 參數調整（滑鼠掃過畫面會激起漣漪）</div>
+
+  <div class="groups">
+  <div class="group">
+    <h3>字雨 Rain</h3>
+    <div class="row"><label>密度/欄距</label><input type="range" id="colGap" min="10" max="42" step="1" value="18"><span class="val" id="colGap_v"></span></div>
+    <div class="row"><label>落速</label><input type="range" id="fallSpeed" min="2" max="40" step="0.5" value="14"><span class="val" id="fallSpeed_v"></span></div>
+    <div class="row"><label>尾長</label><input type="range" id="tailLen" min="0.1" max="1" step="0.01" value="0.62"><span class="val" id="tailLen_v"></span></div>
+    <div class="row"><label>字級</label><input type="range" id="fontSize" min="8" max="40" step="1" value="17"><span class="val" id="fontSize_v"></span></div>
+    <div class="row"><label>變異頻率</label><input type="range" id="mutation" min="0" max="1" step="0.01" value="0.4"><span class="val" id="mutation_v"></span></div>
+  </div>
+
+  <div class="group">
+    <h3>字符 Charset</h3>
+    <div class="charsetBtns" id="charsetBtns">
+      <button data-cs="kana" class="active">半角假名+數字</button>
+      <button data-cs="binary">二進位 01</button>
+      <button data-cs="ascii">英數 ASCII</button>
+      <button data-cs="cjk">漢字</button>
+    </div>
+  </div>
+
+  <div class="group">
+    <h3>特殊 Special</h3>
+    <div class="note">故障：水平帶狀錯位 + 紅青色差；隱藏訊息會不定時在雨中浮現後溶解</div>
+    <div class="row"><label>故障頻率</label><input type="range" id="glitchFreq" min="0" max="1" step="0.01" value="0.35"><span class="val" id="glitchFreq_v"></span></div>
+    <div class="row"><label>隱藏訊息</label><input type="text" id="msgText" maxlength="24" value="WAKE UP"></div>
+    <div class="row"><label>訊息頻率</label><input type="range" id="msgFreq" min="0" max="1" step="0.01" value="0.4"><span class="val" id="msgFreq_v"></span></div>
+  </div>
+
+  <div class="group">
+    <h3>色彩 Color</h3>
+    <div class="row"><label>主色相</label><input type="range" id="hue" min="0" max="360" step="1" value="122"><span class="val" id="hue_v"></span></div>
+    <div class="row"><label>飽和度</label><input type="range" id="sat" min="0" max="100" step="1" value="95"><span class="val" id="sat_v"></span></div>
+    <div class="row"><label>頭部亮度</label><input type="range" id="headBright" min="0" max="1" step="0.01" value="0.85"><span class="val" id="headBright_v"></span></div>
+  </div>
+  </div>
+
+  <div class="btns">
+    <button id="resetBtn">↺ 重設</button>
+  </div>
+</div>
+<button id="toggleBtn">⚙ 面板</button>
+<button id="playCtl">⏸ 暫停</button>
+
+<script>
+'use strict';
+
+// 預覽嵌入模式（?preview=1）：供首頁卡片用 iframe 嵌入，隱藏面板與導覽按鈕
+const PREVIEW = new URLSearchParams(location.search).has('preview');
+if (PREVIEW) document.documentElement.classList.add('preview-mode');
+
+const canvas = document.getElementById('stage');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+/* ===== 參數 ===== */
+const DEFAULTS = {
+  colGap: PREVIEW ? 26 : 18,        // 欄距（px），預覽模式加大字距讓縮圖更易讀
+  fallSpeed: 14,                    // 落速（格/秒）
+  tailLen: 0.62,                    // 尾長 0..1
+  fontSize: PREVIEW ? 24 : 17,      // 字級（px）
+  mutation: 0.4,                    // 變異頻率 0..1
+  glitchFreq: 0.35,                 // 故障頻率 0..1
+  msgFreq: 0.4,                     // 隱藏訊息頻率 0..1
+  hue: 122, sat: 95, headBright: 0.85,
+};
+const DEFAULT_CHARSET = 'kana';
+const DEFAULT_MSG = 'WAKE UP';
+const P = { ...DEFAULTS };
+let charsetKey = DEFAULT_CHARSET;
+let msgText = DEFAULT_MSG;
+
+/* ===== 字符集（預先展開成字元陣列，避免每幀做字串運算）===== */
+const CHARSETS = {
+  kana: 'ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789'.split(''),
+  binary: '01'.split(''),
+  ascii: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%&*+=<>?'.split(''),
+  cjk: '雨電光影夢醒真假虛實界網絡碼數位靈魂機器心眼天地火水風雷'.split(''),
+};
+let glyphs = CHARSETS[charsetKey];
+
+/* ===== 確定性亂數 ===== */
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* ===== 欄位狀態 =====
+   每欄一個「雨滴頭」：y（格位置）、速度倍率、目前字符索引。
+   尾巴靠半透明黑疊染自然殘留，頭部之後補畫一格主色字 → 白頭綠尾的經典效果。 */
+let cols = [];
+let colCount = 0, rowCount = 0, cellW = 0, cellH = 0;
+let fontStr = '';
+
+function rebuildGrid() {
+  cellW = P.colGap;
+  cellH = Math.max(10, P.fontSize * 1.15);
+  colCount = Math.max(1, Math.ceil(W / cellW));
+  rowCount = Math.max(1, Math.ceil(H / cellH));
+  fontStr = P.fontSize + 'px "Menlo", "MS Gothic", "Osaka-Mono", monospace';
+  const rnd = mulberry32(424242);
+  cols = Array.from({ length: colCount }, () => ({
+    y: -rnd() * rowCount * 1.5,          // 錯開的起始位置（畫面上方外）
+    speedMul: 0.6 + rnd() * 0.8,
+    gi: (rnd() * 4096) | 0,              // 字符索引種子
+    boost: 0,                            // 滑鼠漣漪的加速/增亮量（會衰減）
+  }));
+  // 尺寸重建後畫面清空為黑，避免殘留舊格線比例的字
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+}
+
+function resize() {
+  W = window.innerWidth; H = window.innerHeight;
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  rebuildGrid();
+}
+window.addEventListener('resize', resize);
+resize();
+
+/* ===== 面板綁定 ===== */
+const fmt = {
+  colGap: v => v + 'px', fontSize: v => v + 'px',
+  hue: v => v + '°', sat: v => v + '%',
+};
+const GRID_KEYS = new Set(['colGap', 'fontSize']);
+function bindControls() {
+  for (const key of Object.keys(DEFAULTS)) {
+    const el = document.getElementById(key);
+    const valEl = document.getElementById(key + '_v');
+    const update = () => {
+      P[key] = parseFloat(el.value);
+      if (valEl) valEl.textContent = (fmt[key] || (v => +v.toFixed(2)))(P[key]);
+      if (GRID_KEYS.has(key)) rebuildGrid();
+    };
+    el.removeEventListener('input', el._upd || (() => {}));
+    el._upd = update;
+    el.addEventListener('input', update);
+    el.value = P[key];
+    update();
+  }
+}
+bindControls();
+
+const msgInput = document.getElementById('msgText');
+msgInput.addEventListener('input', () => {
+  msgText = msgInput.value || '';
+  msgEvent.active = false; // 換訊息時取消進行中的浮現
+});
+
+const csBtns = document.querySelectorAll('#charsetBtns button');
+csBtns.forEach(btn => btn.addEventListener('click', () => {
+  charsetKey = btn.dataset.cs;
+  glyphs = CHARSETS[charsetKey];
+  csBtns.forEach(b => b.classList.toggle('active', b === btn));
+}));
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+  Object.assign(P, DEFAULTS);
+  bindControls();
+  charsetKey = DEFAULT_CHARSET;
+  glyphs = CHARSETS[charsetKey];
+  csBtns.forEach(b => b.classList.toggle('active', b.dataset.cs === DEFAULT_CHARSET));
+  msgText = DEFAULT_MSG;
+  msgInput.value = DEFAULT_MSG;
+  msgEvent.active = false;
+  glitch.active = false;
+  rebuildGrid();
+});
+
+/* ===== 播放/暫停（按鈕、postMessage、分頁隱藏三路合流）===== */
+let userPaused = false, msgPaused = false;
+const pauseBtn = document.getElementById('playCtl');
+function isPaused() { return userPaused || msgPaused || document.hidden; }
+pauseBtn.addEventListener('click', () => {
+  userPaused = !userPaused;
+  pauseBtn.textContent = userPaused ? '▶ 播放' : '⏸ 暫停';
+  maybeResume();
+});
+window.addEventListener('message', (e) => {
+  if (e.data === 'vfx-pause') msgPaused = true;
+  else if (e.data === 'vfx-play') { msgPaused = false; maybeResume(); }
+});
+document.addEventListener('visibilitychange', maybeResume);
+
+const panel = document.getElementById('panel');
+document.getElementById('toggleBtn').addEventListener('click', () => {
+  panel.classList.toggle('collapsed');
+});
+
+/* ===== 滑鼠漣漪 ===== */
+const mouse = { x: -9999, y: -9999, t: -10 };
+window.addEventListener('pointermove', (e) => {
+  mouse.x = e.clientX; mouse.y = e.clientY; mouse.t = nowSec;
+});
+window.addEventListener('pointerleave', () => { mouse.x = -9999; mouse.y = -9999; });
+
+/* ===== 故障 glitch 事件 ===== */
+const glitch = { active: false, until: 0, y: 0, h: 0, offs: 0, next: 1.5 };
+function scheduleGlitch(t) {
+  // 頻率 0..1 → 平均間隔 12s..1.2s
+  const mean = P.glitchFreq <= 0.001 ? Infinity : 12 - P.glitchFreq * 10.8;
+  glitch.next = t + mean * (0.5 + Math.random());
+}
+function updateGlitch(t) {
+  if (glitch.active && t > glitch.until) { glitch.active = false; scheduleGlitch(t); }
+  if (!glitch.active && t > glitch.next && P.glitchFreq > 0.001) {
+    glitch.active = true;
+    glitch.until = t + 0.12 + Math.random() * 0.25;
+    glitch.y = Math.random() * H * 0.9;
+    glitch.h = 20 + Math.random() * H * 0.15;
+    glitch.offs = (Math.random() < 0.5 ? -1 : 1) * (6 + Math.random() * 26);
+  }
+}
+
+/* ===== 隱藏訊息事件 ===== */
+const msgEvent = { active: false, start: 0, dur: 0, col0: 0, row: 0, chars: [], next: 3 };
+function scheduleMsg(t) {
+  const mean = P.msgFreq <= 0.001 ? Infinity : 22 - P.msgFreq * 18;
+  msgEvent.next = t + mean * (0.6 + Math.random() * 0.8);
+}
+function startMsg(t) {
+  const chars = msgText.split('');
+  if (!chars.length || chars.length >= colCount) { scheduleMsg(t); return; }
+  msgEvent.active = true;
+  msgEvent.start = t;
+  msgEvent.dur = 4.5;
+  msgEvent.chars = chars;
+  msgEvent.col0 = Math.floor(Math.random() * (colCount - chars.length));
+  msgEvent.row = 2 + Math.floor(Math.random() * Math.max(1, rowCount - 5));
+}
+function updateMsg(t) {
+  if (msgEvent.active && t > msgEvent.start + msgEvent.dur) { msgEvent.active = false; scheduleMsg(t); }
+  if (!msgEvent.active && t > msgEvent.next && P.msgFreq > 0.001) startMsg(t);
+}
+
+/* ===== 主迴圈 =====
+   停止時真正停掉 rAF（不是空轉），恢復時重設時間基準再啟動。 */
+let nowSec = 0;          // 動畫累積時間（秒），暫停時凍結
+let last = 0;
+let rafId = 0, running = false;
+
+function frame(now) {
+  if (isPaused()) { running = false; rafId = 0; return; } // 停掉迴圈
+  rafId = requestAnimationFrame(frame);
+  const dt = Math.min((now - last) / 1000, 0.05); // dt 上限 50ms
+  last = now;
+  nowSec += dt;
+  step(dt, nowSec);
+}
+function maybeResume() {
+  if (!isPaused() && !running) {
+    running = true;
+    last = performance.now();
+    rafId = requestAnimationFrame(frame);
+  } else if (isPaused() && rafId) {
+    cancelAnimationFrame(rafId); rafId = 0; running = false;
+  }
+}
+running = true;
+last = performance.now();
+rafId = requestAnimationFrame(frame);
+
+/* ===== 每幀繪製 ===== */
+function step(dt, t) {
+  updateGlitch(t);
+  updateMsg(t);
+
+  /* --- 尾巴：半透明黑疊染。尾長 → 每秒保留率 → 換算成本幀 alpha（時間基準，跟幀率無關）--- */
+  const keepPerSec = 0.0001 + Math.pow(P.tailLen, 1.6) * 0.30; // 一秒後殘留亮度比例
+  const fadeAlpha = 1 - Math.pow(keepPerSec, dt);
+  ctx.fillStyle = 'rgba(0,0,0,' + fadeAlpha.toFixed(4) + ')';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.font = fontStr;
+  ctx.textBaseline = 'top';
+
+  const hue = P.hue, sat = P.sat;
+  const bodyCol = 'hsl(' + hue + ',' + sat + '%,52%)';
+  const dimCol = 'hsl(' + hue + ',' + sat + '%,36%)';
+  const headL = 70 + P.headBright * 28;                  // 頭部亮度 → 接近白
+  const headCol = 'hsl(' + hue + ',' + (sat * 0.45) + '%,' + headL + '%)';
+  const gLen = glyphs.length;
+  const mutStep = P.mutation * 60 * dt;                  // 本幀的變異「配額」（欄數比例）
+
+  const rippleR = 150;                                    // 漣漪半徑（px）
+  const mouseActive = mouse.x > -1000;
+
+  for (let i = 0; i < colCount; i++) {
+    const c = cols[i];
+    const x = i * cellW;
+
+    // 滑鼠漣漪：靠近游標的欄被推快 + 增亮，之後平滑衰減
+    if (mouseActive) {
+      const hy = c.y * cellH;
+      const dx = x + cellW * 0.5 - mouse.x, dy = hy - mouse.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < rippleR * rippleR) {
+        const k = 1 - Math.sqrt(d2) / rippleR;
+        c.boost = Math.max(c.boost, k * k * 2.2);
+      }
+    }
+    c.boost *= Math.pow(0.25, dt); // 每秒衰減至 25%
+
+    const prevY = c.y;
+    c.y += P.fallSpeed * c.speedMul * (1 + c.boost) * dt;
+
+    // 頭部每跨過一格就換一個字（用格索引推進字符序列，不用隨機重擲 → 便宜且穩定）
+    const rowNow = Math.floor(c.y);
+    if (rowNow !== Math.floor(prevY)) c.gi = (c.gi + 1 + ((rowNow * 7 + i * 13) & 3)) | 0;
+
+    if (rowNow >= 0 && rowNow <= rowCount) {
+      const y = rowNow * cellH;
+      // 頭部後一格：主色字（將成為尾巴的一部分）
+      if (rowNow > 0) {
+        ctx.fillStyle = c.boost > 0.15 ? headCol : bodyCol;
+        ctx.fillText(glyphs[(c.gi + rowNow) % gLen], x, y - cellH);
+      }
+      // 頭部：亮白字
+      ctx.fillStyle = headCol;
+      if (c.boost > 0.15) { ctx.globalAlpha = Math.min(1, 0.85 + c.boost * 0.3); }
+      ctx.fillText(glyphs[(c.gi + rowNow + 1) % gLen], x, y);
+      ctx.globalAlpha = 1;
+    }
+
+    // 重生：頭部落出畫面底部後，機率性從頂端重來（讓各欄節奏錯開）
+    if (rowNow > rowCount + 4) {
+      if (Math.random() < 2.5 * dt) {
+        c.y = -Math.random() * 8;
+        c.speedMul = 0.6 + Math.random() * 0.8;
+        c.gi = (Math.random() * 4096) | 0;
+      }
+    }
+
+    // 隨機變異：尾巴範圍內某格換字重畫（暗一階的主色，蓋掉殘影裡的舊字）
+    if (Math.random() < mutStep / Math.max(1, colCount) * 8) {
+      const back = 2 + Math.floor(Math.random() * 14);
+      const mr = rowNow - back;
+      if (mr >= 0 && mr < rowCount) {
+        ctx.fillStyle = dimCol;
+        ctx.fillText(glyphs[(Math.random() * gLen) | 0], x, mr * cellH);
+      }
+    }
+  }
+
+  /* --- 隱藏訊息：淡入 → 保持 → 溶解 --- */
+  if (msgEvent.active) {
+    const p = (t - msgEvent.start) / msgEvent.dur; // 0..1
+    let a;
+    if (p < 0.25) a = p / 0.25;
+    else if (p < 0.6) a = 1;
+    else a = Math.max(0, 1 - (p - 0.6) / 0.4);
+    const y = msgEvent.row * cellH;
+    ctx.textBaseline = 'top';
+    for (let k = 0; k < msgEvent.chars.length; k++) {
+      const x = (msgEvent.col0 + k) * cellW;
+      // 溶解期：每個字獨立抖動消失
+      const ja = p > 0.6 ? a * (0.4 + 0.6 * Math.abs(Math.sin(t * 17 + k * 3.1))) : a;
+      if (ja <= 0.02) continue;
+      ctx.globalAlpha = Math.min(1, ja);
+      ctx.fillStyle = 'hsl(' + hue + ',' + (sat * 0.3) + '%,92%)';
+      ctx.fillText(msgEvent.chars[k], x, y);
+      // 微光暈：同字疊一次主色
+      ctx.globalAlpha = Math.min(1, ja * 0.5);
+      ctx.fillStyle = bodyCol;
+      ctx.fillText(msgEvent.chars[k], x + 1, y + 1);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /* --- 故障 glitch：帶狀水平錯位 + 紅/青色差（以自身畫布為來源複製）--- */
+  if (glitch.active) {
+    const gy = Math.max(0, Math.min(H - 4, glitch.y));
+    const gh = Math.min(glitch.h, H - gy);
+    const sx = 0, sy = gy * DPR, sw = canvas.width, sh = gh * DPR;
+    const jit = glitch.offs * (0.6 + 0.4 * Math.sin(t * 91));
+    ctx.save();
+    // 主帶錯位
+    ctx.drawImage(canvas, sx, sy, sw, sh, jit, gy, W, gh);
+    // 紅/青 fringe：lighter 疊兩層小offset的染色帶
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.25;
+    ctx.drawImage(canvas, sx, sy, sw, sh, jit + 5, gy, W, gh);
+    ctx.fillStyle = 'rgba(255,0,60,0.10)';
+    ctx.fillRect(jit + 5, gy, W, gh);
+    ctx.drawImage(canvas, sx, sy, sw, sh, jit - 5, gy, W, gh);
+    ctx.fillStyle = 'rgba(0,200,255,0.10)';
+    ctx.fillRect(jit - 5, gy, W, gh);
+    ctx.restore();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+}
+</script>
+</body>
+</html>
