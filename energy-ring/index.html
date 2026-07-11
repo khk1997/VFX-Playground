@@ -180,6 +180,16 @@
   </div>
 
   <div class="group">
+    <h3>吸積 Accretion</h3>
+    <div class="note">與火花相反：粒子從環外向核心螺旋墜落，落到核心時閃一下</div>
+    <div class="row"><label>數量</label><input type="range" id="accAmount" min="0" max="1" step="0.01" value="0"><span class="val" id="accAmount_v"></span></div>
+    <div class="row"><label>起始距離</label><input type="range" id="accStart" min="0.1" max="1.5" step="0.05" value="0.6"><span class="val" id="accStart_v"></span></div>
+    <div class="row"><label>墜落速度</label><input type="range" id="accSpeed" min="0.2" max="3" step="0.05" value="1"><span class="val" id="accSpeed_v"></span></div>
+    <div class="row"><label>螺旋感</label><input type="range" id="accSpiral" min="0" max="1" step="0.01" value="0.5"><span class="val" id="accSpiral_v"></span></div>
+    <div class="row"><label>落點閃光</label><input type="range" id="accFlash" min="0" max="1" step="0.01" value="0.6"><span class="val" id="accFlash_v"></span></div>
+  </div>
+
+  <div class="group">
     <h3>電弧 Arc</h3>
     <div class="row"><label>電弧數量</label><input type="range" id="arcAmount" min="0" max="1" step="0.01" value="0.85"><span class="val" id="arcAmount_v"></span></div>
     <div class="row"><label>跨幅</label><input type="range" id="arcSpan" min="0.1" max="1" step="0.01" value="0.45"><span class="val" id="arcSpan_v"></span></div>
@@ -263,6 +273,7 @@ const DEFAULTS = {
   fps: 30, exportSec: 3,
   hue: 116, hueShift: -33, sat: 100,
   sparkAmount: 0, sparkSpeed: 0.2, sparkArc: 25, sparkReach: 0.25, turbulence: 1,
+  accAmount: 0, accStart: 0.6, accSpeed: 1, accSpiral: 0.5, accFlash: 0.6,
   arcAmount: 0.85, arcSpan: 0.45, arcJag: 0.6, arcThickness: 2.65,
   waveAmount: 1.4, waveCount: 2, waveSpeed: 0.45, waveReach: 0.4, waveWidth: 2,
   starCount: 15, starMinSize: 0.4, starMaxSize: 2.5, starSharpness: 0.5, starSpread: 0.4, starSpeed: 0.2,
@@ -320,6 +331,15 @@ pauseBtn.addEventListener('click', () => {
   paused = !paused;
   pauseBtn.textContent = paused ? '▶ 播放' : '⏸ 暫停';
 });
+
+// 首頁卡片用 postMessage 控制預覽播放：非 active 卡片會收到 vfx-pause 以節省效能。
+// previewPaused 與使用者的手動暫停互相獨立，任一為真都停止推進。
+let msgPaused = false;
+window.addEventListener('message', (e) => {
+  if (e.data === 'vfx-pause') msgPaused = true;
+  else if (e.data === 'vfx-play') msgPaused = false;
+});
+function previewPaused() { return msgPaused || document.hidden; }
 
 // 面板開啟時，特效畫面的圓心會平滑往右偏移，避開面板佔用的左側區域（見 renderFrame 的 panelInsetX）
 const panel = document.getElementById('panel');
@@ -404,6 +424,31 @@ function getSparkPool(loopSec) {
     tangent: (rnd() - 0.5) * 40,     // 切線加速 → 掃過去的感覺
   }));
   return sparkPool;
+}
+
+/* ===== 吸積粒子（確定性排程版：可無縫循環）=====
+   跟火花完全獨立的另一套池子：粒子從環外某個半徑往核心「向內」墜落，同時繞著核心螺旋，
+   落到核心時淡出並閃一下。一樣用固定種子 + 年齡取模 + 封閉式位置公式 → 每一循環逐幀相同。 */
+const ACC_MAX_RATE = 90; // accAmount=1 時每秒的吸積粒子數
+let accPool = [], accPoolKey = '';
+function getAccretionPool(loopSec) {
+  const key = loopSec.toFixed(3);
+  if (accPoolKey === key) return accPool;
+  accPoolKey = key;
+  const count = Math.ceil(ACC_MAX_RATE * loopSec);
+  const rnd = mulberry32(5551212);
+  accPool = Array.from({ length: count }, (_, i) => ({
+    birth: (i + rnd() * 0.9) / count * loopSec, // 均勻散佈 + 些許抖動
+    maxLife: 0.8 + rnd() * 1.2,
+    angle0: rnd() * Math.PI * 2,          // 出生角（環外某處）
+    startJitter: 0.7 + rnd() * 0.6,       // 起始半徑的個體差異（乘上起始距離滑桿）
+    spiralDir: rnd() < 0.5 ? -1 : 1,      // 螺旋方向（順/逆各半）
+    spiralTurns: 0.5 + rnd() * 1.5,       // 墜落全程繞核心的圈數
+    size: 1 + rnd() * 3,
+    briT: 0.4 + rnd() * 0.6,
+    seed: rnd() * 100,
+  }));
+  return accPool;
 }
 
 /* ===== 環間電弧（確定性排程版：可無縫循環）=====
@@ -636,7 +681,8 @@ function frame(now) {
   lastDraw = now;
   const realDt = Math.min((now - last) / 1000, 0.25);
   last = now;
-  let dt = paused ? 0 : realDt;
+  const halted = paused || previewPaused();
+  let dt = halted ? 0 : realDt;
   // 面板開合時，畫面圓心平滑地滑往目標偏移（跟面板的滑動動畫節奏一致），避免瞬間跳動。
   // 用 realDt（不受暫停影響）驅動，暫停時也能繼續完成這個純 UI 過渡
   panelInsetX += (panelInsetTarget - panelInsetX) * Math.min(1, realDt * 10);
@@ -645,7 +691,7 @@ function frame(now) {
   // 會跟上一幀逐像素相同，沒必要每 1/FPS 秒就重算一次幾百個漸層跟環束多邊形，白白吃 GPU/CPU。
   // 但暫停中調整滑桿會把 paramsDirty 標記起來，讓它用同一個凍結的時間點重畫「這一張」反映新參數的畫面，
   // 畫完立刻清掉標記，畫面依然停在原地，不會恢復播放
-  if (paused && insetSettled && !paramsDirty) return;
+  if (halted && insetSettled && !paramsDirty) return;
   paramsDirty = false;
   renderFrame(ctx, W, H, dt, false, undefined, panelInsetX);
 }
@@ -1030,6 +1076,63 @@ function renderFrame(outputCtx, W, H, dt, transparent, atTime, centerOffsetX = 0
       g.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = g;
       ctx.fillRect(x - size * 3, y - size * 3, size * 6, size * 6);
+    }
+  }
+
+  /* --- 吸積粒子：從環外向核心螺旋墜落，落到核心時閃光（確定性排程，無縫循環）---
+     跟火花完全獨立：火花往外噴發、吸積往內墜落，畫面上形成「進 vs 出」的對照。 --- */
+  if (Q.accAmount > 0.005) {
+    const pool = getAccretionPool(LOOP_SEC);
+    const activeCount = Math.round(Q.accAmount * ACC_MAX_RATE * LOOP_SEC);
+    const tLoop = ((noiseT % LOOP_SEC) + LOOP_SEC) % LOOP_SEC;
+    // 整個吸積盤有獨立公轉（與環脫鉤），一樣貼齊整數圈以維持無縫循環
+    const accTurns = Math.max(1, Math.round(0.15 * LOOP_SEC));
+    const discRot = dir * accTurns * TWO_PI * (tLoop / LOOP_SEC);
+
+    for (let i = 0; i < activeCount && i < pool.length; i++) {
+      const ap = pool[i];
+      const age = ((tLoop - ap.birth) % LOOP_SEC + LOOP_SEC) % LOOP_SEC;
+      if (age > ap.maxLife) continue;
+      // 墜落進度：0（出生於外圈）→ 1（抵達核心）。ease-in：越靠近核心掉得越快（重力感）
+      const raw = Math.min(1, (age / ap.maxLife) * Q.accSpeed);
+      const lt = Math.min(1, Math.pow(raw, 1.6));
+
+      const startR = R * (1 + Q.accStart * ap.startJitter);
+      const rNow = startR * (1 - lt); // 線性半徑收縮（配合 ease-in 的 lt → 實際越近越快）
+      // 螺旋：角度隨墜落進度累加，圈數 × 螺旋感滑桿；再加上整盤公轉
+      const spiralA = ap.spiralDir * Q.accSpiral * ap.spiralTurns * TWO_PI * lt;
+      const a = ap.angle0 + spiralA + discRot;
+      const x = cx + Math.cos(a) * rNow, y = cy + Math.sin(a) * rNow;
+
+      // 亮度：出生淡入、墜落途中最亮、抵達核心前開始收；拖著往內的短尾巴
+      const fade = lt < 0.15 ? lt / 0.15 : 1;
+      const alpha = fade * (1 - lt * 0.4) * (0.5 + 0.5 * pn(age * 6, 1, ap.seed)) * ap.briT * flick;
+      if (alpha > 0.02) {
+        const size = ap.size * (1.2 - lt * 0.7); // 越靠近核心略縮小
+        const g = ctx.createRadialGradient(x, y, 0, x, y, size * 3);
+        g.addColorStop(0, `hsla(${Q.hue},${Math.max(0, Q.sat - 25)}%,88%,${alpha * 0.6})`);
+        g.addColorStop(0.4, `hsla(${Q.hue},${Q.sat}%,60%,${alpha * 0.3})`);
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(x - size * 3, y - size * 3, size * 6, size * 6);
+      }
+
+      // 落點閃光：抵達核心的瞬間（lt 接近 1）在核心處爆一小閃
+      if (Q.accFlash > 0.01 && lt > 0.88) {
+        const fl = (lt - 0.88) / 0.12; // 0..1
+        const flAlpha = Math.sin(fl * Math.PI) * Q.accFlash * ap.briT * flick;
+        if (flAlpha > 0.02) {
+          const fr = R * 0.12 * (0.4 + fl);
+          const cxr = cx + Math.cos(ap.angle0 + discRot) * R * 0.04;
+          const cyr = cy + Math.sin(ap.angle0 + discRot) * R * 0.04;
+          const fg = ctx.createRadialGradient(cxr, cyr, 0, cxr, cyr, fr);
+          fg.addColorStop(0, `hsla(${Q.hue},30%,96%,${flAlpha * 0.8})`);
+          fg.addColorStop(0.5, `hsla(${Q.hue},${Q.sat}%,65%,${flAlpha * 0.3})`);
+          fg.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.fillStyle = fg;
+          ctx.fillRect(cxr - fr, cyr - fr, fr * 2, fr * 2);
+        }
+      }
     }
   }
 

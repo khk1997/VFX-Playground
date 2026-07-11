@@ -35,17 +35,30 @@
   @keyframes shine { to { background-position: 200% center; } }
   header p { margin-top: 6px; font-size: 12px; letter-spacing: 3px; color: #5c7a68; text-transform: uppercase; }
 
-  /* ===== 選單列 ===== */
+  /* ===== 選單列：卡片可超出畫面，active 卡片永遠移到中央 ===== */
   #rail {
     position: relative; z-index: 1;
-    display: flex; align-items: center; gap: 26px;
-    padding: 10px 10px;
+    display: flex; align-items: center; gap: 14px;
+    width: 100%;
+    padding: 10px 0;
   }
-  #cards { display: flex; align-items: center; gap: 26px; }
+  #viewport {
+    flex: 1;
+    overflow: hidden;
+    /* 讓卡片放大時的陰影不被裁掉 */
+    padding: 18px 0;
+  }
+  #cards {
+    display: flex; align-items: center; gap: 26px;
+    width: max-content;
+    transition: transform .45s cubic-bezier(.25,.9,.3,1);
+    will-change: transform;
+  }
 
   .card {
     position: relative;
     width: 220px; height: 300px;
+    flex: 0 0 auto;
     border-radius: 20px;
     background: linear-gradient(160deg, rgba(255,255,255,.05), rgba(255,255,255,.01));
     border: 1px solid rgba(255,255,255,.08);
@@ -66,6 +79,16 @@
   .card.disabled { cursor: default; }
   .card.disabled:hover { opacity: .55; }
 
+  /* 進入特效頁時的放大轉場 */
+  .card.launching {
+    transform: scale(1.5);
+    opacity: 0;
+    transition: transform .38s cubic-bezier(.5,0,.8,.4), opacity .32s ease .06s;
+    z-index: 5;
+  }
+  body.leaving header, body.leaving footer, body.leaving .navBtn,
+  body.leaving .card:not(.launching) { opacity: 0 !important; transition: opacity .3s ease; }
+
   .card-preview {
     position: relative; flex: 1; background: #000;
     display: flex; align-items: center; justify-content: center;
@@ -78,10 +101,11 @@
     position: absolute; top: 0; left: 0;
     border: 0; pointer-events: none;
     transform-origin: top left;
+    background: #000;
   }
 
   .card-body { padding: 12px 14px 14px; background: rgba(0,0,0,.35); }
-  .card-title { font-size: 15px; font-weight: 600; letter-spacing: .5px; margin-bottom: 8px; }
+  .card-title { font-size: 15px; font-weight: 600; letter-spacing: .5px; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .card-tags { display: flex; flex-wrap: wrap; gap: 5px; }
   .tag {
     font-size: 10px; padding: 3px 7px; border-radius: 20px; letter-spacing: .3px;
@@ -92,26 +116,55 @@
 
   /* 導覽箭頭 */
   .navBtn {
-    position: relative; z-index: 1;
+    position: relative; z-index: 2;
     width: 46px; height: 46px; border-radius: 50%;
     background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.14);
     color: #cfe8d8; font-size: 18px; cursor: pointer;
     display: flex; align-items: center; justify-content: center;
     transition: background .2s ease, transform .15s ease;
     flex: 0 0 auto;
+    margin: 0 14px;
   }
   .navBtn:hover { background: rgba(123,255,176,.15); transform: scale(1.06); }
   .navBtn:active { transform: scale(0.94); }
 
-  footer { position: relative; z-index: 1; font-size: 11px; color: #45594d; letter-spacing: 1px; }
+  /* 進度小圓點 */
+  #dots { position: relative; z-index: 1; display: flex; gap: 8px; }
+  #dots .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: rgba(255,255,255,.14); cursor: pointer;
+    transition: background .25s ease, transform .25s ease;
+  }
+  #dots .dot.on { background: #7bffb0; transform: scale(1.25); }
+
+  footer { position: relative; z-index: 1; font-size: 11px; color: #45594d; letter-spacing: 1px; text-align: center; padding: 0 12px; }
   footer kbd {
     background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.15);
     border-radius: 4px; padding: 1px 6px; font-family: inherit; margin: 0 2px;
+  }
+
+  /* 音效開關 */
+  #sndBtn {
+    position: fixed; top: 14px; right: 14px; z-index: 3;
+    background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.14);
+    color: #cfe8d8; border-radius: 8px; padding: 6px 10px;
+    font-size: 12px; cursor: pointer; font-family: inherit;
+  }
+  #sndBtn:hover { background: rgba(123,255,176,.15); }
+
+  @media (max-width: 700px) {
+    body { gap: 22px; }
+    header h1 { font-size: 22px; letter-spacing: 4px; }
+    .navBtn { display: none; }
+    .card { width: 180px; height: 250px; }
+    footer .kbHint { display: none; }
   }
 </style>
 </head>
 <body>
 <div id="bg"></div>
+
+<button id="sndBtn" aria-label="音效開關">🔊 音效</button>
 
 <header>
   <h1>VFX PLAYGROUND</h1>
@@ -120,37 +173,119 @@
 
 <div id="rail">
   <button class="navBtn" id="prevBtn" aria-label="上一個">‹</button>
-
-  <div id="cards"></div>
-
+  <div id="viewport"><div id="cards"></div></div>
   <button class="navBtn" id="nextBtn" aria-label="下一個">›</button>
 </div>
 
-<footer>使用 <kbd>←</kbd> <kbd>→</kbd> 切換　或滑鼠點擊卡片　<kbd>Enter</kbd> 進入</footer>
+<div id="dots"></div>
+
+<footer><span class="kbHint">使用 <kbd>←</kbd> <kbd>→</kbd> 切換　<kbd>Enter</kbd> 進入　</span>滑鼠點擊或觸控滑動選擇卡片</footer>
 
 <script>
 'use strict';
 
 /* ===== 特效清單 =====
    href 為 null 代表尚未開放（顯示 敬請期待）。
-   preview 是一個小型自繪函式，用來畫出卡片內的縮圖動畫（輕量版，不依賴主特效程式碼）。 */
+   previewSrc 用 iframe 嵌入實際特效頁（?preview=1 隱藏 UI）。
+   為了效能，只有 active 卡片附近的 iframe 會播放，其餘會收到 'vfx-pause' postMessage。 */
 const EFFECTS = [
   {
     title: '能量光環 Energy Ring',
     href: 'energy-ring/index.html',
-    tags: ['HTML5', 'CSS3', 'JavaScript', 'Canvas 2D API'],
+    tags: ['Canvas 2D', 'Particles', 'Bloom'],
     previewSrc: 'energy-ring/index.html?preview=1',
   },
-  { title: '敬請期待', href: null, tags: ['Coming Soon'] },
-  { title: '敬請期待', href: null, tags: ['Coming Soon'] },
+  {
+    title: '電漿閃電 Lightning',
+    href: 'lightning/index.html',
+    tags: ['Canvas 2D', 'Fractal', 'Interactive'],
+    previewSrc: 'lightning/index.html?preview=1',
+  },
+  {
+    title: '粒子星雲 Nebula',
+    href: 'nebula/index.html',
+    tags: ['Canvas 2D', 'Flow Field', 'Particles'],
+    previewSrc: 'nebula/index.html?preview=1',
+  },
+  {
+    title: '流體墨水 Fluid Ink',
+    href: 'fluid-ink/index.html',
+    tags: ['Canvas 2D', 'Fluid Sim', 'Interactive'],
+    previewSrc: 'fluid-ink/index.html?preview=1',
+  },
+  {
+    title: '文字粒子 Text Particles',
+    href: 'text-particles/index.html',
+    tags: ['Canvas 2D', 'Particles', 'Typography'],
+    previewSrc: 'text-particles/index.html?preview=1',
+  },
+  {
+    title: '璀璨烟火 Fireworks',
+    href: 'fireworks/index.html',
+    tags: ['Canvas 2D', 'Particles', 'Interactive'],
+    previewSrc: 'fireworks/index.html?preview=1',
+  },
+  {
+    title: '數位雨 Matrix Rain',
+    href: 'matrix-rain/index.html',
+    tags: ['Canvas 2D', 'Typography', 'Glitch'],
+    previewSrc: 'matrix-rain/index.html?preview=1',
+  },
+  {
+    title: '黑洞 Black Hole',
+    href: 'black-hole/index.html',
+    tags: ['Canvas 2D', 'Lensing', 'Particles'],
+    previewSrc: 'black-hole/index.html?preview=1',
+  },
+  {
+    title: '音訊視覺 Audio Viz',
+    href: 'audio-viz/index.html',
+    tags: ['Canvas 2D', 'Web Audio', 'FFT'],
+    previewSrc: 'audio-viz/index.html?preview=1',
+  },
 ];
 
 // iframe 內部渲染解析度（與卡片預覽框同比例 220:190，放大 3 倍後縮小顯示以求清晰）
 const PREVIEW_W = 660, PREVIEW_H = 570;
 
 const cardsEl = document.getElementById('cards');
+const viewportEl = document.getElementById('viewport');
+const dotsEl = document.getElementById('dots');
 let active = 0;
 const cardEls = [];
+const iframes = [];   // index 對應 EFFECTS，可為 null
+const dotEls = [];
+
+/* ===== WebAudio 合成音效（Switch 風的嗶啵聲，不用音檔） ===== */
+let audioCtx = null;
+let soundOn = (localStorage.getItem('vfx-sound') ?? '1') === '1';
+function blip(freq, dur = 0.07, type = 'sine', gain = 0.12) {
+  if (!soundOn) return;
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const t = audioCtx.currentTime;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(gain, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(t); o.stop(t + dur + 0.02);
+  } catch (e) { /* 音效失敗不影響操作 */ }
+}
+const sndMove = () => blip(880, 0.06, 'sine', 0.10);
+const sndEnter = () => { blip(660, 0.09, 'triangle', 0.14); setTimeout(() => blip(990, 0.12, 'triangle', 0.12), 70); };
+
+const sndBtn = document.getElementById('sndBtn');
+function renderSndBtn() { sndBtn.textContent = soundOn ? '🔊 音效' : '🔇 音效'; }
+sndBtn.addEventListener('click', () => {
+  soundOn = !soundOn;
+  localStorage.setItem('vfx-sound', soundOn ? '1' : '0');
+  renderSndBtn();
+  if (soundOn) sndMove();
+});
+renderSndBtn();
 
 function buildCards() {
   EFFECTS.forEach((fx, i) => {
@@ -166,16 +301,19 @@ function buildCards() {
       iframe.width = PREVIEW_W;
       iframe.height = PREVIEW_H;
       iframe.tabIndex = -1;
+      iframe.loading = 'lazy';
       iframe.setAttribute('scrolling', 'no');
       iframe.setAttribute('aria-hidden', 'true');
       const scale = 220 / PREVIEW_W;
       iframe.style.transform = `scale(${scale})`;
       preview.appendChild(iframe);
+      iframes[i] = iframe;
     } else {
       const soon = document.createElement('div');
       soon.className = 'soon';
       soon.textContent = 'COMING SOON';
       preview.appendChild(soon);
+      iframes[i] = null;
     }
 
     const body = document.createElement('div');
@@ -198,16 +336,60 @@ function buildCards() {
     el.appendChild(body);
     el.addEventListener('click', (e) => {
       if (!fx.href) { e.preventDefault(); return; }
-      if (i !== active) { e.preventDefault(); setActive(i); }
+      e.preventDefault();
+      if (i !== active) { setActive(i); }
+      else launch(i);
     });
     cardsEl.appendChild(el);
     cardEls.push(el);
+
+    const dot = document.createElement('div');
+    dot.className = 'dot';
+    dot.addEventListener('click', () => setActive(i));
+    dotsEl.appendChild(dot);
+    dotEls.push(dot);
   });
 }
 
-function setActive(i) {
-  active = (i + EFFECTS.length) % EFFECTS.length;
+/* 只讓 active 卡片與左右鄰居的 iframe 播放，其餘暫停以省效能 */
+function updatePreviewPlayback() {
+  iframes.forEach((f, i) => {
+    if (!f || !f.contentWindow) return;
+    const near = Math.abs(i - active) <= 1;
+    try { f.contentWindow.postMessage(near ? 'vfx-play' : 'vfx-pause', '*'); } catch (e) {}
+  });
+}
+
+/* 將 active 卡片捲動置中 */
+function centerActive() {
+  const card = cardEls[active];
+  if (!card) return;
+  const target = card.offsetLeft + card.offsetWidth / 2 - viewportEl.clientWidth / 2;
+  const max = cardsEl.scrollWidth - viewportEl.clientWidth;
+  const x = Math.max(0, Math.min(target, Math.max(0, max)));
+  cardsEl.style.transform = `translateX(${-x}px)`;
+}
+
+function setActive(i, silent) {
+  const next = (i + EFFECTS.length) % EFFECTS.length;
+  if (next !== active && !silent) sndMove();
+  active = next;
   cardEls.forEach((el, idx) => el.classList.toggle('active', idx === active));
+  dotEls.forEach((d, idx) => d.classList.toggle('on', idx === active));
+  centerActive();
+  updatePreviewPlayback();
+}
+
+/* 進場轉場：卡片放大 + 其他元素淡出，再跳頁 */
+let launching = false;
+function launch(i) {
+  const fx = EFFECTS[i];
+  if (!fx.href || launching) return;
+  launching = true;
+  sndEnter();
+  document.body.classList.add('leaving');
+  cardEls[i].classList.add('launching');
+  setTimeout(() => { window.location.href = fx.href; }, 380);
 }
 
 document.getElementById('prevBtn').addEventListener('click', () => setActive(active - 1));
@@ -215,14 +397,34 @@ document.getElementById('nextBtn').addEventListener('click', () => setActive(act
 window.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft') setActive(active - 1);
   else if (e.key === 'ArrowRight') setActive(active + 1);
-  else if (e.key === 'Enter') {
-    const fx = EFFECTS[active];
-    if (fx.href) window.location.href = fx.href;
-  }
+  else if (e.key === 'Enter') launch(active);
+});
+
+/* 觸控滑動切換 */
+let touchX = null;
+window.addEventListener('touchstart', (e) => { touchX = e.touches[0].clientX; }, { passive: true });
+window.addEventListener('touchend', (e) => {
+  if (touchX === null) return;
+  const dx = e.changedTouches[0].clientX - touchX;
+  if (Math.abs(dx) > 40) setActive(active + (dx < 0 ? 1 : -1));
+  touchX = null;
+}, { passive: true });
+
+window.addEventListener('resize', centerActive);
+/* iframe 載入完成後再同步一次播放狀態（load 前 postMessage 會沒人聽） */
+iframesReady();
+function iframesReady() {
+  window.addEventListener('load', () => { updatePreviewPlayback(); setTimeout(updatePreviewPlayback, 1500); });
+}
+/* 頁面不可見時全部暫停 */
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    iframes.forEach(f => { try { f && f.contentWindow.postMessage('vfx-pause', '*'); } catch (e) {} });
+  } else updatePreviewPlayback();
 });
 
 buildCards();
-setActive(0);
+setActive(0, true);
 </script>
 </body>
 </html>
