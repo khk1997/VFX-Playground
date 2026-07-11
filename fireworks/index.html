@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Fireworks VFX</title>
+<link rel="icon" href="data:,">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 100%; height: 100%; background: #000; overflow: hidden; font-family: "SF Pro", "PingFang TC", "Microsoft JhengHei", sans-serif; }
@@ -76,6 +77,13 @@
     padding: 7px 0; font-size: 12px; cursor: pointer;
   }
   .btns button:hover { background: rgba(255,150,60,.22); }
+  .preset-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:5px; margin-bottom:8px; }
+  .preset-grid button { background:rgba(255,255,255,.035); color:#cdb8a8; border:1px solid rgba(255,170,90,.16); border-radius:6px; padding:6px 2px; font:10px inherit; cursor:pointer; }
+  .preset-grid button:hover,.preset-grid button.active { color:#fff1d3; border-color:#f5a24d; background:rgba(245,162,77,.16); }
+  .row select { flex:1; min-width:0; color:#f3d7bd; background:#211710; border:1px solid rgba(255,170,90,.22); border-radius:5px; padding:3px; font:11px inherit; }
+  .text-firework { display:none; margin:5px 0 8px; padding:8px; border:1px solid rgba(255,170,90,.14); border-radius:7px; background:rgba(255,180,100,.035); }
+  .text-firework.visible { display:block; }
+  .text-firework input[type=text] { width:100%; color:#fff0d7; background:#160f0d; border:1px solid rgba(255,170,90,.28); border-radius:5px; padding:7px 8px; font:13px "Microsoft JhengHei",sans-serif; outline:none; margin-bottom:7px; }
 </style>
 </head>
 <body>
@@ -89,6 +97,22 @@
 
   <div class="groups">
   <div class="group">
+    <h3>煙火編排 Show</h3>
+    <div class="preset-grid" id="presets">
+      <button data-preset="festival">節慶</button><button data-preset="cinema">電影感</button><button data-preset="willow">金柳</button>
+    </div>
+    <div class="row"><label>煙火類型</label><select id="burstStyle"><option value="random">隨機混合</option><option value="peony">牡丹</option><option value="chrysanthemum">菊花</option><option value="ring">圓環</option><option value="willow">金柳</option><option value="palm">椰樹</option><option value="heart">愛心</option><option value="double">二段爆裂</option><option value="text">文字煙火</option></select><span class="val"></span></div>
+    <div class="text-firework" id="textFirework">
+      <input type="text" id="fireworkText" value="VFX" maxlength="10" aria-label="煙火文字">
+      <div class="row"><label>文字色彩</label><select id="textColorMode"><option value="palette">跟隨配色</option><option value="rainbow">彩虹漸層</option><option value="gold">金白火花</option><option value="custom">自訂單色</option></select><span class="val"></span></div>
+      <div class="row"><label>文字尺寸</label><input type="range" id="textSize" min="0.45" max="1.35" step="0.05" value="0.85"><span class="val" id="textSize_v"></span></div>
+      <div class="row"><label>粒子密度</label><input type="range" id="textDensity" min="2" max="7" step="1" value="4"><span class="val" id="textDensity_v"></span></div>
+      <div class="row"><label>維持時間</label><input type="range" id="textHold" min="0.3" max="2.5" step="0.1" value="1.2"><span class="val" id="textHold_v"></span></div>
+    </div>
+    <div class="row"><label>混合文字煙火</label><input type="checkbox" id="mixText" checked><span class="val"></span></div>
+    <div class="row"><label>齊射數量</label><input type="range" id="salvo" min="1" max="7" step="1" value="3"><span class="val" id="salvo_v"></span></div>
+  </div>
+  <div class="group">
     <h3>發射 Launch</h3>
     <div class="row"><label>自動頻率</label><input type="range" id="autoRate" min="0" max="4" step="0.05" value="1.1"><span class="val" id="autoRate_v"></span></div>
     <div class="row"><label>同時最大數</label><input type="range" id="maxRockets" min="1" max="16" step="1" value="6"><span class="val" id="maxRockets_v"></span></div>
@@ -99,10 +123,12 @@
     <h3>爆炸 Burst</h3>
     <div class="note">爆炸型態隨機：球形／環形／柳枝／雙層／愛心</div>
     <div class="row"><label>粒子數</label><input type="range" id="particleCount" min="30" max="300" step="5" value="150"><span class="val" id="particleCount_v"></span></div>
-    <div class="row"><label>爆炸半徑</label><input type="range" id="burstRadius" min="0.3" max="2" step="0.01" value="1"><span class="val" id="burstRadius_v"></span></div>
+    <div class="row"><label>爆炸半徑</label><input type="range" id="burstRadius" min="0.5" max="3.5" step="0.01" value="1.85"><span class="val" id="burstRadius_v"></span></div>
     <div class="row"><label>重力</label><input type="range" id="gravity" min="0" max="400" step="5" value="130"><span class="val" id="gravity_v"></span></div>
     <div class="row"><label>拖尾殘影</label><input type="range" id="trail" min="0" max="0.95" step="0.01" value="0.82"><span class="val" id="trail_v"></span></div>
     <div class="row"><label>二段爆炸機率</label><input type="range" id="doubleProb" min="0" max="1" step="0.01" value="0.25"><span class="val" id="doubleProb_v"></span></div>
+    <div class="row"><label>火花分岔</label><input type="range" id="crackle" min="0" max="1" step="0.01" value="0.35"><span class="val" id="crackle_v"></span></div>
+    <div class="row"><label>軌跡長度</label><input type="range" id="sparkTrail" min="1" max="10" step="1" value="6"><span class="val" id="sparkTrail_v"></span></div>
   </div>
 
   <div class="group">
@@ -111,17 +137,21 @@
     <div class="row"><label>單色相</label><input type="range" id="hue" min="0" max="360" step="1" value="30"><span class="val" id="hue_v"></span></div>
     <div class="row"><label>飽和度</label><input type="range" id="sat" min="0" max="100" step="1" value="100"><span class="val" id="sat_v"></span></div>
     <div class="row"><label>閃爍</label><input type="range" id="flicker" min="0" max="1" step="0.01" value="0.6"><span class="val" id="flicker_v"></span></div>
+    <div class="row"><label>配色</label><select id="palette"><option value="classic">經典暖白</option><option value="jewel">寶石彩</option><option value="gold">金色</option><option value="ice">冰藍銀白</option></select><span class="val"></span></div>
   </div>
 
   <div class="group">
     <h3>環境 Ambience</h3>
     <div class="row"><label>星空數量</label><input type="range" id="starCount" min="0" max="400" step="5" value="140"><span class="val" id="starCount_v"></span></div>
     <div class="row"><label>天際線</label><input type="checkbox" id="skyline" checked><span class="val"></span></div>
+    <div class="row"><label>煙霧濃度</label><input type="range" id="smokeAmount" min="0" max="1" step="0.01" value="0.55"><span class="val" id="smokeAmount_v"></span></div>
+    <div class="row"><label>風向</label><input type="range" id="wind" min="-80" max="80" step="1" value="12"><span class="val" id="wind_v"></span></div>
+    <div class="row"><label>環境閃光</label><input type="range" id="illumination" min="0" max="1" step="0.01" value="0.24"><span class="val" id="illumination_v"></span></div>
   </div>
   </div>
 
   <div class="btns">
-    <button id="resetBtn">↺ 重設</button>
+    <button id="salvoBtn">✦ 齊射</button><button id="resetBtn">↺ 重設</button>
   </div>
 </div>
 <button id="toggleBtn">⚙ 面板</button>
@@ -159,15 +189,19 @@ const DEFAULTS = {
   maxRockets: 6,
   launchSpeed: 1,
   particleCount: PREVIEW ? 80 : 150,
-  burstRadius: 1,
+  burstRadius: 1.85,
   gravity: 130,
   trail: 0.82,
   doubleProb: 0.25,
+  crackle: 0.35, sparkTrail: PREVIEW ? 3 : 6, salvo: 3,
   hue: 30, sat: 100, flicker: 0.6,
+  smokeAmount: PREVIEW ? 0.25 : 0.55, wind: 12, illumination: 0.24,
+  textSize: 0.85, textDensity: PREVIEW ? 3 : 4, textHold: 1.2,
   starCount: PREVIEW ? 70 : 140,
 };
-const BOOL_DEFAULTS = { randColor: true, skyline: true };
+const BOOL_DEFAULTS = { randColor: true, skyline: true, mixText: true };
 const P = { ...DEFAULTS, ...BOOL_DEFAULTS };
+P.burstStyle = 'random'; P.palette = 'classic'; P.textColorMode = 'palette'; P.fireworkText = 'VFX';
 
 const fmt = {
   autoRate: v => v.toFixed(2) + '/s',
@@ -187,11 +221,18 @@ function bindControls() {
     if (!el._bound) { el.addEventListener('input', update); el._bound = true; }
     update();
   }
+  for (const key of ['burstStyle','palette','textColorMode']) {
+    const el = document.getElementById(key); el.value = P[key];
+    if (!el._bound) { el.addEventListener('change', () => { P[key] = el.value; if (key === 'burstStyle') document.getElementById('textFirework').classList.toggle('visible', el.value === 'text' || P.mixText); }); el._bound = true; }
+  }
+  const textInput = document.getElementById('fireworkText'); textInput.value = P.fireworkText;
+  if (!textInput._bound) { textInput.addEventListener('input', () => P.fireworkText = textInput.value.slice(0, 10)); textInput._bound = true; }
+  document.getElementById('textFirework').classList.toggle('visible', P.burstStyle === 'text' || P.mixText);
   for (const key of Object.keys(BOOL_DEFAULTS)) {
     const el = document.getElementById(key);
     el.checked = P[key];
     if (!el._bound) {
-      el.addEventListener('change', () => { P[key] = el.checked; if (key === 'skyline') skylinePath = null; });
+      el.addEventListener('change', () => { P[key] = el.checked; if (key === 'skyline') skylinePath = null; if (key === 'mixText') document.getElementById('textFirework').classList.toggle('visible', P.burstStyle === 'text' || P.mixText); });
       el._bound = true;
     }
   }
@@ -200,7 +241,9 @@ bindControls();
 
 document.getElementById('resetBtn').addEventListener('click', () => {
   Object.assign(P, DEFAULTS, BOOL_DEFAULTS);
+  P.burstStyle = 'random'; P.palette = 'classic'; P.textColorMode = 'palette'; P.fireworkText = 'VFX';
   bindControls();
+  document.querySelectorAll('#presets button').forEach(x => x.classList.remove('active'));
   starField = null;
 });
 
@@ -235,7 +278,12 @@ document.getElementById('toggleBtn').addEventListener('click', () => panel.class
 /* ===== 工具 ===== */
 const rand = (a, b) => a + Math.random() * (b - a);
 const TWO_PI = Math.PI * 2;
-function pickHue() { return P.randColor ? Math.floor(Math.random() * 360) : P.hue; }
+function pickHue() {
+  if (!P.randColor) return P.hue;
+  const sets = { classic:[28,38,48,8,205], jewel:[345,285,215,165,48], gold:[32,38,44], ice:[190,205,220,48] };
+  const a = sets[P.palette] || sets.classic;
+  return a[Math.floor(Math.random()*a.length)] + rand(-5,5);
+}
 
 /* ===== 星空（離屏快取，微閃爍用透明度調變）===== */
 const starCanvas = document.createElement('canvas');
@@ -287,9 +335,11 @@ function buildSkyline() {
 /* ===== 火箭與粒子 ===== */
 const rockets = [];
 const particles = [];
+const smoke = [];
+let skyFlash = 0, flashX = 0, flashY = 0, flashHue = 35;
 const MAX_PARTICLES = PREVIEW ? 2200 : 6000;
 
-const BURST_TYPES = ['peony', 'ring', 'willow', 'double', 'heart'];
+const BURST_TYPES = ['peony', 'chrysanthemum', 'ring', 'willow', 'palm', 'double', 'heart'];
 
 function launchRocket(targetX, targetY) {
   if (rockets.length >= P.maxRockets) return;
@@ -304,7 +354,9 @@ function launchRocket(targetX, targetY) {
     vx: rand(-14, 14),
     vy: -v0,
     hue: pickHue(),
-    type: BURST_TYPES[Math.floor(Math.random() * BURST_TYPES.length)],
+    type: P.burstStyle === 'random'
+      ? (P.mixText && Math.random() < 0.1 ? 'text' : BURST_TYPES[Math.floor(Math.random() * BURST_TYPES.length)])
+      : P.burstStyle,
     sparkAcc: 0,
     prevVy: -v0,
   });
@@ -315,15 +367,69 @@ function spawnParticle(p) {
   particles.push(p);
 }
 
+const textCanvas = document.createElement('canvas');
+const textCtx = textCanvas.getContext('2d', { willReadFrequently: true });
+function explodeText(x, y, hue) {
+  const label = (P.fireworkText || 'VFX').trim().slice(0, 10) || 'VFX';
+  const cw = 720, ch = 260;
+  const fontSize = Math.max(52, Math.min(180, 170 / Math.max(1, label.length * 0.62)));
+  textCanvas.width = cw; textCanvas.height = ch;
+  textCtx.clearRect(0, 0, cw, ch);
+  textCtx.fillStyle = '#fff'; textCtx.textAlign = 'center'; textCtx.textBaseline = 'middle';
+  textCtx.font = `700 ${fontSize}px "DFKai-SB", "KaiTi", "Microsoft JhengHei", serif`;
+  textCtx.fillText(label, cw / 2, ch / 2);
+  const data = textCtx.getImageData(0, 0, cw, ch).data;
+  const step = Math.max(2, 8 - Math.round(P.textDensity));
+  const points = [];
+  for (let py = 0; py < ch; py += step) for (let px = 0; px < cw; px += step) {
+    const alpha = data[(py * cw + px) * 4 + 3];
+    if (alpha < 100) continue;
+    const edge = px < 3 || py < 3 || px >= cw - 3 || py >= ch - 3 ||
+      data[(py * cw + px - 3) * 4 + 3] < 70 || data[(py * cw + px + 3) * 4 + 3] < 70 ||
+      data[((py - 3) * cw + px) * 4 + 3] < 70 || data[((py + 3) * cw + px) * 4 + 3] < 70;
+    if (edge) points.push([px - cw / 2, py - ch / 2]);
+  }
+  const cap = Math.min(PREVIEW ? 500 : 1100, MAX_PARTICLES - particles.length);
+  const stride = Math.max(1, Math.ceil(points.length / Math.max(1, cap)));
+  const scale = Math.min(W * 0.72 / cw, H * 0.28 / ch) * P.textSize;
+  const formTime = 0.95;
+  skyFlash = Math.max(skyFlash, 0.38); flashX = x; flashY = y; flashHue = hue;
+  for (let i = Math.floor(Math.random() * stride); i < points.length; i += stride) {
+    const pt = points[i];
+    let textHue, textSat;
+    if (P.textColorMode === 'rainbow') { textHue = (hue + (pt[0] / cw + 0.5) * 300) % 360; textSat = 96; }
+    else if (P.textColorMode === 'gold') { textHue = rand(31, 46); textSat = rand(58, 92); }
+    else if (P.textColorMode === 'custom') { textHue = P.hue + rand(-5, 5); textSat = P.sat; }
+    else { textHue = P.randColor ? pickHue() : P.hue + rand(-6, 6); textSat = P.sat; }
+    spawnParticle({ x, y, px: x, py: y, vx: 0, vy: 0, life: 0,
+      maxLife: formTime + P.textHold + 1.4, size: rand(0.65, 1.2), drag: 1.8,
+      hue: textHue, sat: textSat, history: [], textMode: true, glow:Math.random()<0.08,
+      originX: x, originY: y, targetX: x + pt[0] * scale, targetY: y + pt[1] * scale,
+      formTime, holdTime: P.textHold, seed: Math.random() * TWO_PI,
+      delay: rand(0, 0.12) + (pt[0] / cw + 0.5) * 0.22 + (pt[1] / ch + 0.5) * 0.06,
+      bendX: rand(-38, 38), bendY: rand(-52, 20), drift: rand(0.35, 1.15), emberAcc: Math.random() });
+  }
+  spawnParticle({ x, y, vx: 0, vy: 0, life: 0, maxLife: 0.13, hue, sat: 20,
+    size: 17, drag: 1, flash: true, glow: true });
+  for (let i=0;i<(PREVIEW?12:28);i++) {
+    const a=rand(0,TWO_PI),s=rand(55,145);
+    spawnParticle({x,y,px:x,py:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:0,maxLife:rand(.35,.75),
+      size:rand(.45,.95),drag:3.2,hue:rand(30,46),sat:75,history:[],textEmber:true});
+  }
+}
+
 function explode(x, y, hue, type, scale = 1, generation = 0) {
+  if (type === 'text') { explodeText(x, y, hue); return; }
   const n = Math.round(P.particleCount * scale);
   const R = P.burstRadius;
-  const baseSpeed = 190 * R * scale;
+  const baseSpeed = 220 * R * scale;
   const sat = P.sat;
+  skyFlash = Math.max(skyFlash, 0.62 * scale); flashX=x; flashY=y; flashHue=hue;
+  if (P.smokeAmount > 0 && !PREVIEW) for (let s=0;s<Math.ceil(7*P.smokeAmount*scale);s++) smoke.push({x:x+rand(-12,12),y:y+rand(-10,10),vx:rand(-10,10),vy:rand(-18,-3),life:0,maxLife:rand(2.8,5),size:rand(22,46)*scale,hue});
 
   // 中心閃光
   spawnParticle({ x, y, vx: 0, vy: 0, life: 0, maxLife: 0.18, hue, sat: 20,
-    size: 26 * R, drag: 1, flash: true, glow: true });
+    size: 15 * Math.sqrt(R), drag: 1, flash: true, glow: true });
 
   for (let i = 0; i < n; i++) {
     const ang = (i / n) * TWO_PI + rand(-0.03, 0.03);
@@ -341,6 +447,15 @@ function explode(x, y, hue, type, scale = 1, generation = 0) {
         drag = 3.2; maxLife = rand(2.4, 3.6); size = rand(1.2, 2.2);
         isWillow = true;
         break;
+      }
+      case 'chrysanthemum': {
+        sp = baseSpeed * rand(.82,1.08); vx=Math.cos(ang)*sp; vy=Math.sin(ang)*sp;
+        drag=1.35; maxLife=rand(1.5,2.35); size=rand(.9,1.8); break;
+      }
+      case 'palm': {
+        const arms=9, a=Math.round(i/n*arms)/arms*TWO_PI+rand(-.055,.055);
+        sp=baseSpeed*rand(.65,1.15); vx=Math.cos(a)*sp; vy=Math.sin(a)*sp;
+        drag=1.5; maxLife=rand(1.5,2.45); size=rand(1.1,2.1); isWillow=true; break;
       }
       case 'heart': {
         // 心形參數式，t 均勻取樣，速度正比於離心距離 → 爆開後保持心形
@@ -362,8 +477,10 @@ function explode(x, y, hue, type, scale = 1, generation = 0) {
       x, y, vx, vy,
       life: 0, maxLife, size, drag,
       hue: hue + rand(-14, 14), sat,
+      px:x, py:y, history:[],
       willow: isWillow,
-      glow: Math.random() < 0.12,
+      glow: Math.random() < 0.055,
+      crackle: generation===0 && Math.random() < P.crackle*.16,
     };
     // 雙層爆炸：第一代的部分粒子在生命中段再炸出一小圈
     if (generation === 0 && type === 'double' && Math.random() < 0.18) {
@@ -383,6 +500,18 @@ canvas.addEventListener('pointerdown', e => {
   if (isPaused()) return;
   launchRocket(e.clientX, e.clientY);
 });
+function launchSalvo() {
+  const n=Math.round(P.salvo);
+  for(let i=0;i<n;i++) setTimeout(()=>launchRocket(W*(.18+.64*(n===1?.5:i/(n-1)))+rand(-28,28),rand(H*.16,H*.4)),i*110);
+}
+document.getElementById('salvoBtn').addEventListener('click', launchSalvo);
+document.addEventListener('keydown',e=>{ if(e.code==='Space' && !e.repeat){ e.preventDefault(); launchSalvo(); } });
+document.getElementById('presets').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b)return; const v=b.dataset.preset;
+  if(v==='festival') Object.assign(P,{autoRate:2.1,particleCount:190,burstRadius:1.95,crackle:.55,smokeAmount:.45,palette:'jewel'});
+  if(v==='cinema') Object.assign(P,{autoRate:.7,particleCount:240,burstRadius:2.2,crackle:.3,smokeAmount:.72,palette:'classic',trail:.86});
+  if(v==='willow') Object.assign(P,{autoRate:.85,particleCount:210,burstRadius:2.05,crackle:.18,smokeAmount:.62,palette:'gold',burstStyle:'willow',gravity:105});
+  bindControls(); document.querySelectorAll('#presets button').forEach(x=>x.classList.toggle('active',x===b));
+});
 
 /* ===== 主迴圈 ===== */
 let autoAcc = 0;
@@ -397,6 +526,8 @@ function frame(now) {
 
 function update(dt) {
   const g = P.gravity;
+  skyFlash=Math.max(0,skyFlash-dt*2.8);
+  for(let i=smoke.length-1;i>=0;i--){const s=smoke[i];s.life+=dt;if(s.life>s.maxLife){smoke.splice(i,1);continue;}s.vx+=P.wind*dt*.12;s.x+=s.vx*dt;s.y+=s.vy*dt;s.size+=dt*13;}
 
   // 自動發射
   autoAcc += dt * P.autoRate;
@@ -441,10 +572,45 @@ function update(dt) {
       particles.splice(i, 1);
       continue;
     }
+    if (p.textMode) {
+      p.px = p.x; p.py = p.y;
+      const localLife = Math.max(0, p.life - p.delay);
+      const releaseAt = p.formTime + p.holdTime;
+      if (localLife < p.formTime) {
+        const u = Math.min(1, localLife / p.formTime);
+        const ease = 1 + 2.1 * Math.pow(u - 1, 3) + 1.1 * Math.pow(u - 1, 2);
+        const inv = 1 - ease;
+        const controlX = (p.originX + p.targetX) * 0.5 + p.bendX;
+        const controlY = (p.originY + p.targetY) * 0.5 + p.bendY;
+        p.x = inv * inv * p.originX + 2 * inv * ease * controlX + ease * ease * p.targetX;
+        p.y = inv * inv * p.originY + 2 * inv * ease * controlY + ease * ease * p.targetY;
+      } else if (localLife < releaseAt) {
+        const breathe = Math.sin(p.life * 3.2 + p.seed) * p.drift;
+        p.x += (p.targetX + breathe - p.x) * Math.min(1, dt * 9);
+        p.y += (p.targetY + Math.cos(p.life * 2.7 + p.seed) * p.drift * 0.7 - p.y) * Math.min(1, dt * 9);
+        p.emberAcc += dt * 0.18;
+        if (!PREVIEW && p.emberAcc >= 1) {
+          p.emberAcc -= 1;
+          spawnParticle({ x:p.x, y:p.y, px:p.x, py:p.y, vx:rand(-7,7)+P.wind*.05, vy:rand(5,22),
+            life:0, maxLife:rand(.35,.8), size:rand(.35,.75), drag:2.8, hue:p.hue+rand(-5,5), sat:p.sat,
+            history:[], textEmber:true });
+        }
+      } else {
+        if (!p.released) { p.released = true; p.vx = P.wind * 0.12 + rand(-7, 7); p.vy = rand(-12, 2); }
+        p.vy += g * dt * 0.38; p.vx += P.wind * dt * 0.1;
+        p.x += p.vx * dt; p.y += p.vy * dt;
+      }
+      p.history.push([p.x, p.y]); if (p.history.length > 3) p.history.shift();
+      continue;
+    }
     const dragK = Math.exp(-p.drag * dt);
+    p.px=p.x; p.py=p.y;
     p.vx *= dragK; p.vy *= dragK;
     if (!p.flash) p.vy += g * dt * (p.willow ? 0.55 : 1);
     p.x += p.vx * dt; p.y += p.vy * dt;
+    p.vx += P.wind * dt * .18;
+    if (!p.flash && !p.riser) { p.history.push([p.x,p.y]); if(p.history.length>P.sparkTrail)p.history.shift(); }
+    if(p.crackle && p.life>p.maxLife*.62 && Math.random()<dt*10){ p.crackle=false; for(let k=0;k<5;k++) spawnParticle({x:p.x,y:p.y,px:p.x,py:p.y,vx:rand(-45,45),vy:rand(-45,45),life:0,maxLife:rand(.18,.42),size:rand(.45,1),drag:4,hue:42,sat:30,history:[],riser:false}); }
   }
 }
 
@@ -462,6 +628,9 @@ function render(dt, t) {
     ctx.drawImage(starCanvas, 0, 0, W, H);
     ctx.globalAlpha = 1;
   }
+
+  if(smoke.length){ ctx.globalCompositeOperation='source-over'; for(const s of smoke){const q=s.life/s.maxLife,a=Math.sin(Math.PI*q)*.075*P.smokeAmount;const gr=ctx.createRadialGradient(s.x,s.y,0,s.x,s.y,s.size);gr.addColorStop(0,`hsla(${s.hue},18%,45%,${a})`);gr.addColorStop(1,'rgba(18,20,24,0)');ctx.fillStyle=gr;ctx.beginPath();ctx.arc(s.x,s.y,s.size,0,TWO_PI);ctx.fill();} }
+  if(skyFlash>0 && P.illumination>0){const rr=Math.max(W,H)*.58,gr=ctx.createRadialGradient(flashX,flashY,0,flashX,flashY,rr);gr.addColorStop(0,`hsla(${flashHue},100%,72%,${skyFlash*.065*P.illumination})`);gr.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=gr;ctx.fillRect(0,0,W,H);}
 
   ctx.globalCompositeOperation = 'lighter';
 
@@ -482,6 +651,11 @@ function render(dt, t) {
   for (const p of particles) {
     const q = p.life / p.maxLife;      // 0..1 年齡
     let alpha = 1 - q * q;
+    if (p.textMode) {
+      const localLife = p.life - p.delay;
+      if (localLife <= 0) alpha = 0;
+      else alpha *= Math.min(1, localLife / 0.2) * (0.78 + 0.22 * Math.sin(p.life * 18 + p.seed));
+    }
     // 生命末段閃爍/眨眼
     if (flickAmt > 0 && q > 0.55 && !p.flash) {
       const tw = Math.sin((p.life * (18 + (p.size * 7)) + p.hue) * 3.1);
@@ -501,14 +675,15 @@ function render(dt, t) {
       continue;
     }
 
-    const light = p.riser ? 75 : (q < 0.15 ? 85 - q * 160 : 62 - q * 12);
+    const light = p.textMode ? 78 + 12 * Math.sin(p.life * 15 + p.seed) : (p.riser ? 75 : (q < 0.15 ? 85 - q * 160 : 62 - q * 12));
+    if(p.history && p.history.length>1){ctx.strokeStyle=`hsla(${p.hue},${p.sat}%,${Math.min(92,light+18)}%,${alpha*.72})`;ctx.lineWidth=Math.max(.35,p.size*(1-q*.55));ctx.lineCap='round';ctx.beginPath();ctx.moveTo(p.history[0][0],p.history[0][1]);for(let j=1;j<p.history.length;j++)ctx.lineTo(p.history[j][0],p.history[j][1]);ctx.stroke();}
     ctx.fillStyle = `hsla(${p.hue},${p.sat}%,${light}%,${alpha})`;
     ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, TWO_PI); ctx.fill();
 
     // 少數粒子加一圈柔光
     if (p.glow) {
-      ctx.fillStyle = `hsla(${p.hue},${p.sat}%,60%,${alpha * 0.16})`;
-      ctx.beginPath(); ctx.arc(p.x, p.y, p.size * 3.5, 0, TWO_PI); ctx.fill();
+      ctx.fillStyle = `hsla(${p.hue},${p.sat}%,60%,${alpha * 0.055})`;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.size * 2.6, 0, TWO_PI); ctx.fill();
     }
   }
 

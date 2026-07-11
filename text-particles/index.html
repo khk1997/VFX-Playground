@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Text Particles VFX</title>
+<link rel="icon" href="data:,">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 100%; height: 100%; background: #000; overflow: hidden; font-family: "SF Pro", "PingFang TC", "Microsoft JhengHei", sans-serif; }
@@ -179,11 +180,11 @@ resize();
 
 /* ===== 參數 ===== */
 const DEFAULTS = {
-  fontSize: 170, gap: 4, hold: 2.2,
-  spring: 9, damping: 5, burst: 1,
+  fontSize: 170, gap: 4, hold: 2.5,
+  spring: 7.5, damping: 6.4, burst: 0.9,
   repelRadius: 110, repelForce: 1.2,
   hue: 160, hueShift: 90, sat: 100,
-  glow: 1, trail: 0.6,
+  glow: 0.55, trail: 0.78,
 };
 const DEFAULT_TEXT = 'VFX|PLAYGROUND|你好世界';
 const DEFAULT_STYLE = 'explode';
@@ -343,18 +344,17 @@ function sampleText(word) {
 const particles = [];
 function retarget(word, scatterNew) {
   const targets = sampleText(word);
-  // 打散配對順序 → 聚合時交錯飛行更有機
-  for (let i = targets.length - 1; i > 0; i--) {
-    const j = (Math.random() * (i + 1)) | 0;
-    [targets[i], targets[j]] = [targets[j], targets[i]];
-  }
+  const cx = W / 2 + panelInsetX, cy = H / 2;
+  // 依環形角度配對，避免大量粒子互相穿越造成急促、機械式交叉。
+  targets.sort((a,b) => Math.atan2(a.y-cy,a.x-cx)-Math.atan2(b.y-cy,b.x-cx));
+  particles.sort((a,b) => Math.atan2(a.y-cy,a.x-cx)-Math.atan2(b.y-cy,b.x-cx));
   // 補足 / 裁減粒子數
   while (particles.length < targets.length) {
     particles.push({
-      x: Math.random() * W, y: Math.random() * H,
+      x: Math.random() * W, y: Math.random() * H, px: 0, py: 0,
       vx: 0, vy: 0, tx: 0, ty: 0, hueT: 0,
       size: 0.8 + Math.random() * 1.6,
-      jit: Math.random() * Math.PI * 2,
+      jit: Math.random() * Math.PI * 2, flow: 0.65 + Math.random() * 0.9,
     });
   }
   particles.length = targets.length;
@@ -373,7 +373,7 @@ function retarget(word, scatterNew) {
 let wordIndex = 0;
 let phase = 'form';   // 'form' | 'hold' | 'disperse'
 let phaseT = 0;
-const FORM_SEC = 1.6, DISPERSE_SEC = 1.1;
+const FORM_SEC = 2.15, DISPERSE_SEC = 1.35;
 let firstEntry = true;
 
 function beginDisperse() {
@@ -450,9 +450,16 @@ function step(dt) {
   const gravity = P.style === 'gravity';
 
   for (const p of particles) {
+    p.px = p.x; p.py = p.y;
     if (seeking) {
-      p.vx += (p.tx - p.x) * k * dt;
-      p.vy += (p.ty - p.y) * k * dt;
+      const dx = p.tx - p.x, dy = p.ty - p.y;
+      const dist = Math.hypot(dx, dy);
+      p.vx += dx * k * dt;
+      p.vy += dy * k * dt;
+      // 接近字形前保留少量旋流，每顆粒子的相位不同，形成柔順的電影感收束。
+      const curl = Math.min(1, dist / 180) * p.flow * 34;
+      p.vx += Math.cos(p.jit + phaseT * 1.7) * curl * dt;
+      p.vy += Math.sin(p.jit + phaseT * 1.5) * curl * dt;
     } else if (gravity) {
       p.vy += 1400 * P.burst * dt;
     } else if (P.style === 'swirl') {
@@ -501,9 +508,16 @@ function render(dt) {
     const spd = Math.hypot(p.vx, p.vy);
     const bri = Math.min(1, 0.55 + spd / 900);
     const r = p.size * (phase === 'disperse' ? 1.25 : 1);
+    // 速度方向短拖尾，比單純全畫面殘影更流暢，也保留字形清晰度。
+    if (p.px !== undefined && spd > 14) {
+      const tail = Math.min(1, spd / 420);
+      ctx.strokeStyle = `hsla(${h},${sat}%,72%,${0.16 + tail * 0.34})`;
+      ctx.lineWidth = Math.max(0.35, r * 0.72); ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(p.px, p.py); ctx.lineTo(p.x, p.y); ctx.stroke();
+    }
     // 柔和光暈（大而淡）
     if (useGlow) {
-      ctx.fillStyle = `hsla(${h},${sat}%,60%,${0.08 * glow})`;
+      ctx.fillStyle = `hsla(${h},${sat}%,60%,${0.045 * glow})`;
       ctx.beginPath();
       ctx.arc(p.x, p.y, r * (4 + glow * 3), 0, 6.2832);
       ctx.fill();
