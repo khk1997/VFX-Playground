@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aurora VFX</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: #000; overflow: hidden; font-family: "SF Pro", "PingFang TC", "Microsoft JhengHei", sans-serif; }
+  #stage { position: absolute; inset: 0; display: block; }
+
+  /* ===== 控制面板：左側縱向抽屜 ===== */
+  #panel {
+    position: fixed; left: 12px; top: 64px; bottom: 12px; width: 340px;
+    overflow-y: auto;
+    background: rgba(8, 14, 16, 0.86); backdrop-filter: blur(10px);
+    border: 1px solid rgba(80, 230, 180, 0.25); border-radius: 12px;
+    color: #d3e8e0; padding: 14px 16px 18px; z-index: 10;
+    box-shadow: 4px 0 30px rgba(0,0,0,0.6);
+    transition: transform .25s ease, opacity .25s ease;
+  }
+  #panel.collapsed { transform: translateX(calc(-100% - 24px)); opacity: 0; pointer-events: none; }
+  #panel::-webkit-scrollbar { width: 6px; }
+  #panel::-webkit-scrollbar-thumb { background: rgba(80,230,180,.3); border-radius: 3px; }
+
+  #toggleBtn {
+    position: fixed; top: 12px; right: 12px; z-index: 11;
+    background: rgba(8,14,16,.85); color: #6ce8b8;
+    border: 1px solid rgba(80,230,180,.35); border-radius: 8px;
+    padding: 6px 12px; cursor: pointer; font-size: 13px;
+  }
+  #toggleBtn:hover { background: rgba(80,230,180,.15); }
+
+  #homeBtn {
+    position: fixed; top: 12px; left: 12px; z-index: 11;
+    background: rgba(8,14,16,.85); color: #6ce8b8; text-decoration: none;
+    border: 1px solid rgba(80,230,180,.35); border-radius: 8px;
+    padding: 6px 12px; cursor: pointer; font-size: 13px;
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: inherit;
+  }
+  #homeBtn:hover { background: rgba(80,230,180,.15); }
+
+  #playCtl {
+    position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 11;
+    background: rgba(8,14,16,.85); color: #9ff0cd;
+    border: 1px solid rgba(80,230,180,.35); border-radius: 999px;
+    padding: 8px 20px; cursor: pointer; font-size: 13px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  }
+  #playCtl:hover { background: rgba(80,230,180,.18); }
+
+  html.preview-mode #homeBtn,
+  html.preview-mode #toggleBtn,
+  html.preview-mode #playCtl,
+  html.preview-mode #panel { display: none !important; }
+  @media (max-width: 760px) {
+    #panel { left: 8px; top: 56px; bottom: 8px; width: calc(100vw - 16px); max-width: 340px; }
+  }
+
+  #panel h2 { font-size: 14px; letter-spacing: 2px; color: #7be8bd; margin-bottom: 4px; font-weight: 600; }
+  #panel .sub { font-size: 11px; color: #6f8f85; margin-bottom: 12px; }
+  .groups { display: block; }
+  .group { margin-bottom: 8px; border-top: 1px solid rgba(80,230,180,.12); padding-top: 6px; }
+  .group h3 { font-size: 11px; color: #55c9a0; letter-spacing: 1.5px; margin-bottom: 8px; text-transform: uppercase; }
+  .group .note { font-size: 10px; color: #5f7e75; margin: -4px 0 8px; line-height: 1.4; }
+  .row { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; min-width: 0; }
+  .row label { flex: 0 0 78px; font-size: 12px; color: #bcd6cd; white-space: nowrap; }
+  .row input[type=range] { flex: 1 1 110px; min-width: 60px; accent-color: #2ec98f; height: 14px; cursor: pointer; }
+  .row .val { flex: 0 0 44px; text-align: right; font-size: 11px; color: #7be8bd; font-variant-numeric: tabular-nums; }
+  .row input[type=checkbox] { accent-color: #2ec98f; width: 15px; height: 15px; cursor: pointer; }
+  .audioBtns { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-bottom: 8px; }
+  .audioBtns button {
+    background: rgba(80,230,180,.07); color: #8edbbd;
+    border: 1px solid rgba(80,230,180,.22); border-radius: 7px;
+    padding: 7px 5px; font: 11px/1.2 inherit; cursor: pointer;
+    transition: transform 140ms cubic-bezier(.22,1,.36,1), color 200ms ease, background-color 200ms ease, border-color 200ms ease;
+  }
+  .audioBtns button:active { transform: scale(.97); }
+  .audioBtns button.active { color: #effff8; background: rgba(58,211,154,.22); border-color: rgba(121,255,204,.62); box-shadow: inset 0 0 18px rgba(52,220,157,.08); }
+  #audioState { display: flex; align-items: center; gap: 7px; color: #688e80; font-size: 10px; margin: 2px 0 8px; }
+  #audioState::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: #49665c; box-shadow: 0 0 0 transparent; }
+  #audioState.live::before { background: #70ffc5; box-shadow: 0 0 10px rgba(112,255,197,.85); }
+  .btns { display: flex; gap: 8px; margin-top: 12px; }
+  .btns button {
+    flex: 1; background: rgba(80,230,180,.1); color: #9ff0cd;
+    border: 1px solid rgba(80,230,180,.3); border-radius: 7px;
+    padding: 7px 0; font-size: 12px; cursor: pointer;
+  }
+  .btns button:hover { background: rgba(80,230,180,.22); }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+
+<a id="homeBtn" href="../index.html">← 首頁</a>
+
+<div id="panel">
+  <h2>AURORA</h2>
+  <div class="sub">音訊反應極光 — 音樂喚醒光幕、星塵與雪地映光</div>
+
+  <div class="groups">
+  <div class="group">
+    <h3>音訊反應 Audio Reactive</h3>
+    <div class="audioBtns">
+      <button id="audioNatural" class="active">自然模式</button>
+      <button id="audioSynth">背景音樂</button>
+      <button id="audioMic">麥克風</button>
+      <button id="audioFile">音樂檔</button>
+    </div>
+    <div id="audioState">等待音訊輸入</div>
+    <div class="note">頻率由左至右映射：低頻 → 中頻 → 高頻；各區段獨立上下起伏</div>
+    <div class="row"><label>反應強度</label><input type="range" id="audioReact" min="0" max="2" step="0.02" value="0.9"><span class="val" id="audioReact_v"></span></div>
+    <div class="row"><label>節拍靈敏</label><input type="range" id="beatSens" min="1" max="2.2" step="0.02" value="1.35"><span class="val" id="beatSens_v"></span></div>
+    <input type="file" id="audioFileInput" accept="audio/*" hidden>
+  </div>
+  <div class="group">
+    <h3>簾幕 Curtains</h3>
+    <div class="row"><label>簾幕數量</label><input type="range" id="curtains" min="1" max="4" step="1" value="3"><span class="val" id="curtains_v"></span></div>
+    <div class="row"><label>波動速度</label><input type="range" id="waveSpeed" min="0.1" max="3" step="0.05" value="1"><span class="val" id="waveSpeed_v"></span></div>
+    <div class="row"><label>波動尺度</label><input type="range" id="waveScale" min="0.4" max="2.5" step="0.05" value="1"><span class="val" id="waveScale_v"></span></div>
+    <div class="row"><label>亮度強度</label><input type="range" id="intensity" min="0.2" max="2" step="0.05" value="1"><span class="val" id="intensity_v"></span></div>
+    <div class="row"><label>簾幕高度</label><input type="range" id="curtainH" min="0.4" max="1.6" step="0.05" value="1"><span class="val" id="curtainH_v"></span></div>
+  </div>
+
+  <div class="group">
+    <h3>色彩 Color</h3>
+    <div class="note">以綠色為核心，邊緣過渡到青／紫／粉</div>
+    <div class="row"><label>色相偏移</label><input type="range" id="hueShift" min="-90" max="90" step="1" value="0"><span class="val" id="hueShift_v"></span></div>
+    <div class="row"><label>邊緣暈彩</label><input type="range" id="edgeTint" min="0" max="1" step="0.01" value="0.65"><span class="val" id="edgeTint_v"></span></div>
+  </div>
+
+  <div class="group">
+    <h3>環境 Ambience</h3>
+    <div class="row"><label>星空數量</label><input type="range" id="starCount" min="0" max="500" step="10" value="220"><span class="val" id="starCount_v"></span></div>
+    <div class="row"><label>山脈剪影</label><input type="checkbox" id="mountains" checked><span class="val"></span></div>
+    <div class="row"><label>雪地映光</label><input type="checkbox" id="snowGlow" checked><span class="val"></span></div>
+  </div>
+  </div>
+
+  <div class="btns">
+    <button id="resetBtn">↺ 重設</button>
+  </div>
+</div>
+<button id="toggleBtn">⚙ 面板</button>
+<button id="playCtl">⏸ 暫停</button>
+
+<script>
+'use strict';
+
+/* ===== 預覽嵌入模式（?preview=1）===== */
+const PREVIEW = new URLSearchParams(location.search).has('preview');
+if (PREVIEW) document.documentElement.classList.add('preview-mode');
+
+const canvas = document.getElementById('stage');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+let skyGrad = null;      // 快取的夜空漸層
+let mountainLayers = null; // 快取的山脈剪影（前後兩層）
+let starField = null;    // 快取的星星資料（每顆自帶閃爍相位）
+
+function resize() {
+  W = window.innerWidth; H = window.innerHeight;
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.max(1, W * DPR); canvas.height = Math.max(1, H * DPR);
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  skyGrad = null; mountainLayers = null; starField = null;
+}
+window.addEventListener('resize', resize);
+resize();
+
+/* ===== 參數 ===== */
+const DEFAULTS = {
+  audioReact: 0.9,
+  beatSens: 1.35,
+  curtains: 3,
+  waveSpeed: 1,
+  waveScale: 1,
+  intensity: PREVIEW ? 1.1 : 1,
+  curtainH: 1,
+  hueShift: 0,
+  edgeTint: 0.65,
+  starCount: PREVIEW ? 140 : 220,
+};
+const BOOL_DEFAULTS = { mountains: true, snowGlow: true };
+const P = { ...DEFAULTS, ...BOOL_DEFAULTS };
+
+const fmt = {
+  waveSpeed: v => 'x' + v.toFixed(2),
+  waveScale: v => 'x' + v.toFixed(2),
+  intensity: v => 'x' + v.toFixed(2),
+  curtainH: v => 'x' + v.toFixed(2),
+  hueShift: v => (v > 0 ? '+' : '') + v + '°',
+  curtains: v => v.toFixed(0),
+  starCount: v => v.toFixed(0),
+  audioReact: v => 'x' + v.toFixed(2),
+  beatSens: v => 'x' + v.toFixed(2),
+};
+function bindControls() {
+  for (const key of Object.keys(DEFAULTS)) {
+    const el = document.getElementById(key);
+    const valEl = document.getElementById(key + '_v');
+    const update = () => {
+      P[key] = parseFloat(el.value);
+      if (valEl) valEl.textContent = (fmt[key] || (v => +v.toFixed(2)))(P[key]);
+      if (key === 'starCount') starField = null;
+    };
+    el.value = P[key];
+    if (!el._bound) { el.addEventListener('input', update); el._bound = true; }
+    update();
+  }
+  for (const key of Object.keys(BOOL_DEFAULTS)) {
+    const el = document.getElementById(key);
+    el.checked = P[key];
+    if (!el._bound) {
+      el.addEventListener('change', () => { P[key] = el.checked; });
+      el._bound = true;
+    }
+  }
+}
+bindControls();
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+  Object.assign(P, DEFAULTS, BOOL_DEFAULTS);
+  bindControls();
+  starField = null;
+});
+
+/* ===== Web Audio：音訊只提供平滑後的低／中／高頻包絡，不直接控制像素 ===== */
+let actx = null, analyser = null, inputGain = null, outGain = null;
+let audioMode = 'natural';
+let bgMusic = null, bgMusicNode = null, micStream = null, micNode = null, fileNode = null, fileBuffer = null;
+let freqData = new Uint8Array(1024);
+let bassEnv = 0, midEnv = 0, trebleEnv = 0, beatFlash = 0, beatCooldown = 0;
+const spectrumBands = new Float32Array(48);
+const bassHistory = [];
+const audioStateEl = document.getElementById('audioState');
+
+function ensureAudio() {
+  if (actx) return;
+  actx = new (window.AudioContext || window.webkitAudioContext)();
+  analyser = actx.createAnalyser();
+  analyser.fftSize = 2048;
+  analyser.smoothingTimeConstant = 0.68;
+  inputGain = actx.createGain(); inputGain.gain.value = 0.72;
+  outGain = actx.createGain(); outGain.gain.value = 1;
+  inputGain.connect(analyser); analyser.connect(outGain); outGain.connect(actx.destination);
+  freqData = new Uint8Array(analyser.frequencyBinCount);
+}
+function setAudioMode(mode, label) {
+  audioMode = mode;
+  for (const [id, value] of [['audioNatural','natural'],['audioSynth','synth'],['audioMic','mic'],['audioFile','file']]) {
+    document.getElementById(id).classList.toggle('active', value === mode);
+  }
+  audioStateEl.textContent = label;
+  audioStateEl.classList.toggle('live', mode !== 'natural');
+}
+function stopAudioSources() {
+  if (bgMusic) {
+    bgMusic.pause(); bgMusic.currentTime = 0; bgMusic = null;
+  }
+  if (bgMusicNode) { try { bgMusicNode.disconnect(); } catch (e) {} bgMusicNode = null; }
+  if (micNode) { try { micNode.disconnect(); } catch (e) {} micNode = null; }
+  if (micStream) { micStream.getTracks().forEach(track => track.stop()); micStream = null; }
+  if (fileNode) { try { fileNode.stop(); fileNode.disconnect(); } catch (e) {} fileNode = null; }
+  if (outGain && actx) outGain.gain.setTargetAtTime(1, actx.currentTime, .03);
+}
+async function activateSynth() {
+  try {
+    ensureAudio(); stopAudioSources();
+    bgMusic = new Audio('audio/aurora-theme.mp3');
+    bgMusic.loop = true;
+    bgMusicNode = actx.createMediaElementSource(bgMusic);
+    bgMusicNode.connect(inputGain);
+    await actx.resume();
+    await bgMusic.play();
+    setAudioMode('synth', '背景音樂驅動中');
+  } catch (err) {
+    stopAudioSources(); setAudioMode('natural', '背景音樂無法播放');
+  }
+}
+async function activateMic() {
+  ensureAudio(); await actx.resume(); stopAudioSources();
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    micNode = actx.createMediaStreamSource(micStream); micNode.connect(inputGain);
+    outGain.gain.setTargetAtTime(0, actx.currentTime, .03);
+    setAudioMode('mic', '麥克風即時驅動中');
+  } catch (e) {
+    setAudioMode('natural', '無法取得麥克風權限');
+  }
+}
+function playFile() {
+  fileNode = actx.createBufferSource(); fileNode.buffer = fileBuffer; fileNode.loop = true;
+  fileNode.connect(inputGain); fileNode.start(); setAudioMode('file', '音樂檔驅動中');
+}
+document.getElementById('audioNatural').addEventListener('click', () => {
+  stopAudioSources(); setAudioMode('natural', '等待音訊輸入');
+});
+document.getElementById('audioSynth').addEventListener('click', activateSynth);
+document.getElementById('audioMic').addEventListener('click', activateMic);
+document.getElementById('audioFile').addEventListener('click', async () => {
+  ensureAudio(); await actx.resume(); document.getElementById('audioFileInput').click();
+});
+document.getElementById('audioFileInput').addEventListener('change', async e => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  try {
+    fileBuffer = await actx.decodeAudioData(await file.arrayBuffer());
+    stopAudioSources(); playFile();
+  } catch (err) { setAudioMode('natural', '音訊檔案無法解碼'); }
+  e.target.value = '';
+});
+
+function fakeAudio(t) {
+  const beatPhase = (t * 1.6) % 1;
+  const pump = Math.pow(Math.max(0, 1 - beatPhase * 4), 2);
+  bassEnv += ((.2 + pump * .72) - bassEnv) * .18;
+  midEnv += ((.24 + Math.sin(t * 1.7) * .08) - midEnv) * .12;
+  trebleEnv += ((.18 + Math.sin(t * 5.1) * .06) - trebleEnv) * .1;
+  beatFlash += (pump - beatFlash) * .28;
+  for (let i = 0; i < spectrumBands.length; i++) {
+    const f = i / (spectrumBands.length - 1);
+    const target = pump * .78 * Math.exp(-f * 4.5) +
+      (.22 + Math.sin(t * (1.3 + f * 2.4) + f * 18) * .12) * (1 - f * .42);
+    spectrumBands[i] += (target - spectrumBands[i]) * .15;
+  }
+}
+function updateSpectrumBands(dt, silent = false) {
+  const usable = Math.min(freqData.length, 520);
+  for (let i = 0; i < spectrumBands.length; i++) {
+    let target = 0;
+    if (!silent) {
+      const f0 = i / spectrumBands.length;
+      const f1 = (i + 1) / spectrumBands.length;
+      const a = Math.floor(Math.pow(f0, 1.72) * usable);
+      const b = Math.max(a + 1, Math.floor(Math.pow(f1, 1.72) * usable));
+      let sum = 0;
+      for (let k = a; k < b; k++) sum += freqData[k];
+      target = sum / (b - a) / 255;
+    }
+    const rate = target > spectrumBands[i] ? 17 : 5.5;
+    spectrumBands[i] += (target - spectrumBands[i]) * Math.min(1, dt * rate);
+  }
+}
+function spectrumAt(fraction) {
+  const p = clamp(fraction, 0, 1) * (spectrumBands.length - 1);
+  const i = Math.floor(p), q = p - i;
+  const at = n => spectrumBands[Math.max(0, Math.min(spectrumBands.length - 1, n))];
+  const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
+  const q2 = q * q, q3 = q2 * q;
+  return clamp(0.5 * ((2 * p1) + (-p0 + p2) * q + (2 * p0 - 5 * p1 + 4 * p2 - p3) * q2 + (-p0 + 3 * p1 - 3 * p2 + p3) * q3), 0, 1);
+}
+function analyseAudio(dt, t) {
+  if (PREVIEW) { fakeAudio(t); return; }
+  if (audioMode === 'natural' || !analyser) {
+    bassEnv += (0 - bassEnv) * Math.min(1, dt * 4);
+    midEnv += (0 - midEnv) * Math.min(1, dt * 4);
+    trebleEnv += (0 - trebleEnv) * Math.min(1, dt * 4);
+    beatFlash = Math.max(0, beatFlash - dt * 4.5);
+    updateSpectrumBands(dt, true);
+    return;
+  }
+  analyser.getByteFrequencyData(freqData);
+  updateSpectrumBands(dt);
+  const band = (from, to) => {
+    let sum = 0;
+    for (let i = from; i < to; i++) sum += freqData[i];
+    return sum / Math.max(1, to - from) / 255;
+  };
+  const bass = band(1, 14), mid = band(14, 110), treble = band(110, 420);
+  bassEnv += (bass - bassEnv) * Math.min(1, dt * 12);
+  midEnv += (mid - midEnv) * Math.min(1, dt * 8);
+  trebleEnv += (treble - trebleEnv) * Math.min(1, dt * 10);
+  bassHistory.push(bass); if (bassHistory.length > 54) bassHistory.shift();
+  const average = bassHistory.reduce((a, b) => a + b, 0) / Math.max(1, bassHistory.length);
+  beatCooldown -= dt; beatFlash = Math.max(0, beatFlash - dt * 4.5);
+  if (bassHistory.length > 18 && beatCooldown <= 0 && bass > .12 && bass > average * P.beatSens) {
+    beatFlash = 1; beatCooldown = .22;
+  }
+}
+
+/* ===== 播放/暫停：面板按鈕、postMessage（vfx-pause / vfx-play）、分頁隱藏三者共同決定 ===== */
+let userPaused = false, extPaused = false;
+let rafId = 0, last = 0;
+const pauseBtn = document.getElementById('playCtl');
+function isPaused() { return userPaused || extPaused || document.hidden; }
+function syncLoop() {
+  if (isPaused()) {
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+    if (actx && actx.state === 'running') actx.suspend();
+  } else if (!rafId) {
+    last = performance.now();
+    rafId = requestAnimationFrame(frame);
+    if (actx && audioMode !== 'natural' && actx.state === 'suspended') actx.resume();
+  }
+}
+pauseBtn.addEventListener('click', () => {
+  userPaused = !userPaused;
+  pauseBtn.textContent = userPaused ? '▶ 播放' : '⏸ 暫停';
+  syncLoop();
+});
+window.addEventListener('message', e => {
+  if (e.data === 'vfx-pause') { extPaused = true; syncLoop(); }
+  else if (e.data === 'vfx-play') { extPaused = false; syncLoop(); }
+});
+document.addEventListener('visibilitychange', syncLoop);
+
+/* ===== 面板開合 ===== */
+const panel = document.getElementById('panel');
+document.getElementById('toggleBtn').addEventListener('click', () => panel.classList.toggle('collapsed'));
+
+/* ===== 工具 ===== */
+const rand = (a, b) => a + Math.random() * (b - a);
+const TWO_PI = Math.PI * 2;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+
+/* ===== 確定性值噪聲（value noise）+ fBm ===== */
+/* 整數座標雜湊 → 平滑插值。無需查表，重現性佳。 */
+function hash2(ix, iy) {
+  let h = ix * 374761393 + iy * 668265263;
+  h = (h ^ (h >> 13)) | 0;
+  h = (h * 1274126177) | 0;
+  h ^= h >> 16;
+  return ((h >>> 0) % 1048576) / 1048576; // 0..1
+}
+function smooth(t) { return t * t * (3 - 2 * t); }
+function vnoise2(x, y) {
+  const ix = Math.floor(x), iy = Math.floor(y);
+  const fx = x - ix, fy = y - iy;
+  const a = hash2(ix, iy),     b = hash2(ix + 1, iy);
+  const c = hash2(ix, iy + 1), d = hash2(ix + 1, iy + 1);
+  const ux = smooth(fx), uy = smooth(fy);
+  return a + (b - a) * ux + (c - a) * uy + (a - b - c + d) * ux * uy;
+}
+function fbm2(x, y, oct) {
+  let sum = 0, amp = 0.5, tot = 0;
+  for (let o = 0; o < oct; o++) {
+    sum += vnoise2(x, y) * amp;
+    tot += amp;
+    amp *= 0.5; x *= 2.03; y *= 2.11;
+  }
+  return sum / tot; // 0..1
+}
+// 水平三點濾波：保留大尺度流動，去除簾腳會顯得鋸齒的高頻折角。
+function smoothFbmX(x, y, oct, radius) {
+  return (fbm2(x - radius, y, oct) + fbm2(x, y, oct) * 2 + fbm2(x + radius, y, oct)) * 0.25;
+}
+
+/* ===== 夜空漸層 ===== */
+function buildSkyGrad() {
+  skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+  skyGrad.addColorStop(0, '#020308');
+  skyGrad.addColorStop(0.45, '#04101c');
+  skyGrad.addColorStop(0.78, '#071a26');
+  skyGrad.addColorStop(1, '#0a2230');
+  return skyGrad;
+}
+
+/* ===== 星空（保留資料以便逐顆閃爍）===== */
+function buildStars() {
+  const n = Math.round(P.starCount);
+  starField = { count: n, stars: [] };
+  for (let i = 0; i < n; i++) {
+    starField.stars.push({
+      x: hash2(i * 7 + 1, 13) * W,
+      y: hash2(i * 7 + 2, 29) * H * 0.72,
+      r: 0.3 + hash2(i * 7 + 3, 41) * 1.1,
+      base: 0.25 + hash2(i * 7 + 4, 57) * 0.6,
+      spd: 0.4 + hash2(i * 7 + 5, 71) * 2.2,
+      ph: hash2(i * 7 + 6, 83) * TWO_PI,
+    });
+  }
+}
+
+/* ===== 山脈剪影：以噪聲生成兩層稜線 ===== */
+function buildMountains() {
+  mountainLayers = [];
+  const defs = [
+    { seed: 11, base: 0.86, amp: 0.13, freq: 2.2, color: '#0a1218' }, // 遠山
+    { seed: 47, base: 0.93, amp: 0.09, freq: 3.4, color: '#04080c' }, // 近山
+  ];
+  for (const d of defs) {
+    const path = new Path2D();
+    path.moveTo(0, H);
+    const step = 6;
+    for (let x = 0; x <= W; x += step) {
+      const u = x / W;
+      const n = fbm2(u * d.freq + d.seed * 10.7, d.seed, 4);
+      const ridge = Math.abs(n - 0.5) * 2; // 摺出尖峰感
+      const y = H * d.base - (n * 0.7 + ridge * 0.3) * H * d.amp;
+      path.lineTo(x, y);
+    }
+    path.lineTo(W, H);
+    path.closePath();
+    mountainLayers.push({ path, color: d.color });
+  }
+}
+
+/* ===== 極光簾幕 =====
+ * 每道簾幕：一條沿 x 的基線，高度/亮度由分層噪聲隨時間流動；
+ * 以許多細窄的縱向漸層條帶（底亮、向上淡出）用 'lighter' 疊加，
+ * 形成典型的簾幕波褶。 */
+const CURTAIN_DEFS = [
+  { seed: 3.1,  baseY: 0.42, drift: 0.9,  hue: 140, span: 1.05 },
+  { seed: 17.7, baseY: 0.55, drift: -0.6, hue: 158, span: 0.9 },
+  { seed: 42.3, baseY: 0.33, drift: 0.45, hue: 128, span: 1.15 },
+  { seed: 71.9, baseY: 0.62, drift: -1.1, hue: 168, span: 0.8 },
+];
+
+/* 流星 */
+let meteor = null, meteorTimer = rand(4, 9);
+function updateMeteor(dt) {
+  if (!meteor) {
+    meteorTimer -= dt;
+    if (meteorTimer <= 0) {
+      const x0 = rand(W * 0.15, W * 0.85), y0 = rand(H * 0.05, H * 0.3);
+      const ang = rand(0.35, 0.75) * (Math.random() < 0.5 ? 1 : -1);
+      const sp = rand(260, 420);
+      meteor = {
+        x: x0, y: y0,
+        vx: Math.cos(ang) * sp * (Math.random() < 0.5 ? 1 : -1),
+        vy: Math.abs(Math.sin(ang)) * sp * 0.5,
+        life: 0, maxLife: rand(1.1, 2),
+      };
+      meteorTimer = rand(6, 14);
+    }
+  } else {
+    meteor.life += dt;
+    meteor.x += meteor.vx * dt; meteor.y += meteor.vy * dt;
+    if (meteor.life >= meteor.maxLife || meteor.x < -60 || meteor.x > W + 60) meteor = null;
+  }
+}
+function drawMeteor() {
+  if (!meteor) return;
+  const q = meteor.life / meteor.maxLife;
+  const alpha = Math.sin(q * Math.PI) * 0.9;
+  const tail = 90;
+  const nx = meteor.vx, ny = meteor.vy;
+  const len = Math.hypot(nx, ny) || 1;
+  const tx = meteor.x - (nx / len) * tail, ty = meteor.y - (ny / len) * tail;
+  const g = ctx.createLinearGradient(meteor.x, meteor.y, tx, ty);
+  g.addColorStop(0, `rgba(255,255,255,${alpha})`);
+  g.addColorStop(0.3, `rgba(190,220,255,${alpha * 0.45})`);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.strokeStyle = g;
+  ctx.lineWidth = 1.6;
+  ctx.beginPath(); ctx.moveTo(meteor.x, meteor.y); ctx.lineTo(tx, ty); ctx.stroke();
+}
+
+/* ===== 主迴圈 ===== */
+let simT = rand(0, 100); // 噪聲時間軸
+
+function frame(now) {
+  rafId = requestAnimationFrame(frame);
+  const dt = Math.min((now - last) / 1000, 0.05);
+  last = now;
+  analyseAudio(dt, now / 1000);
+  const drive = P.audioReact;
+  simT += dt * P.waveSpeed;
+  updateMeteor(dt);
+  render(now / 1000);
+}
+
+function drawCurtain(def, idx, count) {
+  const step = PREVIEW ? 3 : 2;                   // 取樣間距（噪聲連續 → 相鄰條帶自然銜接）
+  const stripW = step;                            // 精確拼接：無縫隙、也無加法重疊造成的梳狀紋
+  const scale = P.waveScale;
+  const baseY = H * def.baseY;
+  const drive = P.audioReact;
+  const maxH = H * 0.42 * P.curtainH * def.span;  // 簾幕最大高度
+  const hue0 = def.hue + P.hueShift;
+  const tint = P.edgeTint;
+  const t = simT * (0.7 + idx * 0.13) + def.seed * 31.7;
+  const inten = P.intensity * 2.0 * (1 - idx * 0.1);
+  const edgeSamples = [];
+
+  for (let x = 0; x <= W; x += step) {
+    // 保留各頻帶驅動的局部跳動；最後以曲線繪製簾腳，避免頻帶交界形成硬折角。
+    const localDrive = spectrumAt(x / Math.max(1, W)) * drive;
+    const u = (x / W) * 3.0 * scale + def.seed;
+    // 主體亮度：慢速大尺度 fBm，決定簾幕哪裡濃哪裡淡
+    let bright = fbm2(u, t * 0.18, 4);
+    bright = Math.pow(clamp((bright - 0.24) / 0.55, 0, 1), 1.25);
+    if (bright < 0.015) continue;
+
+    // 波褶：較快的細尺度噪聲，讓底線起伏、條帶高度抖動
+    const ripple = (smoothFbmX(u * 2.6 + 50, t * 0.55, 3, 0.042) - 0.5) * (1 + localDrive * .32);
+    const sway = smoothFbmX(u * 0.8 + 90, t * 0.1, 3, 0.055) - 0.5;
+
+    const y0 = baseY + sway * H * 0.14 + ripple * H * 0.038 * scale - localDrive * H * (0.048 + idx * .01);
+    const hgt = maxH * (0.35 + bright * 0.65) * (1 + ripple * 0.32 + localDrive * .72);
+    if (hgt < 4) continue;
+
+    const a = clamp(bright * inten * (0.55 + localDrive * .48), 0, 1);
+    // 底部翠綠 → 中段青 → 頂端紫粉，邊緣（亮度低處）暈彩更重
+    const edge = (0.45 + (1 - bright) * 0.55) * tint;
+    const hue = hue0 + Math.sin(u * 1.7) * 8;
+    const topHue = hue + edge * 165;   // 綠 → 青 → 紫（色相向上走）
+    const midHue = hue + edge * 60;    // 中段偏青
+    const g = ctx.createLinearGradient(0, y0, 0, y0 - hgt);
+    g.addColorStop(0, `hsla(${hue + 10},100%,68%,${a * 0.62})`);
+    g.addColorStop(0.18, `hsla(${hue},95%,58%,${a * 0.72})`);
+    g.addColorStop(0.48, `hsla(${midHue},90%,60%,${a * 0.42})`);
+    g.addColorStop(0.78, `hsla(${topHue},88%,66%,${a * 0.3})`);
+    g.addColorStop(0.94, `hsla(${topHue + 40},85%,72%,${a * 0.14})`); // 頂端泛粉
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(x, y0 - hgt, stripW, hgt);
+
+    // 簾腳輝光：往下柔和淡出，避免硬邊鋸齒
+    const gl = hgt * 0.22;
+    const g2 = ctx.createLinearGradient(0, y0 - 2, 0, y0 + gl);
+    g2.addColorStop(0, `hsla(${hue + 14},100%,74%,${a * 0.14})`);
+    g2.addColorStop(0.35, `hsla(${hue + 8},95%,62%,${a * 0.22})`);
+    g2.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g2;
+    ctx.fillRect(x, y0 - 2, stripW, gl + 2);
+    edgeSamples.push({ x, y: y0, a, hue });
+  }
+
+  // Catmull-style quadratic pass：視覺上連續通過頻帶起伏，但不改變頻譜驅動的節奏。
+  if (edgeSamples.length > 2) {
+    const first = edgeSamples[0], last = edgeSamples[edgeSamples.length - 1];
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(first.x, first.y);
+    for (let i = 1; i < edgeSamples.length - 1; i++) {
+      const p = edgeSamples[i], next = edgeSamples[i + 1];
+      ctx.quadraticCurveTo(p.x, p.y, (p.x + next.x) * 0.5, (p.y + next.y) * 0.5);
+    }
+    ctx.lineTo(last.x, last.y);
+    ctx.globalAlpha = Math.min(0.78, edgeSamples.reduce((sum, p) => sum + p.a, 0) / edgeSamples.length * 0.85);
+    ctx.strokeStyle = `hsl(${def.hue + P.hueShift + 12},100%,72%)`;
+    ctx.lineWidth = 2.2;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.shadowColor = `hsla(${def.hue + P.hueShift + 15},100%,70%,0.72)`;
+    ctx.shadowBlur = 7;
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function render(t) {
+  /* --- 夜空 --- */
+  ctx.globalCompositeOperation = 'source-over';
+  if (!skyGrad) buildSkyGrad();
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  /* --- 星星（逐顆閃爍）--- */
+  if (P.starCount > 0) {
+    if (!starField || starField.count !== Math.round(P.starCount)) buildStars();
+    ctx.fillStyle = '#fff';
+    for (const s of starField.stars) {
+      const tw = 0.6 + 0.4 * Math.sin(t * s.spd + s.ph);
+      ctx.globalAlpha = s.base * tw;
+      const spark = 1 + trebleEnv * P.audioReact * 1.8 + beatFlash * .18;
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r * spark, 0, TWO_PI); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  drawMeteor();
+
+  /* --- 極光簾幕（加法混合）--- */
+  ctx.globalCompositeOperation = 'lighter';
+  const n = Math.round(P.curtains);
+  for (let i = 0; i < n; i++) drawCurtain(CURTAIN_DEFS[i], i, n);
+
+  /* --- 雪地映光：地平線下方微微反照極光色 --- */
+  if (P.snowGlow) {
+    const gy = H * 0.9;
+    const g = ctx.createLinearGradient(0, gy, 0, H);
+    const glowHue = 145 + P.hueShift;
+    const pulse = 0.05 + 0.04 * fbm2(simT * 0.2, 7.7, 2) + bassEnv * P.audioReact * .08;
+    g.addColorStop(0, 'rgba(0,0,0,0)');
+    g.addColorStop(1, `hsla(${glowHue},70%,60%,${pulse * P.intensity})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, gy, W, H - gy);
+  }
+
+  /* --- 山脈剪影（不透明覆蓋）--- */
+  ctx.globalCompositeOperation = 'source-over';
+  if (P.mountains) {
+    if (!mountainLayers) buildMountains();
+    for (const m of mountainLayers) {
+      ctx.fillStyle = m.color;
+      ctx.fill(m.path);
+    }
+  }
+}
+
+syncLoop();
+</script>
+</body>
+</html>
