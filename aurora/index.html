@@ -133,8 +133,9 @@
   <div class="group">
     <h3>環境 Ambience</h3>
     <div class="row"><label>星空數量</label><input type="range" id="starCount" min="0" max="500" step="10" value="220"><span class="val" id="starCount_v"></span></div>
-    <div class="row"><label>山脈剪影</label><input type="checkbox" id="mountains" checked><span class="val"></span></div>
     <div class="row"><label>雪地映光</label><input type="checkbox" id="snowGlow" checked><span class="val"></span></div>
+    <div class="row"><label>柔光反射</label><input type="checkbox" id="reflection" checked><span class="val"></span></div>
+    <div class="row"><label>近景雪粒</label><input type="checkbox" id="snowParticles" checked><span class="val"></span></div>
   </div>
   </div>
 
@@ -157,8 +158,8 @@ const ctx = canvas.getContext('2d');
 let W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2);
 
 let skyGrad = null;      // 快取的夜空漸層
-let mountainLayers = null; // 快取的山脈剪影（前後兩層）
 let starField = null;    // 快取的星星資料（每顆自帶閃爍相位）
+let snowField = null;    // 快取的近景雪粒
 
 function resize() {
   W = window.innerWidth; H = window.innerHeight;
@@ -166,7 +167,7 @@ function resize() {
   canvas.width = Math.max(1, W * DPR); canvas.height = Math.max(1, H * DPR);
   canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  skyGrad = null; mountainLayers = null; starField = null;
+  skyGrad = null; starField = null; snowField = null;
 }
 window.addEventListener('resize', resize);
 resize();
@@ -184,7 +185,7 @@ const DEFAULTS = {
   edgeTint: 0.65,
   starCount: PREVIEW ? 140 : 220,
 };
-const BOOL_DEFAULTS = { mountains: true, snowGlow: true };
+const BOOL_DEFAULTS = { snowGlow: true, reflection: true, snowParticles: true };
 const P = { ...DEFAULTS, ...BOOL_DEFAULTS };
 
 const fmt = {
@@ -475,28 +476,54 @@ function buildStars() {
   }
 }
 
-/* ===== 山脈剪影：以噪聲生成兩層稜線 ===== */
-function buildMountains() {
-  mountainLayers = [];
-  const defs = [
-    { seed: 11, base: 0.86, amp: 0.13, freq: 2.2, color: '#0a1218' }, // 遠山
-    { seed: 47, base: 0.93, amp: 0.09, freq: 3.4, color: '#04080c' }, // 近山
-  ];
-  for (const d of defs) {
-    const path = new Path2D();
-    path.moveTo(0, H);
-    const step = 6;
-    for (let x = 0; x <= W; x += step) {
-      const u = x / W;
-      const n = fbm2(u * d.freq + d.seed * 10.7, d.seed, 4);
-      const ridge = Math.abs(n - 0.5) * 2; // 摺出尖峰感
-      const y = H * d.base - (n * 0.7 + ridge * 0.3) * H * d.amp;
-      path.lineTo(x, y);
-    }
-    path.lineTo(W, H);
-    path.closePath();
-    mountainLayers.push({ path, color: d.color });
+/* ===== 近景雪粒：低密度、分層尺寸，提供空氣透視而不遮住極光 ===== */
+function buildSnow() {
+  const count = PREVIEW ? 34 : 64;
+  snowField = [];
+  for (let i = 0; i < count; i++) {
+    snowField.push({
+      x: hash2(i * 11 + 3, 101) * W,
+      y: hash2(i * 11 + 5, 131) * (H + 40),
+      r: 0.55 + Math.pow(hash2(i * 11 + 7, 151), 1.8) * 2.1,
+      speed: 9 + hash2(i * 11 + 9, 181) * 18,
+      sway: 7 + hash2(i * 11 + 10, 197) * 20,
+      phase: hash2(i * 11 + 12, 211) * TWO_PI,
+      alpha: 0.18 + hash2(i * 11 + 14, 227) * 0.42,
+    });
   }
+}
+
+function drawReflection(t) {
+  if (!P.reflection) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const cy = H * 0.91;
+  ctx.translate(0, cy); ctx.scale(1, 0.24);
+  for (let i = 0; i < 3; i++) {
+    const x = W * (0.2 + i * 0.3) + Math.sin(t * (0.07 + i * .015) + i * 2.1) * W * .045;
+    const radius = W * (0.28 + i * .035);
+    const hue = 138 + P.hueShift + i * 18;
+    const alpha = (0.018 + bassEnv * P.audioReact * 0.026) * P.intensity;
+    const g = ctx.createRadialGradient(x, 0, 0, x, 0, radius);
+    g.addColorStop(0, `hsla(${hue},85%,60%,${alpha})`);
+    g.addColorStop(.48, `hsla(${hue + 25},80%,58%,${alpha * .52})`);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(x - radius, -radius, radius * 2, radius * 2);
+  }
+  ctx.restore();
+}
+
+function drawSnow(t) {
+  if (!P.snowParticles) return;
+  if (!snowField) buildSnow();
+  ctx.save(); ctx.globalCompositeOperation = 'screen'; ctx.fillStyle = '#e9fbff';
+  for (const s of snowField) {
+    const y = ((s.y + t * s.speed) % (H + 40)) - 20;
+    const x = (s.x + Math.sin(t * .45 + s.phase) * s.sway + t * 2.2) % (W + 20) - 10;
+    ctx.globalAlpha = s.alpha * (0.8 + trebleEnv * P.audioReact * .42);
+    ctx.beginPath(); ctx.arc(x, y, s.r, 0, TWO_PI); ctx.fill();
+  }
+  ctx.restore();
 }
 
 /* ===== 極光簾幕 =====
@@ -584,7 +611,6 @@ function drawCurtain(def, idx, count) {
     // 主體亮度：慢速大尺度 fBm，決定簾幕哪裡濃哪裡淡
     let bright = fbm2(u, t * 0.18, 4);
     bright = Math.pow(clamp((bright - 0.24) / 0.55, 0, 1), 1.25);
-    if (bright < 0.015) continue;
 
     // 波褶：較快的細尺度噪聲，讓底線起伏、條帶高度抖動
     const ripple = (smoothFbmX(u * 2.6 + 50, t * 0.55, 3, 0.042) - 0.5) * (1 + localDrive * .32);
@@ -592,7 +618,6 @@ function drawCurtain(def, idx, count) {
 
     const y0 = baseY + sway * H * 0.14 + ripple * H * 0.038 * scale - localDrive * H * (0.048 + idx * .01);
     const hgt = maxH * (0.35 + bright * 0.65) * (1 + ripple * 0.32 + localDrive * .72);
-    if (hgt < 4) continue;
 
     const a = clamp(bright * inten * (0.55 + localDrive * .48), 0, 1);
     // 底部翠綠 → 中段青 → 頂端紫粉，邊緣（亮度低處）暈彩更重
@@ -600,24 +625,27 @@ function drawCurtain(def, idx, count) {
     const hue = hue0 + Math.sin(u * 1.7) * 8;
     const topHue = hue + edge * 165;   // 綠 → 青 → 紫（色相向上走）
     const midHue = hue + edge * 60;    // 中段偏青
-    const g = ctx.createLinearGradient(0, y0, 0, y0 - hgt);
-    g.addColorStop(0, `hsla(${hue + 10},100%,68%,${a * 0.62})`);
-    g.addColorStop(0.18, `hsla(${hue},95%,58%,${a * 0.72})`);
-    g.addColorStop(0.48, `hsla(${midHue},90%,60%,${a * 0.42})`);
-    g.addColorStop(0.78, `hsla(${topHue},88%,66%,${a * 0.3})`);
-    g.addColorStop(0.94, `hsla(${topHue + 40},85%,72%,${a * 0.14})`); // 頂端泛粉
-    g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(x, y0 - hgt, stripW, hgt);
+    // 低亮度只略過透明簾幕；底線幾何仍保留完整取樣，避免路徑從畫面中段開始。
+    if (bright >= 0.015 && hgt >= 4) {
+      const g = ctx.createLinearGradient(0, y0, 0, y0 - hgt);
+      g.addColorStop(0, `hsla(${hue + 10},100%,68%,${a * 0.62})`);
+      g.addColorStop(0.18, `hsla(${hue},95%,58%,${a * 0.72})`);
+      g.addColorStop(0.48, `hsla(${midHue},90%,60%,${a * 0.42})`);
+      g.addColorStop(0.78, `hsla(${topHue},88%,66%,${a * 0.3})`);
+      g.addColorStop(0.94, `hsla(${topHue + 40},85%,72%,${a * 0.14})`); // 頂端泛粉
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(x, y0 - hgt, stripW, hgt);
 
-    // 簾腳輝光：往下柔和淡出，避免硬邊鋸齒
-    const gl = hgt * 0.22;
-    const g2 = ctx.createLinearGradient(0, y0 - 2, 0, y0 + gl);
-    g2.addColorStop(0, `hsla(${hue + 14},100%,74%,${a * 0.14})`);
-    g2.addColorStop(0.35, `hsla(${hue + 8},95%,62%,${a * 0.22})`);
-    g2.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = g2;
-    ctx.fillRect(x, y0 - 2, stripW, gl + 2);
+      // 簾腳輝光：往下柔和淡出，避免硬邊鋸齒
+      const gl = hgt * 0.22;
+      const g2 = ctx.createLinearGradient(0, y0 - 2, 0, y0 + gl);
+      g2.addColorStop(0, `hsla(${hue + 14},100%,74%,${a * 0.14})`);
+      g2.addColorStop(0.35, `hsla(${hue + 8},95%,62%,${a * 0.22})`);
+      g2.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g2;
+      ctx.fillRect(x, y0 - 2, stripW, gl + 2);
+    }
     edgeSamples.push({ x, y: y0, a, hue });
   }
 
@@ -671,9 +699,12 @@ function render(t) {
   const n = Math.round(P.curtains);
   for (let i = 0; i < n; i++) drawCurtain(CURTAIN_DEFS[i], i, n);
 
+  /* --- 雪面接收極光的寬幅柔反射 --- */
+  drawReflection(t);
+
   /* --- 雪地映光：地平線下方微微反照極光色 --- */
   if (P.snowGlow) {
-    const gy = H * 0.9;
+    const gy = H * 0.82;
     const g = ctx.createLinearGradient(0, gy, 0, H);
     const glowHue = 145 + P.hueShift;
     const pulse = 0.05 + 0.04 * fbm2(simT * 0.2, 7.7, 2) + bassEnv * P.audioReact * .08;
@@ -683,15 +714,8 @@ function render(t) {
     ctx.fillRect(0, gy, W, H - gy);
   }
 
-  /* --- 山脈剪影（不透明覆蓋）--- */
-  ctx.globalCompositeOperation = 'source-over';
-  if (P.mountains) {
-    if (!mountainLayers) buildMountains();
-    for (const m of mountainLayers) {
-      ctx.fillStyle = m.color;
-      ctx.fill(m.path);
-    }
-  }
+  /* --- 近景雪粒位於最前景 --- */
+  drawSnow(t);
 }
 
 syncLoop();
