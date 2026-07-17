@@ -365,8 +365,9 @@ function centerActive() {
   const card = cardEls[active];
   if (!card) return;
   const target = card.offsetLeft + card.offsetWidth / 2 - viewportEl.clientWidth / 2;
-  // 允許軌道在兩端超出 viewport，首尾卡片才能和中間卡片一樣置中。
-  cardsEl.style.transform = `translateX(${-target}px)`;
+  const max = cardsEl.scrollWidth - viewportEl.clientWidth;
+  const x = Math.max(0, Math.min(target, Math.max(0, max)));
+  cardsEl.style.transform = `translateX(${-x}px)`;
 }
 
 function setActive(i, silent) {
