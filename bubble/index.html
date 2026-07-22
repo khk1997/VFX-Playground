@@ -61,11 +61,28 @@
   #panel .sub { font-size: 11px; color: #7784a5; margin-bottom: 12px; }
   .group { margin-bottom: 8px; border-top: 1px solid rgba(150,180,255,.12); padding-top: 6px; }
   .group h3 { font-size: 11px; color: #7fa0e6; letter-spacing: 1.5px; margin-bottom: 8px; text-transform: uppercase; }
+  .group .note { font-size: 10px; color: #5f6f95; margin: 2px 0 6px; line-height: 1.4; }
   .row { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; min-width: 0; }
   .row label { flex: 0 0 78px; font-size: 12px; color: #c6cfe4; white-space: nowrap; }
   .row input[type=range] { flex: 1 1 110px; min-width: 60px; accent-color: #5b7cff; height: 14px; cursor: pointer; }
   .row input[type=color] { flex: 1 1 110px; min-width: 60px; height: 24px; padding: 0; border: 1px solid rgba(150,180,255,.3); border-radius: 6px; background: none; cursor: pointer; }
+  .row select {
+    flex: 1 1 110px; min-width: 60px; height: 24px; padding: 0 6px;
+    background: rgba(20,26,40,.95); color: #c6cfe4;
+    border: 1px solid rgba(150,180,255,.3); border-radius: 6px;
+    font: 12px inherit; cursor: pointer;
+  }
   .row .val { flex: 0 0 46px; text-align: right; font-size: 11px; color: #9fb8ff; font-variant-numeric: tabular-nums; }
+  .stopRow label { flex: 0 0 34px; font-size: 11px; color: #97a6c6; }
+  .stopRow input[type=color] { flex: 0 0 40px; min-width: 40px; }
+  .stopRow input[type=range] { flex: 1 1 70px; }
+  .stopRow .val { flex: 0 0 34px; }
+  #hdriBtn {
+    flex: 1 1 auto; background: rgba(150,180,255,.1); color: #c3d3ff;
+    border: 1px solid rgba(150,180,255,.3); border-radius: 7px;
+    padding: 6px 0; font-size: 12px; cursor: pointer;
+  }
+  #hdriBtn:hover { background: rgba(150,180,255,.22); }
   .btns { display: flex; gap: 8px; margin-top: 12px; }
   .btns button {
     flex: 1; background: rgba(150,180,255,.1); color: #c3d3ff;
@@ -86,45 +103,97 @@
   <div class="sub">Three.js + GLSL 薄膜彩虹水滴 — Metaball 融合/分裂・拖曳可旋轉</div>
 
   <div class="group">
-    <h3>外觀 Appearance</h3>
+    <h3>背景與 HDRI Background</h3>
+    <div class="row"><label>背景模式</label><select id="bgMode"><option value="color">純色</option><option value="hdri">HDRI</option><option value="transparent">透明 Alpha</option></select><span class="val"></span></div>
     <div class="row"><label>背景顏色</label><input type="color" id="bgColor" value="#000000"><span class="val"></span></div>
+    <div class="row"><label>HDRI 水平</label><input type="range" id="hdriYaw" min="-180" max="180" step="1" value="0"><span class="val" id="hdriYaw_v"></span></div>
+    <div class="row"><label>HDRI 垂直</label><input type="range" id="hdriPitch" min="-90" max="90" step="1" value="0"><span class="val" id="hdriPitch_v"></span></div>
+    <div class="row"><button id="hdriBtn">更換 HDRI…</button></div>
+    <div id="hdriState" class="note">預設 HDRI：photo_studio_london_hall_1k.hdr</div>
+    <input type="file" id="hdriInput" accept=".hdr,image/*" hidden>
+  </div>
+
+  <div class="group">
+    <h3>鏡頭 Camera</h3>
+    <div class="row"><label>鏡頭距離</label><input type="range" id="cameraDistance" min="2.8" max="10" step="0.05" value="5.6"><span class="val" id="cameraDistance_v"></span></div>
+    <div class="note">可使用滑鼠滾輪或觸控板拉近、拉遠</div>
+  </div>
+
+  <div class="group">
+    <h3>材質反射 Material</h3>
+    <div class="row"><label>反射強度</label><input type="range" id="reflect" min="0" max="2" step="0.02" value="1.6"><span class="val" id="reflect_v"></span></div>
+    <div class="row"><label>粗糙度</label><input type="range" id="roughness" min="0" max="1" step="0.01" value="0.2"><span class="val" id="roughness_v"></span></div>
+    <div class="row"><label>邊緣光</label><input type="range" id="fresnel" min="0" max="3" step="0.05" value="0.8"><span class="val" id="fresnel_v"></span></div>
+  </div>
+
+  <div class="group">
+    <h3>薄膜外觀 Thin Film</h3>
+    <div class="row"><label>上色模式</label><select id="colorMode"><option value="spectral">光譜（物理）</option><option value="ramp">自訂漸層</option></select><span class="val"></span></div>
     <div class="row"><label>薄膜厚度</label><input type="range" id="thickness" min="120" max="760" step="5" value="385"><span class="val" id="thickness_v"></span></div>
     <div class="row"><label>花紋強度</label><input type="range" id="thickVar" min="0" max="400" step="5" value="55"><span class="val" id="thickVar_v"></span></div>
     <div class="row"><label>花紋尺度</label><input type="range" id="noiseScale" min="0.5" max="6" step="0.1" value="0.7"><span class="val" id="noiseScale_v"></span></div>
+    <div class="row"><label>花紋速度</label><input type="range" id="patternSpeed" min="0" max="2" step="0.01" value="0.3"><span class="val" id="patternSpeed_v"></span></div>
     <div class="row"><label>色散</label><input type="range" id="dispersion" min="0" max="1" step="0.01" value="0.8"><span class="val" id="dispersion_v"></span></div>
     <div class="row"><label>彩度</label><input type="range" id="saturation" min="0" max="2" step="0.02" value="1.38"><span class="val" id="saturation_v"></span></div>
+    <div class="row"><label>重力黑膜</label><input type="range" id="gravity" min="0" max="1" step="0.01" value="1"><span class="val" id="gravity_v"></span></div>
+  </div>
+
+  <div class="group" id="rampGroup">
+    <h3>自訂配色 Custom Ramp</h3>
+    <div class="note">僅在「自訂漸層」模式作用：干涉條紋映射到這組漸層；右側滑桿調每色位置</div>
+    <div class="row"><label>配色數量</label><input type="range" id="rampCount" min="2" max="6" step="1" value="6"><span class="val" id="rampCount_v"></span></div>
+    <div class="row stopRow" id="stopRow0"><label>色 1</label><input type="color" id="stopCol0" value="#3698d8"><input type="range" id="stopPos0" min="0" max="1" step="0.01" value="0.56"><span class="val" id="stopPos0_v"></span></div>
+    <div class="row stopRow" id="stopRow1"><label>色 2</label><input type="color" id="stopCol1" value="#b794a6"><input type="range" id="stopPos1" min="0" max="1" step="0.01" value="0.20"><span class="val" id="stopPos1_v"></span></div>
+    <div class="row stopRow" id="stopRow2"><label>色 3</label><input type="color" id="stopCol2" value="#d1aa75"><input type="range" id="stopPos2" min="0" max="1" step="0.01" value="0.39"><span class="val" id="stopPos2_v"></span></div>
+    <div class="row stopRow" id="stopRow3"><label>色 4</label><input type="color" id="stopCol3" value="#b2b3b4"><input type="range" id="stopPos3" min="0" max="1" step="0.01" value="0.60"><span class="val" id="stopPos3_v"></span></div>
+    <div class="row stopRow" id="stopRow4"><label>色 5</label><input type="color" id="stopCol4" value="#9e7d98"><input type="range" id="stopPos4" min="0" max="1" step="0.01" value="0.27"><span class="val" id="stopPos4_v"></span></div>
+    <div class="row stopRow" id="stopRow5"><label>色 6</label><input type="color" id="stopCol5" value="#5dbded"><input type="range" id="stopPos5" min="0" max="1" step="0.01" value="0.66"><span class="val" id="stopPos5_v"></span></div>
   </div>
 
   <div class="group">
-    <h3>水滴 Droplets</h3>
+    <h3>水滴形態 Droplets</h3>
     <div class="row"><label>水滴數量</label><input type="range" id="count" min="1" max="8" step="1" value="2"><span class="val" id="count_v"></span></div>
     <div class="row"><label>水滴大小</label><input type="range" id="radius" min="0.25" max="1.1" step="0.01" value="0.54"><span class="val" id="radius_v"></span></div>
-    <div class="row"><label>黏性融合</label><input type="range" id="viscosity" min="0" max="1.2" step="0.01" value="0.74"><span class="val" id="viscosity_v"></span></div>
+    <div class="row"><label>黏性融合</label><input type="range" id="viscosity" min="0" max="1.2" step="0.01" value="0.78"><span class="val" id="viscosity_v"></span></div>
     <div class="row"><label>漂浮範圍</label><input type="range" id="spread" min="0.6" max="2.4" step="0.05" value="0.75"><span class="val" id="spread_v"></span></div>
-  </div>
-
-  <div class="group">
-    <h3>環境 Environment</h3>
-    <div class="row"><label>邊緣光</label><input type="range" id="fresnel" min="0" max="3" step="0.05" value="2.6"><span class="val" id="fresnel_v"></span></div>
-    <div class="row"><label>重力黑膜</label><input type="range" id="gravity" min="0" max="1" step="0.01" value="1"><span class="val" id="gravity_v"></span></div>
+    <div class="row"><label>表面起伏</label><input type="range" id="wobble" min="0" max="0.4" step="0.005" value="0.305"><span class="val" id="wobble_v"></span></div>
+    <div class="row"><label>起伏尺度</label><input type="range" id="wobbleScale" min="0.3" max="6" step="0.1" value="0.7"><span class="val" id="wobbleScale_v"></span></div>
+    <div class="note">分離彈性 Capillary Wave</div>
+    <div class="row"><label>分離回彈</label><input type="range" id="elasticStrength" min="0" max="0.2" step="0.005" value="0.015"><span class="val" id="elasticStrength_v"></span></div>
+    <div class="row"><label>波紋密度</label><input type="range" id="elasticDensity" min="1" max="8" step="0.1" value="3.5"><span class="val" id="elasticDensity_v"></span></div>
+    <div class="row"><label>波紋衰減</label><input type="range" id="elasticDamping" min="0" max="1" step="0.01" value="0.55"><span class="val" id="elasticDamping_v"></span></div>
+    <div class="row"><label>傳播速度</label><input type="range" id="elasticSpeed" min="0.5" max="2" step="0.05" value="1.75"><span class="val" id="elasticSpeed_v"></span></div>
   </div>
 
   <div class="group">
     <h3>動態 Motion</h3>
-    <div class="row"><label>漂浮速度</label><input type="range" id="flowSpeed" min="0" max="1.5" step="0.01" value="0.3"><span class="val" id="flowSpeed_v"></span></div>
-    <div class="row"><label>自轉速度</label><input type="range" id="spin" min="0" max="1" step="0.01" value="0.08"><span class="val" id="spin_v"></span></div>
+    <div class="row"><label>動態模式</label><select id="motion">
+      <option value="cinematic">電影循環 Cinematic</option>
+      <option value="drift">漂移 Drift</option>
+      <option value="float">巨泡漂浮 Float</option>
+      <option value="orbit">軌道 Orbit</option>
+      <option value="lava">熔岩燈 Lava</option>
+      <option value="breathe">呼吸 Breathe</option>
+    </select><span class="val"></span></div>
+    <div class="row"><label>循環秒數</label><input type="range" id="loopDuration" min="4" max="30" step="0.5" value="12"><span class="val" id="loopDuration_v"></span></div>
+    <div class="row"><label>動態張力</label><input type="range" id="flowSpeed" min="0" max="1.5" step="0.01" value="0.47"><span class="val" id="flowSpeed_v"></span></div>
+    <div class="row"><label>起伏動畫</label><input type="range" id="wobbleSpeed" min="0" max="2" step="0.01" value="1.05"><span class="val" id="wobbleSpeed_v"></span></div>
+    <div class="row"><label>環繞幅度</label><input type="range" id="spin" min="0" max="1" step="0.01" value="0.14"><span class="val" id="spin_v"></span></div>
   </div>
 
   <div class="btns">
     <button id="resetBtn">↺ 重設</button>
   </div>
-  <div class="hint">水滴在空中漂浮，靠近時因表面張力（smooth-min）融合成一體，飄開時分裂。<br>拖曳可旋轉視角；黏性越高越容易黏在一起。</div>
+  <div class="hint">水滴靠近時因表面張力（smooth-min）融合、飄開時分裂。<br>拖曳可旋轉視角；滾輪可縮放；上色模式切「自訂漸層」可指定配色。</div>
 </div>
 <button id="toggleBtn">⚙ 面板</button>
 <button id="playCtl">⏸ 暫停</button>
 
 <script type="importmap">
-{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
 </script>
 
 <script type="module">
@@ -136,25 +205,58 @@ const PREVIEW = new URLSearchParams(location.search).has('preview');
 if (PREVIEW) document.documentElement.classList.add('preview-mode');
 
 const canvas = document.getElementById('stage');
+const DEFAULT_HDRI_URL = new URL('./assets/photo_studio_london_hall_1k.hdr', import.meta.url).href;
+const DEFAULT_HDRI_LABEL = 'photo_studio_london_hall_1k.hdr';
 
 /* ===== 參數 ===== */
-const DEFAULTS = {
-  thickness: 385,
-  thickVar: 55,
-  noiseScale: 0.7,
-  dispersion: 0.8,
-  saturation: 1.38,
+const DEFAULTS = {              // 數值滑桿
+  thickness: 390,
+  thickVar: 95,
+  noiseScale: 1.0,
+  dispersion: 0.69,
+  saturation: 1.94,
+  patternSpeed: 0.21,
   count: 2,
   radius: 0.54,
-  viscosity: 0.74,
+  viscosity: 0.78,
   spread: 0.75,
-  fresnel: 2.6,
+  fresnel: 0.8,
   gravity: 1,
-  flowSpeed: 0.3,
-  spin: 0.08,
+  roughness: 0.2,
+  flowSpeed: 0.47,
+  reflect: 1.6,
+  hdriYaw: 0,
+  hdriPitch: 0,
+  cameraDistance: 5.6,
+  loopDuration: 12,
+  wobble: 0.305,
+  wobbleScale: 0.7,
+  wobbleSpeed: 1.05,
+  elasticStrength: 0.015,
+  elasticDensity: 3.5,
+  elasticDamping: 0.55,
+  elasticSpeed: 1.75,
+  spin: 0.14,
 };
-const COLOR_DEFAULTS = { bgColor: '#000000' };
-const P = { ...DEFAULTS, ...COLOR_DEFAULTS };
+const SELECT_DEFAULTS = { bgMode: 'color', colorMode: 'ramp', motion: 'cinematic' };
+const COLOR_DEFAULTS  = { bgColor: '#000000' };
+const P = { ...DEFAULTS, ...SELECT_DEFAULTS, ...COLOR_DEFAULTS };
+
+// 自訂漸層色標（最多 6，可調位置）— reset 用
+const STOP_MAX = 6;
+const RAMP_DEFAULT = {
+  count: 6,
+  cols: ['#3698d8', '#b794a6', '#d1aa75', '#b2b3b4', '#9e7d98', '#5dbded'],
+  pos:  [0.56, 0.20, 0.39, 0.60, 0.27, 0.66],
+};
+
+// select 字串 → int uniform
+const SELECTS = {
+  bgMode:    { uniform: 'uBgMode',    map: { color: 0, hdri: 1, transparent: 2 } },
+  colorMode: { uniform: 'uColorMode', map: { spectral: 0, ramp: 1 } },
+  motion:    { uniform: 'uMotion',    map: { cinematic: 0, drift: 1, float: 2, orbit: 3, lava: 4, breathe: 5 } },
+};
+const COLORS = { bgColor: 'uBgColor' };
 
 const fmt = {
   thickness: v => v.toFixed(0) + 'nm',
@@ -166,6 +268,19 @@ const fmt = {
   spread: v => v.toFixed(2),
   flowSpeed: v => 'x' + v.toFixed(2),
   spin: v => 'x' + v.toFixed(2),
+  wobble: v => v.toFixed(3),
+  wobbleScale: v => 'x' + v.toFixed(1),
+  wobbleSpeed: v => 'x' + v.toFixed(2),
+  patternSpeed: v => 'x' + v.toFixed(2),
+  reflect: v => 'x' + v.toFixed(2),
+  hdriYaw: v => v.toFixed(0) + '°',
+  hdriPitch: v => v.toFixed(0) + '°',
+  cameraDistance: v => v.toFixed(2),
+  loopDuration: v => v.toFixed(1) + 's',
+  elasticStrength: v => v.toFixed(3),
+  elasticDensity: v => 'x' + v.toFixed(1),
+  elasticDamping: v => v.toFixed(2),
+  elasticSpeed: v => 'x' + v.toFixed(2),
 };
 
 /* ===== 著色器 ===== */
@@ -221,6 +336,12 @@ float fbm(vec3 p){
   for (int i = 0; i < 4; i++) { s += a * snoise(p); p *= 2.02; a *= 0.5; }
   return s;
 }
+// 距離場專用的低成本版本；薄膜上色仍使用上方完整 4 octave。
+float fbmFast(vec3 p){
+  float s = 0.5 * snoise(p);
+  s += 0.25 * snoise(p * 2.02);
+  return s;
+}
 `;
 
 // 全螢幕：頂點著色器直接輸出 clip 座標（忽略相機），frag 內自建相機射線做 raymarch
@@ -237,13 +358,23 @@ precision highp float;
 varying vec2 vUv;
 
 uniform float uTime;
+uniform float uLoopDuration;
 uniform vec2  uResolution;
-uniform mat3  uRot;         // 拖曳/自轉：旋轉相機環繞水滴群
+uniform mat3  uRot;
+uniform float uCameraDistance;
 
 uniform int   uCount;
-uniform float uRadius;
-uniform float uViscosity;   // smooth-min 融合半徑（黏性）
-uniform float uSpread;      // 漂浮範圍
+uniform float uViscosity;
+uniform float uWobble;
+uniform float uWobbleScale;
+uniform float uWobbleSpeed;
+uniform vec2  uElasticEvent;    // x：事件包絡，y：傳播進度
+uniform float uElasticStrength;
+uniform float uElasticDensity;
+uniform float uElasticDamping;
+uniform float uElasticSpeed;
+uniform vec4  uDrops[8];       // xyz：中心，w：半徑（CPU 每幀更新）
+uniform vec4  uBounds;         // xyz：包圍球中心，w：半徑
 
 uniform float uThickness;
 uniform float uThickVar;
@@ -253,49 +384,114 @@ uniform float uSaturation;
 uniform float uFresnel;
 uniform float uGravity;
 uniform float uFlowSpeed;
+uniform float uPatternSpeed;
+
+uniform int       uColorMode;   // 0 光譜, 1 自訂漸層
+uniform sampler2D uRampTex;      // 自訂漸層查找表（CPU 端依色標生成）
+
+uniform int   uBgMode;      // 0 純色, 1 HDRI
+uniform vec3  uBgColor;
+uniform float uReflect;
+uniform float uRoughness;
+uniform float uHdriYaw;
+uniform float uHdriPitch;
+uniform sampler2D uEnvMap;
+uniform sampler2D uPmremMap;
+uniform int   uHasEnv;
+
+#include <cube_uv_reflection_fragment>
 
 const int   MAXN = 8;
 const float IOR  = 1.33;
+const float PI   = 3.14159265359;
 const float TAU  = 6.28318530718;
 
 ${NOISE_GLSL}
 
 float hash11(float n){ return fract(sin(n * 127.1) * 43758.5453123); }
-
-// 每顆水滴的漂浮軌跡（Lissajous，頻率互質 → 偶爾交會後分開）
-vec3 dropCenter(int ii, float t){
-  float i = float(ii);
-  float h1 = hash11(i + 1.0), h2 = hash11(i + 7.0), h3 = hash11(i + 13.0);
-  vec3 freq  = vec3(0.55 + h1 * 0.5, 0.47 + h2 * 0.5, 0.51 + h3 * 0.5);
-  vec3 phase = vec3(h1, h2, h3) * TAU;
-  float s = t * uFlowSpeed;
-  vec3 c = vec3(
-    sin(s * freq.x + phase.x),
-    sin(s * freq.y + phase.y + 1.7),
-    sin(s * freq.z + phase.z + 3.1)
-  );
-  return c * uSpread;
+vec3 loopNoiseOffset(float speed){
+  float phase = TAU * uTime / max(uLoopDuration, 0.001);
+  return vec3(cos(phase), sin(phase), sin(phase * 2.0)) * speed;
 }
 
-// 多項式 smooth-min：a、b 兩距離場靠近時平滑相接（表面張力頸縮）
+// 環境：程序化棚燈（無 HDRI 時的預設反射來源）；rough 越大光斑越柔散
+vec3 proceduralEnv(vec3 d, float rough){
+  vec3 col = mix(vec3(0.015, 0.02, 0.03), vec3(0.05, 0.06, 0.08), d.y * 0.5 + 0.5);
+  col += vec3(1.0, 0.98, 0.95) * smoothstep(mix(0.55, 0.12, rough), 0.98, dot(d, normalize(vec3(0.35, 0.7, 0.5)))) * 1.1;
+  col += vec3(0.55, 0.7, 0.95) * smoothstep(mix(0.6, 0.2, rough), 1.0, dot(d, normalize(vec3(-0.55, 0.15, 0.55)))) * 0.6;
+  col += vec3(1.0) * pow(max(dot(d, normalize(vec3(0.2, 0.85, 0.25))), 0.0), mix(300.0, 24.0, rough)) * mix(1.5, 0.45, rough);
+  return col;
+}
+vec3 rotateEnvDir(vec3 d){
+  float yaw = uHdriYaw * PI / 180.0;
+  float pitch = uHdriPitch * PI / 180.0;
+  float cy = cos(yaw), sy = sin(yaw);
+  d = vec3(cy * d.x + sy * d.z, d.y, -sy * d.x + cy * d.z);
+  float cp = cos(pitch), sp = sin(pitch);
+  return vec3(d.x, cp * d.y - sp * d.z, sp * d.y + cp * d.z);
+}
+vec3 sampleReflection(vec3 d, float rough){
+  if (uHasEnv == 1) return textureCubeUV(uPmremMap, rotateEnvDir(d), rough).rgb;
+  return proceduralEnv(d, rough);
+}
+vec4 backgroundSample(vec3 rd){
+  if (uBgMode == 2) return vec4(0.0);
+  if (uBgMode == 1 && uHasEnv == 1){
+    rd = rotateEnvDir(rd);
+    vec2 uvE = vec2(atan(rd.z, rd.x) / TAU + 0.5, asin(clamp(rd.y, -1.0, 1.0)) / PI + 0.5);
+    return vec4(texture2D(uEnvMap, uvE).rgb, 1.0);
+  }
+  return vec4(uBgColor, 1.0);
+}
+
+// C2 cubic smooth-min：曲率也連續，避免高光暴露每顆水滴的融合邊界。
 float smin(float a, float b, float k){
   if (k <= 0.0001) return min(a, b);
-  float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
-  return mix(b, a, h) - k * h * (1.0 - h);
+  // cubic 中央下沉量為 k/6；放大 1.5 倍可維持原 quadratic 約 k/4 的頸部厚度。
+  float kc = k * 1.5;
+  float h = max(kc - abs(a - b), 0.0) / kc;
+  return min(a, b) - h * h * h * kc * (1.0 / 6.0);
+}
+
+// 分離後由接觸極點向外傳播的局部毛細波；只處理主要水滴對 0/1。
+float capillaryWave(vec3 p, int i){
+  vec3 center = uDrops[i].xyz;
+  vec3 other = (i == 0) ? uDrops[1].xyz : uDrops[0].xyz;
+  vec3 local = p - center;
+  float localLen = length(local);
+  vec3 contactAxis = other - center;
+  float axisLen = length(contactAxis);
+  if (localLen < 0.0001 || axisLen < 0.0001) return 0.0;
+
+  float poleDistance = sqrt(max(0.0, 2.0 * (1.0 - dot(local / localLen, contactAxis / axisLen))));
+  float travel = uElasticEvent.y * uElasticSpeed * 2.2;
+  float behindFront = travel - poleDistance;
+  if (behindFront < 0.0) return 0.0;
+
+  float spatialDecay = 1.0 / (1.0 + behindFront * (2.0 + uElasticDamping * 10.0));
+  float hemisphereMask = 1.0 - smoothstep(1.65, 2.0, poleDistance);
+  float ripple = sin(behindFront * uElasticDensity * PI);
+  return ripple * spatialDecay * hemisphereMask * uElasticEvent.x * uElasticStrength;
 }
 
 float mapScene(vec3 p){
   float d = 1e9;
   for (int i = 0; i < MAXN; i++){
     if (i >= uCount) break;
-    vec3 c = dropCenter(i, uTime);
-    float r = uRadius * (0.72 + 0.55 * hash11(float(i) * 3.17 + 5.0));
-    d = smin(d, length(p - c) - r, uViscosity);
+    float sphereD = length(p - uDrops[i].xyz) - uDrops[i].w;
+    // 僅在事件期間、主要兩滴且接近表面時付出波紋成本。
+    if (uElasticEvent.x > 0.0001 && i < 2 && abs(sphereD) < 0.3) {
+      sphereD -= capillaryWave(p, i);
+    }
+    d = smin(d, sphereD, uViscosity);
+  }
+  // 最大位移遠小於 0.25；遠離表面時略過 noise，不影響射線接近表面的安全性。
+  if (uWobble > 0.001 && d < 0.25) {
+    d += fbmFast(p * uWobbleScale + loopNoiseOffset(uWobbleSpeed)) * uWobble * 0.25;
   }
   return d;
 }
 
-// 四點四面體法線（省一次取樣）
 vec3 calcNormal(vec3 p){
   const vec2 k = vec2(1.0, -1.0);
   const float h = 0.0009;
@@ -306,59 +502,59 @@ vec3 calcNormal(vec3 p){
     k.xxx * mapScene(p + k.xxx * h));
 }
 
-// 薄膜干涉上色（透明玻璃泡：body 清透、彩虹集中在邊緣與細帶）
-// 回傳 rgb + alpha，讓 body 半透明露出背景
+// 薄膜干涉上色（透明玻璃泡 + 環境反射）
 vec4 thinFilm(vec3 p, vec3 N, vec3 V){
   float cosTheta = clamp(dot(N, V), 0.0, 1.0);
 
   vec3 sp = p * uNoiseScale;
-  float flow = uTime * uFlowSpeed;
+  vec3 flow = loopNoiseOffset(uPatternSpeed);
   vec3 warp = vec3(
-    fbm(sp + vec3(0.0, 0.0, flow)),
-    fbm(sp + vec3(5.2, 1.3, flow)),
-    fbm(sp + vec3(1.7, 9.2, flow))
+    fbm(sp + flow),
+    fbm(sp + vec3(5.2, 1.3, 0.0) + flow.yzx),
+    fbm(sp + vec3(1.7, 9.2, 0.0) + flow.zxy)
   );
-  float n = fbm(sp + warp * 0.6 + vec3(0.0, flow * 0.5, 0.0));
+  float n = fbm(sp + warp * 0.6 + flow * 0.5);
   float thickness = uThickness + n * uThickVar;
 
-  // 重力排水：朝上表面變薄 → 近黑
   float top = clamp(N.y * 0.5 + 0.5, 0.0, 1.0);
   thickness -= pow(top, 2.5) * uGravity * uThickness * 0.95;
   thickness = max(thickness, 0.0);
 
-  // 光程差用「膜內折射角」(Snell)：掠射角時 cosT 仍可觀 → 邊緣才有彩虹
+  // Snell 折射角：掠射角時 cosT 仍可觀 → 邊緣才有彩虹
   float sinI = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
   float cosT = sqrt(max(0.0, 1.0 - (sinI / IOR) * (sinI / IOR)));
   float opd = 2.0 * IOR * thickness * cosT;
-  vec3 lambda = mix(vec3(550.0), vec3(650.0, 550.0, 450.0), uDispersion);
-  vec3 interf = 0.5 - 0.5 * cos(TAU * opd / lambda);
+
+  vec3 interf;
+  if (uColorMode == 0){
+    vec3 lambda = mix(vec3(550.0), vec3(650.0, 550.0, 450.0), uDispersion);
+    interf = 0.5 - 0.5 * cos(TAU * opd / lambda);
+  } else {
+    float freq = mix(0.4, 1.4, uDispersion);   // 色散＝色帶擴散
+    interf = texture2D(uRampTex, vec2(fract(opd / 560.0 * freq), 0.5)).rgb;
+  }
 
   float lum = dot(interf, vec3(0.3333));
   interf = mix(vec3(lum), interf, uSaturation);
 
-  // Fresnel：邊緣權重（掠射角）。薄膜反射本就在邊緣最強 → 彩虹集中在輪廓
   float fres = pow(1.0 - cosTheta, 3.0);
   float rim  = fres * uFresnel;
 
-  // 薄膜色只在邊緣/細帶顯著，body 幾乎不上色（保持清透）
   vec3 film = interf * (0.08 + 1.3 * rim);
 
-  // 玻璃光澤：一寬一窄兩道高光
-  vec3 R = reflect(-V, N);
-  vec3 L1 = normalize(vec3(0.5, 0.72, 0.45));
-  vec3 L2 = normalize(vec3(-0.45, -0.2, 0.6));
-  float broad = pow(max(dot(R, L1), 0.0), 7.0);   // 寬柔片光
-  float sharp = pow(max(dot(R, L2), 0.0), 160.0); // 銳利亮點
-  vec3 spec = vec3(broad * 0.28 + sharp * 1.0);
+  // 環境反射（Fresnel 加權，邊緣更強；粗糙度使其模糊）
+  vec3 refl = sampleReflection(reflect(-V, N), uRoughness) * uReflect * (0.12 + 0.9 * fres);
 
-  // 極淡的冷色 body 底，讓透明處不至於全黑
+  // 玻璃亮點（粗糙度使其變寬變弱）
+  float sharp = pow(max(dot(reflect(-V, N), normalize(vec3(-0.45, -0.2, 0.6))), 0.0), mix(220.0, 14.0, uRoughness)) * mix(1.0, 0.3, uRoughness);
+  vec3 spec = vec3(sharp);
+
   vec3 bodyTint = vec3(0.02, 0.03, 0.05) * (0.4 + 0.6 * lum);
 
-  vec3 col = film + spec + bodyTint;
+  vec3 col = film + refl + spec + bodyTint;
   col = 1.0 - exp(-col * 1.7);
 
-  // alpha：body 透明（露出背景），邊緣與高光處不透明
-  float alpha = clamp(0.05 + rim * 0.95 + broad * 0.25 + sharp + dot(film, vec3(0.4)), 0.0, 1.0);
+  float alpha = clamp(0.05 + rim * 0.95 + sharp + dot(film, vec3(0.4)) + dot(refl, vec3(0.4)), 0.0, 1.0);
   return vec4(col, alpha);
 }
 
@@ -367,59 +563,278 @@ void main(){
   uv.x *= uResolution.x / uResolution.y;
   float tanHalfFov = 0.364; // fov ~40°
 
-  // 相機射線，經 uRot 環繞水滴群
-  vec3 ro = uRot * vec3(0.0, 0.0, 5.6);
+  vec3 ro = uRot * vec3(0.0, 0.0, uCameraDistance);
   vec3 rd = uRot * normalize(vec3(uv * tanHalfFov, -1.0));
 
-  // 球體追蹤
-  float t = 0.0;
+  vec4 bg = backgroundSample(rd);
+
+  // 先裁掉沒有穿過水滴群包圍球的射線，避免背景畫素進入 raymarch。
+  vec3 oc = ro - uBounds.xyz;
+  float qb = dot(oc, rd);
+  float qc = dot(oc, oc) - uBounds.w * uBounds.w;
+  float qh = qb * qb - qc;
+  if (qh < 0.0){ gl_FragColor = bg; return; }
+  qh = sqrt(qh);
+  float tEnd = -qb + qh;
+  if (tEnd < 0.0){ gl_FragColor = bg; return; }
+
+  float t = max(0.0, -qb - qh);
   bool hit = false;
-  for (int i = 0; i < 110; i++){
+  for (int i = 0; i < 88; i++){
     vec3 p = ro + rd * t;
     float d = mapScene(p);
     if (d < 0.0008){ hit = true; break; }
-    t += d;
-    if (t > 14.0) break;
+    t += d * 0.85;               // wobble 讓場非嚴格 Lipschitz → 縮步保險
+    if (t > tEnd) break;
   }
 
-  if (!hit) discard;
+  if (!hit){ gl_FragColor = bg; return; }
 
   vec3 p = ro + rd * t;
   vec3 N = calcNormal(p);
-  vec3 V = -rd;
-  gl_FragColor = thinFilm(p, N, V);
+  vec4 s = thinFilm(p, N, -rd);
+  gl_FragColor = (uBgMode == 2) ? vec4(s.rgb, s.a) : vec4(mix(bg.rgb, s.rgb, s.a), 1.0);
 }
 `;
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
+let pmremGenerator = null, pmremTarget = null;
 let inited = false;
 
-// 旋轉狀態（拖曳 + 慣性 + 自轉）
 const rot = { x: 0.1, y: 0.3 };
 const vel = { x: 0, y: 0 };
 let dragging = false, lastX = 0, lastY = 0;
 const rotM4 = new THREE.Matrix4();
 const tmpX = new THREE.Matrix4();
+const dropData = Array.from({ length: 8 }, () => new THREE.Vector4());
+const dropBounds = new THREE.Vector4(0, 0, 0, 1);
+const elasticEvent = new THREE.Vector2(0, 0);
+
+const fract = x => x - Math.floor(x);
+const hash11CPU = n => fract(Math.sin(n * 127.1) * 43758.5453123);
+const dropSeeds = Array.from({ length: 8 }, (_, i) => ({
+  h1: hash11CPU(i + 1),
+  h2: hash11CPU(i + 7),
+  h3: hash11CPU(i + 13),
+  radius: 0.72 + 0.55 * hash11CPU(i * 3.17 + 5),
+}));
+
+function cyclicPulse(phase, center, width) {
+  const d = Math.abs(((phase - center + 0.5) % 1 + 1) % 1 - 0.5);
+  if (d >= width) return 0;
+  const x = 1 - d / width;
+  return x * x * (3 - 2 * x);
+}
+
+function smoothstepCPU(value, edge0, edge1) {
+  const x = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)));
+  return x * x * (3 - 2 * x);
+}
+
+// 水滴動畫只在 CPU 每幀計算一次；shader 的每個 march step 僅讀取 vec4 array。
+function updateDropUniforms(t) {
+  const count = Math.max(1, Math.min(8, Math.round(P.count)));
+  const tau = Math.PI * 2;
+  const phase = fract(t / Math.max(0.001, P.loopDuration));
+  const a = phase * tau;
+  const energy = 0.55 + P.flowSpeed * 0.9;
+
+  // 電影循環事件：預備 → 聚合/融合 → 阻尼回彈 → 分離/餘韻。
+  const anticipation = cyclicPulse(phase, 0.2, 0.09);
+  const merge = cyclicPulse(phase, 0.44, 0.2);
+  const followEnvelope = cyclicPulse(phase, 0.68, 0.16);
+  const followThrough = followEnvelope * Math.sin((phase - 0.52) * tau * 3);
+  // 融合後確實拉斷 smooth-min 頸部；循環終點前平滑回到初始狀態。
+  const breakaway = cyclicPulse(phase, 0.78, 0.22);
+  const groupX = Math.sin(a) * P.spread * 0.12 * energy;
+  const groupY = Math.sin(a * 2 + 0.4) * P.spread * 0.08 * energy;
+  const groupZ = Math.cos(a) * P.spread * 0.07 * energy;
+
+  for (let i = 0; i < 8; i++) {
+    const { h1, h2, h3, radius } = dropSeeds[i];
+    let x = 0, y = 0, z = 0, radiusFactor = 1;
+
+    if (P.motion === 'cinematic') {
+      const anchor = i * tau / count + (h1 - 0.5) * 0.5;
+      const arc = anchor + Math.sin(a + h1 * tau) * 0.24 + Math.sin(a * 2 + h2 * tau) * 0.07;
+      const radial = P.spread * (0.68 + 0.12 * Math.sin(a + h2 * tau));
+      const mergeResponse = Math.pow(merge, 0.85 + h1 * 0.3);
+      const actionScale = (1 + anticipation * (0.12 + h2 * 0.06))
+        * (1 - mergeResponse * 0.8)
+        * (1 + followThrough * (0.07 + h3 * 0.04))
+        * (1 + breakaway * 0.6);
+      x = groupX + Math.cos(arc) * radial * actionScale * energy;
+      y = groupY
+        + Math.sin(a * 2 + h3 * tau) * P.spread * 0.2 * actionScale * energy
+        + (h2 - 0.5) * P.spread * 0.12;
+      z = groupZ + Math.sin(arc) * radial * 0.55 * actionScale * energy;
+      radiusFactor = 1 + anticipation * 0.05 - mergeResponse * 0.04 + followThrough * 0.025;
+    } else if (P.motion === 'float') {
+      x = Math.sin(a + h1 * tau) * P.spread * 0.5 * energy;
+      y = Math.sin(a * 2 + i * 1.9) * P.spread * 0.7 * energy;
+      z = Math.cos(a + h2 * tau) * P.spread * 0.4 * energy;
+    } else if (P.motion === 'orbit') {
+      const ang = a + i * tau / count;
+      x = Math.cos(ang) * P.spread;
+      y = Math.sin(a * 2 + h2 * tau) * P.spread * 0.45 * energy;
+      z = Math.sin(ang) * P.spread;
+    } else if (P.motion === 'lava') {
+      x = (h1 - 0.5) * P.spread * 0.8;
+      y = Math.sin(a + i * 2.1) * P.spread * energy;
+      z = (h3 - 0.5) * P.spread * 0.6;
+    } else if (P.motion === 'breathe') {
+      x = Math.sin(i * 2.4) * P.spread * 0.5;
+      y = Math.cos(i * 1.7) * P.spread * 0.5;
+      z = Math.sin(i * 3.1) * P.spread * 0.4;
+      radiusFactor = 1 + 0.28 * Math.sin(a + i * 1.3) * Math.min(1.25, energy);
+    } else {
+      x = Math.sin(a + h1 * tau) * P.spread * energy;
+      y = Math.sin(a * 2 + h2 * tau + 1.7) * P.spread * 0.7 * energy;
+      z = Math.sin(a * 3 + h3 * tau + 3.1) * P.spread * 0.55 * energy;
+    }
+    dropData[i].set(x, y, z, P.radius * radius * radiusFactor);
+  }
+
+  // 以實際 SDF 頸部是否斷裂觸發毛細波，不再用固定時間假裝已分離。
+  // C2 smin 使用 kc = 1.5k，兩球的連接臨界表面間距為 kc / 3 = 0.5k。
+  if (P.motion === 'cinematic' && count >= 2) {
+    const aDrop = dropData[0], bDrop = dropData[1];
+    const centerDistance = Math.hypot(
+      aDrop.x - bDrop.x,
+      aDrop.y - bDrop.y,
+      aDrop.z - bDrop.z,
+    );
+    const neckGap = centerDistance - aDrop.w - bDrop.w - P.viscosity * 0.5;
+    const detachGate = smoothstepCPU(neckGap, 0, 0.08);
+    // 預設動態約在 0.64 斷開；實際門檻仍由 detachGate 決定。
+    const progress = Math.max(0, Math.min(1, (phase - 0.635) / 0.28));
+    const pulse = Math.sin(Math.PI * progress);
+    const envelope = detachGate * pulse * pulse
+      * Math.pow(1 - progress, 0.25 + P.elasticDamping * 1.5);
+    elasticEvent.set(envelope, progress);
+  } else {
+    elasticEvent.set(0, 0);
+  }
+
+  // smooth-min 與 wobble 都可能讓表面超出單顆球體，因此加入保守 padding。
+  const padding = P.viscosity * 0.25 * Math.max(0, count - 1)
+    + P.wobble * 0.25 + P.elasticStrength + 0.08;
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (let i = 0; i < count; i++) {
+    const d = dropData[i], r = d.w + padding;
+    minX = Math.min(minX, d.x - r); maxX = Math.max(maxX, d.x + r);
+    minY = Math.min(minY, d.y - r); maxY = Math.max(maxY, d.y + r);
+    minZ = Math.min(minZ, d.z - r); maxZ = Math.max(maxZ, d.z + r);
+  }
+  const cx = (minX + maxX) * 0.5;
+  const cy = (minY + maxY) * 0.5;
+  const cz = (minZ + maxZ) * 0.5;
+  let boundRadius = 0;
+  for (let i = 0; i < count; i++) {
+    const d = dropData[i];
+    boundRadius = Math.max(boundRadius, Math.hypot(d.x - cx, d.y - cy, d.z - cz) + d.w + padding);
+  }
+  dropBounds.set(cx, cy, cz, boundRadius);
+}
+
+function makeBlankEnv() {
+  const tex = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1, THREE.RGBAFormat);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/* ===== 自訂漸層查找表（LUT）===== */
+let rampTex = null;
+const RAMP_W = 256;
+function hexToRgb(hex) {
+  const h = hex.replace('#', '');
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+function readStops() {
+  const n = Math.round(parseFloat(document.getElementById('rampCount').value));
+  const stops = [];
+  for (let i = 0; i < n; i++) {
+    stops.push({
+      p: Math.min(1, Math.max(0, parseFloat(document.getElementById('stopPos' + i).value))),
+      rgb: hexToRgb(document.getElementById('stopCol' + i).value),
+    });
+  }
+  return stops;
+}
+// 循環取樣：色標依位置排序，末色與首色跨接縫接回
+function sampleStops(stops, t) {
+  const n = stops.length;
+  if (n === 1) return stops[0].rgb;
+  for (let i = 0; i < n; i++) {
+    const a = stops[i], b = stops[(i + 1) % n];
+    let p0 = a.p, p1 = b.p, tt = t;
+    if (i === n - 1) { p1 += 1; if (t < a.p) tt = t + 1; }   // 接縫段
+    if (tt >= p0 && tt <= p1) {
+      const f = (p1 > p0) ? (tt - p0) / (p1 - p0) : 0;
+      return [a.rgb[0] + (b.rgb[0] - a.rgb[0]) * f, a.rgb[1] + (b.rgb[1] - a.rgb[1]) * f, a.rgb[2] + (b.rgb[2] - a.rgb[2]) * f];
+    }
+  }
+  return stops[0].rgb;
+}
+function buildRampLUT() {
+  if (!rampTex) return;
+  const stops = readStops().sort((s1, s2) => s1.p - s2.p);
+  const data = rampTex.image.data;
+  for (let x = 0; x < RAMP_W; x++) {
+    const c = sampleStops(stops, x / RAMP_W);
+    data[x * 4] = c[0]; data[x * 4 + 1] = c[1]; data[x * 4 + 2] = c[2]; data[x * 4 + 3] = 255;
+  }
+  rampTex.needsUpdate = true;
+}
+function makeRampTexture() {
+  rampTex = new THREE.DataTexture(new Uint8Array(RAMP_W * 4), RAMP_W, 1, THREE.RGBAFormat);
+  rampTex.colorSpace = THREE.SRGBColorSpace;
+  rampTex.wrapS = THREE.RepeatWrapping;
+  rampTex.wrapT = THREE.ClampToEdgeWrapping;
+  rampTex.minFilter = THREE.LinearFilter;
+  rampTex.magFilter = THREE.LinearFilter;
+  rampTex.generateMipmaps = false;
+  buildRampLUT();
+  return rampTex;
+}
 
 function initGL() {
   if (inited) return;
   inited = true;
 
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, premultipliedAlpha: false });
+  renderer.setClearColor(0x000000, 0);
+  renderer.setPixelRatio(PREVIEW ? 1 : Math.min(window.devicePixelRatio || 1, 2));
+
+  pmremGenerator = new THREE.PMREMGenerator(renderer);
+  pmremGenerator.compileEquirectangularShader();
+  const fallbackEnvScene = new THREE.Scene();
+  fallbackEnvScene.background = new THREE.Color(0x000000);
+  pmremTarget = pmremGenerator.fromScene(fallbackEnvScene, 0.04);
 
   scene = new THREE.Scene();
-  camera = new THREE.Camera(); // 全螢幕 raymarch 不用相機投影
+  camera = new THREE.Camera();
 
   uniforms = {
     uTime:       { value: 0 },
+    uLoopDuration: { value: P.loopDuration },
     uResolution: { value: new THREE.Vector2(1, 1) },
     uRot:        { value: new THREE.Matrix3() },
+    uCameraDistance: { value: P.cameraDistance },
     uCount:      { value: Math.round(P.count) },
-    uRadius:     { value: P.radius },
     uViscosity:  { value: P.viscosity },
-    uSpread:     { value: P.spread },
+    uWobble:     { value: P.wobble },
+    uWobbleScale: { value: P.wobbleScale },
+    uWobbleSpeed: { value: P.wobbleSpeed },
+    uElasticEvent: { value: elasticEvent },
+    uElasticStrength: { value: P.elasticStrength },
+    uElasticDensity: { value: P.elasticDensity },
+    uElasticDamping: { value: P.elasticDamping },
+    uElasticSpeed: { value: P.elasticSpeed },
+    uDrops:      { value: dropData },
+    uBounds:     { value: dropBounds },
     uThickness:  { value: P.thickness },
     uThickVar:   { value: P.thickVar },
     uNoiseScale: { value: P.noiseScale },
@@ -428,27 +843,37 @@ function initGL() {
     uFresnel:    { value: P.fresnel },
     uGravity:    { value: P.gravity },
     uFlowSpeed:  { value: P.flowSpeed },
+    uPatternSpeed: { value: P.patternSpeed },
+    uColorMode:  { value: SELECTS.colorMode.map[P.colorMode] },
+    uRampTex:    { value: makeRampTexture() },
+    uBgMode:     { value: SELECTS.bgMode.map[P.bgMode] },
+    uBgColor:    { value: new THREE.Color(P.bgColor) },
+    uReflect:    { value: P.reflect },
+    uRoughness:  { value: P.roughness },
+    uHdriYaw:    { value: P.hdriYaw },
+    uHdriPitch:  { value: P.hdriPitch },
+    uEnvMap:     { value: makeBlankEnv() },
+    uPmremMap:   { value: pmremTarget.texture },
+    uHasEnv:     { value: 0 },
   };
 
   const geo = new THREE.PlaneGeometry(2, 2);
   const mat = new THREE.ShaderMaterial({
     uniforms, vertexShader: VERT, fragmentShader: FRAG,
     depthTest: false, depthWrite: false,
-    transparent: true, blending: THREE.NormalBlending,
   });
+  // 讓 Three.js 依 PMREM atlas 尺寸注入 CubeUV shader 常數。
+  mat.envMap = pmremTarget.texture;
   mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
   scene.add(mesh);
 
-  applyBg();
+  updateDropUniforms(0);
   resize();
   window.addEventListener('resize', resize);
   bindPointer();
-}
-
-function applyBg() {
-  if (renderer) renderer.setClearColor(new THREE.Color(P.bgColor), 1);
-  document.body.style.background = P.bgColor;
+  syncPanelToUniforms();
+  loadDefaultEnvironment();
 }
 
 function resize() {
@@ -474,10 +899,34 @@ function bindPointer() {
   const end = e => { dragging = false; try { canvas.releasePointerCapture(e.pointerId); } catch (_) {} };
   canvas.addEventListener('pointerup', end);
   canvas.addEventListener('pointercancel', end);
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const el = document.getElementById('cameraDistance');
+    const min = parseFloat(el.min), max = parseFloat(el.max);
+    const next = Math.min(max, Math.max(min, parseFloat(el.value) + e.deltaY * 0.003));
+    el.value = next.toFixed(2);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }, { passive: false });
 }
 
 /* ===== 面板綁定 ===== */
+// 若 GL 尚未建立（預覽暫停中），把當前 P 推進 uniforms
+function syncPanelToUniforms() {
+  if (!uniforms) return;
+  for (const key of Object.keys(DEFAULTS)) {
+    const u = 'u' + key.charAt(0).toUpperCase() + key.slice(1);
+    if (uniforms[u]) uniforms[u].value = (key === 'count') ? Math.round(P[key]) : P[key];
+  }
+  for (const key of Object.keys(SELECTS)) {
+    const u = uniforms[SELECTS[key].uniform];
+    if (u) u.value = SELECTS[key].map[P[key]];
+  }
+  for (const key of Object.keys(COLORS)) uniforms[COLORS[key]].value.set(P[key]);
+  document.body.style.background = (P.bgMode === 'hdri') ? '#000' : P.bgColor;
+}
+
 function bindControls() {
+  // 數值滑桿
   for (const key of Object.keys(DEFAULTS)) {
     const el = document.getElementById(key);
     const valEl = document.getElementById(key + '_v');
@@ -491,20 +940,174 @@ function bindControls() {
     if (!el._bound) { el.addEventListener('input', update); el._bound = true; }
     update();
   }
-  const bg = document.getElementById('bgColor');
-  const bgUpdate = () => { P.bgColor = bg.value; applyBg(); };
-  bg.value = P.bgColor;
-  if (!bg._bound) { bg.addEventListener('input', bgUpdate); bg._bound = true; }
-  bgUpdate();
+  // 下拉選單
+  for (const key of Object.keys(SELECTS)) {
+    const el = document.getElementById(key);
+    const { uniform, map } = SELECTS[key];
+    const update = () => {
+      P[key] = el.value;
+      if (uniforms && uniforms[uniform]) uniforms[uniform].value = map[el.value];
+      updateUIState();
+    };
+    el.value = P[key];
+    if (!el._bound) { el.addEventListener('change', update); el._bound = true; }
+    update();
+  }
+  // 顏色
+  for (const key of Object.keys(COLORS)) {
+    const el = document.getElementById(key);
+    const uName = COLORS[key];
+    const update = () => {
+      P[key] = el.value;
+      if (uniforms) uniforms[uName].value.set(el.value);
+      if (key === 'bgColor') document.body.style.background = (P.bgMode === 'hdri') ? '#000' : el.value;
+    };
+    el.value = P[key];
+    if (!el._bound) { el.addEventListener('input', update); el._bound = true; }
+    update();
+  }
+  bindRamp();
+  updateUIState();
+}
+
+// 自訂漸層色標：數量 + 每色位置
+function updateRampRows() {
+  const n = Math.round(parseFloat(document.getElementById('rampCount').value));
+  for (let i = 0; i < STOP_MAX; i++) {
+    document.getElementById('stopRow' + i).style.display = (i < n) ? 'flex' : 'none';
+  }
+}
+function bindRamp() {
+  const rc = document.getElementById('rampCount');
+  const rcv = document.getElementById('rampCount_v');
+  const onCount = () => { rcv.textContent = Math.round(parseFloat(rc.value)).toFixed(0); updateRampRows(); buildRampLUT(); updateUIState(); };
+  if (!rc._bound) { rc.addEventListener('input', onCount); rc._bound = true; }
+  onCount();
+  for (let i = 0; i < STOP_MAX; i++) {
+    const col = document.getElementById('stopCol' + i);
+    const pos = document.getElementById('stopPos' + i);
+    const pv = document.getElementById('stopPos' + i + '_v');
+    const upd = () => { if (pv) pv.textContent = parseFloat(pos.value).toFixed(2); buildRampLUT(); };
+    if (!col._bound) { col.addEventListener('input', upd); col._bound = true; }
+    if (!pos._bound) { pos.addEventListener('input', upd); pos._bound = true; }
+    upd();
+  }
+}
+function resetRamp() {
+  document.getElementById('rampCount').value = RAMP_DEFAULT.count;
+  for (let i = 0; i < STOP_MAX; i++) {
+    document.getElementById('stopCol' + i).value = RAMP_DEFAULT.cols[i];
+    document.getElementById('stopPos' + i).value = RAMP_DEFAULT.pos[i];
+  }
+}
+
+// 依模式反灰不適用的控制項
+function updateUIState() {
+  const spectral = P.colorMode === 'spectral';
+  const rampGroup = document.getElementById('rampGroup');
+  rampGroup.style.opacity = spectral ? 0.4 : 1;
+  rampGroup.querySelectorAll('input').forEach(el => { el.disabled = spectral; });
+  const colorBackground = P.bgMode === 'color';
+  const bgc = document.getElementById('bgColor');
+  bgc.disabled = !colorBackground;
+  bgc.closest('.row').style.opacity = colorBackground ? 1 : 0.4;
+  document.body.style.background = colorBackground ? P.bgColor : '#000';
 }
 
 document.getElementById('resetBtn').addEventListener('click', () => {
-  Object.assign(P, DEFAULTS, COLOR_DEFAULTS);
+  Object.assign(P, DEFAULTS, SELECT_DEFAULTS, COLOR_DEFAULTS);
+  resetRamp();
   bindControls();
+  if (inited) loadDefaultEnvironment();
+});
+
+/* ===== HDRI 載入（動態 import，離線也不會弄壞主程式）===== */
+let RGBELoaderClass = null;
+async function ensureRGBE() {
+  if (!RGBELoaderClass) {
+    const m = await import('three/addons/loaders/RGBELoader.js');
+    RGBELoaderClass = m.RGBELoader;
+  }
+  return RGBELoaderClass;
+}
+const hdriInput = document.getElementById('hdriInput');
+const hdriState = document.getElementById('hdriState');
+let environmentRequestId = 0;
+
+function applyEnvironmentTexture(tex, label, requestId) {
+  if (requestId !== environmentRequestId) {
+    tex.dispose();
+    return;
+  }
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.generateMipmaps = false;
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+
+  const nextPmremTarget = pmremGenerator.fromEquirectangular(tex);
+  const oldEnv = uniforms.uEnvMap.value;
+  const oldPmremTarget = pmremTarget;
+
+  uniforms.uEnvMap.value = tex;
+  uniforms.uPmremMap.value = nextPmremTarget.texture;
+  uniforms.uHasEnv.value = 1;
+  pmremTarget = nextPmremTarget;
+  mesh.material.envMap = nextPmremTarget.texture;
+  mesh.material.needsUpdate = true;
+
+  if (oldEnv && oldEnv.dispose) oldEnv.dispose();
+  if (oldPmremTarget) oldPmremTarget.dispose();
+  hdriState.textContent = 'HDRI 已載入：' + label;
+}
+
+function loadEnvironment(url, label, isHDR, revokeURL = false) {
+  const requestId = ++environmentRequestId;
+  hdriState.textContent = 'HDRI 載入中：' + label;
+  const finish = () => { if (revokeURL) URL.revokeObjectURL(url); };
+  const apply = tex => {
+    try { applyEnvironmentTexture(tex, label, requestId); }
+    catch (_) {
+      if (requestId === environmentRequestId) hdriState.textContent = 'HDRI 載入失敗：' + label;
+      if (tex && tex.dispose) tex.dispose();
+    }
+    finish();
+  };
+  const fail = () => {
+    if (requestId === environmentRequestId) hdriState.textContent = 'HDRI 載入失敗：' + label;
+    finish();
+  };
+
+  if (isHDR) {
+    ensureRGBE()
+      .then(RGBE => new RGBE().load(url, apply, undefined, fail))
+      .catch(fail);
+  } else {
+    new THREE.TextureLoader().load(url, tex => {
+      tex.colorSpace = THREE.SRGBColorSpace;
+      apply(tex);
+    }, undefined, fail);
+  }
+}
+
+function loadDefaultEnvironment() {
+  loadEnvironment(DEFAULT_HDRI_URL, DEFAULT_HDRI_LABEL, true);
+}
+
+document.getElementById('hdriBtn').addEventListener('click', () => hdriInput.click());
+hdriInput.addEventListener('change', e => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  if (!inited) initGL();
+  const url = URL.createObjectURL(file);
+  loadEnvironment(url, file.name, /\.hdr$/i.test(file.name), true);
+  e.target.value = '';
 });
 
 /* ===== 播放/暫停：面板按鈕、postMessage、分頁隱藏三者共同決定 ===== */
-let userPaused = false, extPaused = PREVIEW; // 預覽預設暫停，直到 gallery 送 vfx-play 才啟動
+let userPaused = false, extPaused = PREVIEW;
 let rafId = 0, last = 0;
 const pauseBtn = document.getElementById('playCtl');
 function isPaused() { return userPaused || extPaused || document.hidden; }
@@ -512,7 +1115,7 @@ function syncLoop() {
   if (isPaused()) {
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
   } else {
-    if (!inited) initGL();      // 首次真正播放時才建立 WebGL context
+    if (!inited) initGL();
     if (!rafId) { last = performance.now(); rafId = requestAnimationFrame(frame); }
   }
 }
@@ -537,19 +1140,20 @@ function frame(now) {
   rafId = requestAnimationFrame(frame);
   const dt = Math.min((now - last) / 1000, 0.05);
   last = now;
-  simT += dt;
+  simT = (simT + dt) % Math.max(0.001, P.loopDuration);
+  updateDropUniforms(simT);
 
-  // 慣性 + 自轉
   if (!dragging) {
     vel.x *= 0.94; vel.y *= 0.94;
     rot.x += vel.x; rot.y += vel.y;
-    rot.y += P.spin * dt * 0.35;
   }
   rot.x = Math.max(-1.2, Math.min(1.2, rot.x));
 
-  // 相機環繞旋轉矩陣：Ry(yaw) * Rx(pitch)
-  rotM4.makeRotationY(rot.y);
-  tmpX.makeRotationX(rot.x);
+  const loopAngle = simT / Math.max(0.001, P.loopDuration) * Math.PI * 2;
+  const autoYaw = Math.sin(loopAngle) * P.spin * 0.6;
+  const autoPitch = Math.sin(loopAngle * 2) * P.spin * 0.12;
+  rotM4.makeRotationY(rot.y + autoYaw);
+  tmpX.makeRotationX(rot.x + autoPitch);
   rotM4.multiply(tmpX);
   uniforms.uRot.value.setFromMatrix4(rotM4);
 
