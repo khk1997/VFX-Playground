@@ -388,6 +388,7 @@ uniform vec4  uDropShape[8];   // xyz：形變主軸，w：體積守恆的縱向
 uniform vec4  uDropPhysics[8]; // x：接觸壓平，y：形狀振盪，z：斷裂尖端，w：配對權重
 uniform vec2  uElasticPair;    // 正在接觸／斷裂的水滴索引
 uniform vec4  uSatellites[3];  // xyz：衛星滴中心，w：半徑（斷裂處的小滴串）
+uniform float uSatelliteBlend; // 衛星滴與頸部的融合度：成形時高（相連），掐斷時→0（分離）
 uniform vec4  uBounds;         // xyz：包圍球中心，w：半徑
 
 uniform float uThickness;
@@ -526,9 +527,11 @@ float mapScene(vec3 p){
     }
     d = smin(d, sphereD, uViscosity);
   }
+  // 衛星滴以「會釋放的 smin」與頸部相連：成形期 blend 高（細絲上的鼓包），
+  // 掐斷時 blend→0，smin 退化為硬 min → 成為自由滴。
   for (int s = 0; s < 3; s++) {
     if (uSatellites[s].w > 0.001) {
-      d = min(d, length(p - uSatellites[s].xyz) - uSatellites[s].w);
+      d = smin(d, length(p - uSatellites[s].xyz) - uSatellites[s].w, uSatelliteBlend);
     }
   }
   // 最大位移遠小於 0.25；遠離表面時略過 noise，不影響射線接近表面的安全性。
@@ -1193,9 +1196,13 @@ function updateDropUniforms(t) {
     const qLen = Math.hypot(qx, qy, qz);
     if (qLen < 0.1) { qx = 0; qy = -uz; qz = uy; }
     else { qx /= qLen; qy /= qLen; qz /= qLen; }
-    // 斷裂窗（~phase 0.24→0.37）：出現→消失，半徑於首尾為 0。
-    const satBreak = Math.max(0, Math.min(1, (phase - 0.24) / 0.13));
+    // 生命窗對齊頸部收細（~phase 0.19→0.34）：衛星滴在細絲上鼓起 → 掐斷 → 短暫殘留後
+    // 消失；半徑於首尾為 0，循環接縫乾淨。
+    const satBreak = Math.max(0, Math.min(1, (phase - 0.19) / 0.15));
     const satLife = Math.sin(Math.PI * satBreak);
+    // 融合度：成形期高（與頸部相連的鼓包），於掐斷（~phase 0.29）前釋放到 0 → 自由滴。
+    const releaseProg = Math.max(0, Math.min(1, (phase - 0.19) / 0.10));
+    if (uniforms) uniforms.uSatelliteBlend.value = 0.34 * (1 - releaseProg);
     const baseR = Math.min(da.w, db.w);
     for (let s = 0; s < SAT_N; s++) {
       const spec = SAT_SPEC[s];
@@ -1211,6 +1218,7 @@ function updateDropUniforms(t) {
   } else {
     elasticEvent.set(0, 0);
     for (let s = 0; s < SAT_N; s++) satelliteDrops[s].w = 0;
+    if (uniforms) uniforms.uSatelliteBlend.value = 0;
   }
 
   for (let i = 0; i < count; i++) previousDropPositions[i].set(dropData[i].x, dropData[i].y, dropData[i].z);
@@ -1347,6 +1355,7 @@ function initGL() {
     uDropPhysics: { value: dropPhysicsData },
     uElasticPair: { value: elasticPair },
     uSatellites: { value: satelliteDrops },
+    uSatelliteBlend: { value: 0 },
     uBounds:     { value: dropBounds },
     uThickness:  { value: P.thickness },
     uThickVar:   { value: P.thickVar },
