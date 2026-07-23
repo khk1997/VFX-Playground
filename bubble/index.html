@@ -115,7 +115,7 @@
 
   <div class="group">
     <h3>鏡頭 Camera</h3>
-    <div class="row"><label>鏡頭距離</label><input type="range" id="cameraDistance" min="2.8" max="10" step="0.05" value="5.6"><span class="val" id="cameraDistance_v"></span></div>
+    <div class="row"><label>鏡頭距離</label><input type="range" id="cameraDistance" min="2.8" max="10" step="0.05" value="5.0"><span class="val" id="cameraDistance_v"></span></div>
     <div class="note">可使用滑鼠滾輪或觸控板拉近、拉遠</div>
   </div>
 
@@ -158,36 +158,34 @@
     <div class="row"><label>水滴數量</label><input type="range" id="count" min="1" max="8" step="1" value="2"><span class="val" id="count_v"></span></div>
     <div class="row"><label>水滴大小</label><input type="range" id="radius" min="0.25" max="1.1" step="0.01" value="0.54"><span class="val" id="radius_v"></span></div>
     <div class="row"><label>黏性融合</label><input type="range" id="viscosity" min="0" max="1.2" step="0.01" value="0.78"><span class="val" id="viscosity_v"></span></div>
+    <div class="row"><label>表面張力</label><input type="range" id="surfaceTension" min="0" max="1.5" step="0.01" value="0.82"><span class="val" id="surfaceTension_v"></span></div>
+    <div class="row"><label>慣性形變</label><input type="range" id="inertiaDeform" min="0" max="1.5" step="0.01" value="0.68"><span class="val" id="inertiaDeform_v"></span></div>
     <div class="row"><label>漂浮範圍</label><input type="range" id="spread" min="0.6" max="2.4" step="0.05" value="0.75"><span class="val" id="spread_v"></span></div>
     <div class="row"><label>表面起伏</label><input type="range" id="wobble" min="0" max="0.4" step="0.005" value="0.305"><span class="val" id="wobble_v"></span></div>
     <div class="row"><label>起伏尺度</label><input type="range" id="wobbleScale" min="0.3" max="6" step="0.1" value="0.7"><span class="val" id="wobbleScale_v"></span></div>
     <div class="note">分離彈性 Capillary Wave</div>
-    <div class="row"><label>分離回彈</label><input type="range" id="elasticStrength" min="0" max="0.2" step="0.005" value="0.015"><span class="val" id="elasticStrength_v"></span></div>
+    <div class="row"><label>分離回彈</label><input type="range" id="elasticStrength" min="0" max="0.2" step="0.005" value="0.024"><span class="val" id="elasticStrength_v"></span></div>
     <div class="row"><label>波紋密度</label><input type="range" id="elasticDensity" min="1" max="8" step="0.1" value="3.5"><span class="val" id="elasticDensity_v"></span></div>
     <div class="row"><label>波紋衰減</label><input type="range" id="elasticDamping" min="0" max="1" step="0.01" value="0.55"><span class="val" id="elasticDamping_v"></span></div>
     <div class="row"><label>傳播速度</label><input type="range" id="elasticSpeed" min="0.5" max="2" step="0.05" value="1.75"><span class="val" id="elasticSpeed_v"></span></div>
+    <div class="row"><label>衛星小滴</label><input type="range" id="satelliteAmount" min="0" max="1" step="0.01" value="0.22"><span class="val" id="satelliteAmount_v"></span></div>
   </div>
 
   <div class="group">
     <h3>動態 Motion</h3>
     <div class="row"><label>動態模式</label><select id="motion">
       <option value="cinematic">電影循環 Cinematic</option>
-      <option value="drift">漂移 Drift</option>
-      <option value="float">巨泡漂浮 Float</option>
-      <option value="orbit">軌道 Orbit</option>
-      <option value="lava">熔岩燈 Lava</option>
-      <option value="breathe">呼吸 Breathe</option>
     </select><span class="val"></span></div>
     <div class="row"><label>循環秒數</label><input type="range" id="loopDuration" min="4" max="30" step="0.5" value="12"><span class="val" id="loopDuration_v"></span></div>
     <div class="row"><label>動態張力</label><input type="range" id="flowSpeed" min="0" max="1.5" step="0.01" value="0.47"><span class="val" id="flowSpeed_v"></span></div>
-    <div class="row"><label>起伏動畫</label><input type="range" id="wobbleSpeed" min="0" max="2" step="0.01" value="1.05"><span class="val" id="wobbleSpeed_v"></span></div>
-    <div class="row"><label>環繞幅度</label><input type="range" id="spin" min="0" max="1" step="0.01" value="0.14"><span class="val" id="spin_v"></span></div>
+    <div class="row"><label>起伏動畫</label><input type="range" id="wobbleSpeed" min="0" max="2" step="0.01" value="0.65"><span class="val" id="wobbleSpeed_v"></span></div>
+    <div class="row"><label>環繞幅度</label><input type="range" id="spin" min="0" max="1" step="0.01" value="0.08"><span class="val" id="spin_v"></span></div>
   </div>
 
   <div class="btns">
     <button id="resetBtn">↺ 重設</button>
   </div>
-  <div class="hint">水滴靠近時因表面張力（smooth-min）融合、飄開時分裂。<br>拖曳可旋轉視角；滾輪可縮放；上色模式切「自訂漸層」可指定配色。</div>
+  <div class="hint">水滴會依速度與尺寸產生體積守恆形變；接觸時排液壓平、融合收頸，強拉斷時可能形成衛星小滴。<br>拖曳可旋轉視角；滾輪可縮放；上色模式切「自訂漸層」可指定配色。</div>
 </div>
 <button id="toggleBtn">⚙ 面板</button>
 <button id="playCtl">⏸ 暫停</button>
@@ -223,6 +221,8 @@ const DEFAULTS = {              // 數值滑桿
   count: 2,
   radius: 0.54,
   viscosity: 0.78,
+  surfaceTension: 0.82,
+  inertiaDeform: 0.68,
   spread: 0.75,
   fresnel: 0.8,
   gravity: 1,
@@ -233,16 +233,17 @@ const DEFAULTS = {              // 數值滑桿
   materialExposure: 1,
   hdriYaw: 0,
   hdriPitch: 0,
-  cameraDistance: 5.6,
+  cameraDistance: 5.0,
   loopDuration: 12,
   wobble: 0.305,
   wobbleScale: 0.7,
-  wobbleSpeed: 1.05,
-  elasticStrength: 0.015,
+  wobbleSpeed: 0.65,
+  elasticStrength: 0.024,
   elasticDensity: 3.5,
   elasticDamping: 0.55,
   elasticSpeed: 1.75,
-  spin: 0.14,
+  satelliteAmount: 0.22,
+  spin: 0.08,
 };
 const SELECT_DEFAULTS = { bgMode: 'color', colorMode: 'ramp', motion: 'cinematic' };
 const COLOR_DEFAULTS  = { bgColor: '#000000' };
@@ -383,6 +384,10 @@ uniform float uElasticDensity;
 uniform float uElasticDamping;
 uniform float uElasticSpeed;
 uniform vec4  uDrops[8];       // xyz：中心，w：半徑（CPU 每幀更新）
+uniform vec4  uDropShape[8];   // xyz：形變主軸，w：體積守恆的縱向伸縮
+uniform vec4  uDropPhysics[8]; // x：接觸壓平，y：形狀振盪，z：斷裂尖端，w：配對權重
+uniform vec2  uElasticPair;    // 正在接觸／斷裂的水滴索引
+uniform vec4  uSatellites[3];  // xyz：衛星滴中心，w：半徑（斷裂處的小滴串）
 uniform vec4  uBounds;         // xyz：包圍球中心，w：半徑
 
 uniform float uThickness;
@@ -464,10 +469,33 @@ float smin(float a, float b, float k){
   return min(a, b) - h * h * h * kc * (1.0 / 6.0);
 }
 
+// 方向性液滴 SDF：縱向伸長時以 1/sqrt(s) 壓縮橫向，近似維持體積。
+float dropletDistance(vec3 p, int i){
+  vec3 local = p - uDrops[i].xyz;
+  vec3 axis = normalize(uDropShape[i].xyz + vec3(0.00001));
+  vec4 physics = uDropPhysics[i];
+  float longScale = clamp(uDropShape[i].w, 0.68, 1.65);
+  longScale *= 1.0 + physics.y * 0.16 + physics.z * 0.12;
+  longScale *= 1.0 - physics.x * 0.1;
+  float transverseScale = inversesqrt(max(longScale, 0.2));
+  float along = dot(local, axis);
+  vec3 across = local - axis * along;
+  // 接觸面局部壓平；分離後同一極點短暫保留尖頭，再由表面張力收回。
+  float pole = along / max(0.001, uDrops[i].w * longScale);
+  float poleMask = smoothstep(0.05, 0.82, pole);
+  along += physics.x * uDrops[i].w * 0.13 * poleMask;
+  along -= physics.z * uDrops[i].w * 0.11 * poleMask;
+  vec3 q = across / transverseScale + axis * (along / longScale);
+  float conservativeScale = min(longScale, transverseScale);
+  return (length(q) - uDrops[i].w) * conservativeScale;
+}
+
 // 分離後由接觸極點向外傳播的局部毛細波；只處理主要水滴對 0/1。
 float capillaryWave(vec3 p, int i){
   vec3 center = uDrops[i].xyz;
-  vec3 other = (i == 0) ? uDrops[1].xyz : uDrops[0].xyz;
+  int pairA = int(uElasticPair.x + 0.5);
+  int pairB = int(uElasticPair.y + 0.5);
+  vec3 other = (i == pairA) ? uDrops[pairB].xyz : uDrops[pairA].xyz;
   vec3 local = p - center;
   float localLen = length(local);
   vec3 contactAxis = other - center;
@@ -489,12 +517,19 @@ float mapScene(vec3 p){
   float d = 1e9;
   for (int i = 0; i < MAXN; i++){
     if (i >= uCount) break;
-    float sphereD = length(p - uDrops[i].xyz) - uDrops[i].w;
-    // 僅在事件期間、主要兩滴且接近表面時付出波紋成本。
-    if (uElasticEvent.x > 0.0001 && i < 2 && abs(sphereD) < 0.3) {
+    float sphereD = dropletDistance(p, i);
+    int pairA = int(uElasticPair.x + 0.5);
+    int pairB = int(uElasticPair.y + 0.5);
+    // 僅在事件期間、活動配對且接近表面時付出波紋成本。
+    if (uElasticEvent.x > 0.0001 && (i == pairA || i == pairB) && abs(sphereD) < 0.3) {
       sphereD -= capillaryWave(p, i);
     }
     d = smin(d, sphereD, uViscosity);
+  }
+  for (int s = 0; s < 3; s++) {
+    if (uSatellites[s].w > 0.001) {
+      d = min(d, length(p - uSatellites[s].xyz) - uSatellites[s].w);
+    }
   }
   // 最大位移遠小於 0.25；遠離表面時略過 noise，不影響射線接近表面的安全性。
   if (uWobble > 0.001 && d < 0.25) {
@@ -664,7 +699,10 @@ FilmMaterial thinFilm(vec3 p, vec3 N, vec3 V){
 void main(){
   vec2 uv = (vUv * 2.0 - 1.0);
   uv.x *= uResolution.x / uResolution.y;
-  float tanHalfFov = 0.364; // fov ~40°
+  // 構圖置中（穩定英雄鏡）：主體位於畫面正中，分裂時兩滴對稱展開、不易出框。
+  // 若日後想偏移，改此處：負 x 右移、負 y 上移。
+  uv += vec2(0.0, 0.0);
+  float tanHalfFov = 0.42; // fov ~46°：稍廣、加強近遠水滴的透視景深
 
   vec3 ro = uRot * vec3(0.0, 0.0, uCameraDistance);
   vec3 rd = uRot * normalize(vec3(uv * tanHalfFov, -1.0));
@@ -789,14 +827,30 @@ let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
 let pmremGenerator = null, pmremTarget = null;
 let inited = false;
 
-const rot = { x: 0.1, y: 0.3 };
+const rot = { x: 0.17, y: 0.52 };
 const vel = { x: 0, y: 0 };
 let dragging = false, lastX = 0, lastY = 0;
 const rotM4 = new THREE.Matrix4();
 const tmpX = new THREE.Matrix4();
+const tmpZ = new THREE.Matrix4();
 const dropData = Array.from({ length: 8 }, () => new THREE.Vector4());
+const dropShapeData = Array.from({ length: 8 }, () => new THREE.Vector4(1, 0, 0, 1));
+const dropPhysicsData = Array.from({ length: 8 }, () => new THREE.Vector4());
+const previousDropPositions = Array.from({ length: 8 }, () => new THREE.Vector3());
 const dropBounds = new THREE.Vector4(0, 0, 0, 1);
 const elasticEvent = new THREE.Vector2(0, 0);
+const elasticPair = new THREE.Vector2(0, 1);
+// 斷裂處的衛星滴串（Rayleigh–Plateau）：沿收頸軸排列、尺寸漸小。
+const SAT_N = 3;
+const SAT_SPEC = [
+  { along: -0.55, size: 0.50, jitter:  0.05 }, // 主衛星，偏母滴側
+  { along:  0.35, size: 0.30, jitter: -0.06 }, // 次衛星
+  { along:  1.05, size: 0.17, jitter:  0.05 }, // 末端小滴
+];
+const satelliteDrops = Array.from({ length: SAT_N }, () => new THREE.Vector4(0, 0, 0, 0));
+let previousDropT = null;
+let previousPairKey = '';
+let previousPairGap = 0;
 
 const fract = x => x - Math.floor(x);
 const hash11CPU = n => fract(Math.sin(n * 127.1) * 43758.5453123);
@@ -819,6 +873,55 @@ function smoothstepCPU(value, edge0, edge1) {
   return x * x * (3 - 2 * x);
 }
 
+function cinematicTimeline(phase) {
+  // 12 秒敘事，節奏配平：停留 → 蓄力 → 拉斷 → 漂浮 → 靠近 → 接觸融合 → 毛細平復 → 停留。
+  // 位置與體積分開控制：聚合時 approach 幾乎收滿距離，最後由表面接觸完成融合。
+  // 分裂與融合各自擁有一次守恆的毛細事件（recoil / coalesce），維持敘事對稱。
+  const anticipation = cyclicPulse(phase, 0.09, 0.05);
+  const pull = smoothstepCPU(phase, 0.10, 0.19);
+  const detach = smoothstepCPU(phase, 0.18, 0.26);
+  // 靠近提前到 0.50，把原本 ~4 秒的空拍漂浮段壓成與分裂段對稱的長度。
+  const approach = smoothstepCPU(phase, 0.50, 0.66);
+  const absorb = smoothstepCPU(phase, 0.66, 0.80);
+  const contact = smoothstepCPU(phase, 0.60, 0.70)
+    * (1 - smoothstepCPU(phase, 0.80, 0.88));
+
+  const volumeSeparation = smoothstepCPU(phase, 0.135, 0.26) * (1 - absorb);
+  const travelOut = smoothstepCPU(phase, 0.13, 0.27);
+  // approach 收到 0.92：保留真實接觸殘距（兩滴接觸時球心相距約 r1+r2，不重合），
+  // 剩餘閉合交給 absorb 期子滴收縮，讀起來是「表面貼合後排液」而非「原地被吸乾」。
+  const distanceSeparation = travelOut
+    * (1 - approach * 0.92)
+    * (1 - absorb);
+
+  const recoilProgress = Math.max(0, Math.min(1, (phase - 0.19) / 0.17));
+  // raised-cosine（Hann）脈衝取代半正弦：峰值與時機不變，但兩端斜率為 0。
+  // sin(π·x) 在 clamp 邊界（分離起點 phase 0.19）斜率從 0 突跳到 π/0.17，
+  // 是 C1 不連續 → 無限 jerk（加速度脈衝），視覺上就是分離瞬間那下不自然的猛晃。
+  const recoil = 0.5 * (1 - Math.cos(2 * Math.PI * recoilProgress));
+  const splitProgress = Math.max(0, Math.min(1, (phase - 0.11) / 0.18));
+  const splitShape = 0.5 * (1 - Math.cos(2 * Math.PI * splitProgress))
+    * (1 - smoothstepCPU(phase, 0.29, 0.36));
+
+  // 融合毛細震盪進度：接觸建立後（~0.62）發源，於 absorb 完成（0.80，接觸軸退化）前
+  // ring-down 歸零；尾段為 0 亦維持循環週期性。
+  const coalesce = Math.max(0, Math.min(1, (phase - 0.62) / 0.18));
+
+  return {
+    anticipation,
+    pull,
+    detach,
+    approach,
+    absorb,
+    contact,
+    volumeSeparation,
+    distanceSeparation,
+    recoil,
+    splitShape,
+    coalesce,
+  };
+}
+
 // 水滴動畫只在 CPU 每幀計算一次；shader 的每個 march step 僅讀取 vec4 array。
 function updateDropUniforms(t) {
   const count = Math.max(1, Math.min(8, Math.round(P.count)));
@@ -827,13 +930,21 @@ function updateDropUniforms(t) {
   const a = phase * tau;
   const energy = 0.55 + P.flowSpeed * 0.9;
 
-  // 電影循環事件：預備 → 聚合/融合 → 阻尼回彈 → 分離/餘韻。
-  const anticipation = cyclicPulse(phase, 0.2, 0.09);
-  const merge = cyclicPulse(phase, 0.44, 0.2);
-  const followEnvelope = cyclicPulse(phase, 0.68, 0.16);
-  const followThrough = followEnvelope * Math.sin((phase - 0.52) * tau * 3);
-  // 融合後確實拉斷 smooth-min 頸部；循環終點前平滑回到初始狀態。
-  const breakaway = cyclicPulse(phase, 0.78, 0.22);
+  const cinema = cinematicTimeline(phase);
+  const separation = cinema.volumeSeparation;
+  const merge = 1 - separation;
+  const tension = cinema.pull * (1 - cinema.detach);
+  const breakaway = cinema.recoil;
+  const bounceProgress = Math.max(0, Math.min(1, (phase - 0.19) / 0.17));
+  // 只保留一次小幅回彈；不再疊加多週正負振盪。
+  const followThrough = breakaway * Math.sin(bounceProgress * Math.PI * 2)
+    * Math.exp(-3.2 * bounceProgress);
+  // 滑桿值仍是基準黏度；電影模式依事件暫時改變融合半徑。
+  // 接觸時增黏，拉伸時開始收頸，斷裂時快速卸除 smooth-min 的連接。
+  let viscosityScale = P.motion === 'cinematic'
+    ? Math.max(0.35, 1 + merge * 0.15 - tension * 0.25 - breakaway * 0.55)
+    : 1;
+  let effectiveViscosity = P.viscosity * viscosityScale;
   const groupX = Math.sin(a) * P.spread * 0.12 * energy;
   const groupY = Math.sin(a * 2 + 0.4) * P.spread * 0.08 * energy;
   const groupZ = Math.cos(a) * P.spread * 0.07 * energy;
@@ -843,74 +954,277 @@ function updateDropUniforms(t) {
     let x = 0, y = 0, z = 0, radiusFactor = 1;
 
     if (P.motion === 'cinematic') {
-      const anchor = i * tau / count + (h1 - 0.5) * 0.5;
-      const arc = anchor + Math.sin(a + h1 * tau) * 0.24 + Math.sin(a * 2 + h2 * tau) * 0.07;
-      const radial = P.spread * (0.68 + 0.12 * Math.sin(a + h2 * tau));
-      const mergeResponse = Math.pow(merge, 0.85 + h1 * 0.3);
-      const actionScale = (1 + anticipation * (0.12 + h2 * 0.06))
-        * (1 - mergeResponse * 0.8)
-        * (1 + followThrough * (0.07 + h3 * 0.04))
-        * (1 + breakaway * 0.6);
-      x = groupX + Math.cos(arc) * radial * actionScale * energy;
-      y = groupY
-        + Math.sin(a * 2 + h3 * tau) * P.spread * 0.2 * actionScale * energy
-        + (h2 - 0.5) * P.spread * 0.12;
-      z = groupZ + Math.sin(arc) * radial * 0.55 * actionScale * energy;
-      radiusFactor = 1 + anticipation * 0.05 - mergeResponse * 0.04 + followThrough * 0.025;
-    } else if (P.motion === 'float') {
-      x = Math.sin(a + h1 * tau) * P.spread * 0.5 * energy;
-      y = Math.sin(a * 2 + i * 1.9) * P.spread * 0.7 * energy;
-      z = Math.cos(a + h2 * tau) * P.spread * 0.4 * energy;
-    } else if (P.motion === 'orbit') {
-      const ang = a + i * tau / count;
-      x = Math.cos(ang) * P.spread;
-      y = Math.sin(a * 2 + h2 * tau) * P.spread * 0.45 * energy;
-      z = Math.sin(ang) * P.spread;
-    } else if (P.motion === 'lava') {
-      x = (h1 - 0.5) * P.spread * 0.8;
-      y = Math.sin(a + i * 2.1) * P.spread * energy;
-      z = (h3 - 0.5) * P.spread * 0.6;
-    } else if (P.motion === 'breathe') {
-      x = Math.sin(i * 2.4) * P.spread * 0.5;
-      y = Math.cos(i * 1.7) * P.spread * 0.5;
-      z = Math.sin(i * 3.1) * P.spread * 0.4;
-      radiusFactor = 1 + 0.28 * Math.sin(a + i * 1.3) * Math.min(1.25, energy);
-    } else {
-      x = Math.sin(a + h1 * tau) * P.spread * energy;
-      y = Math.sin(a * 2 + h2 * tau + 1.7) * P.spread * 0.7 * energy;
-      z = Math.sin(a * 3 + h3 * tau + 3.1) * P.spread * 0.55 * energy;
+      // 所有水滴共用同一個緩慢旋轉的分離軸；不再各自沿亂數弧線交叉碰撞。
+      const anchor = i * tau / count + Math.sin(a) * 0.18;
+      const radial = P.spread * (1.04 + h2 * 0.06) * energy;
+      const recoil = 1 + breakaway * (0.11 + h2 * 0.018)
+        + followThrough * (0.035 + h3 * 0.012);
+      const actionScale = cinema.distanceSeparation * recoil;
+      x = groupX + Math.cos(anchor) * radial * actionScale;
+      y = groupY + Math.sin(anchor) * radial * 0.24 * actionScale;
+      z = groupZ + Math.sin(anchor) * radial * 0.52 * actionScale;
+      // 形變本身已近似守恆體積，避免再用半徑做一次「呼吸」而產生橫向縮放感。
+      radiusFactor = 1 + cinema.anticipation * 0.01
+        + breakaway * 0.006 + followThrough * 0.004;
     }
+    // 大滴受重力與慣性影響較明顯；常量位移不破壞循環接縫。
+    y -= P.gravity * P.spread * 0.045 * Math.pow(radius, 1.35);
     dropData[i].set(x, y, z, P.radius * radius * radiusFactor);
   }
 
-  // 以實際 SDF 頸部是否斷裂觸發毛細波，不再用固定時間假裝已分離。
-  // C2 smin 使用 kc = 1.5k，兩球的連接臨界表面間距為 kc / 3 = 0.5k。
-  if (P.motion === 'cinematic' && count >= 2) {
-    const aDrop = dropData[0], bDrop = dropData[1];
-    const centerDistance = Math.hypot(
-      aDrop.x - bDrop.x,
-      aDrop.y - bDrop.y,
-      aDrop.z - bDrop.z,
-    );
-    const neckGap = centerDistance - aDrop.w - bDrop.w - P.viscosity * 0.5;
-    const detachGate = smoothstepCPU(neckGap, 0, 0.08);
-    // 預設動態約在 0.64 斷開；實際門檻仍由 detachGate 決定。
-    const progress = Math.max(0, Math.min(1, (phase - 0.635) / 0.28));
-    const pulse = Math.sin(Math.PI * progress);
-    const envelope = detachGate * pulse * pulse
-      * Math.pow(1 - progress, 0.25 + P.elasticDamping * 1.5);
-    elasticEvent.set(envelope, progress);
-  } else {
-    elasticEvent.set(0, 0);
+  // 電影模式的合體狀態是真正的一顆母滴：其餘水滴由零半徑連續長出，而不是讓
+  // 多顆完整半徑的 SDF 重疊後再突然解鎖。以 q^3 轉移體積，子滴半徑會隨 q
+  // 近似線性增長，同時嚴格維持總體積，輪廓便能自然經過鼓包、細頸、斷裂。
+  if (P.motion === 'cinematic' && count > 1) {
+    const childVolumeProgress = separation * separation * separation;
+    let transferredVolume = 0;
+    for (let i = 1; i < count; i++) {
+      const targetRadius = dropData[i].w;
+      const targetVolume = targetRadius ** 3;
+      transferredVolume += targetVolume * (1 - childVolumeProgress);
+      dropData[i].w = targetRadius * separation;
+    }
+    const primaryTargetRadius = dropData[0].w;
+    dropData[0].w = Math.cbrt(primaryTargetRadius ** 3 + transferredVolume);
   }
 
+  // 電影敘事期間鎖定主配對，避免多滴的最近距離交替造成形變軸跳動。
+  // 其他模式仍使用即時最近配對。
+  let pairA = 0, pairB = Math.min(1, count - 1), pairDistance = Infinity, surfaceGap = Infinity;
+  if (count >= 2 && P.motion === 'cinematic') {
+    const da = dropData[pairA], db = dropData[pairB];
+    pairDistance = Math.hypot(da.x - db.x, da.y - db.y, da.z - db.z);
+    surfaceGap = pairDistance - da.w - db.w;
+  } else {
+    for (let i = 0; i < count; i++) {
+      for (let j = i + 1; j < count; j++) {
+        const di = dropData[i], dj = dropData[j];
+        const distance = Math.hypot(di.x - dj.x, di.y - dj.y, di.z - dj.z);
+        const gap = distance - di.w - dj.w;
+        if (gap < surfaceGap) {
+          pairA = i; pairB = j; pairDistance = distance; surfaceGap = gap;
+        }
+      }
+    }
+  }
+
+  const frameDt = previousDropT == null || t < previousDropT
+    ? 0 : Math.min(0.05, Math.max(0.0001, t - previousDropT));
+  const pairKey = `${pairA}:${pairB}`;
+  const gapVelocity = frameDt > 0 && pairKey === previousPairKey
+    ? (surfaceGap - previousPairGap) / frameDt : 0;
+  const contactRange = Math.max(0.12, P.viscosity * 0.55);
+  const contactAmount = count >= 2
+    ? 1 - smoothstepCPU(surfaceGap, 0.015, contactRange) : 0;
+  const drainageHold = contactAmount * merge;
+  const separationSpeed = Math.max(0, gapVelocity);
+  // 電影模式由體積轉移本身完成分裂／融合，不再額外鎖中心或複製合體半徑。
+  // 額外的 fusion lock 正是先縮放、再雙葉化的第二套互相衝突的形變來源。
+  const fusionLock = 0;
+  const fusionAmount = Math.max(drainageHold, fusionLock);
+  let pairAxisX = 1, pairAxisY = 0, pairAxisZ = 0;
+
+  // 非電影模式仍可依實際接觸做黏性融合；電影模式已在上方守恆轉移體積。
+  if (P.motion !== 'cinematic' && count >= 2 && fusionAmount > 0) {
+    const da = dropData[pairA], db = dropData[pairB];
+    const axisX = db.x - da.x, axisY = db.y - da.y, axisZ = db.z - da.z;
+    const axisInv = 1 / Math.max(0.0001, Math.hypot(axisX, axisY, axisZ));
+    pairAxisX = axisX * axisInv; pairAxisY = axisY * axisInv; pairAxisZ = axisZ * axisInv;
+    const midX = (da.x + db.x) * 0.5;
+    const midY = (da.y + db.y) * 0.5;
+    const midZ = (da.z + db.z) * 0.5;
+    da.x += (midX - da.x) * fusionLock; db.x += (midX - db.x) * fusionLock;
+    da.y += (midY - da.y) * fusionLock; db.y += (midY - db.y) * fusionLock;
+    da.z += (midZ - da.z) * fusionLock; db.z += (midZ - db.z) * fusionLock;
+    const radiusA = dropData[pairA].w, radiusB = dropData[pairB].w;
+    const mergedRadius = Math.cbrt(radiusA ** 3 + radiusB ** 3);
+    dropData[pairA].w += (mergedRadius - radiusA) * fusionAmount;
+    dropData[pairB].w += (mergedRadius - radiusB) * fusionAmount;
+  }
+
+  // 實際接觸距離修正事件黏性：壓平時增黏，頸部拉伸與快速分離時卸黏。
+  if (P.motion === 'cinematic' && count >= 2) {
+    viscosityScale = Math.max(0.35,
+      1 + cinema.contact * 0.2 - tension * 0.18
+      - breakaway * (0.42 + Math.min(0.1, separationSpeed * 0.035)));
+    effectiveViscosity = P.viscosity * viscosityScale;
+  }
+  if (uniforms) uniforms.uViscosity.value = effectiveViscosity;
+
+  // 每滴以速度決定慣性拉伸；斷裂後的彈性留給位移回彈與局部毛細波。
+  // 不再對整顆水滴施加正負長軸振盪，避免兩滴同步橫向縮放再復原。
+  for (let i = 0; i < count; i++) {
+    const d = dropData[i];
+    let vx = 0, vy = 0, vz = 0;
+    if (frameDt > 0) {
+      const prev = previousDropPositions[i];
+      vx = (d.x - prev.x) / frameDt;
+      vy = (d.y - prev.y) / frameDt;
+      vz = (d.z - prev.z) / frameDt;
+    }
+    const speed = Math.hypot(vx, vy, vz);
+    let ax = speed > 0.0001 ? vx / speed : 1;
+    let ay = speed > 0.0001 ? vy / speed : 0;
+    let az = speed > 0.0001 ? vz / speed : 0;
+    const sizeResponse = Math.sqrt(Math.max(0.2, d.w) / 0.54);
+    const tensionResistance = 0.58 + P.surfaceTension * 0.42;
+    let stretch = 1 + Math.min(0.24,
+      speed * 0.055 * P.inertiaDeform * sizeResponse / tensionResistance);
+    let flatten = 0, shapeOscillation = 0, tip = 0, paired = 0;
+
+    if (count >= 2 && (i === pairA || i === pairB)) {
+      const other = dropData[i === pairA ? pairB : pairA];
+      const dx = other.x - d.x, dy = other.y - d.y, dz = other.z - d.z;
+      const invDistance = 1 / Math.max(0.0001, Math.hypot(dx, dy, dz));
+      const contactAxisX = dx * invDistance;
+      const contactAxisY = dy * invDistance;
+      const contactAxisZ = dz * invDistance;
+      // 完全分離時沿速度方向形變；只有事件或接觸期間才轉向兩滴之間的軸線。
+      // 電影模式回彈期把形變軸完全鎖到 contactAxis（法線），確保斷裂尖端嚴格沿法線
+      // 回彈、不隨殘餘速度分量抖動；breakaway 為 C1 的 Hann，鎖定權重本身平滑。
+      const breakawayLock = P.motion === 'cinematic' ? breakaway : breakaway * 0.85;
+      const pairInfluence = Math.min(1,
+        Math.max(contactAmount, fusionLock, tension, breakawayLock));
+      // 分離時速度軸 ≈ −contactAxis（往外飛，背向另一顆）；直接線性混向法線會在中途
+      // 抵消成零向量，使 normalize 病態、尖端指向翻面而抖動。先把速度軸翻到與法線
+      // 同半球再混合。尖端(physics.z)只在 +axis 極點，故軸的正負號需與法線一致；
+      // 拉伸(longScale)對稱、drift 期無尖端，翻號不影響外觀。
+      if (ax * contactAxisX + ay * contactAxisY + az * contactAxisZ < 0) {
+        ax = -ax; ay = -ay; az = -az;
+      }
+      ax += (contactAxisX - ax) * pairInfluence;
+      ay += (contactAxisY - ay) * pairInfluence;
+      az += (contactAxisZ - az) * pairInfluence;
+      const axisLength = Math.max(0.0001, Math.hypot(ax, ay, az));
+      ax /= axisLength; ay /= axisLength; az /= axisLength;
+      const physicalStretch = stretch
+        + tension * (0.12 + P.surfaceTension * 0.05)
+        + breakaway * 0.055;
+      if (P.motion === 'cinematic') {
+        // 電影模式由單一包絡擁有長軸形變；速度只提供少量次級慣性。
+        const designedStretch = 1
+          + cinema.splitShape * (0.085 + P.surfaceTension * 0.025)
+          + cinema.contact * (0.025 + P.surfaceTension * 0.012);
+        stretch = designedStretch + (physicalStretch - 1) * 0.22;
+      } else {
+        stretch = physicalStretch;
+      }
+      // 壓平只在聚合接觸／排液期發生，不再於分裂與融合兩側各出現一次。
+      const drainageTransition = contactAmount * (P.motion === 'cinematic'
+        ? cinema.contact
+        : Math.sin(Math.PI * merge));
+      flatten = drainageTransition * (0.55 + P.surfaceTension * 0.2);
+      // 電影模式用平滑解析包絡驅動尖端回彈，與逐幀量測的 separationSpeed 解耦，
+      // 避免量測噪聲讓尖頭幅度抖動；非電影模式仍依實際分離速度觸發。
+      tip = P.motion === 'cinematic'
+        ? breakaway * Math.exp(-4.2 * bounceProgress)
+        : breakaway * Math.exp(-4.2 * bounceProgress)
+          * smoothstepCPU(separationSpeed, 0.02, 0.35);
+      // Q 彈：擾動後整顆果凍震盪，經 physics.y 調變長軸；shader 以
+      // transverseScale=1/√longScale 補償橫向 → 體積守恆的 prolate↔oblate 脈動。
+      // 振幅用 C1 的事件包絡（breakaway 的 Hann / 融合 settle 的 Hann），兩端斜率為 0，
+      // 事件內與循環接縫都無跳變；頻率隨滴徑 √(σ/R³) 提高，小滴抖得快、符合物理。
+      if (P.motion === 'cinematic') {
+        const jellyFreq = Math.sqrt(0.54 / Math.max(0.2, d.w));
+        const wobbleGain = 0.45 + P.elasticStrength * 4.5;
+        // 分裂回彈：斷裂後盪約兩下收斂。
+        const sepWobble = breakaway
+          * Math.sin(2 * Math.PI * (2.3 * jellyFreq) * bounceProgress);
+        // 融合著陸：獨立於 coalesce，延伸到 absorb 完成後的 hold 段（0.74→0.98）平復，
+        // 於接縫前歸零。
+        const settleProg = Math.max(0, Math.min(1, (phase - 0.74) / 0.24));
+        const settleEnv = 0.5 * (1 - Math.cos(2 * Math.PI * settleProg));
+        const mergeWobble = settleEnv
+          * Math.sin(2 * Math.PI * (2.0 * jellyFreq) * settleProg);
+        shapeOscillation = Math.max(-1.2, Math.min(1.2,
+          (sepWobble + mergeWobble * 1.1) * wobbleGain));
+      }
+      paired = 1;
+      // 鎖定合體後兩個 SDF 使用完全相同的主軸與伸縮，視覺上成為單一液滴。
+      ax += (pairAxisX - ax) * fusionLock;
+      ay += (pairAxisY - ay) * fusionLock;
+      az += (pairAxisZ - az) * fusionLock;
+      stretch += (1 - stretch) * fusionLock;
+      flatten *= 1 - fusionLock;
+    }
+    dropShapeData[i].set(ax, ay, az, stretch);
+    dropPhysicsData[i].set(flatten, shapeOscillation, tip, paired);
+  }
+  for (let i = count; i < 8; i++) {
+    dropShapeData[i].set(1, 0, 0, 1);
+    dropPhysicsData[i].set(0, 0, 0, 0);
+  }
+
+  // 以實際 SDF 頸部是否斷裂觸發毛細波，並把活動配對傳給 shader。
+  if (P.motion === 'cinematic' && count >= 2) {
+    elasticPair.set(pairA, pairB);
+    const neckGap = pairDistance - dropData[pairA].w - dropData[pairB].w
+      - effectiveViscosity * 0.5;
+    const detachGate = smoothstepCPU(neckGap, 0, 0.08);
+    const progress = Math.max(0, Math.min(1, (phase - 0.19) / 0.20));
+    const pulse = Math.sin(Math.PI * progress);
+    const sizeFrequency = Math.sqrt(0.54 / Math.max(0.2,
+      (dropData[pairA].w + dropData[pairB].w) * 0.5));
+    const detachEnvelope = detachGate * pulse * pulse * P.surfaceTension
+      * Math.pow(1 - progress, 0.25 + P.elasticDamping * 1.5);
+
+    // 毛細回彈波只在分裂（pinch-off）發生；融合為平順接合，不再產生回彈漣漪。
+    elasticEvent.set(detachEnvelope, Math.min(1, progress * sizeFrequency));
+    if (uniforms) {
+      uniforms.uElasticStrength.value = P.elasticStrength
+        * (0.62 + P.surfaceTension * 0.58) / (1 + P.viscosity * 0.32);
+      uniforms.uElasticDamping.value = Math.max(0, Math.min(1,
+        P.elasticDamping + P.viscosity * 0.12 - P.surfaceTension * 0.06));
+      uniforms.uElasticSpeed.value = P.elasticSpeed
+        * (0.74 + P.surfaceTension * 0.3) * sizeFrequency;
+    }
+
+    // 衛星滴串：液橋 pinch-off（Rayleigh–Plateau）在收頸軸上留下一列漸小的小滴。
+    // 沿兩滴連線（收頸軸）排列，於斷裂瞬間短暫出現、半徑首尾歸零 → 循環接縫乾淨。
+    // 以解析包絡驅動（不再靠逐幀量測 neckGap / flowSpeed 閘控，避免幾乎不可見）；
+    // 尺寸與有無由「衛星小滴」滑桿控制。
+    const da = dropData[pairA], db = dropData[pairB];
+    const sdx = db.x - da.x, sdy = db.y - da.y, sdz = db.z - da.z;
+    const sInv = 1 / Math.max(0.0001, Math.hypot(sdx, sdy, sdz));
+    const ux = sdx * sInv, uy = sdy * sInv, uz = sdz * sInv;
+    const mx = (da.x + db.x) * 0.5, my = (da.y + db.y) * 0.5, mz = (da.z + db.z) * 0.5;
+    // 垂直於軸的方向，供極輕微非共線抖動，避免像一串完美珠子。
+    let qx = -uy, qy = ux, qz = 0;
+    const qLen = Math.hypot(qx, qy, qz);
+    if (qLen < 0.1) { qx = 0; qy = -uz; qz = uy; }
+    else { qx /= qLen; qy /= qLen; qz /= qLen; }
+    // 斷裂窗（~phase 0.24→0.37）：出現→消失，半徑於首尾為 0。
+    const satBreak = Math.max(0, Math.min(1, (phase - 0.24) / 0.13));
+    const satLife = Math.sin(Math.PI * satBreak);
+    const baseR = Math.min(da.w, db.w);
+    for (let s = 0; s < SAT_N; s++) {
+      const spec = SAT_SPEC[s];
+      const along = spec.along * baseR;
+      const jit = spec.jitter * baseR * satLife;
+      satelliteDrops[s].set(
+        mx + ux * along + qx * jit,
+        my + uy * along + qy * jit,
+        mz + uz * along + qz * jit,
+        baseR * spec.size * P.satelliteAmount * satLife,
+      );
+    }
+  } else {
+    elasticEvent.set(0, 0);
+    for (let s = 0; s < SAT_N; s++) satelliteDrops[s].w = 0;
+  }
+
+  for (let i = 0; i < count; i++) previousDropPositions[i].set(dropData[i].x, dropData[i].y, dropData[i].z);
+  previousDropT = t;
+  previousPairKey = pairKey;
+  previousPairGap = surfaceGap;
+
   // smooth-min 與 wobble 都可能讓表面超出單顆球體，因此加入保守 padding。
-  const padding = P.viscosity * 0.25 * Math.max(0, count - 1)
+  const padding = P.viscosity * 1.15 * 0.25 * Math.max(0, count - 1)
     + P.wobble * 0.25 + P.elasticStrength + 0.08;
   let minX = Infinity, minY = Infinity, minZ = Infinity;
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
   for (let i = 0; i < count; i++) {
-    const d = dropData[i], r = d.w + padding;
+    const d = dropData[i], r = d.w * Math.max(1, dropShapeData[i].w) + padding;
     minX = Math.min(minX, d.x - r); maxX = Math.max(maxX, d.x + r);
     minY = Math.min(minY, d.y - r); maxY = Math.max(maxY, d.y + r);
     minZ = Math.min(minZ, d.z - r); maxZ = Math.max(maxZ, d.z + r);
@@ -921,7 +1235,15 @@ function updateDropUniforms(t) {
   let boundRadius = 0;
   for (let i = 0; i < count; i++) {
     const d = dropData[i];
-    boundRadius = Math.max(boundRadius, Math.hypot(d.x - cx, d.y - cy, d.z - cz) + d.w + padding);
+    boundRadius = Math.max(boundRadius, Math.hypot(d.x - cx, d.y - cy, d.z - cz)
+      + d.w * Math.max(1, dropShapeData[i].w) + padding);
+  }
+  for (let s = 0; s < SAT_N; s++) {
+    const sd = satelliteDrops[s];
+    if (sd.w > 0) {
+      boundRadius = Math.max(boundRadius,
+        Math.hypot(sd.x - cx, sd.y - cy, sd.z - cz) + sd.w + padding);
+    }
   }
   dropBounds.set(cx, cy, cz, boundRadius);
 }
@@ -1021,6 +1343,10 @@ function initGL() {
     uElasticDamping: { value: P.elasticDamping },
     uElasticSpeed: { value: P.elasticSpeed },
     uDrops:      { value: dropData },
+    uDropShape:  { value: dropShapeData },
+    uDropPhysics: { value: dropPhysicsData },
+    uElasticPair: { value: elasticPair },
+    uSatellites: { value: satelliteDrops },
     uBounds:     { value: dropBounds },
     uThickness:  { value: P.thickness },
     uThickVar:   { value: P.thickVar },
@@ -1339,12 +1665,24 @@ function frame(now) {
   }
   rot.x = Math.max(-1.2, Math.min(1.2, rot.x));
 
-  const loopAngle = simT / Math.max(0.001, P.loopDuration) * Math.PI * 2;
-  const autoYaw = Math.sin(loopAngle) * P.spin * 0.6;
-  const autoPitch = Math.sin(loopAngle * 2) * P.spin * 0.12;
+  const phase01 = simT / Math.max(0.001, P.loopDuration);
+  const loopAngle = phase01 * Math.PI * 2;
+  // 緩慢的弧線環繞 + 極輕的抬降，像手持/推軌的呼吸感，而非對稱來回。
+  const autoYaw = (Math.sin(loopAngle) * 0.85 + Math.sin(loopAngle * 2 + 0.6) * 0.15) * P.spin * 0.6;
+  const autoPitch = Math.sin(loopAngle + 1.1) * P.spin * 0.14;
+  // 穩定英雄鏡：保留極輕的靜態荷蘭角增添張力，但移除擺動以維持畫面穩定。
+  const roll = -0.03;
+  // 推軌：在動作高潮（分裂 ~0.24、融合 ~0.80）輕微推近，漂浮段拉回，鏡頭隨敘事呼吸。
+  const dolly = 1
+    - 0.05 * Math.exp(-Math.pow((phase01 - 0.80) / 0.10, 2))
+    - 0.03 * Math.exp(-Math.pow((phase01 - 0.24) / 0.08, 2));
+  uniforms.uCameraDistance.value = P.cameraDistance * dolly;
+
   rotM4.makeRotationY(rot.y + autoYaw);
   tmpX.makeRotationX(rot.x + autoPitch);
   rotM4.multiply(tmpX);
+  tmpZ.makeRotationZ(roll);
+  rotM4.multiply(tmpZ);
   uniforms.uRot.value.setFromMatrix4(rotM4);
 
   uniforms.uTime.value = simT;
