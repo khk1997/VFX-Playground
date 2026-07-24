@@ -163,7 +163,11 @@
 <link rel="stylesheet" href="switch2-theme.css">
 </head>
 <body>
-<div id="bg"></div>
+<div id="bg" aria-hidden="true">
+  <div class="bg-banner-image"></div>
+  <div class="bg-theme-layer active"></div>
+  <div class="bg-theme-layer"></div>
+</div>
 
 <button id="sndBtn" aria-label="音效開關">🔊 音效</button>
 
@@ -173,14 +177,25 @@
 </header>
 
 <div id="rail">
-  <button class="navBtn" id="prevBtn" aria-label="上一個">‹</button>
+  <button class="navBtn" id="prevBtn" aria-label="上一個"><span class="navGlyph">‹</span><span class="navLabel">L</span></button>
   <div id="viewport"><div id="cards"></div></div>
-  <button class="navBtn" id="nextBtn" aria-label="下一個">›</button>
+  <button class="navBtn" id="nextBtn" aria-label="下一個"><span class="navGlyph">›</span><span class="navLabel">R</span></button>
+</div>
+
+<div id="selectionInfo" aria-live="polite">
+  <span id="selectionIndex">01 / 09</span>
+  <span id="selectionCategory">PARTICLE SYSTEM</span>
+  <span id="selectionDescription">風場驅動的櫻花粒子場景</span>
+  <span id="selectionAction"><span class="actionKey">A</span> OPEN</span>
 </div>
 
 <div id="dots"></div>
 
-<footer><span class="kbHint">使用 <kbd>←</kbd> <kbd>→</kbd> 切換　<kbd>Enter</kbd> 進入　</span>滑鼠點擊或觸控滑動選擇卡片</footer>
+<footer>
+  <span class="controlItem"><kbd>←</kbd><kbd>→</kbd><span>SELECT</span></span>
+  <span class="controlItem"><kbd class="keyA">A</kbd><kbd>Enter</kbd><span>OPEN</span></span>
+  <span class="controlItem"><kbd>S</kbd><span>SOUND</span></span>
+</footer>
 
 <script>
 'use strict';
@@ -192,54 +207,81 @@
 const EFFECTS = [
   {
     title: '櫻吹雪 Sakura Blizzard',
+    category: 'PARTICLE SYSTEM',
+    description: '風場驅動的櫻花粒子場景',
+    theme: ['239, 105, 143', '119, 171, 255'],
     href: 'sakura-blizzard/index.html',
     tags: ['Canvas 2D', 'Particles', 'Wind Field'],
     previewSrc: 'sakura-blizzard/index.html?preview=1',
   },
   {
     title: '能量光環 Energy Ring',
+    category: 'ENERGY SIMULATION',
+    description: '多層電弧構成的旋轉能量核心',
+    theme: ['85, 255, 121', '36, 178, 107'],
     href: 'energy-ring/index.html',
     tags: ['HTML5 Canvas', 'CSS', 'JavaScript'],
     previewSrc: 'energy-ring/index.html?preview=1',
   },
   {
     title: '電漿閃電 Lightning',
+    category: 'ELECTRIC STORM',
+    description: '具有分支與殘影的程序閃電',
+    theme: ['104, 173, 255', '92, 111, 255'],
     href: 'lightning/index.html',
     tags: ['HTML5 Canvas', 'CSS', 'JavaScript'],
     previewSrc: 'lightning/index.html?preview=1',
   },
   {
     title: '粒子星雲 Nebula',
+    category: 'FLOW FIELD',
+    description: '流場驅動的深空粒子星雲',
+    theme: ['80, 153, 255', '130, 91, 255'],
     href: 'nebula/index.html',
     tags: ['HTML5 Canvas', 'CSS', 'JavaScript'],
     previewSrc: 'nebula/index.html?preview=1',
   },
   {
     title: '流體墨水 Fluid Ink',
+    category: 'FLUID DYNAMICS',
+    description: '可互動的彩色墨流模擬',
+    theme: ['39, 192, 213', '64, 108, 255'],
     href: 'fluid-ink/index.html',
     tags: ['HTML5 Canvas', 'CSS', 'JavaScript'],
     previewSrc: 'fluid-ink/index.html?preview=1',
   },
   {
     title: '文字粒子 Text Particles',
+    category: 'TYPOGRAPHIC VFX',
+    description: '文字聚合、爆散與重新組構',
+    theme: ['70, 240, 180', '44, 146, 255'],
     href: 'text-particles/index.html',
     tags: ['HTML5 Canvas', 'CSS', 'JavaScript'],
     previewSrc: 'text-particles/index.html?preview=1',
   },
   {
     title: '璀璨烟火 Fireworks',
+    category: 'PYROTECHNICS',
+    description: '多種爆炸型態的夜空煙火',
+    theme: ['255, 167, 73', '255, 79, 92'],
     href: 'fireworks/index.html',
     tags: ['HTML5 Canvas', 'CSS', 'JavaScript'],
     previewSrc: 'fireworks/index.html?preview=1',
   },
   {
     title: '極光 Aurora',
+    category: 'AUDIO REACTIVE',
+    description: '隨音訊頻率起伏的極光簾幕',
+    theme: ['63, 233, 179', '80, 138, 255'],
     href: 'aurora/index.html',
     tags: ['HTML5 Canvas', 'Web Audio API', 'JavaScript'],
     previewSrc: 'aurora/index.html?preview=1',
   },
   {
     title: '薄膜水滴 Thin Film Droplets',
+    category: 'RAYMARCHING',
+    description: '具有薄膜干涉色彩的融合水滴',
+    theme: ['91, 181, 255', '238, 117, 204'],
     href: 'bubble/index.html',
     tags: ['Three.js', 'Raymarching', 'Metaballs'],
     previewSrc: 'bubble/index.html?preview=1',
@@ -252,12 +294,24 @@ const PREVIEW_W = 660, PREVIEW_H = 570;
 const cardsEl = document.getElementById('cards');
 const viewportEl = document.getElementById('viewport');
 const dotsEl = document.getElementById('dots');
+const bgEl = document.getElementById('bg');
+const bgThemeLayers = Array.from(bgEl.querySelectorAll('.bg-theme-layer'));
+const prevBtn = document.getElementById('prevBtn');
+const nextBtn = document.getElementById('nextBtn');
+const selectionIndexEl = document.getElementById('selectionIndex');
+const selectionCategoryEl = document.getElementById('selectionCategory');
+const selectionDescriptionEl = document.getElementById('selectionDescription');
 let active = 0;
 let position = EFFECTS.length; // 三組完整清單中的中間組起點
 let snapTimer = null;
+let motionTimer = null;
+let activeThemeLayer = 0;
 const cardEls = [];
 const iframes = [];   // 實體卡片順序，可為 null
 const dotEls = [];
+const mobilePreviewQuery = window.matchMedia('(max-width: 760px)');
+const PREVIEW_CACHE_LIMIT = 7;
+let previewUseTick = 0;
 
 /* ===== WebAudio 合成音效（Switch 風的嗶啵聲，不用音檔） ===== */
 let audioCtx = null;
@@ -310,13 +364,16 @@ function buildCards() {
     preview.className = 'card-preview';
     if (fx.previewSrc) {
       const iframe = document.createElement('iframe');
-      iframe.src = fx.previewSrc;
+      iframe.dataset.src = fx.previewSrc;
+      iframe.dataset.loaded = '0';
       iframe.width = PREVIEW_W;
       iframe.height = PREVIEW_H;
       iframe.tabIndex = -1;
       iframe.loading = 'lazy';
       iframe.setAttribute('scrolling', 'no');
       iframe.setAttribute('aria-hidden', 'true');
+      iframe.dataset.index = String(iframes.length);
+      iframe.addEventListener('load', () => syncPreviewState(iframe, Number(iframe.dataset.index)));
       const scale = 220 / PREVIEW_W;
       iframe.style.transform = `scale(${scale})`;
       preview.appendChild(iframe);
@@ -366,13 +423,97 @@ function buildCards() {
   });
 }
 
-/* 只讓 active 卡片與左右鄰居的 iframe 播放，其餘暫停以省效能 */
+function syncPreviewState(frame, index) {
+  if (!frame || frame.dataset.loaded !== '1' || !frame.contentWindow) return;
+  const distance = Math.abs(index - position);
+  const shouldPlay = distance <= 1 && !document.hidden;
+  const fps = distance === 0 ? 60 : distance === 1 ? 24 : 12;
+  const dpr = mobilePreviewQuery.matches ? 1.15 : 1.5;
+  try { frame.contentWindow.postMessage({ type: 'vfx-quality', fps, dpr }, '*'); } catch (e) {}
+  try { frame.contentWindow.postMessage(shouldPlay ? 'vfx-play' : 'vfx-pause', '*'); } catch (e) {}
+}
+
+function ensurePreviewLoaded(frame, index) {
+  if (!frame) return;
+  frame.dataset.lastUsed = String(++previewUseTick);
+  if (frame.dataset.loaded === '1') return;
+  frame.src = frame.dataset.src;
+  frame.dataset.loaded = '1';
+  frame.dataset.index = String(index);
+}
+
+function unloadPreview(frame) {
+  if (!frame || frame.dataset.loaded !== '1') return;
+  try { frame.contentWindow && frame.contentWindow.postMessage('vfx-pause', '*'); } catch (e) {}
+  frame.src = 'about:blank';
+  frame.dataset.loaded = '0';
+}
+
+function trimPreviewCache(protectedIndices) {
+  const loaded = iframes
+    .map((frame, index) => ({ frame, index }))
+    .filter(item => item.frame && item.frame.dataset.loaded === '1');
+  if (loaded.length <= PREVIEW_CACHE_LIMIT) return;
+
+  loaded
+    .filter(item => !protectedIndices.has(item.index))
+    .sort((a, b) => Number(a.frame.dataset.lastUsed || 0) - Number(b.frame.dataset.lastUsed || 0))
+    .slice(0, loaded.length - PREVIEW_CACHE_LIMIT)
+    .forEach(item => unloadPreview(item.frame));
+}
+
+/* 中心附近立即載入，其餘使用最多 7 個項目的 LRU 緩存，避免來回切換反覆初始化。 */
 function updatePreviewPlayback() {
+  const protectedIndices = new Set();
   iframes.forEach((f, i) => {
-    if (!f || !f.contentWindow) return;
-    const near = Math.abs(i - position) <= 1;
-    try { f.contentWindow.postMessage(near ? 'vfx-play' : 'vfx-pause', '*'); } catch (e) {}
+    if (!f) return;
+    const distance = Math.abs(i - position);
+    const shouldLoad = distance <= 2;
+
+    if (shouldLoad) {
+      protectedIndices.add(i);
+      ensurePreviewLoaded(f, i);
+    }
+    if (f.dataset.loaded === '1') syncPreviewState(f, i);
   });
+  trimPreviewCache(protectedIndices);
+}
+
+function updateCardDepth() {
+  cardEls.forEach((el, idx) => {
+    const distance = idx - position;
+    el.classList.remove('depth-near-left', 'depth-near-right', 'depth-far-left', 'depth-far-right');
+    if (distance === -1) el.classList.add('depth-near-left');
+    else if (distance === 1) el.classList.add('depth-near-right');
+    else if (distance < -1) el.classList.add('depth-far-left');
+    else if (distance > 1) el.classList.add('depth-far-right');
+  });
+}
+
+function updateSelectionUI(instant = false) {
+  const fx = EFFECTS[active];
+  selectionIndexEl.textContent = `${String(active + 1).padStart(2, '0')} / ${String(EFFECTS.length).padStart(2, '0')}`;
+  selectionCategoryEl.textContent = fx.category;
+  selectionDescriptionEl.textContent = fx.description;
+  if (instant) {
+    bgEl.classList.add('theme-instant');
+    bgThemeLayers[activeThemeLayer].style.setProperty('--theme-left', fx.theme[0]);
+    bgThemeLayers[activeThemeLayer].style.setProperty('--theme-right', fx.theme[1]);
+    bgThemeLayers[activeThemeLayer].classList.add('active');
+  } else {
+    const nextLayer = activeThemeLayer === 0 ? 1 : 0;
+    bgThemeLayers[nextLayer].style.setProperty('--theme-left', fx.theme[0]);
+    bgThemeLayers[nextLayer].style.setProperty('--theme-right', fx.theme[1]);
+    bgThemeLayers[nextLayer].classList.add('active');
+    bgThemeLayers[activeThemeLayer].classList.remove('active');
+    activeThemeLayer = nextLayer;
+  }
+  prevBtn.style.setProperty('--theme-left', fx.theme[0]);
+  nextBtn.style.setProperty('--theme-right', fx.theme[1]);
+  dotsEl.style.setProperty('--theme-left', fx.theme[0]);
+  dotsEl.style.setProperty('--theme-right', fx.theme[1]);
+  selectionIndexEl.style.color = `rgb(${fx.theme[0]})`;
+  if (instant) requestAnimationFrame(() => bgEl.classList.remove('theme-instant'));
 }
 
 /* 將 active 卡片捲動置中 */
@@ -388,11 +529,22 @@ function centerActive(instant = false) {
   }
 }
 
-function setActive(i, silent, direct = false) {
+function startCarouselMotion(direction, instant) {
+  clearTimeout(motionTimer);
+  cardsEl.classList.remove('is-moving', 'moving-forward', 'moving-backward');
+  if (instant || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  cardsEl.classList.add('is-moving', direction >= 0 ? 'moving-forward' : 'moving-backward');
+  motionTimer = setTimeout(() => {
+    cardsEl.classList.remove('is-moving', 'moving-forward', 'moving-backward');
+  }, 460);
+}
+
+function setActive(i, silent, direct = false, instant = false) {
   const next = (i + EFFECTS.length) % EFFECTS.length;
   if (next !== active && !silent) sndMove();
 
   clearTimeout(snapTimer);
+  const previousPosition = position;
   if (direct) {
     position = EFFECTS.length + next;
   } else if (active === EFFECTS.length - 1 && next === 0) {
@@ -404,19 +556,25 @@ function setActive(i, silent, direct = false) {
   }
 
   active = next;
+  startCarouselMotion(position - previousPosition, instant);
   cardEls.forEach((el, idx) => el.classList.toggle('active', idx === position));
   dotEls.forEach((d, idx) => d.classList.toggle('on', idx === active));
-  centerActive();
+  updateCardDepth();
+  updateSelectionUI(instant);
+  centerActive(instant);
   updatePreviewPlayback();
 
   // 滑過接續卡後，無動畫跳回中間那組完全相同的卡片。
   if (position < EFFECTS.length || position >= EFFECTS.length * 2) {
+    const targetPosition = EFFECTS.length + active;
+    ensurePreviewLoaded(iframes[targetPosition], targetPosition);
     snapTimer = setTimeout(() => {
-      position = EFFECTS.length + active;
+      position = targetPosition;
       cardEls.forEach((el, idx) => el.classList.toggle('active', idx === position));
+      updateCardDepth();
       centerActive(true);
       updatePreviewPlayback();
-    }, 470);
+    }, 450);
   }
 }
 
@@ -432,12 +590,13 @@ function launch(i) {
   setTimeout(() => { window.location.href = fx.href; }, 380);
 }
 
-document.getElementById('prevBtn').addEventListener('click', () => setActive(active - 1));
-document.getElementById('nextBtn').addEventListener('click', () => setActive(active + 1));
+prevBtn.addEventListener('click', () => setActive(active - 1));
+nextBtn.addEventListener('click', () => setActive(active + 1));
 window.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft') setActive(active - 1);
   else if (e.key === 'ArrowRight') setActive(active + 1);
   else if (e.key === 'Enter') launch(active);
+  else if (e.key.toLowerCase() === 's') sndBtn.click();
 });
 
 /* 觸控滑動切換 */
@@ -451,6 +610,7 @@ window.addEventListener('touchend', (e) => {
 }, { passive: true });
 
 window.addEventListener('resize', centerActive);
+mobilePreviewQuery.addEventListener('change', updatePreviewPlayback);
 /* iframe 載入完成後再同步一次播放狀態（load 前 postMessage 會沒人聽） */
 iframesReady();
 function iframesReady() {
@@ -468,6 +628,8 @@ active = 0;
 position = EFFECTS.length;
 cardEls[position].classList.add('active');
 dotEls[0].classList.add('on');
+updateCardDepth();
+updateSelectionUI(true);
 centerActive(true);
 updatePreviewPlayback();
 </script>
