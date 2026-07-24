@@ -160,6 +160,7 @@
     footer .kbHint { display: none; }
   }
 </style>
+<link rel="stylesheet" href="switch2-theme.css">
 </head>
 <body>
 <div id="bg"></div>
@@ -252,8 +253,10 @@ const cardsEl = document.getElementById('cards');
 const viewportEl = document.getElementById('viewport');
 const dotsEl = document.getElementById('dots');
 let active = 0;
+let position = EFFECTS.length; // 三組完整清單中的中間組起點
+let snapTimer = null;
 const cardEls = [];
-const iframes = [];   // index 對應 EFFECTS，可為 null
+const iframes = [];   // 實體卡片順序，可為 null
 const dotEls = [];
 
 /* ===== WebAudio 合成音效（Switch 風的嗶啵聲，不用音檔） ===== */
@@ -288,10 +291,20 @@ sndBtn.addEventListener('click', () => {
 renderSndBtn();
 
 function buildCards() {
-  EFFECTS.forEach((fx, i) => {
+  // 三組完整清單首尾相接，確保畫面兩側始終都有足夠的前後卡片。
+  const sequence = [-1, 0, 1].flatMap(copy =>
+    EFFECTS.map((fx, logicalIndex) => ({
+      fx,
+      logicalIndex,
+      clone: copy !== 0,
+    }))
+  );
+
+  sequence.forEach(({ fx, logicalIndex: i, clone }) => {
     const el = document.createElement(fx.href ? 'a' : 'div');
     el.className = 'card' + (fx.href ? '' : ' disabled');
     if (fx.href) el.href = fx.href;
+    if (clone) el.setAttribute('aria-hidden', 'true');
 
     const preview = document.createElement('div');
     preview.className = 'card-preview';
@@ -307,13 +320,13 @@ function buildCards() {
       const scale = 220 / PREVIEW_W;
       iframe.style.transform = `scale(${scale})`;
       preview.appendChild(iframe);
-      iframes[i] = iframe;
+      iframes.push(iframe);
     } else {
       const soon = document.createElement('div');
       soon.className = 'soon';
       soon.textContent = 'COMING SOON';
       preview.appendChild(soon);
-      iframes[i] = null;
+      iframes.push(null);
     }
 
     const body = document.createElement('div');
@@ -343,11 +356,13 @@ function buildCards() {
     cardsEl.appendChild(el);
     cardEls.push(el);
 
-    const dot = document.createElement('div');
-    dot.className = 'dot';
-    dot.addEventListener('click', () => setActive(i));
-    dotsEl.appendChild(dot);
-    dotEls.push(dot);
+    if (!clone) {
+      const dot = document.createElement('div');
+      dot.className = 'dot';
+      dot.addEventListener('click', () => setActive(i, false, true));
+      dotsEl.appendChild(dot);
+      dotEls.push(dot);
+    }
   });
 }
 
@@ -355,29 +370,54 @@ function buildCards() {
 function updatePreviewPlayback() {
   iframes.forEach((f, i) => {
     if (!f || !f.contentWindow) return;
-    const near = Math.abs(i - active) <= 1;
+    const near = Math.abs(i - position) <= 1;
     try { f.contentWindow.postMessage(near ? 'vfx-play' : 'vfx-pause', '*'); } catch (e) {}
   });
 }
 
 /* 將 active 卡片捲動置中 */
-function centerActive() {
-  const card = cardEls[active];
+function centerActive(instant = false) {
+  const card = cardEls[position];
   if (!card) return;
+  if (instant) cardsEl.classList.add('no-transition');
   const target = card.offsetLeft + card.offsetWidth / 2 - viewportEl.clientWidth / 2;
-  const max = cardsEl.scrollWidth - viewportEl.clientWidth;
-  const x = Math.max(0, Math.min(target, Math.max(0, max)));
-  cardsEl.style.transform = `translateX(${-x}px)`;
+  cardsEl.style.transform = `translateX(${-target}px)`;
+  if (instant) {
+    cardsEl.getBoundingClientRect();
+    requestAnimationFrame(() => cardsEl.classList.remove('no-transition'));
+  }
 }
 
-function setActive(i, silent) {
+function setActive(i, silent, direct = false) {
   const next = (i + EFFECTS.length) % EFFECTS.length;
   if (next !== active && !silent) sndMove();
+
+  clearTimeout(snapTimer);
+  if (direct) {
+    position = EFFECTS.length + next;
+  } else if (active === EFFECTS.length - 1 && next === 0) {
+    position += 1;
+  } else if (active === 0 && next === EFFECTS.length - 1) {
+    position -= 1;
+  } else {
+    position += next - active;
+  }
+
   active = next;
-  cardEls.forEach((el, idx) => el.classList.toggle('active', idx === active));
+  cardEls.forEach((el, idx) => el.classList.toggle('active', idx === position));
   dotEls.forEach((d, idx) => d.classList.toggle('on', idx === active));
   centerActive();
   updatePreviewPlayback();
+
+  // 滑過接續卡後，無動畫跳回中間那組完全相同的卡片。
+  if (position < EFFECTS.length || position >= EFFECTS.length * 2) {
+    snapTimer = setTimeout(() => {
+      position = EFFECTS.length + active;
+      cardEls.forEach((el, idx) => el.classList.toggle('active', idx === position));
+      centerActive(true);
+      updatePreviewPlayback();
+    }, 470);
+  }
 }
 
 /* 進場轉場：卡片放大 + 其他元素淡出，再跳頁 */
@@ -388,7 +428,7 @@ function launch(i) {
   launching = true;
   sndEnter();
   document.body.classList.add('leaving');
-  cardEls[i].classList.add('launching');
+  cardEls[position].classList.add('launching');
   setTimeout(() => { window.location.href = fx.href; }, 380);
 }
 
@@ -424,7 +464,12 @@ document.addEventListener('visibilitychange', () => {
 });
 
 buildCards();
-setActive(0, true);
+active = 0;
+position = EFFECTS.length;
+cardEls[position].classList.add('active');
+dotEls[0].classList.add('on');
+centerActive(true);
+updatePreviewPlayback();
 </script>
 </body>
 </html>
