@@ -51,11 +51,11 @@ body:has(#rail) {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  opacity: .72;
   background:
     linear-gradient(180deg, rgba(7,8,10,.28) 0%, rgba(7,8,10,.12) 42%, rgba(7,8,10,.5) 100%),
     linear-gradient(90deg, rgba(7,8,10,.16), transparent 44%, rgba(7,8,10,.05)),
-    url("image/main_banner.png") 58% center / cover no-repeat;
-  opacity: .72;
+    url("image/main_banner2.png") 58% center / cover no-repeat;
 }
 #bg .bg-theme-layer {
   position: absolute;
@@ -210,6 +210,30 @@ header p {
   flex: 0 0 242px !important;
   background: #050506 !important;
   border-bottom: 1px solid rgba(255,255,255,.075);
+}
+.card-preview::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background:
+    linear-gradient(110deg, rgba(190,205,220,.035), transparent 42%),
+    rgba(8,10,14,.34);
+  opacity: 1;
+  transition: opacity 320ms ease, background-color 320ms ease;
+}
+.card.depth-near-left .card-preview::after,
+.card.depth-near-right .card-preview::after {
+  background: rgba(12,15,20,.14);
+  -webkit-backdrop-filter: blur(1.2px);
+  backdrop-filter: blur(1.2px);
+}
+.card.active .card-preview::after,
+.card.launching .card-preview::after {
+  opacity: 0;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 .card-preview iframe { transform: scale(.424242) !important; }
 .card-body {
@@ -534,59 +558,58 @@ input[type=color] {
 
 /* 27" 2K / large desktop displays */
 @media (min-width: 1900px) and (min-height: 1000px) {
-  body:has(#rail) { gap: 22px !important; }
+  body:has(#rail) { gap: 28px !important; }
   header h1 {
-    font-size: 48px !important;
+    font-size: 60px !important;
     letter-spacing: .18em !important;
   }
   header h1::before, header h1::after {
-    width: 11px;
-    height: 30px;
-    margin-right: 18px;
+    width: 14px;
+    height: 38px;
+    margin-right: 23px;
   }
-  header h1::after { margin-left: 12px; margin-right: 0; }
+  header h1::after { margin-left: 15px; margin-right: 0; }
   header p {
-    margin-top: 15px !important;
-    font-size: 12px !important;
+    margin-top: 19px !important;
+    font-size: 15px !important;
   }
-  #viewport { padding: 36px 0 40px !important; }
-  #cards { gap: 40px !important; }
+  #viewport { padding: 45px 0 50px !important; }
+  #cards { gap: 50px !important; }
   .card {
-    width: 336px !important;
-    height: 432px !important;
-    border-radius: 23px !important;
+    width: 420px !important;
+    height: 540px !important;
+    border-radius: 29px !important;
   }
-  .card-preview { flex-basis: 290px !important; }
-  .card-preview iframe { transform: scale(.509091) !important; }
-  .card-body { padding: 16px 19px 17px !important; }
+  .card-preview { flex-basis: 363px !important; }
+  .card-preview iframe { transform: scale(.636364) !important; }
+  .card-body { padding: 20px 24px 21px !important; }
   .card-title {
-    font-size: 16px !important;
-    margin-bottom: 12px !important;
+    font-size: 20px !important;
+    margin-bottom: 15px !important;
   }
   .tag {
-    font-size: 11px !important;
-    padding: 4px 9px !important;
+    font-size: 14px !important;
+    padding: 5px 11px !important;
   }
   .navBtn {
-    width: 72px !important;
-    height: 50px !important;
-    margin-inline: 20px !important;
+    width: 90px !important;
+    height: 63px !important;
+    margin-inline: 25px !important;
   }
-  .navGlyph { font-size: 25px; }
-  .navLabel { width: 19px; height: 19px; font-size: 9px; }
+  .navGlyph { font-size: 31px; }
+  .navLabel { width: 24px; height: 24px; font-size: 11px; }
   #selectionInfo {
-    min-height: 32px;
-    gap: 14px;
-    font-size: 11px;
+    min-height: 40px;
+    gap: 18px;
+    font-size: 14px;
   }
-  #selectionInfo > span + span::before { margin-right: 14px; }
-  .actionKey { width: 21px; height: 21px; font-size: 9px; }
-  #dots .dot { width: 23px !important; height: 4px !important; }
-  footer { gap: 24px; }
-  .controlItem { gap: 7px; font-size: 10px; }
-  footer kbd { padding: 2px 8px; }
-  #sndBtn { padding: 10px 16px !important; font-size: 14px !important; }
-
+  #selectionInfo > span + span::before { margin-right: 18px; }
+  .actionKey { width: 26px; height: 26px; font-size: 11px; }
+  #dots .dot { width: 29px !important; height: 5px !important; }
+  footer { gap: 30px; }
+  .controlItem { gap: 9px; font-size: 13px; }
+  footer kbd { padding: 3px 10px; }
+  #sndBtn { padding: 12px 20px !important; font-size: 17px !important; }
   /* Effect-page control panels */
   #panel {
     width: 410px !important;
@@ -669,6 +692,11 @@ input[type=color] {
     border-radius: 17px !important;
   }
   .card-preview { flex-basis: 181px !important; }
+  .card.depth-near-left .card-preview::after,
+  .card.depth-near-right .card-preview::after {
+    -webkit-backdrop-filter: blur(.8px);
+    backdrop-filter: blur(.8px);
+  }
   .card-preview iframe { transform: scale(.318182) !important; }
   .card-body { padding: 10px 12px 11px !important; }
   .card-title { font-size: 12px !important; margin-bottom: 7px !important; }
@@ -680,8 +708,8 @@ input[type=color] {
   footer .controlItem:last-child { display: none; }
   #bg .bg-banner-image {
     background-position: center, center, 70% center;
-    opacity: .58;
   }
+  #bg .bg-banner-image { opacity: .58; }
   #panel { border-radius: 16px !important; }
 }
 
