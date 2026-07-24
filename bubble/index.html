@@ -92,8 +92,9 @@
   .btns button:hover { background: rgba(150,180,255,.22); }
   .hint { font-size: 10px; color: #66739a; margin-top: 10px; line-height: 1.5; }
 </style>
-<link rel="stylesheet" href="../switch2-theme.css">
+<link rel="stylesheet" href="../switch2-theme.css?v=mobile-sheet-9">
 <script src="../preview-performance.js"></script>
+<script src="../mobile-control-sheet.js?v=mobile-sheet-9"></script>
 </head>
 <body>
 <canvas id="stage"></canvas>
@@ -378,6 +379,8 @@ uniform float uLoopDuration;
 uniform vec2  uResolution;
 uniform mat3  uRot;
 uniform float uCameraDistance;
+uniform float uCompositionOffsetX;
+uniform float uCompositionOffsetY;
 
 uniform int   uCount;
 uniform float uViscosity;
@@ -708,9 +711,8 @@ FilmMaterial thinFilm(vec3 p, vec3 N, vec3 V){
 void main(){
   vec2 uv = (vUv * 2.0 - 1.0);
   uv.x *= uResolution.x / uResolution.y;
-  // 構圖置中（穩定英雄鏡）：主體位於畫面正中，分裂時兩滴對稱展開、不易出框。
-  // 若日後想偏移，改此處：負 x 右移、負 y 上移。
-  uv += vec2(0.0, 0.0);
+  // 桌面維持英雄鏡置中；手機依可用視覺區上移，避免主體被底部控制面板切掉。
+  uv += vec2(uCompositionOffsetX, uCompositionOffsetY);
   float tanHalfFov = 0.42; // fov ~46°：稍廣、加強近遠水滴的透視景深
 
   vec3 ro = uRot * vec3(0.0, 0.0, uCameraDistance);
@@ -838,6 +840,7 @@ let inited = false;
 
 const rot = { x: 0.17, y: 0.52 };
 const vel = { x: 0, y: 0 };
+let compositionOffsetX = 0;
 let dragging = false, lastX = 0, lastY = 0;
 const rotM4 = new THREE.Matrix4();
 const tmpX = new THREE.Matrix4();
@@ -1372,6 +1375,8 @@ function initGL() {
     uResolution: { value: new THREE.Vector2(1, 1) },
     uRot:        { value: new THREE.Matrix3() },
     uCameraDistance: { value: P.cameraDistance },
+    uCompositionOffsetX: { value: 0 },
+    uCompositionOffsetY: { value: 0 },
     uCount:      { value: Math.round(P.count) },
     uViscosity:  { value: P.viscosity },
     uWobble:     { value: P.wobble },
@@ -1435,7 +1440,10 @@ function initGL() {
 
 function resize() {
   if (!renderer) return;
-  const w = window.innerWidth, h = window.innerHeight;
+  // DevTools 裝置模式有時會保留較大的 layout viewport（window.innerWidth），
+  // 但 documentElement client size 才是使用者實際看到的裝置畫面。
+  const w = document.documentElement.clientWidth;
+  const h = document.documentElement.clientHeight;
   renderer.setSize(w, h, true);
   uniforms.uResolution.value.set(w, h);
 }
@@ -1717,15 +1725,63 @@ function frame(now) {
   const dolly = 1
     - 0.05 * Math.exp(-Math.pow((phase01 - 0.80) / 0.10, 2))
     - 0.03 * Math.exp(-Math.pow((phase01 - 0.24) / 0.08, 2));
-  uniforms.uCameraDistance.value = P.cameraDistance * dolly;
-
-  rotM4.makeRotationY(rot.y + autoYaw);
+  // 直向螢幕的水平視野遠窄於桌面；依 aspect 拉遠，避免分裂後的大滴出框。
+  // Bottom Sheet 展開時再把構圖上提，讓調參數時仍看得到結果。
+  const viewportWidth = document.documentElement.clientWidth;
+  const viewportHeight = document.documentElement.clientHeight;
+  const aspect = viewportWidth / Math.max(1, viewportHeight);
+  const isMobilePortrait = viewportWidth <= 760 && aspect < 0.8;
+  let compositionDistance = isMobilePortrait
+    ? Math.min(1.72, Math.max(1.15, 0.8 / aspect))
+    : 1;
+  let compositionOffsetY = isMobilePortrait ? -0.08 : 0;
+  const sheetState = document.body.dataset.mobileSheet;
+  if (isMobilePortrait && sheetState === 'half') {
+    compositionDistance *= 1.12;
+    compositionOffsetY = -0.32;
+  } else if (isMobilePortrait && sheetState === 'full') {
+    compositionDistance *= 1.2;
+    compositionOffsetY = -0.48;
+  }
+  // 手機採較正面的英雄鏡，避免桌面的斜角透視讓右滴顯得特別巨大、整組視覺偏右。
+  const mobileYawCorrection = isMobilePortrait ? -0.42 : 0;
+  rotM4.makeRotationY(rot.y + autoYaw + mobileYawCorrection);
   tmpX.makeRotationX(rot.x + autoPitch);
   rotM4.multiply(tmpX);
   tmpZ.makeRotationZ(roll);
   rotM4.multiply(tmpZ);
   uniforms.uRot.value.setFromMatrix4(rotM4);
 
+  const cameraDistance = P.cameraDistance * dolly * compositionDistance;
+  if (isMobilePortrait) {
+    // 以主要水滴投影外輪廓的中點校正構圖。面積重心會被較大的水滴拉動，
+    // 在展開狀態下反而讓整組水滴的左右留白不對稱。
+    const e = rotM4.elements;
+    const count = Math.max(1, Math.min(8, Math.round(P.count)));
+    let minProjectedX = Infinity, maxProjectedX = -Infinity;
+    for (let i = 0; i < count; i++) {
+      const d = dropData[i];
+      if (d.w <= 0.0001) continue;
+      const localX = e[0] * d.x + e[1] * d.y + e[2] * d.z;
+      const localZ = e[8] * d.x + e[9] * d.y + e[10] * d.z;
+      const depth = Math.max(0.25, cameraDistance - localZ);
+      const projectionScale = depth * 0.42;
+      const projectedX = localX / projectionScale;
+      const projectedRadius = d.w * Math.max(1, dropShapeData[i].w) / projectionScale;
+      minProjectedX = Math.min(minProjectedX, projectedX - projectedRadius);
+      maxProjectedX = Math.max(maxProjectedX, projectedX + projectedRadius);
+    }
+    const hasProjectedBounds = Number.isFinite(minProjectedX) && Number.isFinite(maxProjectedX);
+    const targetOffsetX = hasProjectedBounds
+      ? Math.max(-0.16, Math.min(0.16, (minProjectedX + maxProjectedX) * 0.5))
+      : 0;
+    compositionOffsetX += (targetOffsetX - compositionOffsetX) * Math.min(1, dt * 5);
+  } else {
+    compositionOffsetX = 0;
+  }
+  uniforms.uCameraDistance.value = cameraDistance;
+  uniforms.uCompositionOffsetX.value = compositionOffsetX;
+  uniforms.uCompositionOffsetY.value = compositionOffsetY;
   uniforms.uTime.value = simT;
   renderer.render(scene, camera);
 }
