@@ -1,0 +1,86 @@
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; background: #000; overflow: hidden; font-family: "SF Pro", "PingFang TC", "Microsoft JhengHei", sans-serif; }
+  #stage { position: absolute; inset: 0; display: block; touch-action: none; }
+
+  /* ===== 控制面板：左側縱向抽屜（沿用 aurora 風格）===== */
+  #panel {
+    position: fixed; left: 12px; top: 64px; bottom: 12px; width: 340px;
+    overflow-y: auto;
+    background: rgba(8, 10, 16, 0.86); backdrop-filter: blur(10px);
+    border: 1px solid rgba(150, 180, 255, 0.25); border-radius: 12px;
+    color: #d6ddf0; padding: 14px 16px 18px; z-index: 10;
+    box-shadow: 4px 0 30px rgba(0,0,0,0.6);
+    transition: transform .25s ease, opacity .25s ease;
+  }
+  #panel.collapsed { transform: translateX(calc(-100% - 24px)); opacity: 0; pointer-events: none; }
+  #panel::-webkit-scrollbar { width: 6px; }
+  #panel::-webkit-scrollbar-thumb { background: rgba(150,180,255,.3); border-radius: 3px; }
+
+  #toggleBtn {
+    position: fixed; top: 12px; right: 12px; z-index: 11;
+    background: rgba(8,10,16,.85); color: #a9c2ff;
+    border: 1px solid rgba(150,180,255,.35); border-radius: 8px;
+    padding: 6px 12px; cursor: pointer; font-size: 13px;
+  }
+  #toggleBtn:hover { background: rgba(150,180,255,.15); }
+
+  #homeBtn {
+    position: fixed; top: 12px; left: 12px; z-index: 11;
+    background: rgba(8,10,16,.85); color: #a9c2ff; text-decoration: none;
+    border: 1px solid rgba(150,180,255,.35); border-radius: 8px;
+    padding: 6px 12px; cursor: pointer; font-size: 13px;
+    display: inline-flex; align-items: center; gap: 6px; font-family: inherit;
+  }
+  #homeBtn:hover { background: rgba(150,180,255,.15); }
+
+  #playCtl {
+    position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 11;
+    background: rgba(8,10,16,.85); color: #c3d3ff;
+    border: 1px solid rgba(150,180,255,.35); border-radius: 999px;
+    padding: 8px 20px; cursor: pointer; font-size: 13px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  }
+  #playCtl:hover { background: rgba(150,180,255,.18); }
+
+  html.preview-mode #homeBtn,
+  html.preview-mode #toggleBtn,
+  html.preview-mode #playCtl,
+  html.preview-mode #panel { display: none !important; }
+  @media (max-width: 760px) {
+    #panel { left: 8px; top: 56px; bottom: 8px; width: calc(100vw - 16px); max-width: 340px; }
+  }
+
+  #panel h2 { font-size: 14px; letter-spacing: 2px; color: #9fb8ff; margin-bottom: 4px; font-weight: 600; }
+  #panel .sub { font-size: 11px; color: #7784a5; margin-bottom: 12px; }
+  .group { margin-bottom: 8px; border-top: 1px solid rgba(150,180,255,.12); padding-top: 6px; }
+  .group h3 { font-size: 11px; color: #7fa0e6; letter-spacing: 1.5px; margin-bottom: 8px; text-transform: uppercase; }
+  .group .note { font-size: 10px; color: #5f6f95; margin: 2px 0 6px; line-height: 1.4; }
+  .row { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; min-width: 0; }
+  .row label { flex: 0 0 78px; font-size: 12px; color: #c6cfe4; white-space: nowrap; }
+  .row input[type=range] { flex: 1 1 110px; min-width: 60px; accent-color: #5b7cff; height: 14px; cursor: pointer; }
+  .row input[type=color] { flex: 1 1 110px; min-width: 60px; height: 24px; padding: 0; border: 1px solid rgba(150,180,255,.3); border-radius: 6px; background: none; cursor: pointer; }
+  .row select {
+    flex: 1 1 110px; min-width: 60px; height: 24px; padding: 0 6px;
+    background: rgba(20,26,40,.95); color: #c6cfe4;
+    border: 1px solid rgba(150,180,255,.3); border-radius: 6px;
+    font: 12px inherit; cursor: pointer;
+  }
+  .row .val { flex: 0 0 46px; text-align: right; font-size: 11px; color: #9fb8ff; font-variant-numeric: tabular-nums; }
+  .stopRow label { flex: 0 0 34px; font-size: 11px; color: #97a6c6; }
+  .stopRow input[type=color] { flex: 0 0 40px; min-width: 40px; }
+  .stopRow input[type=range] { flex: 1 1 70px; }
+  .stopRow .val { flex: 0 0 34px; }
+  #hdriBtn {
+    flex: 1 1 auto; background: rgba(150,180,255,.1); color: #c3d3ff;
+    border: 1px solid rgba(150,180,255,.3); border-radius: 7px;
+    padding: 6px 0; font-size: 12px; cursor: pointer;
+  }
+  #hdriBtn:hover { background: rgba(150,180,255,.22); }
+  .btns { display: flex; gap: 8px; margin-top: 12px; }
+  .btns button {
+    flex: 1; background: rgba(150,180,255,.1); color: #c3d3ff;
+    border: 1px solid rgba(150,180,255,.3); border-radius: 7px;
+    padding: 7px 0; font-size: 12px; cursor: pointer;
+  }
+  .btns button:hover { background: rgba(150,180,255,.22); }
+  .hint { font-size: 10px; color: #66739a; margin-top: 10px; line-height: 1.5; }

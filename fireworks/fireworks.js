@@ -1,0 +1,542 @@
+'use strict';
+
+/* ===== 預覽嵌入模式（?preview=1）===== */
+const PREVIEW = new URLSearchParams(location.search).has('preview');
+if (PREVIEW) document.documentElement.classList.add('preview-mode');
+
+const canvas = document.getElementById('stage');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+let skylinePath = null; // 快取的天際線多邊形，尺寸改變時重建
+let starField = null;   // 快取的星空，數量或尺寸改變時重建
+
+function resize() {
+  W = window.innerWidth; H = window.innerHeight;
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.max(1, W * DPR); canvas.height = Math.max(1, H * DPR);
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  skylinePath = null; starField = null;
+}
+window.addEventListener('resize', resize);
+resize();
+
+/* ===== 參數 ===== */
+const DEFAULTS = {
+  autoRate: PREVIEW ? 1.8 : 1.1,
+  maxRockets: 6,
+  launchSpeed: 1,
+  particleCount: PREVIEW ? 80 : 150,
+  burstRadius: 1.85,
+  gravity: 130,
+  trail: 0.82,
+  doubleProb: 0.25,
+  crackle: 0.35, sparkTrail: PREVIEW ? 3 : 6, salvo: 3,
+  hue: 30, sat: 100, flicker: 0.6,
+  smokeAmount: PREVIEW ? 0.25 : 0.55, wind: 12, illumination: 0.24,
+  textSize: 0.85, textDensity: PREVIEW ? 3 : 4, textHold: 1.2,
+  starCount: PREVIEW ? 70 : 140,
+};
+const BOOL_DEFAULTS = { randColor: true, skyline: true, mixText: true };
+const P = { ...DEFAULTS, ...BOOL_DEFAULTS };
+P.burstStyle = 'random'; P.palette = 'classic'; P.textColorMode = 'palette'; P.fireworkText = 'VFX';
+
+const fmt = {
+  autoRate: v => v.toFixed(2) + '/s',
+  launchSpeed: v => 'x' + v.toFixed(2),
+  burstRadius: v => 'x' + v.toFixed(2),
+  hue: v => v + '°', sat: v => v + '%',
+};
+function bindControls() {
+  for (const key of Object.keys(DEFAULTS)) {
+    const el = document.getElementById(key);
+    const valEl = document.getElementById(key + '_v');
+    const update = () => {
+      P[key] = parseFloat(el.value);
+      if (valEl) valEl.textContent = (fmt[key] || (v => +v.toFixed(2)))(P[key]);
+    };
+    el.value = P[key];
+    if (!el._bound) { el.addEventListener('input', update); el._bound = true; }
+    update();
+  }
+  for (const key of ['burstStyle','palette','textColorMode']) {
+    const el = document.getElementById(key); el.value = P[key];
+    if (!el._bound) { el.addEventListener('change', () => { P[key] = el.value; if (key === 'burstStyle') document.getElementById('textFirework').classList.toggle('visible', el.value === 'text' || P.mixText); }); el._bound = true; }
+  }
+  const textInput = document.getElementById('fireworkText'); textInput.value = P.fireworkText;
+  if (!textInput._bound) { textInput.addEventListener('input', () => P.fireworkText = textInput.value.slice(0, 10)); textInput._bound = true; }
+  document.getElementById('textFirework').classList.toggle('visible', P.burstStyle === 'text' || P.mixText);
+  for (const key of Object.keys(BOOL_DEFAULTS)) {
+    const el = document.getElementById(key);
+    el.checked = P[key];
+    if (!el._bound) {
+      el.addEventListener('change', () => { P[key] = el.checked; if (key === 'skyline') skylinePath = null; if (key === 'mixText') document.getElementById('textFirework').classList.toggle('visible', P.burstStyle === 'text' || P.mixText); });
+      el._bound = true;
+    }
+  }
+}
+bindControls();
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+  Object.assign(P, DEFAULTS, BOOL_DEFAULTS);
+  P.burstStyle = 'random'; P.palette = 'classic'; P.textColorMode = 'palette'; P.fireworkText = 'VFX';
+  bindControls();
+  document.querySelectorAll('#presets button').forEach(x => x.classList.remove('active'));
+  starField = null;
+});
+
+/* ===== 播放/暫停：面板按鈕、postMessage（vfx-pause / vfx-play）、分頁隱藏三者共同決定 ===== */
+let userPaused = false, extPaused = false;
+let rafId = 0, last = 0;
+const pauseBtn = document.getElementById('playCtl');
+function isPaused() { return userPaused || extPaused || document.hidden; }
+function syncLoop() {
+  if (isPaused()) {
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+  } else if (!rafId) {
+    last = performance.now();
+    rafId = requestAnimationFrame(frame);
+  }
+}
+pauseBtn.addEventListener('click', () => {
+  userPaused = !userPaused;
+  pauseBtn.textContent = userPaused ? '▶ 播放' : '⏸ 暫停';
+  syncLoop();
+});
+window.addEventListener('message', e => {
+  if (e.data === 'vfx-pause') { extPaused = true; syncLoop(); }
+  else if (e.data === 'vfx-play') { extPaused = false; syncLoop(); }
+});
+document.addEventListener('visibilitychange', syncLoop);
+
+/* ===== 面板開合 ===== */
+const panel = document.getElementById('panel');
+document.getElementById('toggleBtn').addEventListener('click', () => panel.classList.toggle('collapsed'));
+
+/* ===== 工具 ===== */
+const rand = (a, b) => a + Math.random() * (b - a);
+const TWO_PI = Math.PI * 2;
+function pickHue() {
+  if (!P.randColor) return P.hue;
+  const sets = { classic:[28,38,48,8,205], jewel:[345,285,215,165,48], gold:[32,38,44], ice:[190,205,220,48] };
+  const a = sets[P.palette] || sets.classic;
+  return a[Math.floor(Math.random()*a.length)] + rand(-5,5);
+}
+
+/* ===== 星空（離屏快取，微閃爍用透明度調變）===== */
+const starCanvas = document.createElement('canvas');
+const starCtx = starCanvas.getContext('2d');
+function buildStars() {
+  starCanvas.width = Math.max(1, W * DPR); starCanvas.height = Math.max(1, H * DPR);
+  starCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  starCtx.clearRect(0, 0, W, H);
+  const n = Math.round(P.starCount);
+  starField = [];
+  for (let i = 0; i < n; i++) {
+    const x = Math.random() * W, y = Math.random() * H * 0.85;
+    const r = rand(0.3, 1.4), a = rand(0.2, 0.9);
+    starCtx.fillStyle = `rgba(255,255,255,${a})`;
+    starCtx.beginPath(); starCtx.arc(x, y, r, 0, TWO_PI); starCtx.fill();
+  }
+  starField.count = n;
+}
+
+/* ===== 天際線剪影 ===== */
+function buildSkyline() {
+  skylinePath = new Path2D();
+  const base = H;
+  skylinePath.moveTo(0, base);
+  let x = 0;
+  // 用固定種子式的隨機也可以，但天際線只在 resize 時重建一次，直接隨機即可
+  while (x < W) {
+    const bw = rand(24, 70);
+    const bh = rand(H * 0.04, H * 0.14);
+    skylinePath.lineTo(x, base - bh);
+    skylinePath.lineTo(Math.min(x + bw, W), base - bh);
+    // 偶爾加個天線
+    if (Math.random() < 0.18) {
+      const ax = x + bw * 0.5;
+      if (ax < W) {
+        skylinePath.lineTo(ax - 1, base - bh);
+        skylinePath.lineTo(ax - 1, base - bh - rand(8, 26));
+        skylinePath.lineTo(ax + 1, base - bh - rand(8, 26));
+        skylinePath.lineTo(ax + 1, base - bh);
+        skylinePath.lineTo(Math.min(x + bw, W), base - bh);
+      }
+    }
+    x += bw;
+  }
+  skylinePath.lineTo(W, base);
+  skylinePath.closePath();
+}
+
+/* ===== 火箭與粒子 ===== */
+const rockets = [];
+const particles = [];
+const smoke = [];
+let skyFlash = 0, flashX = 0, flashY = 0, flashHue = 35;
+const MAX_PARTICLES = PREVIEW ? 2200 : 6000;
+
+const BURST_TYPES = ['peony', 'chrysanthemum', 'ring', 'willow', 'palm', 'double', 'heart'];
+
+function launchRocket(targetX, targetY) {
+  if (rockets.length >= P.maxRockets) return;
+  const sx = targetX !== undefined ? targetX + rand(-30, 30) : rand(W * 0.12, W * 0.88);
+  const apexY = targetY !== undefined ? targetY : rand(H * 0.12, H * 0.45);
+  // 由「到達 apexY 時 vy=0」反推初速：v0 = sqrt(2 g h)
+  const g = Math.max(40, P.gravity);
+  const h = Math.max(60, H - apexY);
+  const v0 = Math.sqrt(2 * g * h) * P.launchSpeed;
+  rockets.push({
+    x: sx, y: H + 6,
+    vx: rand(-14, 14),
+    vy: -v0,
+    hue: pickHue(),
+    type: P.burstStyle === 'random'
+      ? (P.mixText && Math.random() < 0.1 ? 'text' : BURST_TYPES[Math.floor(Math.random() * BURST_TYPES.length)])
+      : P.burstStyle,
+    sparkAcc: 0,
+    prevVy: -v0,
+  });
+}
+
+function spawnParticle(p) {
+  if (particles.length >= MAX_PARTICLES) return;
+  particles.push(p);
+}
+
+const textCanvas = document.createElement('canvas');
+const textCtx = textCanvas.getContext('2d', { willReadFrequently: true });
+function explodeText(x, y, hue) {
+  const label = (P.fireworkText || 'VFX').trim().slice(0, 10) || 'VFX';
+  const cw = 720, ch = 260;
+  const fontSize = Math.max(52, Math.min(180, 170 / Math.max(1, label.length * 0.62)));
+  textCanvas.width = cw; textCanvas.height = ch;
+  textCtx.clearRect(0, 0, cw, ch);
+  textCtx.fillStyle = '#fff'; textCtx.textAlign = 'center'; textCtx.textBaseline = 'middle';
+  textCtx.font = `700 ${fontSize}px "DFKai-SB", "KaiTi", "Microsoft JhengHei", serif`;
+  textCtx.fillText(label, cw / 2, ch / 2);
+  const data = textCtx.getImageData(0, 0, cw, ch).data;
+  const step = Math.max(2, 8 - Math.round(P.textDensity));
+  const points = [];
+  for (let py = 0; py < ch; py += step) for (let px = 0; px < cw; px += step) {
+    const alpha = data[(py * cw + px) * 4 + 3];
+    if (alpha < 100) continue;
+    const edge = px < 3 || py < 3 || px >= cw - 3 || py >= ch - 3 ||
+      data[(py * cw + px - 3) * 4 + 3] < 70 || data[(py * cw + px + 3) * 4 + 3] < 70 ||
+      data[((py - 3) * cw + px) * 4 + 3] < 70 || data[((py + 3) * cw + px) * 4 + 3] < 70;
+    if (edge) points.push([px - cw / 2, py - ch / 2]);
+  }
+  const cap = Math.min(PREVIEW ? 500 : 1100, MAX_PARTICLES - particles.length);
+  const stride = Math.max(1, Math.ceil(points.length / Math.max(1, cap)));
+  const scale = Math.min(W * 0.72 / cw, H * 0.28 / ch) * P.textSize;
+  const formTime = 0.95;
+  skyFlash = Math.max(skyFlash, 0.38); flashX = x; flashY = y; flashHue = hue;
+  for (let i = Math.floor(Math.random() * stride); i < points.length; i += stride) {
+    const pt = points[i];
+    let textHue, textSat;
+    if (P.textColorMode === 'rainbow') { textHue = (hue + (pt[0] / cw + 0.5) * 300) % 360; textSat = 96; }
+    else if (P.textColorMode === 'gold') { textHue = rand(31, 46); textSat = rand(58, 92); }
+    else if (P.textColorMode === 'custom') { textHue = P.hue + rand(-5, 5); textSat = P.sat; }
+    else { textHue = P.randColor ? pickHue() : P.hue + rand(-6, 6); textSat = P.sat; }
+    spawnParticle({ x, y, px: x, py: y, vx: 0, vy: 0, life: 0,
+      maxLife: formTime + P.textHold + 1.4, size: rand(0.65, 1.2), drag: 1.8,
+      hue: textHue, sat: textSat, history: [], textMode: true, glow:Math.random()<0.08,
+      originX: x, originY: y, targetX: x + pt[0] * scale, targetY: y + pt[1] * scale,
+      formTime, holdTime: P.textHold, seed: Math.random() * TWO_PI,
+      delay: rand(0, 0.12) + (pt[0] / cw + 0.5) * 0.22 + (pt[1] / ch + 0.5) * 0.06,
+      bendX: rand(-38, 38), bendY: rand(-52, 20), drift: rand(0.35, 1.15), emberAcc: Math.random() });
+  }
+  spawnParticle({ x, y, vx: 0, vy: 0, life: 0, maxLife: 0.13, hue, sat: 20,
+    size: 17, drag: 1, flash: true, glow: true });
+  for (let i=0;i<(PREVIEW?12:28);i++) {
+    const a=rand(0,TWO_PI),s=rand(55,145);
+    spawnParticle({x,y,px:x,py:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:0,maxLife:rand(.35,.75),
+      size:rand(.45,.95),drag:3.2,hue:rand(30,46),sat:75,history:[],textEmber:true});
+  }
+}
+
+function explode(x, y, hue, type, scale = 1, generation = 0) {
+  if (type === 'text') { explodeText(x, y, hue); return; }
+  const n = Math.round(P.particleCount * scale);
+  const R = P.burstRadius;
+  const baseSpeed = 220 * R * scale;
+  const sat = P.sat;
+  skyFlash = Math.max(skyFlash, 0.62 * scale); flashX=x; flashY=y; flashHue=hue;
+  if (P.smokeAmount > 0 && !PREVIEW) for (let s=0;s<Math.ceil(7*P.smokeAmount*scale);s++) smoke.push({x:x+rand(-12,12),y:y+rand(-10,10),vx:rand(-10,10),vy:rand(-18,-3),life:0,maxLife:rand(2.8,5),size:rand(22,46)*scale,hue});
+
+  // 中心閃光
+  spawnParticle({ x, y, vx: 0, vy: 0, life: 0, maxLife: 0.18, hue, sat: 20,
+    size: 15 * Math.sqrt(R), drag: 1, flash: true, glow: true });
+
+  for (let i = 0; i < n; i++) {
+    const ang = (i / n) * TWO_PI + rand(-0.03, 0.03);
+    let sp, vx, vy, drag, maxLife, size, isWillow = false;
+    switch (type) {
+      case 'ring': {
+        sp = baseSpeed * rand(0.95, 1.05);
+        vx = Math.cos(ang) * sp; vy = Math.sin(ang) * sp;
+        drag = 2.2; maxLife = rand(1.1, 1.7); size = rand(1.6, 2.6);
+        break;
+      }
+      case 'willow': {
+        sp = baseSpeed * 0.75 * Math.pow(Math.random(), 0.4);
+        vx = Math.cos(ang) * sp; vy = Math.sin(ang) * sp;
+        drag = 3.2; maxLife = rand(2.4, 3.6); size = rand(1.2, 2.2);
+        isWillow = true;
+        break;
+      }
+      case 'chrysanthemum': {
+        sp = baseSpeed * rand(.82,1.08); vx=Math.cos(ang)*sp; vy=Math.sin(ang)*sp;
+        drag=1.35; maxLife=rand(1.5,2.35); size=rand(.9,1.8); break;
+      }
+      case 'palm': {
+        const arms=9, a=Math.round(i/n*arms)/arms*TWO_PI+rand(-.055,.055);
+        sp=baseSpeed*rand(.65,1.15); vx=Math.cos(a)*sp; vy=Math.sin(a)*sp;
+        drag=1.5; maxLife=rand(1.5,2.45); size=rand(1.1,2.1); isWillow=true; break;
+      }
+      case 'heart': {
+        // 心形參數式，t 均勻取樣，速度正比於離心距離 → 爆開後保持心形
+        const t = (i / n) * TWO_PI;
+        const hx = 16 * Math.pow(Math.sin(t), 3);
+        const hy = -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t));
+        const k = baseSpeed / 17;
+        vx = hx * k * rand(0.96, 1.04); vy = hy * k * rand(0.96, 1.04);
+        drag = 2.4; maxLife = rand(1.2, 1.8); size = rand(1.6, 2.6);
+        break;
+      }
+      default: { // peony / double 的第一段
+        sp = baseSpeed * Math.pow(Math.random(), 0.55) * rand(0.9, 1.1);
+        vx = Math.cos(ang) * sp; vy = Math.sin(ang) * sp;
+        drag = 1.9; maxLife = rand(1.0, 1.9); size = rand(1.5, 2.8);
+      }
+    }
+    const p = {
+      x, y, vx, vy,
+      life: 0, maxLife, size, drag,
+      hue: hue + rand(-14, 14), sat,
+      px:x, py:y, history:[],
+      willow: isWillow,
+      glow: Math.random() < 0.055,
+      crackle: generation===0 && Math.random() < P.crackle*.16,
+    };
+    // 雙層爆炸：第一代的部分粒子在生命中段再炸出一小圈
+    if (generation === 0 && type === 'double' && Math.random() < 0.18) {
+      p.secondary = rand(0.35, 0.6) * p.maxLife;
+      p.maxLife = p.secondary + 0.05;
+    } else if (generation === 0 && type !== 'double' && Math.random() < P.doubleProb * 0.12) {
+      // 其他型態也依「二段爆炸機率」少量點綴
+      p.secondary = rand(0.4, 0.7) * p.maxLife;
+      p.maxLife = p.secondary + 0.05;
+    }
+    spawnParticle(p);
+  }
+}
+
+/* ===== 點擊/觸控發射 ===== */
+canvas.addEventListener('pointerdown', e => {
+  if (isPaused()) return;
+  launchRocket(e.clientX, e.clientY);
+});
+function launchSalvo() {
+  const n=Math.round(P.salvo);
+  for(let i=0;i<n;i++) setTimeout(()=>launchRocket(W*(.18+.64*(n===1?.5:i/(n-1)))+rand(-28,28),rand(H*.16,H*.4)),i*110);
+}
+document.getElementById('salvoBtn').addEventListener('click', launchSalvo);
+document.addEventListener('keydown',e=>{ if(e.code==='Space' && !e.repeat){ e.preventDefault(); launchSalvo(); } });
+document.getElementById('presets').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b)return; const v=b.dataset.preset;
+  if(v==='festival') Object.assign(P,{autoRate:2.1,particleCount:190,burstRadius:1.95,crackle:.55,smokeAmount:.45,palette:'jewel'});
+  if(v==='cinema') Object.assign(P,{autoRate:.7,particleCount:240,burstRadius:2.2,crackle:.3,smokeAmount:.72,palette:'classic',trail:.86});
+  if(v==='willow') Object.assign(P,{autoRate:.85,particleCount:210,burstRadius:2.05,crackle:.18,smokeAmount:.62,palette:'gold',burstStyle:'willow',gravity:105});
+  bindControls(); document.querySelectorAll('#presets button').forEach(x=>x.classList.toggle('active',x===b));
+});
+
+/* ===== 主迴圈 ===== */
+let autoAcc = 0;
+
+function frame(now) {
+  rafId = requestAnimationFrame(frame);
+  const dt = Math.min((now - last) / 1000, 0.05);
+  last = now;
+  update(dt);
+  render(dt, now / 1000);
+}
+
+function update(dt) {
+  const g = P.gravity;
+  skyFlash=Math.max(0,skyFlash-dt*2.8);
+  for(let i=smoke.length-1;i>=0;i--){const s=smoke[i];s.life+=dt;if(s.life>s.maxLife){smoke.splice(i,1);continue;}s.vx+=P.wind*dt*.12;s.x+=s.vx*dt;s.y+=s.vy*dt;s.size+=dt*13;}
+
+  // 自動發射
+  autoAcc += dt * P.autoRate;
+  while (autoAcc >= 1) { autoAcc -= 1; launchRocket(); }
+
+  // 火箭
+  for (let i = rockets.length - 1; i >= 0; i--) {
+    const r = rockets[i];
+    r.prevVy = r.vy;
+    r.vy += g * dt;
+    r.x += r.vx * dt; r.y += r.vy * dt;
+
+    // 上升火花尾跡
+    r.sparkAcc += dt * 90;
+    while (r.sparkAcc >= 1) {
+      r.sparkAcc -= 1;
+      spawnParticle({
+        x: r.x + rand(-1.5, 1.5), y: r.y + rand(0, 6),
+        vx: rand(-18, 18), vy: rand(10, 55),
+        life: 0, maxLife: rand(0.25, 0.7),
+        size: rand(0.7, 1.6), drag: 2.5,
+        hue: 38, sat: 90, riser: true,
+      });
+    }
+
+    // 到達頂點（速度轉正）或極慢時爆炸
+    if (r.vy >= -20 || r.y < H * 0.06) {
+      explode(r.x, r.y, r.hue, r.type);
+      rockets.splice(i, 1);
+    }
+  }
+
+  // 粒子
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.life += dt;
+    if (p.life >= p.maxLife) {
+      // 二段爆炸
+      if (p.secondary !== undefined) {
+        explode(p.x, p.y, pickHue(), 'peony', 0.22, 1);
+      }
+      particles.splice(i, 1);
+      continue;
+    }
+    if (p.textMode) {
+      p.px = p.x; p.py = p.y;
+      const localLife = Math.max(0, p.life - p.delay);
+      const releaseAt = p.formTime + p.holdTime;
+      if (localLife < p.formTime) {
+        const u = Math.min(1, localLife / p.formTime);
+        const ease = 1 + 2.1 * Math.pow(u - 1, 3) + 1.1 * Math.pow(u - 1, 2);
+        const inv = 1 - ease;
+        const controlX = (p.originX + p.targetX) * 0.5 + p.bendX;
+        const controlY = (p.originY + p.targetY) * 0.5 + p.bendY;
+        p.x = inv * inv * p.originX + 2 * inv * ease * controlX + ease * ease * p.targetX;
+        p.y = inv * inv * p.originY + 2 * inv * ease * controlY + ease * ease * p.targetY;
+      } else if (localLife < releaseAt) {
+        const breathe = Math.sin(p.life * 3.2 + p.seed) * p.drift;
+        p.x += (p.targetX + breathe - p.x) * Math.min(1, dt * 9);
+        p.y += (p.targetY + Math.cos(p.life * 2.7 + p.seed) * p.drift * 0.7 - p.y) * Math.min(1, dt * 9);
+        p.emberAcc += dt * 0.18;
+        if (!PREVIEW && p.emberAcc >= 1) {
+          p.emberAcc -= 1;
+          spawnParticle({ x:p.x, y:p.y, px:p.x, py:p.y, vx:rand(-7,7)+P.wind*.05, vy:rand(5,22),
+            life:0, maxLife:rand(.35,.8), size:rand(.35,.75), drag:2.8, hue:p.hue+rand(-5,5), sat:p.sat,
+            history:[], textEmber:true });
+        }
+      } else {
+        if (!p.released) { p.released = true; p.vx = P.wind * 0.12 + rand(-7, 7); p.vy = rand(-12, 2); }
+        p.vy += g * dt * 0.38; p.vx += P.wind * dt * 0.1;
+        p.x += p.vx * dt; p.y += p.vy * dt;
+      }
+      p.history.push([p.x, p.y]); if (p.history.length > 3) p.history.shift();
+      continue;
+    }
+    const dragK = Math.exp(-p.drag * dt);
+    p.px=p.x; p.py=p.y;
+    p.vx *= dragK; p.vy *= dragK;
+    if (!p.flash) p.vy += g * dt * (p.willow ? 0.55 : 1);
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.vx += P.wind * dt * .18;
+    if (!p.flash && !p.riser) { p.history.push([p.x,p.y]); if(p.history.length>P.sparkTrail)p.history.shift(); }
+    if(p.crackle && p.life>p.maxLife*.62 && Math.random()<dt*10){ p.crackle=false; for(let k=0;k<5;k++) spawnParticle({x:p.x,y:p.y,px:p.x,py:p.y,vx:rand(-45,45),vy:rand(-45,45),life:0,maxLife:rand(.18,.42),size:rand(.45,1),drag:4,hue:42,sat:30,history:[],riser:false}); }
+  }
+}
+
+function render(dt, t) {
+  /* --- 拖尾殘影：半透明黑覆蓋 --- */
+  const fade = 1 - P.trail;
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = `rgba(0,0,0,${Math.max(0.03, fade)})`;
+  ctx.fillRect(0, 0, W, H);
+
+  /* --- 星空（獨立圖層快取，避免被殘影拖糊太多）--- */
+  if (P.starCount > 0) {
+    if (!starField || starField.count !== Math.round(P.starCount)) buildStars();
+    ctx.globalAlpha = 0.5 + 0.15 * Math.sin(t * 1.3);
+    ctx.drawImage(starCanvas, 0, 0, W, H);
+    ctx.globalAlpha = 1;
+  }
+
+  if(smoke.length){ ctx.globalCompositeOperation='source-over'; for(const s of smoke){const q=s.life/s.maxLife,a=Math.sin(Math.PI*q)*.075*P.smokeAmount;const gr=ctx.createRadialGradient(s.x,s.y,0,s.x,s.y,s.size);gr.addColorStop(0,`hsla(${s.hue},18%,45%,${a})`);gr.addColorStop(1,'rgba(18,20,24,0)');ctx.fillStyle=gr;ctx.beginPath();ctx.arc(s.x,s.y,s.size,0,TWO_PI);ctx.fill();} }
+  if(skyFlash>0 && P.illumination>0){const rr=Math.max(W,H)*.58,gr=ctx.createRadialGradient(flashX,flashY,0,flashX,flashY,rr);gr.addColorStop(0,`hsla(${flashHue},100%,72%,${skyFlash*.065*P.illumination})`);gr.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=gr;ctx.fillRect(0,0,W,H);}
+
+  ctx.globalCompositeOperation = 'lighter';
+
+  /* --- 火箭本體 --- */
+  for (const r of rockets) {
+    const gr = ctx.createRadialGradient(r.x, r.y, 0, r.x, r.y, 8);
+    gr.addColorStop(0, 'rgba(255,240,210,0.95)');
+    gr.addColorStop(0.4, `hsla(${r.hue},100%,65%,0.5)`);
+    gr.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = gr;
+    ctx.beginPath(); ctx.arc(r.x, r.y, 8, 0, TWO_PI); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.95)';
+    ctx.beginPath(); ctx.arc(r.x, r.y, 1.6, 0, TWO_PI); ctx.fill();
+  }
+
+  /* --- 粒子 --- */
+  const flickAmt = P.flicker;
+  for (const p of particles) {
+    const q = p.life / p.maxLife;      // 0..1 年齡
+    let alpha = 1 - q * q;
+    if (p.textMode) {
+      const localLife = p.life - p.delay;
+      if (localLife <= 0) alpha = 0;
+      else alpha *= Math.min(1, localLife / 0.2) * (0.78 + 0.22 * Math.sin(p.life * 18 + p.seed));
+    }
+    // 生命末段閃爍/眨眼
+    if (flickAmt > 0 && q > 0.55 && !p.flash) {
+      const tw = Math.sin((p.life * (18 + (p.size * 7)) + p.hue) * 3.1);
+      alpha *= 1 - flickAmt * (q - 0.55) / 0.45 * (0.5 + 0.5 * tw);
+    }
+    if (alpha <= 0.01) continue;
+
+    if (p.flash) {
+      // 爆心閃光：大而短促的白光球
+      const rr = p.size * (1 + q * 2.2);
+      const gf = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, rr);
+      gf.addColorStop(0, `rgba(255,255,255,${0.85 * alpha})`);
+      gf.addColorStop(0.5, `hsla(${p.hue},100%,75%,${0.35 * alpha})`);
+      gf.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = gf;
+      ctx.beginPath(); ctx.arc(p.x, p.y, rr, 0, TWO_PI); ctx.fill();
+      continue;
+    }
+
+    const light = p.textMode ? 78 + 12 * Math.sin(p.life * 15 + p.seed) : (p.riser ? 75 : (q < 0.15 ? 85 - q * 160 : 62 - q * 12));
+    if(p.history && p.history.length>1){ctx.strokeStyle=`hsla(${p.hue},${p.sat}%,${Math.min(92,light+18)}%,${alpha*.72})`;ctx.lineWidth=Math.max(.35,p.size*(1-q*.55));ctx.lineCap='round';ctx.beginPath();ctx.moveTo(p.history[0][0],p.history[0][1]);for(let j=1;j<p.history.length;j++)ctx.lineTo(p.history[j][0],p.history[j][1]);ctx.stroke();}
+    ctx.fillStyle = `hsla(${p.hue},${p.sat}%,${light}%,${alpha})`;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, TWO_PI); ctx.fill();
+
+    // 少數粒子加一圈柔光
+    if (p.glow) {
+      ctx.fillStyle = `hsla(${p.hue},${p.sat}%,60%,${alpha * 0.055})`;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.size * 2.6, 0, TWO_PI); ctx.fill();
+    }
+  }
+
+  /* --- 天際線剪影（不透明覆蓋，蓋掉底部殘影）--- */
+  if (P.skyline) {
+    ctx.globalCompositeOperation = 'source-over';
+    if (!skylinePath) buildSkyline();
+    ctx.fillStyle = '#05060a';
+    ctx.fill(skylinePath);
+  }
+}
+
+/* 開場先熱鬧一下 */
+launchRocket();
+launchRocket();
+syncLoop();
