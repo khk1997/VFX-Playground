@@ -111,6 +111,7 @@
     <div class="row"><label>背景顏色</label><input type="color" id="bgColor" value="#000000"><span class="val"></span></div>
     <div class="row"><label>HDRI 水平</label><input type="range" id="hdriYaw" min="-180" max="180" step="1" value="0"><span class="val" id="hdriYaw_v"></span></div>
     <div class="row"><label>HDRI 垂直</label><input type="range" id="hdriPitch" min="-90" max="90" step="1" value="0"><span class="val" id="hdriPitch_v"></span></div>
+    <div class="row"><label>HDRI 模糊</label><input type="range" id="hdriBlur" min="0" max="1" step="0.01" value="0"><span class="val" id="hdriBlur_v"></span></div>
     <div class="row"><label>環境折射</label><input type="range" id="envRefraction" min="0" max="1" step="0.01" value="0.5"><span class="val" id="envRefraction_v"></span></div>
     <div class="row"><button id="hdriBtn">更換 HDRI…</button></div>
     <div id="hdriState" class="note">預設 HDRI：photo_studio_london_hall_1k.hdr</div>
@@ -180,7 +181,6 @@
     <h3>動態 Motion</h3>
     <div class="row"><label>動態模式</label><select id="motion">
       <option value="cinematic">電影循環 Cinematic</option>
-      <option value="chat">聊天圖示 Chat Icon</option>
     </select><span class="val"></span></div>
     <div class="row"><label>循環秒數</label><input type="range" id="loopDuration" min="4" max="30" step="0.5" value="12"><span class="val" id="loopDuration_v"></span></div>
     <div class="row"><label>動態張力</label><input type="range" id="flowSpeed" min="0" max="1.5" step="0.01" value="0.47"><span class="val" id="flowSpeed_v"></span></div>
@@ -239,6 +239,7 @@ const DEFAULTS = {              // 數值滑桿
   materialExposure: 1,
   hdriYaw: 0,
   hdriPitch: 0,
+  hdriBlur: 0,
   envRefraction: 0.5,
   cameraDistance: 5.0,
   loopDuration: 12,
@@ -269,7 +270,7 @@ const RAMP_DEFAULT = {
 const SELECTS = {
   bgMode:    { uniform: 'uBgMode',    map: { color: 0, hdri: 1 } },
   colorMode: { uniform: 'uColorMode', map: { spectral: 0, ramp: 1 } },
-  motion:    { uniform: 'uMotion',    map: { cinematic: 0, chat: 1 } },
+  motion:    { uniform: 'uMotion',    map: { cinematic: 0 } },
 };
 const COLORS = { bgColor: 'uBgColor' };
 
@@ -293,6 +294,7 @@ const fmt = {
   materialExposure: v => 'x' + v.toFixed(2),
   hdriYaw: v => v.toFixed(0) + '°',
   hdriPitch: v => v.toFixed(0) + '°',
+  hdriBlur: v => Math.round(v * 100) + '%',
   envRefraction: v => Math.round(v * 100) + '%',
   cameraDistance: v => v.toFixed(2),
   loopDuration: v => v.toFixed(1) + 's',
@@ -388,9 +390,6 @@ uniform float uCompositionOffsetY;
 
 uniform int   uCount;
 uniform float uViscosity;
-uniform float uShapeMorph;
-uniform float uChatTail;
-uniform float uChatScale;
 uniform float uWobble;
 uniform float uWobbleScale;
 uniform float uWobbleSpeed;
@@ -430,6 +429,7 @@ uniform float uMaterialExposure;
 uniform float uRoughness;
 uniform float uHdriYaw;
 uniform float uHdriPitch;
+uniform float uHdriBlur;
 uniform sampler2D uEnvMap;
 uniform sampler2D uPmremMap;
 uniform int   uHasEnv;
@@ -473,7 +473,11 @@ vec3 sampleEnvironmentBackdrop(vec3 d){
   if (uHasEnv != 1) return uBgColor;
   d = rotateEnvDir(d);
   vec2 uvE = vec2(atan(d.z, d.x) / TAU + 0.5, asin(clamp(d.y, -1.0, 1.0)) / PI + 0.5);
-  return texture2D(uEnvMap, uvE).rgb;
+  vec3 sharpEnv = texture2D(uEnvMap, uvE).rgb;
+  if (uHdriBlur <= 0.001) return sharpEnv;
+  vec3 blurredEnv = textureCubeUV(uPmremMap, d, uHdriBlur).rgb;
+  float blurBlend = smoothstep(0.0, 0.08, uHdriBlur);
+  return mix(sharpEnv, blurredEnv, blurBlend);
 }
 vec4 backgroundSample(vec3 rd){
   if (uBgMode == 1 && uHasEnv == 1){
@@ -490,7 +494,6 @@ float smin(float a, float b, float k){
   float h = max(kc - abs(a - b), 0.0) / kc;
   return min(a, b) - h * h * h * kc * (1.0 / 6.0);
 }
-
 // 方向性液滴 SDF：縱向伸長時以 1/sqrt(s) 壓縮橫向，近似維持體積。
 float dropletDistance(vec3 p, int i){
   vec3 local = p - uDrops[i].xyz;
@@ -510,34 +513,6 @@ float dropletDistance(vec3 p, int i){
   vec3 q = across / transverseScale + axis * (along / longScale);
   float conservativeScale = min(longScale, transverseScale);
   return (length(q) - uDrops[i].w) * conservativeScale;
-}
-
-float roundedBoxDistance(vec3 p, vec3 halfSize, float radius){
-  vec3 q = abs(p) - halfSize + radius;
-  return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0) - radius;
-}
-
-float capsuleDistance(vec3 p, vec3 a, vec3 b, float radius){
-  vec3 pa = p - a;
-  vec3 ba = b - a;
-  float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-  return length(pa - ba * h) - radius;
-}
-
-// 正面可辨識、側面仍有薄膜厚度的圓角聊天泡泡。尾巴使用獨立包絡延遲長出，
-// 避免主體與尖角同時出現，讓形變讀起來更像液體的 follow-through。
-float chatIconDistance(vec3 p){
-  vec3 q = p / max(0.001, uChatScale);
-  q.y += 0.08;
-  float body = roundedBoxDistance(q, vec3(1.05, 0.66, 0.30), 0.28);
-  float tail = capsuleDistance(
-    q,
-    vec3(0.56, -0.45, 0.0),
-    vec3(0.92, -1.18, 0.0),
-    mix(0.045, 0.22, uChatTail)
-  );
-  tail += (1.0 - uChatTail) * 0.85;
-  return smin(body, tail, 0.16 * uChatTail) * uChatScale;
 }
 
 // 分離後由接觸極點向外傳播的局部毛細波；只處理主要水滴對 0/1。
@@ -582,10 +557,6 @@ float mapScene(vec3 p){
     if (uSatellites[s].w > 0.001) {
       d = smin(d, length(p - uSatellites[s].xyz) - uSatellites[s].w, uSatelliteBlend);
     }
-  }
-  if (uShapeMorph > 0.0001) {
-    float shapeBlend = uShapeMorph * uShapeMorph * (3.0 - 2.0 * uShapeMorph);
-    d = mix(d, chatIconDistance(p), shapeBlend);
   }
   // 最大位移遠小於 0.25；遠離表面時略過 noise，不影響射線接近表面的安全性。
   if (uWobble > 0.001 && d < 0.25) {
@@ -1000,56 +971,6 @@ function cinematicTimeline(phase) {
   };
 }
 
-function chatTimeline(phase) {
-  // 母滴停留 → 預備壓縮 → 撐開主體 → 尾巴跟隨 → 英雄姿態 → 尾巴收回 → 回到母滴。
-  const form = smoothstepCPU(phase, 0.16, 0.43)
-    * (1 - smoothstepCPU(phase, 0.79, 0.96));
-  const tail = smoothstepCPU(phase, 0.28, 0.43)
-    * (1 - smoothstepCPU(phase, 0.78, 0.91));
-  const anticipation = cyclicPulse(phase, 0.135, 0.055);
-  const settle = cyclicPulse(phase, 0.49, 0.10);
-  return { form, tail, anticipation, settle };
-}
-
-function updateChatIconUniforms(phase, count) {
-  const chat = chatTimeline(phase);
-  let totalVolume = 0;
-  for (let i = 0; i < count; i++) {
-    const targetRadius = P.radius * dropSeeds[i].radius;
-    totalVolume += targetRadius ** 3;
-  }
-  const motherRadius = Math.cbrt(Math.max(0.0001, totalVolume));
-  const scale = motherRadius * (1.12 + chat.settle * 0.018);
-
-  // 只有母滴參與形變；其餘滴的體積已守恆地收進母滴，避免重疊 SDF 形成暗縫。
-  dropData[0].set(0, -P.gravity * P.spread * 0.045, 0, motherRadius);
-  dropShapeData[0].set(1, 0, 0, 1 - chat.anticipation * 0.055);
-  dropPhysicsData[0].set(0, chat.settle * 0.08, 0, 0);
-  for (let i = 1; i < 8; i++) {
-    dropData[i].set(0, 0, 0, 0);
-    dropShapeData[i].set(1, 0, 0, 1);
-    dropPhysicsData[i].set(0, 0, 0, 0);
-  }
-  elasticEvent.set(0, 0);
-  for (let s = 0; s < SAT_N; s++) satelliteDrops[s].set(0, 0, 0, 0);
-
-  if (uniforms) {
-    uniforms.uCount.value = 1;
-    uniforms.uShapeMorph.value = chat.form;
-    uniforms.uChatTail.value = chat.tail;
-    uniforms.uChatScale.value = scale;
-    uniforms.uViscosity.value = P.viscosity;
-    uniforms.uSatelliteBlend.value = 0;
-  }
-
-  previousDropPositions[0].set(dropData[0].x, dropData[0].y, dropData[0].z);
-  previousDropT = null;
-  previousPairKey = '';
-  previousPairGap = Infinity;
-  // 涵蓋聊天泡泡右側與延遲長出的尾巴，避免 raymarch 包圍球裁切圖示。
-  dropBounds.set(0, -scale * 0.18, 0, scale * 1.84 + P.wobble * 0.25 + 0.12);
-}
-
 // 水滴動畫只在 CPU 每幀計算一次；shader 的每個 march step 僅讀取 vec4 array。
 function updateDropUniforms(t) {
   const count = Math.max(1, Math.min(8, Math.round(P.count)));
@@ -1057,16 +978,6 @@ function updateDropUniforms(t) {
   const phase = fract(t / Math.max(0.001, P.loopDuration));
   const a = phase * tau;
   const energy = 0.55 + P.flowSpeed * 0.9;
-
-  if (P.motion === 'chat') {
-    updateChatIconUniforms(phase, count);
-    return;
-  }
-  if (uniforms) {
-    uniforms.uCount.value = count;
-    uniforms.uShapeMorph.value = 0;
-    uniforms.uChatTail.value = 0;
-  }
 
   const cinema = cinematicTimeline(phase);
   const separation = cinema.volumeSeparation;
@@ -1505,9 +1416,6 @@ function initGL() {
     uCompositionOffsetY: { value: 0 },
     uCount:      { value: Math.round(P.count) },
     uViscosity:  { value: P.viscosity },
-    uShapeMorph: { value: 0 },
-    uChatTail:   { value: 0 },
-    uChatScale:  { value: 1 },
     uWobble:     { value: P.wobble },
     uWobbleScale: { value: P.wobbleScale },
     uWobbleSpeed: { value: P.wobbleSpeed },
@@ -1544,6 +1452,7 @@ function initGL() {
     uRoughness:  { value: P.roughness },
     uHdriYaw:    { value: P.hdriYaw },
     uHdriPitch:  { value: P.hdriPitch },
+    uHdriBlur:   { value: P.hdriBlur },
     uEnvMap:     { value: makeBlankEnv() },
     uPmremMap:   { value: pmremTarget.texture },
     uHasEnv:     { value: 0 },
