@@ -18,10 +18,13 @@ let snapTimer = null;
 let motionTimer = null;
 let activeThemeLayer = 0;
 const cardEls = [];
-const iframes = [];   // 實體卡片順序，可為 null
+const iframes = [];   // 只保留目前實際掛載的 iframe；遠端卡片為 null。
+const previewHosts = [];
+const previewSources = [];
 const dotEls = [];
 const mobilePreviewQuery = window.matchMedia('(max-width: 760px)');
-const PREVIEW_CACHE_LIMIT = 7;
+const primedMobilePreviews = new WeakSet();
+const mobilePreviewPauseTimers = new WeakMap();
 let previewUseTick = 0;
 
 /* ===== WebAudio 合成音效（Switch 風的嗶啵聲，不用音檔） ===== */
@@ -74,27 +77,17 @@ function buildCards() {
     const preview = document.createElement('div');
     preview.className = 'card-preview';
     if (fx.previewSrc) {
-      const iframe = document.createElement('iframe');
-      iframe.dataset.src = fx.previewSrc;
-      iframe.dataset.loaded = '0';
-      iframe.width = PREVIEW_W;
-      iframe.height = PREVIEW_H;
-      iframe.tabIndex = -1;
-      iframe.loading = 'lazy';
-      iframe.setAttribute('scrolling', 'no');
-      iframe.setAttribute('aria-hidden', 'true');
-      iframe.dataset.index = String(iframes.length);
-      iframe.addEventListener('load', () => syncPreviewState(iframe, Number(iframe.dataset.index)));
-      const scale = 220 / PREVIEW_W;
-      iframe.style.transform = `scale(${scale})`;
-      preview.appendChild(iframe);
-      iframes.push(iframe);
+      iframes.push(null);
+      previewHosts.push(preview);
+      previewSources.push(fx.previewSrc);
     } else {
       const soon = document.createElement('div');
       soon.className = 'soon';
       soon.textContent = 'COMING SOON';
       preview.appendChild(soon);
       iframes.push(null);
+      previewHosts.push(null);
+      previewSources.push(null);
     }
 
     const body = document.createElement('div');
@@ -137,55 +130,115 @@ function buildCards() {
 function syncPreviewState(frame, index) {
   if (!frame || frame.dataset.loaded !== '1' || !frame.contentWindow) return;
   const distance = Math.abs(index - position);
+  const mobile = mobilePreviewQuery.matches;
+  const dpr = mobile ? 1.15 : 1.5;
+  const existingTimer = mobilePreviewPauseTimers.get(frame);
+
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+    mobilePreviewPauseTimers.delete(frame);
+  }
+
+  if (mobile) {
+    if (distance === 0 && !document.hidden) {
+      try { frame.contentWindow.postMessage({ type: 'vfx-quality', fps: 30, dpr }, '*'); } catch (e) {}
+      try { frame.contentWindow.postMessage('vfx-play', '*'); } catch (e) {}
+      return;
+    }
+
+    // 左右卡片先跑幾幀取得完整靜態預覽，之後暫停，保留畫面質感但不持續佔用 CPU/GPU。
+    if (distance === 1 && !document.hidden && !primedMobilePreviews.has(frame)) {
+      primedMobilePreviews.add(frame);
+      try { frame.contentWindow.postMessage({ type: 'vfx-quality', fps: 12, dpr }, '*'); } catch (e) {}
+      try { frame.contentWindow.postMessage('vfx-play', '*'); } catch (e) {}
+      const timer = setTimeout(() => {
+        mobilePreviewPauseTimers.delete(frame);
+        const currentIndex = Number(frame.dataset.index);
+        if (Math.abs(currentIndex - position) === 1) {
+          try { frame.contentWindow.postMessage('vfx-pause', '*'); } catch (e) {}
+        }
+      }, 500);
+      mobilePreviewPauseTimers.set(frame, timer);
+      return;
+    }
+
+    try { frame.contentWindow.postMessage({ type: 'vfx-quality', fps: 12, dpr }, '*'); } catch (e) {}
+    try { frame.contentWindow.postMessage('vfx-pause', '*'); } catch (e) {}
+    return;
+  }
+
   const shouldPlay = distance <= 1 && !document.hidden;
   const fps = distance === 0 ? 60 : distance === 1 ? 24 : 12;
-  const dpr = mobilePreviewQuery.matches ? 1.15 : 1.5;
   try { frame.contentWindow.postMessage({ type: 'vfx-quality', fps, dpr }, '*'); } catch (e) {}
   try { frame.contentWindow.postMessage(shouldPlay ? 'vfx-play' : 'vfx-pause', '*'); } catch (e) {}
 }
 
-function ensurePreviewLoaded(frame, index) {
-  if (!frame) return;
+function ensurePreviewLoaded(index) {
+  let frame = iframes[index];
+  if (!frame) {
+    const host = previewHosts[index];
+    const src = previewSources[index];
+    if (!host || !src) return null;
+    frame = document.createElement('iframe');
+    frame.dataset.src = src;
+    frame.dataset.loaded = '1';
+    frame.dataset.index = String(index);
+    frame.width = PREVIEW_W;
+    frame.height = PREVIEW_H;
+    frame.tabIndex = -1;
+    frame.loading = 'eager';
+    frame.setAttribute('scrolling', 'no');
+    frame.setAttribute('aria-hidden', 'true');
+    frame.style.transform = `scale(${220 / PREVIEW_W})`;
+    frame.addEventListener('load', () => syncPreviewState(frame, index));
+    iframes[index] = frame;
+    host.appendChild(frame);
+    frame.src = src;
+  }
   frame.dataset.lastUsed = String(++previewUseTick);
-  if (frame.dataset.loaded === '1') return;
-  frame.src = frame.dataset.src;
-  frame.dataset.loaded = '1';
-  frame.dataset.index = String(index);
+  return frame;
 }
 
-function unloadPreview(frame) {
-  if (!frame || frame.dataset.loaded !== '1') return;
+function unloadPreview(frame, index) {
+  if (!frame) return;
+  const timer = mobilePreviewPauseTimers.get(frame);
+  if (timer) clearTimeout(timer);
+  mobilePreviewPauseTimers.delete(frame);
+  primedMobilePreviews.delete(frame);
   try { frame.contentWindow && frame.contentWindow.postMessage('vfx-pause', '*'); } catch (e) {}
-  frame.src = 'about:blank';
-  frame.dataset.loaded = '0';
+  frame.remove();
+  iframes[index] = null;
 }
 
 function trimPreviewCache(protectedIndices) {
   const loaded = iframes
     .map((frame, index) => ({ frame, index }))
     .filter(item => item.frame && item.frame.dataset.loaded === '1');
-  if (loaded.length <= PREVIEW_CACHE_LIMIT) return;
+  const cacheLimit = mobilePreviewQuery.matches ? 3 : 7;
+  if (loaded.length <= cacheLimit) return;
 
   loaded
     .filter(item => !protectedIndices.has(item.index))
     .sort((a, b) => Number(a.frame.dataset.lastUsed || 0) - Number(b.frame.dataset.lastUsed || 0))
-    .slice(0, loaded.length - PREVIEW_CACHE_LIMIT)
-    .forEach(item => unloadPreview(item.frame));
+    .slice(0, loaded.length - cacheLimit)
+    .forEach(item => unloadPreview(item.frame, item.index));
 }
 
-/* 中心附近立即載入，其餘使用最多 7 個項目的 LRU 緩存，避免來回切換反覆初始化。 */
+/* 手機只載入中心與左右卡片；桌面保留較寬的預熱範圍與 LRU 緩存。 */
 function updatePreviewPlayback() {
   const protectedIndices = new Set();
-  iframes.forEach((f, i) => {
-    if (!f) return;
+  const loadDistance = mobilePreviewQuery.matches ? 1 : 2;
+  previewSources.forEach((src, i) => {
+    if (!src) return;
     const distance = Math.abs(i - position);
-    const shouldLoad = distance <= 2;
+    const shouldLoad = distance <= loadDistance;
 
+    let frame = iframes[i];
     if (shouldLoad) {
       protectedIndices.add(i);
-      ensurePreviewLoaded(f, i);
+      frame = ensurePreviewLoaded(i);
     }
-    if (f.dataset.loaded === '1') syncPreviewState(f, i);
+    if (frame) syncPreviewState(frame, i);
   });
   trimPreviewCache(protectedIndices);
 }
@@ -278,7 +331,7 @@ function setActive(i, silent, direct = false, instant = false) {
   // 滑過接續卡後，無動畫跳回中間那組完全相同的卡片。
   if (position < EFFECTS.length || position >= EFFECTS.length * 2) {
     const targetPosition = EFFECTS.length + active;
-    ensurePreviewLoaded(iframes[targetPosition], targetPosition);
+    ensurePreviewLoaded(targetPosition);
     snapTimer = setTimeout(() => {
       position = targetPosition;
       cardEls.forEach((el, idx) => el.classList.toggle('active', idx === position));

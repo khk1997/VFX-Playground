@@ -11,6 +11,7 @@ OUTPUT_DIR = Path(os.environ.get("VFX_OUTPUT_DIR", "/tmp/vfx-regression"))
 MODE = os.environ.get("VFX_MODE", "current")
 VIEWPORT_WIDTH = int(os.environ.get("VFX_VIEWPORT_WIDTH", "1280"))
 VIEWPORT_HEIGHT = int(os.environ.get("VFX_VIEWPORT_HEIGHT", "800"))
+DEVICE_SCALE_FACTOR = float(os.environ.get("VFX_DEVICE_SCALE_FACTOR", "1"))
 PAGES = [
     ("home", "/index.html"),
     ("aurora", "/aurora/index.html"),
@@ -35,7 +36,7 @@ def main():
         browser = playwright.chromium.launch(headless=True)
         context = browser.new_context(
             viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT},
-            device_scale_factor=1,
+            device_scale_factor=DEVICE_SCALE_FACTOR,
         )
 
         for name, route in PAGES:
@@ -78,7 +79,11 @@ def main():
                         homeBtn: rect('#homeBtn'),
                         toggleBtn: rect('#toggleBtn'),
                         playCtl: rect('#playCtl'),
-                        controls: document.querySelectorAll('input, select, button').length
+                        controls: document.querySelectorAll('input, select, button').length,
+                        canvasPixels: [...document.querySelectorAll('canvas')]
+                            .reduce((sum, canvas) => sum + canvas.width * canvas.height, 0),
+                        loadedIframes: [...document.querySelectorAll('iframe')]
+                            .filter(frame => frame.dataset.loaded === '1').length
                     };
                 }"""
             )
@@ -131,9 +136,12 @@ def main():
                     metrics["rangeInputChanged"] = new_value != old_value
             else:
                 next_button = page.locator("#nextBtn")
-                if next_button.count() and next_button.is_visible():
+                if next_button.count():
                     before = page.locator("#selectionIndex").inner_text()
-                    next_button.click()
+                    if next_button.is_visible():
+                        next_button.click()
+                    else:
+                        page.keyboard.press("ArrowRight")
                     page.wait_for_timeout(200)
                     after = page.locator("#selectionIndex").inner_text()
                     metrics["carouselChanged"] = before != after
@@ -167,10 +175,10 @@ def main():
                 failures.append(f"{name}: panel toggle did not change state")
             if metrics.get("playToggleTested") and not metrics.get("playToggleChanged"):
                 failures.append(f"{name}: play control did not change state")
-            if name != "home" and not metrics.get("rangeInputChanged"):
+            if not metrics.get("rangeInputChanged"):
                 failures.append(f"{name}: range input did not accept updates")
-            if name == "home" and not metrics.get("carouselChanged"):
-                failures.append("home: carousel did not change selection")
+        elif not result["metrics"].get("carouselChanged"):
+            failures.append("home: carousel did not change selection")
 
     if failures:
         print("\n".join(failures))

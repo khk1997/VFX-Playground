@@ -6,6 +6,7 @@ const PREVIEW = new URLSearchParams(location.search).has('preview');
 if (PREVIEW) document.documentElement.classList.add('preview-mode');
 
 const canvas = document.getElementById('stage');
+const mobileRenderQuery = window.matchMedia('(max-width: 760px)');
 const DEFAULT_HDRI_URL = new URL('./assets/photo_studio_london_hall_1k.hdr', import.meta.url).href;
 const DEFAULT_HDRI_LABEL = 'photo_studio_london_hall_1k.hdr';
 
@@ -106,6 +107,18 @@ import { VERT, FRAG } from './shaders.js';
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
 let pmremGenerator = null, pmremTarget = null;
 let inited = false;
+const maxRenderDpr = PREVIEW ? 1 : mobileRenderQuery.matches
+  ? Math.min(window.devicePixelRatio || 1, 1.5)
+  : Math.min(window.devicePixelRatio || 1, 2);
+const minRenderDpr = PREVIEW ? 1 : mobileRenderQuery.matches
+  ? Math.min(maxRenderDpr, 1.25)
+  : Math.max(1, maxRenderDpr - 0.25);
+let qualityDpr = maxRenderDpr;
+let qualitySteps = PREVIEW ? 56 : mobileRenderQuery.matches ? 64 : 88;
+let qualitySampleStarted = performance.now();
+let qualitySampleFrames = 0;
+let qualityLowSamples = 0;
+let qualityHighSamples = 0;
 
 const rot = { x: 0.17, y: 0.52 };
 const vel = { x: 0, y: 0 };
@@ -625,9 +638,10 @@ function initGL() {
   if (inited) return;
   inited = true;
 
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+  // 全螢幕 shader 本身沒有多邊形鋸齒，關閉 MSAA 可省下額外 framebuffer 成本。
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false });
   renderer.setClearColor(0x000000, 1);
-  renderer.setPixelRatio(PREVIEW ? 1 : Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setPixelRatio(qualityDpr);
 
   pmremGenerator = new THREE.PMREMGenerator(renderer);
   pmremGenerator.compileEquirectangularShader();
@@ -646,6 +660,7 @@ function initGL() {
     uCameraDistance: { value: P.cameraDistance },
     uCompositionOffsetX: { value: 0 },
     uCompositionOffsetY: { value: 0 },
+    uMaxSteps:   { value: qualitySteps },
     uCount:      { value: Math.round(P.count) },
     uViscosity:  { value: P.viscosity },
     uWobble:     { value: P.wobble },
@@ -719,11 +734,57 @@ function resize() {
   uniforms.uResolution.value.set(w, h);
 }
 
+function refreshRenderQuality() {
+  if (!renderer || !uniforms) return;
+  const interactionDpr = dragging ? Math.min(qualityDpr, minRenderDpr) : qualityDpr;
+  const interactionSteps = dragging ? Math.min(qualitySteps, 56) : qualitySteps;
+  if (Math.abs(renderer.getPixelRatio() - interactionDpr) > 0.01) {
+    renderer.setPixelRatio(interactionDpr);
+    resize();
+  }
+  uniforms.uMaxSteps.value = interactionSteps;
+}
+
+function sampleRenderQuality(now) {
+  if (PREVIEW || !mobileRenderQuery.matches) return;
+  qualitySampleFrames++;
+  const elapsed = now - qualitySampleStarted;
+  if (elapsed < 2000) return;
+
+  const fps = qualitySampleFrames * 1000 / elapsed;
+  qualitySampleStarted = now;
+  qualitySampleFrames = 0;
+
+  if (fps < 42) {
+    qualityLowSamples++;
+    qualityHighSamples = 0;
+    if (qualityLowSamples >= 2 && (qualityDpr > minRenderDpr || qualitySteps > 56)) {
+      qualityDpr = minRenderDpr;
+      qualitySteps = 56;
+      qualityLowSamples = 0;
+      refreshRenderQuality();
+    }
+  } else if (fps > 55) {
+    qualityHighSamples++;
+    qualityLowSamples = 0;
+    if (qualityHighSamples >= 3 && (qualityDpr < maxRenderDpr || qualitySteps < 64)) {
+      qualityDpr = maxRenderDpr;
+      qualitySteps = 64;
+      qualityHighSamples = 0;
+      refreshRenderQuality();
+    }
+  } else {
+    qualityLowSamples = 0;
+    qualityHighSamples = 0;
+  }
+}
+
 /* ===== 拖曳旋轉 ===== */
 function bindPointer() {
   canvas.addEventListener('pointerdown', e => {
     dragging = true; lastX = e.clientX; lastY = e.clientY;
     canvas.setPointerCapture(e.pointerId);
+    refreshRenderQuality();
   });
   canvas.addEventListener('pointermove', e => {
     if (!dragging) return;
@@ -732,7 +793,11 @@ function bindPointer() {
     rot.y += dx * 0.006; rot.x += dy * 0.006;
     vel.y = dx * 0.006; vel.x = dy * 0.006;
   });
-  const end = e => { dragging = false; try { canvas.releasePointerCapture(e.pointerId); } catch (_) {} };
+  const end = e => {
+    dragging = false;
+    refreshRenderQuality();
+    try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+  };
   canvas.addEventListener('pointerup', end);
   canvas.addEventListener('pointercancel', end);
   canvas.addEventListener('wheel', e => {
@@ -974,6 +1039,7 @@ document.getElementById('toggleBtn').addEventListener('click', () => panel.class
 let simT = 0;
 function frame(now) {
   rafId = requestAnimationFrame(frame);
+  sampleRenderQuality(now);
   const dt = Math.min((now - last) / 1000, 0.05);
   last = now;
   simT = (simT + dt) % Math.max(0.001, P.loopDuration);

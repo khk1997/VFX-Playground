@@ -79,6 +79,7 @@ uniform mat3  uRot;
 uniform float uCameraDistance;
 uniform float uCompositionOffsetX;
 uniform float uCompositionOffsetY;
+uniform int   uMaxSteps;
 
 uniform int   uCount;
 uniform float uViscosity;
@@ -440,6 +441,7 @@ void main(){
   float t = max(0.0, -qb - qh);
   bool hit = false;
   for (int i = 0; i < 88; i++){
+    if (i >= uMaxSteps) break;
     vec3 p = ro + rd * t;
     float d = mapScene(p);
     if (d < 0.0008){ hit = true; break; }

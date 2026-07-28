@@ -6,10 +6,13 @@ if (PREVIEW) document.documentElement.classList.add('preview-mode');
 
 const canvas = document.getElementById('stage');
 const ctx = canvas.getContext('2d');
-let W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2);
+const mobileFluidQuery = window.matchMedia('(max-width: 760px)');
+let W = 0, H = 0, DPR = 1;
 
 function resize() {
   W = window.innerWidth; H = window.innerHeight;
+  // 模擬來源最高只有 100px 高；手機使用 DPR 1 不會丟失流體細節，只避免無效的大畫布放大成本。
+  DPR = PREVIEW || mobileFluidQuery.matches ? 1 : Math.min(window.devicePixelRatio || 1, 2);
   canvas.width = W * DPR; canvas.height = H * DPR;
   canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -43,7 +46,10 @@ function bindControls() {
       if (valEl) valEl.textContent = (fmt[key] || (v => v.toFixed ? +v.toFixed(2) : v))(P[key]);
       if (key === 'simRes') allocGrid();
     };
-    el.addEventListener('input', update);
+    if (!el._bound) {
+      el.addEventListener('input', update);
+      el._bound = true;
+    }
     el.value = P[key];
     update();
   }
@@ -63,12 +69,13 @@ const pauseBtn = document.getElementById('playCtl');
 pauseBtn.addEventListener('click', () => {
   paused = !paused;
   pauseBtn.textContent = paused ? '▶ 播放' : '⏸ 暫停';
+  syncLoop();
 });
 window.addEventListener('message', e => {
-  if (e.data === 'vfx-pause') extPaused = true;
-  else if (e.data === 'vfx-play') { extPaused = false; last = performance.now(); }
+  if (e.data === 'vfx-pause') { extPaused = true; syncLoop(); }
+  else if (e.data === 'vfx-play') { extPaused = false; syncLoop(); }
 });
-document.addEventListener('visibilitychange', () => { if (!document.hidden) last = performance.now(); });
+document.addEventListener('visibilitychange', syncLoop);
 
 /* ===== 面板開合 ===== */
 const panel = document.getElementById('panel');
@@ -378,17 +385,46 @@ function render() {
 /* ===== 主迴圈 ===== */
 let last = performance.now();
 let rafId = 0;
+let accumulator = 0;
+const FIXED_STEP = 1 / 60;
+
+function isHalted() {
+  return paused || extPaused || document.hidden;
+}
+
+function syncLoop() {
+  if (isHalted()) {
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = 0;
+    accumulator = 0;
+    return;
+  }
+  if (!rafId) {
+    last = performance.now();
+    rafId = requestAnimationFrame(frame);
+  }
+}
+
 function frame(now) {
   rafId = requestAnimationFrame(frame);
   const dt = Math.min((now - last) / 1000, 0.05); // dt 上限 50ms
   last = now;
-  if (paused || extPaused || document.hidden) return;
   if (!u) return;
-  simTime += dt;
-  step(dt * 60); // 模擬用「每格/幀」尺度，換算成 60fps 基準的步長
+
+  accumulator = Math.min(accumulator + dt, FIXED_STEP * 2);
+  const idleLowMotion = !pointerDown && P.autoSwirl <= 0.001 && simTime - lastInteract > 3;
+  const renderInterval = idleLowMotion ? FIXED_STEP * 2 : FIXED_STEP;
+  if (accumulator + 1e-6 < renderInterval) return;
+
+  const steps = Math.min(2, Math.floor((accumulator + 1e-6) / FIXED_STEP));
+  for (let i = 0; i < steps; i++) {
+    simTime += FIXED_STEP;
+    step(1); // 固定 60Hz 模擬，120Hz 螢幕不再重複計算兩倍流體步驟。
+    accumulator -= FIXED_STEP;
+  }
   render();
 }
 
 window.addEventListener('resize', resize);
 resize();
-rafId = requestAnimationFrame(frame);
+syncLoop();
