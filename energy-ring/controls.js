@@ -42,6 +42,9 @@ const P = { ...DEFAULTS, ccw: false };
 let Q = P;
 // 暫停中調整參數時標記為 true，讓主迴圈用同一個凍結的時間點重畫一張反映新參數的靜態畫面
 let paramsDirty = false;
+function wakeRenderer() {
+  if (typeof syncLoop === 'function') syncLoop();
+}
 
 const fmt = {
   speed: v => v.toFixed(2), radius: v => v.toFixed(2), thickness: v => v.toFixed(1),
@@ -56,12 +59,17 @@ function bindControls() {
       P[key] = parseFloat(el.value);
       if (valEl) valEl.textContent = (fmt[key] || (v => v.toFixed ? +v.toFixed(2) : v))(P[key]);
       paramsDirty = true;
+      wakeRenderer();
     };
     el.addEventListener('input', update);
     el.value = P[key];
     update();
   }
-  document.getElementById('ccw').addEventListener('change', e => { P.ccw = e.target.checked; paramsDirty = true; });
+  document.getElementById('ccw').addEventListener('change', e => {
+    P.ccw = e.target.checked;
+    paramsDirty = true;
+    wakeRenderer();
+  });
   updateEffSpeedHint();
 }
 // 顯示轉速滑桿貼齊整數圈之後的實際數值，滑桿寫的是「目標值」，這裡才是真正跑出來的速度
@@ -88,6 +96,8 @@ const pauseBtn = document.getElementById('playCtl');
 pauseBtn.addEventListener('click', () => {
   paused = !paused;
   pauseBtn.textContent = paused ? '▶ 播放' : '⏸ 暫停';
+  if (!paused) last = performance.now();
+  wakeRenderer();
 });
 
 // 首頁卡片用 postMessage 控制預覽播放：非 active 卡片會收到 vfx-pause 以節省效能。
@@ -95,7 +105,16 @@ pauseBtn.addEventListener('click', () => {
 let msgPaused = false;
 window.addEventListener('message', (e) => {
   if (e.data === 'vfx-pause') msgPaused = true;
-  else if (e.data === 'vfx-play') msgPaused = false;
+  else if (e.data === 'vfx-play') {
+    msgPaused = false;
+    last = performance.now();
+  }
+  else return;
+  wakeRenderer();
+});
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) last = performance.now();
+  wakeRenderer();
 });
 function previewPaused() { return msgPaused || document.hidden; }
 
@@ -105,6 +124,7 @@ let panelOpen = true, panelInsetX = 0, panelInsetTarget = 0;
 const PANEL_OCCUPIED_W = 340 + 12 + 24; // 面板寬度 + 左右邊距，跟 CSS 的數值對應
 function updatePanelInset() {
   panelInsetTarget = (panelOpen && window.innerWidth > 760) ? PANEL_OCCUPIED_W / 2 : 0;
+  wakeRenderer();
 }
 document.getElementById('toggleBtn').addEventListener('click', () => {
   panelOpen = !panelOpen;

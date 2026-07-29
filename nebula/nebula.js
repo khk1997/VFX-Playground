@@ -75,14 +75,17 @@ const pauseBtn = document.getElementById('playCtl');
 pauseBtn.addEventListener('click', () => {
   paused = !paused;
   pauseBtn.textContent = paused ? '▶ 播放' : '⏸ 暫停';
+  syncLoop();
 });
 // 預覽卡片用 postMessage 控制暫停/續播（首頁滾出視野時省電）
 window.addEventListener('message', e => {
   if (e.data === 'vfx-pause') msgPaused = true;
-  else if (e.data === 'vfx-play') { msgPaused = false; last = performance.now(); }
+  else if (e.data === 'vfx-play') msgPaused = false;
+  else return;
+  syncLoop();
 });
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) last = performance.now(); // 回到前景時重設時鐘，避免大 dt
+  syncLoop();
 });
 
 /* ===== 面板開關 ===== */
@@ -147,11 +150,23 @@ let burstFlash = 0;            // 爆炸瞬間的核心閃光餘量
 /* ===== 主迴圈 ===== */
 let last = performance.now();
 let flowT = 0;
+let rafId = 0;
 const tmpV = { x: 0, y: 0 };
 
+function syncLoop() {
+  if (paused || msgPaused || document.hidden) {
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = 0;
+    return;
+  }
+  if (!rafId) {
+    last = performance.now();
+    rafId = requestAnimationFrame(frame);
+  }
+}
+
 function frame(now) {
-  requestAnimationFrame(frame);
-  if (paused || msgPaused || document.hidden) { last = now; return; }
+  rafId = requestAnimationFrame(frame);
   const dt = Math.min((now - last) / 1000, 0.05); // dt 上限 50ms
   last = now;
   step(dt);
@@ -291,4 +306,4 @@ function draw() {
   }
 }
 
-requestAnimationFrame(frame);
+syncLoop();

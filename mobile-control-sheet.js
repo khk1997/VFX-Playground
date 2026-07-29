@@ -11,6 +11,9 @@
   let toggle;
   let handle;
   let handleAction;
+  let play;
+  let playParent;
+  let playNextSibling;
   let state = 'half';
   let dragStartY = 0;
   let dragDeltaY = 0;
@@ -52,6 +55,26 @@
 
   function cycleSheet() {
     applyState(state === 'peek' ? 'half' : state === 'half' ? 'full' : 'peek');
+  }
+
+  function syncPlayPlacement() {
+    if (!play || !handle || !playParent) return;
+    if (mobileQuery.matches) {
+      handle.append(play);
+    } else if (playNextSibling?.parentNode === playParent) {
+      playParent.insertBefore(play, playNextSibling);
+    } else {
+      playParent.append(play);
+    }
+  }
+
+  function syncPlayState() {
+    if (!play) return;
+    const action = play.textContent.includes('播放') ? 'play' : 'pause';
+    const label = action === 'play' ? '播放動畫' : '暫停動畫';
+    play.dataset.action = action;
+    play.setAttribute('aria-label', label);
+    play.title = label;
   }
 
   function settleDrag() {
@@ -174,8 +197,18 @@
     handleAction = handle.querySelector('.mobile-sheet-action');
     panel.querySelectorAll('select').forEach(enhanceSelect);
 
-    const play = document.getElementById('playCtl');
-    if (play) handle.append(play);
+    play = document.getElementById('playCtl');
+    if (play) {
+      playParent = play.parentNode;
+      playNextSibling = play.nextSibling;
+      syncPlayState();
+      new MutationObserver(syncPlayState).observe(play, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
+      syncPlayPlacement();
+    }
     const reset = document.getElementById('resetBtn');
     if (reset) {
       const mobileReset = document.createElement('button');
@@ -251,6 +284,7 @@
     }, true);
 
     mobileQuery.addEventListener('change', event => {
+      syncPlayPlacement();
       if (event.matches) {
         panel.classList.remove('collapsed', 'hidden');
         syncViewportMetrics();

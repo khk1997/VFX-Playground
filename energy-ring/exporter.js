@@ -116,5 +116,6 @@ document.getElementById('exportBtn').addEventListener('click', async () => {
     btn.disabled = false;
     exporting = false;
     last = performance.now(); // 避免恢復播放時 dt 暴衝
+    syncLoop();
   }
 });

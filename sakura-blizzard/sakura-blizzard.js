@@ -2,7 +2,7 @@
 const canvas=document.querySelector('#stage'),ctx=canvas.getContext('2d');
 const isPreview=new URLSearchParams(location.search).has('preview'); if(isPreview) document.documentElement.classList.add('preview-mode');
 const state={amount:isPreview?82:120,angle:45,speed:1,turbulence:.72,size:1,leaves:0,petalColor:'#efb0c2',leafColor:'#efb0c2',seamless:true,loopSec:6};
-let w=0,h=0,dpr=1,petals=[],paused=false,last=performance.now(),time=0;
+let w=0,h=0,dpr=1,petals=[],paused=false,msgPaused=false,last=performance.now(),time=0,rafId=0;
 const rand=(a,b)=>a+Math.random()*(b-a);
 function windVector(){const a=state.angle*Math.PI/180;return {x:Math.cos(a),y:Math.sin(a)};}
 function spawnPoint(first=false){
@@ -44,7 +44,7 @@ function background(){
   const glow=ctx.createRadialGradient(w*.22,h*.15,0,w*.22,h*.15,Math.max(w,h)*.7);glow.addColorStop(0,'rgba(111,75,88,.18)');glow.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=glow;ctx.fillRect(0,0,w,h);
 }
 function frame(now){
-  requestAnimationFrame(frame);if(paused){last=now;return;}const dt=Math.min((now-last)/1000,.034);last=now;time+=dt;syncCount();background();
+  rafId=requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.034);last=now;time+=dt;syncCount();background();
   petals.sort((a,b)=>a.z-b.z);
   const wind=windVector(),span=Math.hypot(w,h),TAU=Math.PI*2,loopPhase=(time%state.loopSec)/state.loopSec;
   for(const p of petals){
@@ -53,8 +53,10 @@ function frame(now){
     p.type==='leaf'?drawLeaf(p):drawPetal(p);
   }
 }
-addEventListener('resize',resize);resize();requestAnimationFrame(frame);
+function syncLoop(){if(paused||msgPaused||document.hidden){if(rafId)cancelAnimationFrame(rafId);rafId=0;return;}if(!rafId){last=performance.now();rafId=requestAnimationFrame(frame);}}
+addEventListener('resize',resize);resize();syncLoop();
 document.querySelector('#toggle').onclick=()=>document.querySelector('#panel').classList.toggle('hidden');
+const playCtl=document.querySelector('#playCtl');playCtl.onclick=()=>{paused=!paused;playCtl.textContent=paused?'▶ 播放':'⏸ 暫停';syncLoop();};
 ['amount','speed','turbulence','size'].forEach(k=>document.querySelector('#'+k).oninput=e=>state[k]=+e.target.value);
 document.querySelector('#angle').oninput=e=>{state.angle=+e.target.value;document.querySelector('#angleLabel').textContent=`風向 ${state.angle}°`;};
 document.querySelector('#leaves').oninput=e=>{state.leaves=+e.target.value;petals.forEach(p=>p.type=Math.random()*100<state.leaves?'leaf':'petal');};
@@ -62,4 +64,4 @@ document.querySelector('#petalColor').oninput=e=>state.petalColor=e.target.value
 document.querySelector('#leafColor').oninput=e=>state.leafColor=e.target.value;
 document.querySelector('#loopSec').oninput=e=>{state.loopSec=+e.target.value;document.querySelector('#loopLabel').textContent=`循環 ${state.loopSec} 秒`;};
 document.querySelector('#seamless').onchange=e=>{state.seamless=e.target.checked;document.querySelector('#speed').disabled=state.seamless;document.querySelector('#loopNote').textContent=state.seamless?'無縫模式下，循環秒數會取代風速決定移動速度。':'自然模式使用風速，軌跡會持續但不保證首尾同幀。';time=0;};
-addEventListener('message',e=>{if(e.data==='vfx-pause')paused=true;if(e.data==='vfx-play'){paused=false;last=performance.now();}});document.addEventListener('visibilitychange',()=>paused=document.hidden);
+addEventListener('message',e=>{if(e.data==='vfx-pause')msgPaused=true;else if(e.data==='vfx-play')msgPaused=false;else return;syncLoop();});document.addEventListener('visibilitychange',syncLoop);

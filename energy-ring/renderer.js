@@ -1,11 +1,24 @@
 /* ===== 主迴圈 ===== */
-let last = performance.now(), noiseT = 0, lastDraw = 0, exporting = false;
+let last = performance.now(), noiseT = 0, lastDraw = 0, exporting = false, rafId = 0;
+
+function syncLoop() {
+  const insetSettled = Math.abs(panelInsetTarget - panelInsetX) < 0.05;
+  const shouldRun = !exporting && (!(paused || previewPaused()) || !insetSettled || paramsDirty);
+  if (!shouldRun) {
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = 0;
+    return;
+  }
+  if (!rafId) {
+    rafId = requestAnimationFrame(frame);
+  }
+}
 
 function frame(now) {
-  requestAnimationFrame(frame);
-  if (exporting) return; // 輸出中暫停即時繪製，避免共用狀態被打亂
+  rafId = 0;
+  if (exporting) { syncLoop(); return; } // 輸出中暫停即時繪製，避免共用狀態被打亂
   const interval = 1000 / Math.max(1, P.fps || 60);
-  if (now - lastDraw < interval - 1) return; // FPS 上限
+  if (now - lastDraw < interval - 1) { syncLoop(); return; } // FPS 上限
   lastDraw = now;
   const realDt = Math.min((now - last) / 1000, 0.25);
   last = now;
@@ -19,9 +32,10 @@ function frame(now) {
   // 會跟上一幀逐像素相同，沒必要每 1/FPS 秒就重算一次幾百個漸層跟環束多邊形，白白吃 GPU/CPU。
   // 但暫停中調整滑桿會把 paramsDirty 標記起來，讓它用同一個凍結的時間點重畫「這一張」反映新參數的畫面，
   // 畫完立刻清掉標記，畫面依然停在原地，不會恢復播放
-  if (halted && insetSettled && !paramsDirty) return;
+  if (halted && insetSettled && !paramsDirty) { syncLoop(); return; }
   paramsDirty = false;
   renderFrame(ctx, W, H, dt, false, undefined, panelInsetX);
+  syncLoop();
 }
 
 /* ===== 拖尾持久緩衝區 =====
@@ -49,6 +63,37 @@ function getTrailBuffer(outputCtx) {
 // transparent=true 時以去背模式繪製（拖尾用 destination-out 淡出而非疊黑）
 // atTime 有給值時（匯出用）：直接用「幀索引/幀率」精確設定時間，不用累加 dt，完全沒有浮點誤差累積
 // centerOffsetX：即時預覽在面板開啟時，把畫面圓心往右偏移避開面板；匯出時永遠是 0（維持正中央）
+const RIBBON_SEGS = 220;
+const ribbonCos = new Float32Array(RIBBON_SEGS + 1);
+const ribbonSin = new Float32Array(RIBBON_SEGS + 1);
+const ribbonRadius = new Float32Array(RIBBON_SEGS + 1);
+const ribbonHalfWidth = new Float32Array(RIBBON_SEGS + 1);
+const ARC_SEGS = 16;
+const arcPathX = new Float32Array(ARC_SEGS + 1);
+const arcPathY = new Float32Array(ARC_SEGS + 1);
+
+function fillRibbonPath(ctx, cx, cy, scale) {
+  ctx.beginPath();
+  for (let i = 0; i <= RIBBON_SEGS; i++) {
+    const r = ribbonRadius[i] + ribbonHalfWidth[i] * scale;
+    const x = cx + ribbonCos[i] * r, y = cy + ribbonSin[i] * r;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  for (let i = RIBBON_SEGS; i >= 0; i--) {
+    const r = ribbonRadius[i] - ribbonHalfWidth[i] * scale;
+    ctx.lineTo(cx + ribbonCos[i] * r, cy + ribbonSin[i] * r);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
+function strokeArcPath(ctx) {
+  ctx.beginPath();
+  ctx.moveTo(arcPathX[0], arcPathY[0]);
+  for (let i = 1; i <= ARC_SEGS; i++) ctx.lineTo(arcPathX[i], arcPathY[i]);
+  ctx.stroke();
+}
+
 function renderFrame(outputCtx, W, H, dt, transparent, atTime, centerOffsetX = 0) {
   if (W <= 0 || H <= 0) return; // 畫布尚未有尺寸（例如分頁在背景 innerWidth=0）時直接跳過，避免對 0×0 畫布操作
   const ctx = getTrailBuffer(outputCtx); // 以下所有 ctx.xxx 都畫在持久緩衝區上，星辰除外（見函式尾端）
@@ -149,7 +194,7 @@ function renderFrame(outputCtx, W, H, dt, transparent, atTime, centerOffsetX = 0
   }
 
   /* --- 多層旋轉光弧（多絲線 + 細節毛絲 + 裂紋斷點） --- */
-  const SEGS = 220;
+  const SEGS = RIBBON_SEGS;
   const segA = (Math.PI * 2) / SEGS;
   ctx.lineCap = 'round';
   const jitterAmp = Q.fray * R * 0.022;
@@ -221,7 +266,6 @@ function renderFrame(outputCtx, W, H, dt, transparent, atTime, centerOffsetX = 0
       const hueOffset = fSpread * 10;
 
       // 先算出整條絲線的路徑點與每點半寬 → 再填成連續變寬絲帶（避免逐段圓頭造成珠珠感）
-      const pts = new Array(SEGS + 1);
       const wBase = Q.thickness * (0.85 / Math.max(1, Math.sqrt(fCount)));
       for (let i = 0; i <= SEGS; i++) {
         const t = i * segA;
@@ -254,35 +298,23 @@ function renderFrame(outputCtx, W, H, dt, transparent, atTime, centerOffsetX = 0
         const wn = 1 + Q.widthVar * 0.98 * pn(t, 3, fSeed * 2.9 + lst(0.25));
         const hw = wBase * (0.5 + b * 0.9) * Math.max(0, wn) * 0.95;
 
-        pts[i] = { cos: Math.cos(a0), sin: Math.sin(a0), r: rj, hw: Math.max(0.01, hw) };
+        ribbonCos[i] = Math.cos(a0);
+        ribbonSin[i] = Math.sin(a0);
+        ribbonRadius[i] = rj;
+        ribbonHalfWidth[i] = Math.max(0.01, hw);
       }
 
       // 絲帶填色：外緣順走 + 內緣倒走圍成封閉多邊形 → 寬度連續平滑無接縫
-      const ribbon = scale => {
-        ctx.beginPath();
-        for (let i = 0; i <= SEGS; i++) {
-          const p = pts[i], r2 = p.r + p.hw * scale;
-          const x = cx + p.cos * r2, y = cy + p.sin * r2;
-          i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-        }
-        for (let i = SEGS; i >= 0; i--) {
-          const p = pts[i], r2 = p.r - p.hw * scale;
-          ctx.lineTo(cx + p.cos * r2, cy + p.sin * r2);
-        }
-        ctx.closePath();
-        ctx.fill();
-      };
-
       // 同一條絲帶畫三層：外圈微光 → 主體 → 白熱核心，三層都套用同一條沿角度變化的色彩漸層
       ctx.fillStyle = makeHueGradient(freq, fSeed, hueOffset,
         hue => `hsla(${hue},${Q.sat}%,50%,${0.22 * flick})`);
-      ribbon(1.9);
+      fillRibbonPath(ctx, cx, cy, 1.9);
       ctx.fillStyle = makeHueGradient(freq, fSeed, hueOffset,
         hue => `hsla(${hue},${Q.sat}%,58%,${0.5 * flick})`);
-      ribbon(1.0);
+      fillRibbonPath(ctx, cx, cy, 1.0);
       ctx.fillStyle = makeHueGradient(freq, fSeed, hueOffset,
         hue => `hsla(${hue},${Math.max(0, Q.sat - 45)}%,92%,${0.55 * flick})`);
-      ribbon(0.32);
+      fillRibbonPath(ctx, cx, cy, 0.32);
     }
   }
 
@@ -474,7 +506,7 @@ function renderFrame(outputCtx, W, H, dt, transparent, atTime, centerOffsetX = 0
     const arcRot = ringAngle(1); // 電弧的出生角跟著主環旋轉
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
-    const NSEG = 16;
+    const NSEG = ARC_SEGS;
     for (let i = 0; i < activeArcs && i < pool.length; i++) {
       const arc = pool[i];
       const age = ((tLoop - arc.birth) % LOOP_SEC + LOOP_SEC) % LOOP_SEC;
@@ -505,29 +537,24 @@ function renderFrame(outputCtx, W, H, dt, transparent, atTime, centerOffsetX = 0
 
       // 鋸齒路徑：角度線性走完跨幅，半徑從 r1 走到 r2，徑向抖動兩端釘死、中段最大
       const jagAmp = Q.arcJag * (Math.abs(r2 - r1) * 0.9 + R * 0.03);
-      let path = new Array(NSEG + 1);
       for (let sIdx = 0; sIdx <= NSEG; sIdx++) {
         const t = sIdx / NSEG;
         const ang = a0 + span * (t - 0.5);
         const pin = Math.sin(Math.PI * t); // 端點釘死
         const rj = r1 + (r2 - r1) * t + (rnd() - 0.5) * 2 * jagAmp * pin;
-        path[sIdx] = [cx + Math.cos(ang) * rj, cy + Math.sin(ang) * rj];
+        arcPathX[sIdx] = cx + Math.cos(ang) * rj;
+        arcPathY[sIdx] = cy + Math.sin(ang) * rj;
       }
-      const trace = () => {
-        ctx.beginPath();
-        ctx.moveTo(path[0][0], path[0][1]);
-        for (let sIdx = 1; sIdx <= NSEG; sIdx++) ctx.lineTo(path[sIdx][0], path[sIdx][1]);
-        ctx.stroke();
-      };
       // 外層光暈 → 白熱核心，兩筆
       ctx.strokeStyle = `hsla(${Q.hue},${Q.sat}%,65%,${alpha * 0.3})`;
       ctx.lineWidth = Q.arcThickness * 4.5;
-      trace();
+      strokeArcPath(ctx);
       ctx.strokeStyle = `hsla(${Q.hue},${Math.max(0, Q.sat - 55)}%,95%,${alpha})`;
       ctx.lineWidth = Q.arcThickness * 1.3;
-      trace();
+      strokeArcPath(ctx);
       // 兩端接觸點的小閃光
-      for (const [ex, ey] of [path[0], path[NSEG]]) {
+      for (let endpoint = 0; endpoint <= NSEG; endpoint += NSEG) {
+        const ex = arcPathX[endpoint], ey = arcPathY[endpoint];
         const fr = Q.arcThickness * 7;
         const g = ctx.createRadialGradient(ex, ey, 0, ex, ey, fr);
         g.addColorStop(0, `hsla(${Q.hue},30%,97%,${alpha * 0.8})`);
@@ -628,4 +655,4 @@ function renderFrame(outputCtx, W, H, dt, transparent, atTime, centerOffsetX = 0
 
   outputCtx.setTransform(outputTransform);
 }
-requestAnimationFrame(frame);
+syncLoop();

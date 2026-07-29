@@ -214,7 +214,7 @@ function trimPreviewCache(protectedIndices) {
   const loaded = iframes
     .map((frame, index) => ({ frame, index }))
     .filter(item => item.frame && item.frame.dataset.loaded === '1');
-  const cacheLimit = mobilePreviewQuery.matches ? 3 : 7;
+  const cacheLimit = mobilePreviewQuery.matches ? 3 : 5;
   if (loaded.length <= cacheLimit) return;
 
   loaded

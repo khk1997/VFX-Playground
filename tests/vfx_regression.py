@@ -25,6 +25,11 @@ PAGES = [
     ("text-particles", "/text-particles/index.html"),
 ]
 ONLY_PAGE = os.environ.get("VFX_ONLY_PAGE")
+PLAY_CONTROL_PAGES = {
+    "aurora", "bubble", "energy-ring", "fireworks",
+    "fluid-ink", "lightning", "nebula", "sakura-blizzard",
+    "text-particles",
+}
 
 
 def main():
@@ -68,7 +73,13 @@ def main():
                         return {
                             x: box.x, y: box.y, width: box.width, height: box.height,
                             display: style.display, visibility: style.visibility,
-                            opacity: style.opacity
+                            opacity: style.opacity,
+                            clientWidth: node.clientWidth,
+                            scrollWidth: node.scrollWidth,
+                            fontSize: style.fontSize,
+                            lineHeight: style.lineHeight,
+                            textAlign: style.textAlign,
+                            whiteSpace: style.whiteSpace
                         };
                     };
                     return {
@@ -77,13 +88,17 @@ def main():
                         canvas: rect('#stage'),
                         panel: rect('#panel'),
                         homeBtn: rect('#homeBtn'),
-                        toggleBtn: rect('#toggleBtn'),
+                        toggleBtn: rect('#toggleBtn, #toggle'),
                         playCtl: rect('#playCtl'),
                         controls: document.querySelectorAll('input, select, button').length,
                         canvasPixels: [...document.querySelectorAll('canvas')]
                             .reduce((sum, canvas) => sum + canvas.width * canvas.height, 0),
                         loadedIframes: [...document.querySelectorAll('iframe')]
-                            .filter(frame => frame.dataset.loaded === '1').length
+                            .filter(frame => frame.dataset.loaded === '1').length,
+                        toggleDotFlexShrink: (() => {
+                            const node = document.querySelector('#toggleBtn, #toggle');
+                            return node ? getComputedStyle(node, '::after').flexShrink : null;
+                        })()
                     };
                 }"""
             )
@@ -102,10 +117,24 @@ def main():
                 if play.count() and play.is_visible():
                     before = play.inner_text()
                     play.click()
-                    page.wait_for_timeout(100)
+                    # Energy Ring and Text Particles finish their panel-centering
+                    # transition while simulation time is paused. Observe only
+                    # after that UI-only transition has settled.
+                    page.wait_for_timeout(1400)
                     after = play.inner_text()
                     metrics["playToggleChanged"] = before != after
                     metrics["playToggleTested"] = True
+                    paused_frame_a = page.locator("#stage").screenshot()
+                    page.wait_for_timeout(250)
+                    paused_frame_b = page.locator("#stage").screenshot()
+                    metrics["pausedFrameStable"] = paused_frame_a == paused_frame_b
+
+                    play.click()
+                    page.wait_for_timeout(100)
+                    resumed_frame_a = page.locator("#stage").screenshot()
+                    page.wait_for_timeout(250)
+                    resumed_frame_b = page.locator("#stage").screenshot()
+                    metrics["resumedFrameChanged"] = resumed_frame_a != resumed_frame_b
 
                 first_range = page.locator('input[type="range"]').first
                 if first_range.count():
@@ -171,6 +200,26 @@ def main():
             failures.append(f"{name}: page errors: {result['pageErrors']}")
         if name != "home":
             metrics = result["metrics"]
+            if name in PLAY_CONTROL_PAGES:
+                play_ctl = metrics.get("playCtl")
+                if not play_ctl or play_ctl["width"] <= 0 or play_ctl["height"] <= 0:
+                    failures.append(f"{name}: play control is not visible")
+                toggle_ctl = metrics.get("toggleBtn")
+                if play_ctl and toggle_ctl:
+                    control_gap = toggle_ctl["x"] - (play_ctl["x"] + play_ctl["width"])
+                    if control_gap < 6 or control_gap > 12:
+                        failures.append(
+                            f"{name}: play/panel control gap is {control_gap:.1f}px"
+                        )
+                    toggle_font_size = float(toggle_ctl["fontSize"].removesuffix("px"))
+                    if abs(toggle_font_size - 13) > 0.1 or toggle_ctl["whiteSpace"] != "nowrap":
+                        failures.append(f"{name}: panel control text is not normalized")
+                    if metrics.get("toggleDotFlexShrink") != "0":
+                        failures.append(f"{name}: panel control status dot can shrink")
+                if not metrics.get("pausedFrameStable"):
+                    failures.append(f"{name}: canvas kept changing while paused")
+                if not metrics.get("resumedFrameChanged"):
+                    failures.append(f"{name}: canvas did not resume after play")
             if metrics.get("panelToggleTested") and not metrics.get("panelToggleChanged"):
                 failures.append(f"{name}: panel toggle did not change state")
             if metrics.get("playToggleTested") and not metrics.get("playToggleChanged"):

@@ -15,5 +15,5 @@
   input[type="color"] { height: 27px; padding: 2px; border: 1px solid rgba(255,190,208,.25); border-radius: 7px; background: rgba(255,255,255,.05); cursor: pointer; }
   input:disabled { opacity: .32; cursor: not-allowed; }
   #loopNote { margin: 3px 0 0; color: #b99aa4; line-height: 1.5; }
-  html.preview-mode .topbar, html.preview-mode #panel { display: none; }
+  html.preview-mode .topbar, html.preview-mode #panel, html.preview-mode #playCtl { display: none !important; }
   @media (prefers-reduced-motion: reduce) { .home, #toggle, #panel { transition: none; } }
