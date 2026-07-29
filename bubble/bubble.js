@@ -1,5 +1,6 @@
 'use strict';
 import * as THREE from 'three';
+import { svgToField, gltfToField } from './shape-field.js';
 
 /* ===== 預覽嵌入模式（?preview=1）===== */
 const PREVIEW = new URLSearchParams(location.search).has('preview');
@@ -9,6 +10,10 @@ const canvas = document.getElementById('stage');
 const mobileRenderQuery = window.matchMedia('(max-width: 760px)');
 const DEFAULT_HDRI_URL = new URL('./assets/photo_studio_london_hall_1k.hdr', import.meta.url).href;
 const DEFAULT_HDRI_LABEL = 'photo_studio_london_hall_1k.hdr';
+const MAX_DROPS = 12;
+const FORMATION_DEFAULT_COUNT = 6;
+const MAX_MICRO_DROPS = 20;
+const MAX_NEGATIVE_DROPS = 4;
 
 /* ===== 參數 ===== */
 const DEFAULTS = {              // 數值滑桿
@@ -48,10 +53,16 @@ const DEFAULTS = {              // 數值滑桿
   satelliteSize: 0.22,
   satelliteCount: 3,
   spin: 0.08,
+  gatherDuration: 0.48,
+  shapeDepth: 0.28,
+  shapeSoftness: 0.06,
+  shapeHold: 0.22,
+  microCount: 14,
 };
-const SELECT_DEFAULTS = { bgMode: 'color', colorMode: 'ramp', motion: 'cinematic' };
+const SELECT_DEFAULTS = { bgMode: 'color', colorMode: 'ramp', motion: 'cinematic', shapeSource: 'svg' };
 const COLOR_DEFAULTS  = { bgColor: '#000000' };
 const P = { ...DEFAULTS, ...SELECT_DEFAULTS, ...COLOR_DEFAULTS };
+const motionCounts = { cinematic: 2, formation: FORMATION_DEFAULT_COUNT };
 
 // 自訂漸層色標（最多 6，可調位置）— reset 用
 const STOP_MAX = 6;
@@ -65,7 +76,8 @@ const RAMP_DEFAULT = {
 const SELECTS = {
   bgMode:    { uniform: 'uBgMode',    map: { color: 0, hdri: 1 } },
   colorMode: { uniform: 'uColorMode', map: { spectral: 0, ramp: 1 } },
-  motion:    { uniform: 'uMotion',    map: { cinematic: 0 } },
+  motion:    { uniform: 'uMotion',    map: { cinematic: 0, formation: 1 } },
+  shapeSource: { uniform: 'uShapeType', map: { svg: 1, gltf: 2 } },
 };
 const COLORS = { bgColor: 'uBgColor' };
 
@@ -99,6 +111,11 @@ const fmt = {
   elasticSpeed: v => 'x' + v.toFixed(2),
   satelliteSize: v => v.toFixed(2),
   satelliteCount: v => v.toFixed(0),
+  gatherDuration: v => Math.round(v * 100) + '%',
+  shapeDepth: v => v.toFixed(2),
+  shapeSoftness: v => v.toFixed(3),
+  shapeHold: v => Math.round(v * 100) + '%',
+  microCount: v => v.toFixed(0),
 };
 
 import { VERT, FRAG } from './shaders.js';
@@ -127,10 +144,10 @@ let dragging = false, lastX = 0, lastY = 0;
 const rotM4 = new THREE.Matrix4();
 const tmpX = new THREE.Matrix4();
 const tmpZ = new THREE.Matrix4();
-const dropData = Array.from({ length: 8 }, () => new THREE.Vector4());
-const dropShapeData = Array.from({ length: 8 }, () => new THREE.Vector4(1, 0, 0, 1));
-const dropPhysicsData = Array.from({ length: 8 }, () => new THREE.Vector4());
-const previousDropPositions = Array.from({ length: 8 }, () => new THREE.Vector3());
+const dropData = Array.from({ length: MAX_DROPS }, () => new THREE.Vector4());
+const dropShapeData = Array.from({ length: MAX_DROPS }, () => new THREE.Vector4(1, 0, 0, 1));
+const dropPhysicsData = Array.from({ length: MAX_DROPS }, () => new THREE.Vector4());
+const previousDropPositions = Array.from({ length: MAX_DROPS }, () => new THREE.Vector3());
 const dropBounds = new THREE.Vector4(0, 0, 0, 1);
 const elasticEvent = new THREE.Vector2(0, 0);
 const elasticPair = new THREE.Vector2(0, 1);
@@ -145,15 +162,144 @@ const satelliteDrops = Array.from({ length: SAT_N }, () => new THREE.Vector4(0, 
 let previousDropT = null;
 let previousPairKey = '';
 let previousPairGap = 0;
+let shapeField = null;
+let shapeTargets = [];
+let formationAnchors = [];
+let microFormationAnchors = [];
+let negativeFormationAnchors = [];
+const microDropData = new Float32Array(MAX_MICRO_DROPS * 4);
+const microShapeData = new Float32Array(MAX_MICRO_DROPS * 4);
+const negativeDropData = new Float32Array(MAX_NEGATIVE_DROPS * 4);
+let microDropTexture = null;
+let microShapeTexture = null;
+let negativeDropTexture = null;
 
 const fract = x => x - Math.floor(x);
 const hash11CPU = n => fract(Math.sin(n * 127.1) * 43758.5453123);
-const dropSeeds = Array.from({ length: 8 }, (_, i) => ({
+const dropSeeds = Array.from({ length: MAX_DROPS }, (_, i) => ({
   h1: hash11CPU(i + 1),
   h2: hash11CPU(i + 7),
   h3: hash11CPU(i + 13),
   radius: 0.72 + 0.55 * hash11CPU(i * 3.17 + 5),
 }));
+
+function distributeFormationAnchors(candidates, count = MAX_DROPS) {
+  if (!candidates.length) return [];
+  const center = candidates.reduce((sum, p) => sum.add(p), new THREE.Vector3())
+    .multiplyScalar(1 / candidates.length);
+  const chosen = [];
+  let first = candidates[0];
+  let farthest = -1;
+  for (const p of candidates) {
+    const d = p.distanceToSquared(center);
+    if (d > farthest) { farthest = d; first = p; }
+  }
+  chosen.push(first);
+  while (chosen.length < Math.min(count, candidates.length)) {
+    let best = candidates[0], bestDistance = -1;
+    for (const p of candidates) {
+      let nearest = Infinity;
+      for (const q of chosen) nearest = Math.min(nearest, p.distanceToSquared(q));
+      if (nearest > bestDistance) { bestDistance = nearest; best = p; }
+    }
+    chosen.push(best);
+  }
+  return chosen.map((p, i) => {
+    const copy = p.clone();
+    let nearest = Infinity;
+    for (let j = 0; j < chosen.length; j++) {
+      if (i === j) continue;
+      nearest = Math.min(nearest, p.distanceTo(chosen[j]));
+    }
+    // Farthest-point sampling 保證覆蓋輪廓，但局部間距可能大於原始厚度提示。
+    // 半徑至少跨過一半鄰距，才能形成連續液橋；上限則保留耳、嘴等造型辨識度。
+    const bridgeRadius = Number.isFinite(nearest) ? nearest * 0.56 : 0.18;
+    copy.radiusHint = Math.min(0.27, Math.max(p.radiusHint || 0.1, bridgeRadius));
+    return copy;
+  });
+}
+
+function distributePrimaryAnchors(candidates, count = MAX_DROPS) {
+  if (!candidates.length) return [];
+  const chosen = [];
+  const remaining = candidates.slice();
+  while (chosen.length < Math.min(count, candidates.length)) {
+    let bestIndex = 0;
+    let bestScore = -Infinity;
+    for (let i = 0; i < remaining.length; i++) {
+      const p = remaining[i];
+      const thickness = p.radiusHint || 0.1;
+      const spacing = chosen.length
+        ? Math.min(...chosen.map(q => p.distanceTo(q)))
+        : thickness;
+      // 主滴服務於體積與重量，優先落在厚實內部；間距僅防止全部擠在同一區。
+      const score = thickness * 3.2 + spacing * 0.42;
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = i;
+      }
+    }
+    const source = remaining.splice(bestIndex, 1)[0];
+    const copy = source.clone();
+    copy.radiusHint = Math.min(0.24, Math.max(0.14, source.radiusHint || 0.14));
+    chosen.push(copy);
+  }
+  return chosen;
+}
+
+function distributeDetailedAnchors(candidates, count = MAX_MICRO_DROPS) {
+  if (!candidates.length) return [];
+  const weighted = [
+    ...candidates,
+    ...candidates.filter(p => p.surface),
+  ];
+  const centers = distributeFormationAnchors(weighted, count);
+  const groups = Array.from({ length: centers.length }, () => []);
+  // 少量 Lloyd iterations，把每顆橢球變成一塊模型區域的代表，而非單一體素。
+  for (let iteration = 0; iteration < 5; iteration++) {
+    groups.forEach(group => { group.length = 0; });
+    for (const point of weighted) {
+      let best = 0, bestD = Infinity;
+      for (let i = 0; i < centers.length; i++) {
+        const d = point.distanceToSquared(centers[i]);
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      groups[best].push(point);
+    }
+    for (let i = 0; i < centers.length; i++) {
+      if (!groups[i].length) continue;
+      centers[i].set(0, 0, 0);
+      groups[i].forEach(point => centers[i].add(point));
+      centers[i].multiplyScalar(1 / groups[i].length);
+    }
+  }
+  for (let i = 0; i < centers.length; i++) {
+    const group = groups[i];
+    let vx = 0, vy = 0, vz = 0, radiusHint = 0.1;
+    for (const point of group) {
+      vx += (point.x - centers[i].x) ** 2;
+      vy += (point.y - centers[i].y) ** 2;
+      vz += (point.z - centers[i].z) ** 2;
+      radiusHint = Math.max(radiusHint, point.radiusHint || 0.1);
+    }
+    const denom = Math.max(1, group.length);
+    const variances = [vx / denom, vy / denom, vz / denom];
+    const major = variances.indexOf(Math.max(...variances));
+    centers[i].axis = new THREE.Vector3(
+      major === 0 ? 1 : 0,
+      major === 1 ? 1 : 0,
+      major === 2 ? 1 : 0,
+    );
+    const sorted = variances.slice().sort((a, b) => b - a);
+    centers[i].stretch = Math.min(1.42, Math.max(1.06,
+      Math.sqrt((sorted[0] + 1e-4) / (sorted[1] + 1e-4))));
+    centers[i].radiusHint = Math.min(0.28, Math.max(
+      radiusHint,
+      Math.sqrt(sorted[1] + sorted[2]) * 1.15,
+    ));
+  }
+  return centers;
+}
 
 function cyclicPulse(phase, center, width) {
   const d = Math.abs(((phase - center + 0.5) % 1 + 1) % 1 - 0.5);
@@ -165,6 +311,112 @@ function cyclicPulse(phase, center, width) {
 function smoothstepCPU(value, edge0, edge1) {
   const x = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)));
   return x * x * (3 - 2 * x);
+}
+
+function formationAmount(phase) {
+  const gatherEnd = Math.max(0.15, P.gatherDuration);
+  const holdEnd = Math.min(0.94, gatherEnd + P.shapeHold);
+  const gather = smoothstepCPU(phase, 0.04, gatherEnd);
+  const release = smoothstepCPU(phase, holdEnd, 0.98);
+  return gather * (1 - release);
+}
+
+// 每顆水滴的自由段只使用整數諧波，因此 phase=0/1 的位置與速度完全相同。
+// 匯集與散開共用同一個 formationAmount，故兩段是同一路徑的正反向。
+function formationDropPosition(i, phase, count, out) {
+  const tau = Math.PI * 2;
+  const a = phase * tau;
+  const { h1, h2 } = dropSeeds[i];
+  const anchor = i * tau / count + h1 * 1.4;
+  const orbit = P.spread * (1.25 + h2 * 0.65);
+  const freeX = Math.cos(a + anchor) * orbit
+    + Math.cos(a * 2 + anchor * 1.7) * orbit * 0.12;
+  const freeY = Math.sin(a + anchor) * orbit * 0.62
+    + Math.sin(a * 3 + anchor * 0.8) * orbit * 0.08;
+  const freeZ = Math.sin(a * 2 + anchor * 1.3) * orbit * 0.48;
+  const target = formationAnchors.length
+    ? formationAnchors[i % formationAnchors.length]
+    : null;
+  const amount = formationAmount(phase);
+  const eased = amount * amount * (3 - 2 * amount);
+  const tx = target ? target.x : Math.cos(anchor) * 0.7;
+  const ty = target ? target.y : Math.sin(anchor) * 0.7;
+  const tz = target ? target.z : 0;
+  return out.set(
+    freeX + (tx - freeX) * eased,
+    freeY + (ty - freeY) * eased,
+    freeZ + (tz - freeZ) * eased,
+  );
+}
+
+const formationPosNow = new THREE.Vector3();
+const formationPosBefore = new THREE.Vector3();
+const formationPosAfter = new THREE.Vector3();
+
+function updateMicroDrops(phase) {
+  const activeCount = P.motion === 'formation' && shapeField
+    ? Math.max(0, Math.min(MAX_MICRO_DROPS, Math.round(P.microCount)))
+    : 0;
+  const amount = formationAmount(phase);
+  const a = phase * Math.PI * 2;
+  for (let i = 0; i < MAX_MICRO_DROPS; i++) {
+    const o = i * 4;
+    if (i >= activeCount || !microFormationAnchors.length) {
+      microDropData[o + 3] = 0;
+      continue;
+    }
+    const h1 = hash11CPU(i * 2.31 + 31);
+    const h2 = hash11CPU(i * 3.77 + 47);
+    const h3 = hash11CPU(i * 5.13 + 61);
+    const anchor = i * Math.PI * 2 / activeCount + h1 * 0.8;
+    const orbit = P.spread * (1.15 + h2 * 0.75);
+    const freeX = Math.cos(a + anchor) * orbit
+      + Math.cos(a * 2 + anchor * 1.3) * orbit * 0.16;
+    const freeY = Math.sin(a + anchor) * orbit * 0.72
+      + Math.sin(a * 3 + anchor * 0.7) * orbit * 0.10;
+    const freeZ = Math.sin(a * 2 + anchor * 1.9) * orbit * 0.52;
+    // 錯開抵達時間，讓形狀像被液滴逐區域填滿，而不是所有粒子同步縮放。
+    const arriveStart = 0.04 + h3 * 0.30;
+    const arriveEnd = 0.62 + h3 * 0.20;
+    const local = smoothstepCPU(amount, arriveStart, arriveEnd);
+    const eased = local * local * (3 - 2 * local);
+    const target = microFormationAnchors[i % microFormationAnchors.length];
+    microDropData[o] = freeX + (target.x - freeX) * eased;
+    microDropData[o + 1] = freeY + (target.y - freeY) * eased;
+    microDropData[o + 2] = freeZ + (target.z - freeZ) * eased;
+    const targetRadius = target.radiusHint || P.radius * (0.28 + h2 * 0.16);
+    // 自由飛行時仍是清楚可見的小滴；抵達後保留完整體積成為最終造型的一部分。
+    // 半徑與位置共用相同 local，因此不會再出現「先縮掉、模型才淡入」。
+    const freeRadius = targetRadius * (0.52 + h2 * 0.16);
+    microDropData[o + 3] = freeRadius + (targetRadius - freeRadius) * eased;
+    const axis = target.axis || formationPosNow.set(1, 0, 0);
+    microShapeData[o] = axis.x;
+    microShapeData[o + 1] = axis.y;
+    microShapeData[o + 2] = axis.z;
+    microShapeData[o + 3] = 1 + ((target.stretch || 1) - 1) * eased;
+  }
+  if (microDropTexture) microDropTexture.needsUpdate = true;
+  if (microShapeTexture) microShapeTexture.needsUpdate = true;
+  return activeCount;
+}
+
+function updateNegativeDrops(phase) {
+  const amount = smoothstepCPU(formationAmount(phase), 0.58, 0.96);
+  const selected = negativeFormationAnchors;
+  for (let i = 0; i < MAX_NEGATIVE_DROPS; i++) {
+    const o = i * 4;
+    const target = selected[i];
+    if (!target || amount <= 0) {
+      negativeDropData[o + 3] = 0;
+      continue;
+    }
+    negativeDropData[o] = target.x;
+    negativeDropData[o + 1] = target.y;
+    negativeDropData[o + 2] = target.z;
+    negativeDropData[o + 3] = (target.radiusHint || 0.09) * amount;
+  }
+  if (negativeDropTexture) negativeDropTexture.needsUpdate = true;
+  return Math.min(selected.length, MAX_NEGATIVE_DROPS);
 }
 
 function cinematicTimeline(phase) {
@@ -218,11 +470,18 @@ function cinematicTimeline(phase) {
 
 // 水滴動畫只在 CPU 每幀計算一次；shader 的每個 march step 僅讀取 vec4 array。
 function updateDropUniforms(t) {
-  const count = Math.max(1, Math.min(8, Math.round(P.count)));
+  const count = Math.max(1, Math.min(MAX_DROPS, Math.round(P.count)));
   const tau = Math.PI * 2;
   const phase = fract(t / Math.max(0.001, P.loopDuration));
   const a = phase * tau;
   const energy = 0.55 + P.flowSpeed * 0.9;
+  // 高密度細節場由可見主滴進入模型區域後才開始長出；它本身是預烘焙
+  // Metaball union，而非原始 GLB SDF。
+  const formationShapeProgress = P.motion === 'formation' && shapeField
+    ? smoothstepCPU(formationAmount(phase), 0.42, 0.96)
+    : 0;
+  const microCount = updateMicroDrops(phase);
+  const negativeCount = updateNegativeDrops(phase);
 
   const cinema = cinematicTimeline(phase);
   const separation = cinema.volumeSeparation;
@@ -237,13 +496,17 @@ function updateDropUniforms(t) {
   // 接觸時增黏，拉伸時開始收頸，斷裂時快速卸除 smooth-min 的連接。
   let viscosityScale = P.motion === 'cinematic'
     ? Math.max(0.35, 1 + merge * 0.15 - tension * 0.25 - breakaway * 0.55)
-    : 1;
+    : P.motion === 'formation'
+      // smooth-min 連續合併很多顆時會累積膨脹；依數量正規化融合半徑，
+      // 讓 12–16 顆仍只在真正接觸處形成液橋，不把整組擴成巨大距離場。
+      ? Math.max(0.10, 0.42 / Math.sqrt(count))
+      : 1;
   let effectiveViscosity = P.viscosity * viscosityScale;
   const groupX = Math.sin(a) * P.spread * 0.12 * energy;
   const groupY = Math.sin(a * 2 + 0.4) * P.spread * 0.08 * energy;
   const groupZ = Math.cos(a) * P.spread * 0.07 * energy;
 
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < MAX_DROPS; i++) {
     const { h1, h2, h3, radius } = dropSeeds[i];
     let x = 0, y = 0, z = 0, radiusFactor = 1;
 
@@ -260,10 +523,25 @@ function updateDropUniforms(t) {
       // 形變本身已近似守恆體積，避免再用半徑做一次「呼吸」而產生橫向縮放感。
       radiusFactor = 1 + cinema.anticipation * 0.01
         + breakaway * 0.006 + followThrough * 0.004;
+    } else if (P.motion === 'formation') {
+      const formation = formationAmount(phase);
+      formationDropPosition(i, phase, count, formationPosNow);
+      x = formationPosNow.x;
+      y = formationPosNow.y;
+      z = formationPosNow.z;
+      radiusFactor = 0.82 + formation * 0.18;
     }
     // 大滴受重力與慣性影響較明顯；常量位移不破壞循環接縫。
     y -= P.gravity * P.spread * 0.045 * Math.pow(radius, 1.35);
-    dropData[i].set(x, y, z, P.radius * radius * radiusFactor);
+    const freeRadius = P.radius * radius * radiusFactor;
+    if (P.motion === 'formation') {
+      const targetRadius = formationAnchors[i % Math.max(1, formationAnchors.length)]?.radiusHint
+        || P.radius * 0.58;
+      const settle = smoothstepCPU(formationAmount(phase), 0.12, 0.88);
+      dropData[i].set(x, y, z, freeRadius + (targetRadius - freeRadius) * settle);
+    } else {
+      dropData[i].set(x, y, z, freeRadius);
+    }
   }
 
   // 電影模式的合體狀態是真正的一顆母滴：其餘水滴由零半徑連續長出，而不是讓
@@ -319,7 +597,7 @@ function updateDropUniforms(t) {
   let pairAxisX = 1, pairAxisY = 0, pairAxisZ = 0;
 
   // 非電影模式仍可依實際接觸做黏性融合；電影模式已在上方守恆轉移體積。
-  if (P.motion !== 'cinematic' && count >= 2 && fusionAmount > 0) {
+  if (P.motion !== 'formation' && P.motion !== 'cinematic' && count >= 2 && fusionAmount > 0) {
     const da = dropData[pairA], db = dropData[pairB];
     const axisX = db.x - da.x, axisY = db.y - da.y, axisZ = db.z - da.z;
     const axisInv = 1 / Math.max(0.0001, Math.hypot(axisX, axisY, axisZ));
@@ -344,6 +622,16 @@ function updateDropUniforms(t) {
     effectiveViscosity = P.viscosity * viscosityScale;
   }
   if (uniforms) uniforms.uViscosity.value = effectiveViscosity;
+  if (uniforms) {
+    uniforms.uShapeProgress.value = formationShapeProgress;
+    uniforms.uCount.value = count;
+    uniforms.uMicroCount.value = microCount;
+    uniforms.uNegativeCount.value = negativeCount;
+    uniforms.uMicroBlend.value = Math.max(
+      0.035,
+      effectiveViscosity * 0.60 + P.shapeSoftness * 0.35,
+    );
+  }
 
   // 每滴以速度決定慣性拉伸；斷裂後的彈性留給位移回彈與局部毛細波。
   // 不再對整顆水滴施加正負長軸振盪，避免兩滴同步橫向縮放再復原。
@@ -356,6 +644,15 @@ function updateDropUniforms(t) {
       vy = (d.y - prev.y) / frameDt;
       vz = (d.z - prev.z) / frameDt;
     }
+    if (P.motion === 'formation') {
+      const epsilon = 1 / 2048;
+      formationDropPosition(i, fract(phase - epsilon), count, formationPosBefore);
+      formationDropPosition(i, fract(phase + epsilon), count, formationPosAfter);
+      const invDelta = 1 / (epsilon * 2 * Math.max(0.001, P.loopDuration));
+      vx = (formationPosAfter.x - formationPosBefore.x) * invDelta;
+      vy = (formationPosAfter.y - formationPosBefore.y) * invDelta;
+      vz = (formationPosAfter.z - formationPosBefore.z) * invDelta;
+    }
     const speed = Math.hypot(vx, vy, vz);
     let ax = speed > 0.0001 ? vx / speed : 1;
     let ay = speed > 0.0001 ? vy / speed : 0;
@@ -366,7 +663,7 @@ function updateDropUniforms(t) {
       speed * 0.055 * P.inertiaDeform * sizeResponse / tensionResistance);
     let flatten = 0, shapeOscillation = 0, tip = 0, paired = 0;
 
-    if (count >= 2 && (i === pairA || i === pairB)) {
+    if (P.motion === 'cinematic' && count >= 2 && (i === pairA || i === pairB)) {
       const other = dropData[i === pairA ? pairB : pairA];
       const dx = other.x - d.x, dy = other.y - d.y, dz = other.z - d.z;
       const invDistance = 1 / Math.max(0.0001, Math.hypot(dx, dy, dz));
@@ -444,7 +741,7 @@ function updateDropUniforms(t) {
     dropShapeData[i].set(ax, ay, az, stretch);
     dropPhysicsData[i].set(flatten, shapeOscillation, tip, paired);
   }
-  for (let i = count; i < 8; i++) {
+  for (let i = count; i < MAX_DROPS; i++) {
     dropShapeData[i].set(1, 0, 0, 1);
     dropPhysicsData[i].set(0, 0, 0, 0);
   }
@@ -571,12 +868,52 @@ function updateDropUniforms(t) {
     }
   }
   dropBounds.set(cx, cy, cz, boundRadius);
+  if (P.motion === 'formation' && shapeField) {
+    dropBounds.set(0, 0, 0, Math.max(boundRadius, 2.25));
+    for (let i = 0; i < microCount; i++) {
+      const o = i * 4;
+      dropBounds.w = Math.max(dropBounds.w,
+        Math.hypot(microDropData[o], microDropData[o + 1], microDropData[o + 2])
+          + microDropData[o + 3] + 0.12);
+    }
+  }
 }
 
 function makeBlankEnv() {
   const tex = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1, THREE.RGBAFormat);
   tex.needsUpdate = true;
   return tex;
+}
+
+function makeBlankShape() {
+  const tex = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1, THREE.RGBAFormat);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function makeMicroDropTexture() {
+  microDropTexture = new THREE.DataTexture(
+    microDropData,
+    MAX_MICRO_DROPS,
+    1,
+    THREE.RGBAFormat,
+    THREE.FloatType,
+  );
+  microDropTexture.minFilter = microDropTexture.magFilter = THREE.NearestFilter;
+  microDropTexture.wrapS = microDropTexture.wrapT = THREE.ClampToEdgeWrapping;
+  microDropTexture.generateMipmaps = false;
+  microDropTexture.needsUpdate = true;
+  microShapeTexture = new THREE.DataTexture(
+    microShapeData, MAX_MICRO_DROPS, 1, THREE.RGBAFormat, THREE.FloatType,
+  );
+  microShapeTexture.minFilter = microShapeTexture.magFilter = THREE.NearestFilter;
+  microShapeTexture.needsUpdate = true;
+  negativeDropTexture = new THREE.DataTexture(
+    negativeDropData, MAX_NEGATIVE_DROPS, 1, THREE.RGBAFormat, THREE.FloatType,
+  );
+  negativeDropTexture.minFilter = negativeDropTexture.magFilter = THREE.NearestFilter;
+  negativeDropTexture.needsUpdate = true;
+  return microDropTexture;
 }
 
 /* ===== 自訂漸層查找表（LUT）===== */
@@ -703,6 +1040,19 @@ function initGL() {
     uEnvMap:     { value: makeBlankEnv() },
     uPmremMap:   { value: pmremTarget.texture },
     uHasEnv:     { value: 0 },
+    uShapeType: { value: SELECTS.shapeSource.map[P.shapeSource] },
+    uShapeProgress: { value: 0 },
+    uShapeDepth: { value: P.shapeDepth },
+    uShapeSoftness: { value: P.shapeSoftness },
+    uShapeTex: { value: makeBlankShape() },
+    uShapeGrid: { value: 0 },
+    uShapeAtlas: { value: new THREE.Vector2(1, 1) },
+    uMicroDrops: { value: makeMicroDropTexture() },
+    uMicroShape: { value: microShapeTexture },
+    uMicroCount: { value: 0 },
+    uMicroBlend: { value: 0.02 },
+    uNegativeDrops: { value: negativeDropTexture },
+    uNegativeCount: { value: 0 },
   };
 
   const geo = new THREE.PlaneGeometry(2, 2);
@@ -834,6 +1184,7 @@ function bindControls() {
     const uName = 'u' + key.charAt(0).toUpperCase() + key.slice(1);
     const update = () => {
       P[key] = parseFloat(el.value);
+      if (key === 'count') motionCounts[P.motion] = Math.round(P[key]);
       if (valEl) valEl.textContent = (fmt[key] || (v => +v.toFixed(2)))(P[key]);
       if (uniforms && uniforms[uName]) uniforms[uName].value = (key === 'count') ? Math.round(P[key]) : P[key];
     };
@@ -846,7 +1197,15 @@ function bindControls() {
     const el = document.getElementById(key);
     const { uniform, map } = SELECTS[key];
     const update = () => {
+      const previousMotion = P.motion;
       P[key] = el.value;
+      if (key === 'motion' && previousMotion !== P.motion) {
+        motionCounts[previousMotion] = Math.round(P.count);
+        const countEl = document.getElementById('count');
+        countEl.value = motionCounts[P.motion];
+        countEl.dispatchEvent(new Event('input', { bubbles: true }));
+        previousDropT = null;
+      }
       if (uniforms && uniforms[uniform]) uniforms[uniform].value = map[el.value];
       updateUIState();
     };
@@ -913,10 +1272,21 @@ function updateUIState() {
   bgc.disabled = !colorBackground;
   bgc.closest('.row').style.opacity = colorBackground ? 1 : 0.4;
   document.body.style.background = colorBackground ? P.bgColor : '#000';
+  const forming = P.motion === 'formation';
+  const formationGroup = document.getElementById('formationGroup');
+  formationGroup.style.opacity = forming ? 1 : 0.38;
+  formationGroup.querySelectorAll('input, select, button').forEach(el => { el.disabled = !forming; });
+  const isSvg = P.shapeSource === 'svg';
+  const shapeBtn = document.getElementById('shapeBtn');
+  const shapeInput = document.getElementById('shapeInput');
+  shapeBtn.textContent = isSvg ? '選擇 SVG…' : '選擇 GLB / GLTF…';
+  shapeInput.accept = isSvg ? '.svg,image/svg+xml' : '.glb,.gltf,model/gltf-binary,model/gltf+json';
 }
 
 document.getElementById('resetBtn').addEventListener('click', () => {
   Object.assign(P, DEFAULTS, SELECT_DEFAULTS, COLOR_DEFAULTS);
+  motionCounts.cinematic = DEFAULTS.count;
+  motionCounts.formation = FORMATION_DEFAULT_COUNT;
   resetRamp();
   bindControls();
   if (inited) loadDefaultEnvironment();
@@ -1007,11 +1377,62 @@ hdriInput.addEventListener('change', e => {
   e.target.value = '';
 });
 
+/* ===== SVG / GLB 形狀距離場 ===== */
+const shapeInput = document.getElementById('shapeInput');
+const shapeState = document.getElementById('shapeState');
+let shapeConverting = false;
+document.getElementById('shapeBtn').addEventListener('click', () => shapeInput.click());
+shapeInput.addEventListener('change', async e => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  if (!inited) initGL();
+  const kind = P.shapeSource;
+  shapeState.textContent = kind === 'svg'
+    ? `正在分析 SVG：${file.name}`
+    : `正在體素化模型：${file.name}（可能需要幾秒）`;
+  document.getElementById('shapeBtn').disabled = true;
+  shapeConverting = true;
+  syncLoop();
+  try {
+    // 純 Metaball 模式只需要體積取樣與局部厚度，不再需要高解析 SDF 表面。
+    const next = kind === 'svg' ? await svgToField(file) : await gltfToField(file, 48);
+    const old = shapeField?.texture;
+    shapeField = next;
+    shapeTargets = next.targets;
+    formationAnchors = distributePrimaryAnchors(shapeTargets);
+    microFormationAnchors = distributeDetailedAnchors(shapeTargets, MAX_MICRO_DROPS);
+    negativeFormationAnchors = distributeFormationAnchors(
+      next.cavityTargets || [],
+      MAX_NEGATIVE_DROPS,
+    );
+    uniforms.uShapeTex.value = next.texture;
+    uniforms.uShapeGrid.value = next.grid;
+    uniforms.uShapeAtlas.value.copy(next.atlas);
+    uniforms.uShapeType.value = kind === 'svg' ? 1 : 2;
+    if (old) old.dispose();
+    document.getElementById('motion').value = 'formation';
+    document.getElementById('motion').dispatchEvent(new Event('change', { bubbles: true }));
+    simT = 0;
+    const topologyNote = kind === 'gltf' && next.oddScanlines > 0
+      ? `；已修復 ${next.oddScanlines} 條非封閉掃描線`
+      : '';
+    shapeState.textContent = `${kind === 'svg' ? 'SVG' : '3D 模型'} 已就緒：${file.name}${topologyNote}`;
+  } catch (error) {
+    console.error(error);
+    shapeState.textContent = `轉換失敗：${error.message || '檔案格式不支援'}`;
+  } finally {
+    shapeConverting = false;
+    document.getElementById('shapeBtn').disabled = false;
+    e.target.value = '';
+    syncLoop();
+  }
+});
+
 /* ===== 播放/暫停：面板按鈕、postMessage、分頁隱藏三者共同決定 ===== */
 let userPaused = false, extPaused = PREVIEW;
 let rafId = 0, last = 0;
 const pauseBtn = document.getElementById('playCtl');
-function isPaused() { return userPaused || extPaused || document.hidden; }
+function isPaused() { return userPaused || extPaused || shapeConverting || document.hidden; }
 function syncLoop() {
   if (isPaused()) {
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
@@ -1089,12 +1510,18 @@ function frame(now) {
   rotM4.multiply(tmpZ);
   uniforms.uRot.value.setFromMatrix4(rotM4);
 
-  const cameraDistance = P.cameraDistance * dolly * compositionDistance;
+  // 匯聚完成時讓鏡頭跟著液滴群緩慢推近。模型距離場本身比自由漂浮軌道緊湊，
+  // 若維持同一鏡距，外圍小滴剛收回時主體會顯得突然縮小。
+  const formationFocus = P.motion === 'formation' && shapeField
+    ? smoothstepCPU(formationAmount(phase01), 0.42, 0.92)
+    : 0;
+  const formationDolly = 1 - formationFocus * 0.30;
+  const cameraDistance = P.cameraDistance * dolly * compositionDistance * formationDolly;
   if (isMobilePortrait) {
     // 以主要水滴投影外輪廓的中點校正構圖。面積重心會被較大的水滴拉動，
     // 在展開狀態下反而讓整組水滴的左右留白不對稱。
     const e = rotM4.elements;
-    const count = Math.max(1, Math.min(8, Math.round(P.count)));
+    const count = Math.max(1, Math.min(MAX_DROPS, Math.round(P.count)));
     let minProjectedX = Infinity, maxProjectedX = -Infinity;
     for (let i = 0; i < count; i++) {
       const d = dropData[i];
@@ -1120,6 +1547,11 @@ function frame(now) {
   uniforms.uCompositionOffsetX.value = compositionOffsetX;
   uniforms.uCompositionOffsetY.value = compositionOffsetY;
   uniforms.uTime.value = simT;
+  // 多水滴 + 形狀場會增加每一步的取樣成本；64 步仍足以覆蓋保守包圍球，
+  // 並避免高 DPR 桌面在 Formation 模式失去即時預覽能力。
+  uniforms.uMaxSteps.value = P.motion === 'formation'
+    ? Math.min(qualitySteps, 60)
+    : (dragging ? Math.min(qualitySteps, 56) : qualitySteps);
   renderer.render(scene, camera);
 }
 

@@ -91,13 +91,26 @@ uniform float uElasticStrength;
 uniform float uElasticDensity;
 uniform float uElasticDamping;
 uniform float uElasticSpeed;
-uniform vec4  uDrops[8];       // xyz：中心，w：半徑（CPU 每幀更新）
-uniform vec4  uDropShape[8];   // xyz：形變主軸，w：體積守恆的縱向伸縮
-uniform vec4  uDropPhysics[8]; // x：接觸壓平，y：形狀振盪，z：斷裂尖端，w：配對權重
+uniform vec4  uDrops[12];       // xyz：中心，w：半徑（CPU 每幀更新）
+uniform vec4  uDropShape[12];   // xyz：形變主軸，w：體積守恆的縱向伸縮
+uniform vec4  uDropPhysics[12]; // x：接觸壓平，y：形狀振盪，z：斷裂尖端，w：配對權重
 uniform vec2  uElasticPair;    // 正在接觸／斷裂的水滴索引
 uniform vec4  uSatellites[3];  // xyz：衛星滴中心，w：半徑（斷裂處的小滴串）
 uniform float uSatelliteBlend; // 衛星滴與頸部的融合度：成形時高（相連），掐斷時→0（分離）
 uniform vec4  uBounds;         // xyz：包圍球中心，w：半徑
+uniform int   uShapeType;      // 0 無, 1 SVG 擠出, 2 GLB/GLTF 體積
+uniform float uShapeProgress;
+uniform float uShapeDepth;
+uniform float uShapeSoftness;
+uniform sampler2D uShapeTex;
+uniform float uShapeGrid;
+uniform vec2  uShapeAtlas;
+uniform sampler2D uMicroDrops;
+uniform sampler2D uMicroShape;
+uniform int   uMicroCount;
+uniform float uMicroBlend;
+uniform sampler2D uNegativeDrops;
+uniform int   uNegativeCount;
 
 uniform float uThickness;
 uniform float uThickVar;
@@ -129,7 +142,9 @@ uniform int   uHasEnv;
 
 #include <cube_uv_reflection_fragment>
 
-const int   MAXN = 8;
+const int   MAXN = 12;
+const int   MAX_MICRO = 20;
+const int   MAX_NEGATIVE = 4;
 const float IOR  = 1.33;
 const float PI   = 3.14159265359;
 const float TAU  = 6.28318530718;
@@ -208,6 +223,59 @@ float dropletDistance(vec3 p, int i){
   return (length(q) - uDrops[i].w) * conservativeScale;
 }
 
+float microDropletDistance(vec3 p, vec4 sphere, vec4 shape){
+  vec3 local = p - sphere.xyz;
+  vec3 axis = normalize(shape.xyz + vec3(0.00001));
+  float stretch = clamp(shape.w, 1.0, 1.65);
+  float transverse = inversesqrt(stretch);
+  float along = dot(local, axis);
+  vec3 across = local - axis * along;
+  vec3 q = across / transverse + axis * (along / stretch);
+  return (length(q) - sphere.w) * transverse;
+}
+
+float decodeShape(float v){ return (v - 0.5) * 48.0; }
+float svgShapeDistance(vec3 p){
+  vec2 uv = p.xy / 3.0 + 0.5;
+  float edge = decodeShape(texture2D(uShapeTex, uv).r) * (3.0 / 160.0);
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
+    // 包圍盒不是形狀表面；盒外距離不可在盒面回傳 0，否則 ray marcher
+    // 會先命中矩形外框，而不是繼續走進 SVG 的真正零等值面。
+    edge = length(max(abs(p.xy) - vec2(1.5), 0.0)) + 3.0 / 160.0;
+  }
+  float depth = abs(p.z) - uShapeDepth;
+  return max(edge, depth) - uShapeSoftness;
+}
+float atlasVoxel(vec3 cell){
+  float n = uShapeGrid;
+  cell = clamp(cell, vec3(0.0), vec3(n - 1.0));
+  float slice = cell.z;
+  float col = mod(slice, uShapeAtlas.x);
+  float row = floor(slice / uShapeAtlas.x);
+  vec2 atlasSize = uShapeAtlas * n;
+  vec2 uv = (vec2(col, row) * n + cell.xy + 0.5) / atlasSize;
+  return decodeShape(texture2D(uShapeTex, uv).r);
+}
+float volumeShapeDistance(vec3 p){
+  float n = uShapeGrid;
+  vec3 gridP = (p / 2.1 + 0.5) * (n - 1.0);
+  if (any(lessThan(gridP, vec3(0.0))) || any(greaterThan(gridP, vec3(n - 1.0)))) {
+    // 同 SVG：SDF atlas 的取樣盒只負責界定資料範圍，本身不是幾何。
+    // 加上一個 voxel 的正距離，避免 bounding box 被誤判成 d=0 表面。
+    return length(max(abs(p) - vec3(1.05), 0.0))
+      + 2.1 / max(1.0, n - 1.0);
+  }
+  vec3 base = floor(gridP);
+  vec3 f = fract(gridP);
+  float z0 = mix(
+    mix(atlasVoxel(base), atlasVoxel(base + vec3(1,0,0)), f.x),
+    mix(atlasVoxel(base + vec3(0,1,0)), atlasVoxel(base + vec3(1,1,0)), f.x), f.y);
+  float z1 = mix(
+    mix(atlasVoxel(base + vec3(0,0,1)), atlasVoxel(base + vec3(1,0,1)), f.x),
+    mix(atlasVoxel(base + vec3(0,1,1)), atlasVoxel(base + vec3(1,1,1)), f.x), f.y);
+  return mix(z0, z1, f.z) * (2.1 / max(1.0, n - 1.0)) - uShapeSoftness;
+}
+
 // 分離後由接觸極點向外傳播的局部毛細波；只處理主要水滴對 0/1。
 float capillaryWave(vec3 p, int i){
   vec3 center = uDrops[i].xyz;
@@ -233,6 +301,7 @@ float capillaryWave(vec3 p, int i){
 
 float mapScene(vec3 p){
   float d = 1e9;
+  float arrivalDistance = 1e9;
   for (int i = 0; i < MAXN; i++){
     if (i >= uCount) break;
     float sphereD = dropletDistance(p, i);
@@ -243,6 +312,7 @@ float mapScene(vec3 p){
       sphereD -= capillaryWave(p, i);
     }
     d = smin(d, sphereD, uViscosity);
+    arrivalDistance = min(arrivalDistance, length(p - uDrops[i].xyz));
   }
   // 衛星滴以「會釋放的 smin」與頸部相連：成形期 blend 高（細絲上的鼓包），
   // 掐斷時 blend→0，smin 退化為硬 min → 成為自由滴。
@@ -251,16 +321,61 @@ float mapScene(vec3 p){
       d = smin(d, length(p - uSatellites[s].xyz) - uSatellites[s].w, uSatelliteBlend);
     }
   }
+  // 大量形狀微滴由資料紋理提供，突破 uniform array 的數量限制。
+  // 它們先真正填滿目標體積，模型 SDF 只在最後階段補足細節。
+  for (int m = 0; m < MAX_MICRO; m++) {
+    if (m >= uMicroCount) break;
+    vec4 micro = texture2D(uMicroDrops, vec2((float(m) + 0.5) / 20.0, 0.5));
+    if (micro.w > 0.0001) {
+      vec4 shape = texture2D(uMicroShape, vec2((float(m) + 0.5) / 20.0, 0.5));
+      d = smin(d, microDropletDistance(p, micro, shape), uMicroBlend);
+      arrivalDistance = min(arrivalDistance, length(p - micro.xyz));
+    }
+  }
+  float negativeD = 1e9;
+  for (int n = 0; n < MAX_NEGATIVE; n++) {
+    if (n >= uNegativeCount) break;
+    vec4 negativeDrop = texture2D(
+      uNegativeDrops,
+      vec2((float(n) + 0.5) / 4.0, 0.5)
+    );
+    if (negativeDrop.w > 0.0001) {
+      negativeD = min(negativeD, length(p - negativeDrop.xyz) - negativeDrop.w);
+    }
+  }
+  if (negativeD < 1e8) {
+    d = -smin(-d, negativeD, max(0.018, uMicroBlend * 0.55));
+  }
+  if (uShapeProgress > 0.0001) {
+    // uShapeTex 在 GLB 模式儲存的是匯入時烘焙的高密度 Metaball 場，
+    // 不是原模型距離場。以等距侵蝕讓每個細節球核逐步長大，避免 alpha 淡入。
+    float detailD = uShapeType == 1 ? svgShapeDistance(p) : volumeShapeDistance(p);
+    float growth = smoothstep(0.0, 1.0, uShapeProgress);
+    // 已抵達水滴附近先成形，遠處隨全域進度稍晚跟上；這是幾何侵蝕，
+    // 不是透明淡入，因此水滴與模型輪廓之間始終有實際液橋。
+    float contactLead = clamp((0.72 - arrivalDistance) * 0.42, -0.12, 0.24);
+    float localGrowth = smoothstep(0.0, 1.0, growth + contactLead);
+    float growingDetail = detailD + (1.0 - localGrowth) * 0.38;
+    d = smin(d, growingDetail, max(0.018, uMicroBlend * localGrowth));
+  }
   // 最大位移遠小於 0.25；遠離表面時略過 noise，不影響射線接近表面的安全性。
-  if (uWobble > 0.001 && d < 0.25) {
-    d += fbmFast(p * uWobbleScale + loopNoiseOffset(uWobbleSpeed)) * uWobble * 0.25;
+  float geometryWobble = uWobble * mix(1.0, 0.10, uShapeProgress);
+  if (geometryWobble > 0.001 && d < 0.25) {
+    d += fbmFast(p * uWobbleScale + loopNoiseOffset(uWobbleSpeed)) * geometryWobble * 0.25;
   }
   return d;
 }
 
 vec3 calcNormal(vec3 p){
   const vec2 k = vec2(1.0, -1.0);
-  const float h = 0.0009;
+  // 水滴使用細緻微分保留毛細波；體素模型完成時擴大取樣半徑，
+  // 跨越數個 8-bit 距離階層平均法線，減少方格反射與折射閃爍。
+  // Trilinear SDF 在單一 voxel 內仍是分段線性，若微分半徑小於格距，
+  // 相鄰像素會取得近似固定的 cell gradient，鏡面反射便顯出方格。
+  // 完成模型時跨越約 1.35 個 voxel 取樣，做幾何尺度一致的法線平均。
+  float voxelH = 2.1 / max(1.0, uShapeGrid - 1.0);
+  float shapeH = uShapeType == 2 ? voxelH * 1.35 : 0.014;
+  float h = mix(0.0009, shapeH, uShapeProgress);
   return normalize(
     k.xyy * mapScene(p + k.xyy * h) +
     k.yyx * mapScene(p + k.yyx * h) +

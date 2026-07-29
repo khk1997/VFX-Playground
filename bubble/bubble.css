@@ -70,12 +70,14 @@
   .stopRow input[type=color] { flex: 0 0 40px; min-width: 40px; }
   .stopRow input[type=range] { flex: 1 1 70px; }
   .stopRow .val { flex: 0 0 34px; }
-  #hdriBtn {
+  #hdriBtn, .fileBtn {
     flex: 1 1 auto; background: rgba(150,180,255,.1); color: #c3d3ff;
     border: 1px solid rgba(150,180,255,.3); border-radius: 7px;
     padding: 6px 0; font-size: 12px; cursor: pointer;
   }
-  #hdriBtn:hover { background: rgba(150,180,255,.22); }
+  #hdriBtn:hover, .fileBtn:hover { background: rgba(150,180,255,.22); }
+  #formationGroup { border-color: rgba(105,225,255,.3); }
+  #formationGroup h3 { color: #78ddf4; }
   .btns { display: flex; gap: 8px; margin-top: 12px; }
   .btns button {
     flex: 1; background: rgba(150,180,255,.1); color: #c3d3ff;

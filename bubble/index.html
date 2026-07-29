@@ -73,7 +73,7 @@
 
   <div class="group">
     <h3>水滴形態 Droplets</h3>
-    <div class="row"><label>水滴數量</label><input type="range" id="count" min="1" max="8" step="1" value="2"><span class="val" id="count_v"></span></div>
+    <div class="row"><label>水滴數量</label><input type="range" id="count" min="1" max="12" step="1" value="2"><span class="val" id="count_v"></span></div>
     <div class="row"><label>水滴大小</label><input type="range" id="radius" min="0.25" max="1.1" step="0.01" value="0.4"><span class="val" id="radius_v"></span></div>
     <div class="row"><label>黏性融合</label><input type="range" id="viscosity" min="0" max="1.2" step="0.01" value="0.78"><span class="val" id="viscosity_v"></span></div>
     <div class="row"><label>表面張力</label><input type="range" id="surfaceTension" min="0" max="1.5" step="0.01" value="0.82"><span class="val" id="surfaceTension_v"></span></div>
@@ -94,11 +94,26 @@
     <h3>動態 Motion</h3>
     <div class="row"><label>動態模式</label><select id="motion">
       <option value="cinematic">電影循環 Cinematic</option>
+      <option value="formation">形狀匯聚 Formation</option>
     </select><span class="val"></span></div>
     <div class="row"><label>循環秒數</label><input type="range" id="loopDuration" min="4" max="30" step="0.5" value="12"><span class="val" id="loopDuration_v"></span></div>
     <div class="row"><label>動態張力</label><input type="range" id="flowSpeed" min="0" max="1.5" step="0.01" value="0.47"><span class="val" id="flowSpeed_v"></span></div>
     <div class="row"><label>起伏動畫</label><input type="range" id="wobbleSpeed" min="0" max="2" step="0.01" value="0.65"><span class="val" id="wobbleSpeed_v"></span></div>
     <div class="row"><label>環繞幅度</label><input type="range" id="spin" min="0" max="1" step="0.01" value="0.08"><span class="val" id="spin_v"></span></div>
+  </div>
+
+  <div class="group" id="formationGroup">
+    <h3>形狀匯聚 Shape Formation</h3>
+    <div class="row"><label>形狀來源</label><select id="shapeSource"><option value="svg">SVG 擠出</option><option value="gltf">GLB / GLTF</option></select><span class="val"></span></div>
+    <div class="row"><button class="fileBtn" id="shapeBtn">選擇 SVG…</button></div>
+    <div id="shapeState" class="note">請選擇一個有填色輪廓的 SVG</div>
+    <input type="file" id="shapeInput" accept=".svg,image/svg+xml" hidden>
+    <div class="row"><label>匯集時間</label><input type="range" id="gatherDuration" min="0.15" max="0.75" step="0.01" value="0.48"><span class="val" id="gatherDuration_v"></span></div>
+    <div class="row"><label>輪廓細節滴</label><input type="range" id="microCount" min="8" max="20" step="1" value="14"><span class="val" id="microCount_v"></span></div>
+    <div class="row"><label>形狀厚度</label><input type="range" id="shapeDepth" min="0.05" max="0.8" step="0.01" value="0.28"><span class="val" id="shapeDepth_v"></span></div>
+    <div class="row"><label>邊緣液化</label><input type="range" id="shapeSoftness" min="0" max="0.25" step="0.005" value="0.06"><span class="val" id="shapeSoftness_v"></span></div>
+    <div class="row"><label>完成停留</label><input type="range" id="shapeHold" min="0.05" max="0.45" step="0.01" value="0.22"><span class="val" id="shapeHold_v"></span></div>
+    <div class="note">精準液態成形會在本機建立並平滑 GLB 體積輪廓；少量水滴抵達後，液體從接觸區域逐步長成模型，保留辨識度並柔化硬邊。</div>
   </div>
 
   <div class="btns">
