@@ -100,6 +100,7 @@ uniform float uSatelliteBlend; // 衛星滴與頸部的融合度：成形時高�
 uniform vec4  uBounds;         // xyz：包圍球中心，w：半徑
 uniform int   uShapeType;      // 0 無, 1 SVG 擠出, 2 GLB/GLTF 體積
 uniform float uShapeProgress;
+uniform float uFidelityAbsorb;
 uniform float uShapeDepth;
 uniform float uShapeSoftness;
 uniform sampler2D uShapeTex;
@@ -116,6 +117,36 @@ uniform float uThickness;
 uniform float uThickVar;
 uniform float uNoiseScale;
 uniform float uDispersion;
+uniform float uDispersionEnabled;
+uniform float uDispersionSeparation;
+uniform float uCausticScale;
+uniform float uCausticSharpness;
+uniform float uRealDispersion;
+uniform float uRealDispersionSeparation;
+uniform float uRealDispersionEnabled;
+uniform float uSpectralCausticEnabled;
+uniform float uSpectralCausticIntensity;
+uniform float uSpectralCausticFocus;
+uniform float uSpectralCausticWidth;
+uniform float uSpectralCausticLightSize;
+uniform float uSpectralCausticDensity;
+uniform float uSpectralCausticSoftness;
+uniform float uSpectralCausticWarp;
+uniform float uSpectralCausticSeparation;
+uniform float uSpectralCausticBounce;
+uniform float uSpectralCausticFlow;
+uniform float uSpectralCausticFresnelMask;
+uniform float uSpectralCausticNoiseMask;
+uniform float uSpectralCausticNoiseScale;
+uniform float uSpectralCausticAzimuth;
+uniform float uSpectralCausticElevation;
+uniform float uSpectralCausticHdri;
+uniform float uArtThickness;
+uniform float uArtThickVar;
+uniform float uArtNoiseScale;
+uniform float uArtPatternSpeed;
+uniform float uArtGravity;
+uniform float uFilmEnabled;
 uniform float uFilmBlur;
 uniform float uSaturation;
 uniform float uFresnel;
@@ -273,7 +304,12 @@ float volumeShapeDistance(vec3 p){
   float z1 = mix(
     mix(atlasVoxel(base + vec3(0,0,1)), atlasVoxel(base + vec3(1,0,1)), f.x),
     mix(atlasVoxel(base + vec3(0,1,1)), atlasVoxel(base + vec3(1,1,1)), f.x), f.y);
-  return mix(z0, z1, f.z) * (2.1 / max(1.0, n - 1.0)) - uShapeSoftness;
+  float voxelSize = 2.1 / max(1.0, n - 1.0);
+  // 低解析度下薄耳、薄翼等部位可能只有一個 voxel，三線性插值後會斷裂。
+  // 補不到半個 voxel 的解析度感知 guard；128³ 歸零，不改高品質輪廓。
+  float lowResolution = clamp((128.0 - n) / 80.0, 0.0, 1.0);
+  float topologyGuard = voxelSize * 0.48 * lowResolution;
+  return mix(z0, z1, f.z) * voxelSize - uShapeSoftness - topologyGuard;
 }
 
 // 分離後由接觸極點向外傳播的局部毛細波；只處理主要水滴對 0/1。
@@ -301,7 +337,15 @@ float capillaryWave(vec3 p, int i){
 
 float mapScene(vec3 p){
   float d = 1e9;
-  float arrivalDistance = 1e9;
+  // 吸收時半徑歸零並不足以消除 smooth-min：零半徑點落在模型表面時
+  // 仍會產生約 k/4 的鼓包。融合半徑必須同步收至 0，才能讓清除迴圈前後等價。
+  float dropletBlendFade = 1.0 - uFidelityAbsorb;
+  float mainBlend = uViscosity * dropletBlendFade;
+  float detailBlend = uMicroBlend * dropletBlendFade;
+  // 最近抵達水滴只需要用來決定形狀場的局部生長順序。比較平方距離，
+  // 最後再做一次 sqrt，避免每次 mapScene 為所有主滴／微滴各多算一個 length。
+  float arrivalDistanceSq = 1e18;
+  bool needsArrivalDistance = uShapeProgress > 0.0001;
   for (int i = 0; i < MAXN; i++){
     if (i >= uCount) break;
     float sphereD = dropletDistance(p, i);
@@ -311,8 +355,11 @@ float mapScene(vec3 p){
     if (uElasticEvent.x > 0.0001 && (i == pairA || i == pairB) && abs(sphereD) < 0.3) {
       sphereD -= capillaryWave(p, i);
     }
-    d = smin(d, sphereD, uViscosity);
-    arrivalDistance = min(arrivalDistance, length(p - uDrops[i].xyz));
+    d = smin(d, sphereD, mainBlend);
+    if (needsArrivalDistance) {
+      vec3 arrivalDelta = p - uDrops[i].xyz;
+      arrivalDistanceSq = min(arrivalDistanceSq, dot(arrivalDelta, arrivalDelta));
+    }
   }
   // 衛星滴以「會釋放的 smin」與頸部相連：成形期 blend 高（細絲上的鼓包），
   // 掐斷時 blend→0，smin 退化為硬 min → 成為自由滴。
@@ -328,8 +375,11 @@ float mapScene(vec3 p){
     vec4 micro = texture2D(uMicroDrops, vec2((float(m) + 0.5) / 20.0, 0.5));
     if (micro.w > 0.0001) {
       vec4 shape = texture2D(uMicroShape, vec2((float(m) + 0.5) / 20.0, 0.5));
-      d = smin(d, microDropletDistance(p, micro, shape), uMicroBlend);
-      arrivalDistance = min(arrivalDistance, length(p - micro.xyz));
+      d = smin(d, microDropletDistance(p, micro, shape), detailBlend);
+      if (needsArrivalDistance) {
+        vec3 arrivalDelta = p - micro.xyz;
+        arrivalDistanceSq = min(arrivalDistanceSq, dot(arrivalDelta, arrivalDelta));
+      }
     }
   }
   float negativeD = 1e9;
@@ -344,7 +394,11 @@ float mapScene(vec3 p){
     }
   }
   if (negativeD < 1e8) {
-    d = -smin(-d, negativeD, max(0.018, uMicroBlend * 0.55));
+    d = -smin(
+      -d,
+      negativeD,
+      max(0.0001, max(0.018, uMicroBlend * 0.55) * dropletBlendFade)
+    );
   }
   if (uShapeProgress > 0.0001) {
     // uShapeTex 在 GLB 模式儲存的是匯入時烘焙的高密度 Metaball 場，
@@ -353,10 +407,18 @@ float mapScene(vec3 p){
     float growth = smoothstep(0.0, 1.0, uShapeProgress);
     // 已抵達水滴附近先成形，遠處隨全域進度稍晚跟上；這是幾何侵蝕，
     // 不是透明淡入，因此水滴與模型輪廓之間始終有實際液橋。
-    float contactLead = clamp((0.72 - arrivalDistance) * 0.42, -0.12, 0.24);
+    float arrivalDistance = needsArrivalDistance ? sqrt(arrivalDistanceSq) : 0.0;
+    float contactLead = needsArrivalDistance
+      ? clamp((0.72 - arrivalDistance) * 0.42, -0.12, 0.24)
+      : 0.0;
+    contactLead *= 1.0 - uFidelityAbsorb;
     float localGrowth = smoothstep(0.0, 1.0, growth + contactLead);
     float growingDetail = detailD + (1.0 - localGrowth) * 0.38;
-    d = smin(d, growingDetail, max(0.018, uMicroBlend * localGrowth));
+    d = smin(
+      d,
+      growingDetail,
+      max(0.0001, max(0.018, uMicroBlend * localGrowth) * dropletBlendFade)
+    );
   }
   // 最大位移遠小於 0.25；遠離表面時略過 noise，不影響射線接近表面的安全性。
   float geometryWobble = uWobble * mix(1.0, 0.10, uShapeProgress);
@@ -374,7 +436,9 @@ vec3 calcNormal(vec3 p){
   // 相鄰像素會取得近似固定的 cell gradient，鏡面反射便顯出方格。
   // 完成模型時跨越約 1.35 個 voxel 取樣，做幾何尺度一致的法線平均。
   float voxelH = 2.1 / max(1.0, uShapeGrid - 1.0);
-  float shapeH = uShapeType == 2 ? voxelH * 1.35 : 0.014;
+  // 80³ 桌面場維持約 64³ 時相同的世界空間法線半徑，細化輪廓時不讓
+  // 鏡面反射重新顯出 voxel cell。
+  float shapeH = uShapeType == 2 ? voxelH * 1.70 : 0.014;
   float h = mix(0.0009, shapeH, uShapeProgress);
   return normalize(
     k.xyy * mapScene(p + k.xyy * h) +
@@ -430,7 +494,9 @@ struct FilmMaterial {
 vec3 sampleFilmInterference(float opd){
   float blurNm = uFilmBlur * 72.0;
   if (uColorMode == 0){
-    vec3 lambda = mix(vec3(550.0), vec3(650.0, 550.0, 450.0), uDispersion);
+    // 薄膜本身固定使用可見光 RGB 波長。uDispersion 專門控制折射後的
+    // 色頻分離，不再同時改變薄膜條紋，兩個參數因而有清楚不同的功能。
+    vec3 lambda = vec3(650.0, 550.0, 450.0);
     vec3 phase = TAU * opd / lambda;
     // Gaussian 卷積 cosine 後的解析解，避免光譜模式增加三倍三角函數成本。
     vec3 sigma = TAU * blurNm / lambda;
@@ -438,13 +504,57 @@ vec3 sampleFilmInterference(float opd){
     return 0.5 - 0.5 * cos(phase) * attenuation;
   }
 
-  float freq = mix(0.4, 1.4, uDispersion);
+  float freq = 1.0;
   float phase = opd / 560.0 * freq;
   float phaseRadius = blurNm / 560.0 * freq;
   vec3 center = texture2D(uRampTex, vec2(fract(phase), 0.5)).rgb;
   vec3 lower = texture2D(uRampTex, vec2(fract(phase - phaseRadius), 0.5)).rgb;
   vec3 upper = texture2D(uRampTex, vec2(fract(phase + phaseRadius), 0.5)).rgb;
   return center * 0.5 + (lower + upper) * 0.25;
+}
+
+// 藝術色散使用固定可見光譜，完全獨立於薄膜的自訂漸層。
+vec3 visibleSpectrum(float t){
+  t = clamp(t, 0.0, 1.0);
+  float red = smoothstep(0.46, 0.74, t)
+    + (1.0 - smoothstep(0.0, 0.14, t)) * 0.28;
+  float green = smoothstep(0.10, 0.38, t)
+    * (1.0 - smoothstep(0.68, 0.94, t));
+  float blue = 1.0 - smoothstep(0.27, 0.60, t);
+  return clamp(vec3(red, green, blue), 0.0, 1.0);
+}
+
+vec3 separateSpectrum(vec3 spectrum){
+  float lum = dot(spectrum, vec3(0.2126, 0.7152, 0.0722));
+  vec3 separated = mix(
+    vec3(lum),
+    spectrum,
+    clamp(uDispersionSeparation, 0.0, 1.0)
+  );
+  return mix(
+    separated,
+    clamp((separated - 0.5) * 1.45 + 0.5, 0.0, 1.0),
+    clamp(uDispersionSeparation - 1.0, 0.0, 0.5) * 2.0
+  );
+}
+
+float artisticDispersionOPD(vec3 p, vec3 N, vec3 V){
+  float cosTheta = clamp(dot(N, V), 0.0, 1.0);
+  vec3 sp = p * uArtNoiseScale;
+  vec3 flow = loopNoiseOffset(uArtPatternSpeed);
+  vec3 warp = vec3(
+    fbm(sp + flow),
+    fbm(sp + vec3(5.2, 1.3, 0.0) + flow.yzx),
+    fbm(sp + vec3(1.7, 9.2, 0.0) + flow.zxy)
+  );
+  float n = fbm(sp + warp * 0.6 + flow * 0.5);
+  float thickness = uArtThickness + n * uArtThickVar;
+  float top = clamp(N.y * 0.5 + 0.5, 0.0, 1.0);
+  thickness -= pow(top, 2.5) * uArtGravity * uArtThickness * 0.95;
+  thickness = max(thickness, 0.0);
+  float sinI = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
+  float cosT = sqrt(max(0.0, 1.0 - (sinI / IOR) * (sinI / IOR)));
+  return 2.0 * IOR * thickness * cosT;
 }
 
 // 薄膜反射與透射分開計算；避免以暗色 alpha 覆蓋白色背景。
@@ -470,7 +580,8 @@ FilmMaterial thinFilm(vec3 p, vec3 N, vec3 V){
   float cosT = sqrt(max(0.0, 1.0 - (sinI / IOR) * (sinI / IOR)));
   float opd = 2.0 * IOR * thickness * cosT;
 
-  vec3 interf = sampleFilmInterference(opd);
+  vec3 interf = vec3(0.0);
+  if (uFilmEnabled > 0.5) interf = sampleFilmInterference(opd);
 
   float lum = dot(interf, vec3(0.3333));
   interf = mix(vec3(lum), interf, uSaturation);
@@ -485,7 +596,7 @@ FilmMaterial thinFilm(vec3 p, vec3 N, vec3 V){
   float fres = mix(schlick, 1.0, clamp(rim * 0.28, 0.0, 0.82));
 
   // 干涉色是波長相關反射率；透射使用其互補值，白底仍能乾淨穿透。
-  float filmAmount = clamp(0.035 + rim * 0.42, 0.0, 0.72);
+  float filmAmount = clamp(0.035 + rim * 0.42, 0.0, 0.72) * uFilmEnabled;
   vec3 reflectance = clamp(vec3(fres) + interf * filmAmount, vec3(0.0), vec3(0.94));
   vec3 transmittance = (vec3(1.0) - reflectance) * uTransmission;
 
@@ -542,8 +653,11 @@ void main(){
   vec3 rd = uRot * normalize(vec3(uv * tanHalfFov, -1.0));
 
   vec4 bg = backgroundSample(rd);
+  float dispersionStrength = uDispersion * uDispersionEnabled;
+  float realDispersionStrength = uRealDispersion * uRealDispersionEnabled;
 
-  // 先裁掉沒有穿過水滴群包圍球的射線，避免背景畫素進入 raymarch。
+  // 僅追蹤真正穿過物件包圍球的射線；色散發生在透明材質內部，不生成
+  // 幾何外側的彩虹描邊或光暈。
   vec3 oc = ro - uBounds.xyz;
   float qb = dot(oc, rd);
   float qc = dot(oc, oc) - uBounds.w * uBounds.w;
@@ -581,8 +695,12 @@ void main(){
   float backFres = 0.0;
   float backRim = 0.0;
   vec3 transmissionDir = rd;
+  vec3 dispersionNormal = N;
+  float localPrism = material.edgeFactor * 0.18;
+  vec3 realDispersionDelta = vec3(0.0);
   bool needsEnvironmentTransmission =
-    uBgMode == 0 && uHasEnv == 1 && uEnvRefraction > 0.001;
+    uBgMode == 0 && uHasEnv == 1
+      && (uEnvRefraction > 0.001 || realDispersionStrength > 0.001);
   if (brightBg > 0.001 || needsEnvironmentTransmission) {
     vec3 insideDir = refract(rd, N, 1.0 / IOR);
     if (dot(insideDir, insideDir) > 0.0001) {
@@ -605,6 +723,10 @@ void main(){
 
         // 白色背景也保留極淡的虛擬棚燈漸層，讓折射方向產生可見形變。
         float bend = clamp(length(exitDir - rd) * 0.55 + backRim * 0.18, 0.0, 1.0);
+        // 只有折射真正彎曲、或背面接近掠射角時才產生局部稜鏡分離。
+        // 平坦正視區維持無色透明，避免退化成整圈彩虹描邊。
+        dispersionNormal = exitNormal;
+        localPrism = clamp(bend * 1.35 + backRim * 0.75, 0.0, 1.0);
         refractedBg *= mix(vec3(1.0), vec3(0.965, 0.985, 1.0), bend);
         volumeAbsorption = exp(-vec3(0.045, 0.018, 0.005) * pathLength);
 
@@ -630,9 +752,71 @@ void main(){
   }
   // 純色只控制畫布；水滴內部獨立取樣同一張 HDRI。若背面追蹤未命中，
   // transmissionDir 會保留前表面的 Snell 折射方向，滑桿仍能穩定產生效果。
-  if (uBgMode == 0 && uHasEnv == 1 && uEnvRefraction > 0.001) {
+  if (uBgMode == 0 && uHasEnv == 1
+      && (uEnvRefraction > 0.001 || realDispersionStrength > 0.001)) {
     vec3 envRefraction = sampleEnvironmentBackdrop(transmissionDir);
+    if (realDispersionStrength > 0.001) {
+      // 參考 Prism Tunnel 的 thin-glass 方法：不是把同一方向做任意 RGB
+      // 位移，而是用三個波長各自的 IOR 做三次 Snell 折射，再抽取 R/G/B。
+      // 1.50 / 1.53 / 1.57 的相對間距保留，但以目前材質 IOR 為中心。
+      float wavelengthScale = realDispersionStrength * uRealDispersionSeparation;
+      float redIor = max(1.01, IOR - 0.03 * wavelengthScale);
+      float greenIor = IOR;
+      float blueIor = IOR + 0.04 * wavelengthScale;
+      vec3 redDir = refract(rd, N, 1.0 / redIor);
+      vec3 greenDir = refract(rd, N, 1.0 / greenIor);
+      vec3 blueDir = refract(rd, N, 1.0 / blueIor);
+      if (dot(redDir, redDir) < 0.0001) redDir = transmissionDir;
+      if (dot(greenDir, greenDir) < 0.0001) greenDir = transmissionDir;
+      if (dot(blueDir, blueDir) < 0.0001) blueDir = transmissionDir;
+      vec3 redSample = sampleEnvironmentBackdrop(redDir);
+      vec3 greenSample = sampleEnvironmentBackdrop(greenDir);
+      vec3 blueSample = sampleEnvironmentBackdrop(blueDir);
+      // HDRI 在此只當作光場，不把它的 RGB 影像畫進玻璃。三個波長
+      // 全部先轉亮度，再以跨波長的一、二階差分提取局部高頻光變化。
+      // 大面積牆面、窗戶等低頻內容會被抵消，只留下折射邊界的能量。
+      vec3 envLumaWeights = vec3(0.2126, 0.7152, 0.0722);
+      float redLight = dot(redSample, envLumaWeights);
+      float greenLight = dot(greenSample, envLumaWeights);
+      float blueLight = dot(blueSample, envLumaWeights);
+      float firstDerivative = redLight - blueLight;
+      float secondDerivative = redLight - 2.0 * greenLight + blueLight;
+      float spectralEnergy =
+        abs(secondDerivative) * 1.25 + abs(firstDerivative) * 0.22;
+
+      // 光譜顏色由波長差的方向決定，不沿用 HDRI 本身的顏色，因此不會
+      // 把攝影棚染進模型。二階差分決定黃綠／紫紅側的局部偏移。
+      float derivativeScale =
+        abs(firstDerivative) + abs(secondDerivative) + 0.0001;
+      float spectralCoordinate = clamp(
+        0.5 + 0.34 * firstDerivative / derivativeScale
+          + 0.16 * secondDerivative / derivativeScale,
+        0.0,
+        1.0
+      );
+      vec3 spectralColor = separateSpectrum(
+        visibleSpectrum(spectralCoordinate)
+      );
+      float prismVisibility = smoothstep(0.10, 0.92, localPrism);
+      prismVisibility = mix(0.08, 1.0, prismVisibility);
+      realDispersionDelta =
+        spectralColor * spectralEnergy * prismVisibility;
+    }
+    // 背景影像是否可見只由「環境折射」控制，與真實色散開關無關。
     refractedBg = mix(refractedBg, envRefraction, uEnvRefraction);
+  } else if (uBgMode == 1 && uHasEnv == 1 && realDispersionStrength > 0.001) {
+    // HDRI 畫布同樣使用三個物理 IOR；此模式保留完整折射影像。
+    float wavelengthScale = realDispersionStrength * uRealDispersionSeparation;
+    vec3 redDir = refract(rd, N, 1.0 / max(1.01, IOR - 0.03 * wavelengthScale));
+    vec3 greenDir = refract(rd, N, 1.0 / IOR);
+    vec3 blueDir = refract(rd, N, 1.0 / (IOR + 0.04 * wavelengthScale));
+    if (dot(redDir, redDir) < 0.0001) redDir = transmissionDir;
+    if (dot(greenDir, greenDir) < 0.0001) greenDir = transmissionDir;
+    if (dot(blueDir, blueDir) < 0.0001) blueDir = transmissionDir;
+    vec3 redSample = sampleEnvironmentBackdrop(redDir);
+    vec3 greenSample = sampleEnvironmentBackdrop(greenDir);
+    vec3 blueSample = sampleEnvironmentBackdrop(blueDir);
+    refractedBg = vec3(redSample.r, greenSample.g, blueSample.b);
   }
 
   // 白底以帶微冷色的透射衰減塑形；反射只填入剩餘亮度空間，避免大片 clipping。
@@ -675,6 +859,184 @@ void main(){
       - (1.0 - darkComposite) * (1.0 - darkRefraction * darkRefractionWeight);
   }
   vec3 finalColor = mix(darkComposite, brightComposite, brightBg);
+
+  // 色散沿用薄膜的 thickness → OPD mapping：厚度噪聲、花紋尺度、
+  // 花紋流動、重力與入射角都和薄膜一致；唯一不同的是固定使用獨立
+  // 可見光譜，不讀取自訂漸層。Fresnel 只控制亮度，不生成同心環。
+  if (dispersionStrength > 0.001) {
+    float artOpd = artisticDispersionOPD(p, N, -rd);
+    float dispersionPeriod = 205.0 * max(0.35, uCausticScale);
+    float spectrumCoordinate = fract(
+      artOpd / dispersionPeriod
+    );
+    vec3 prismSpectrum = separateSpectrum(
+      visibleSpectrum(spectrumCoordinate)
+    );
+    // 銳利度收束每個 OPD 週期的邊界，但週期內仍完整走過一次彩虹。
+    float cycleEnvelope = sin(spectrumCoordinate * PI);
+    cycleEnvelope = mix(
+      1.0,
+      pow(max(0.0, cycleEnvelope), mix(0.8, 4.5, uCausticSharpness)),
+      uCausticSharpness
+    );
+    float fresnelGain = clamp(
+      0.12 + material.edgeFactor * 0.72 + localPrism * 0.42 + backRim * 0.22,
+      0.0,
+      1.0
+    );
+    float prismAmount = dispersionStrength * fresnelGain
+      * (0.28 + cycleEnvelope * 0.52);
+    vec3 prismLight = prismSpectrum * prismAmount;
+    // 黑底沒有透射底光可承托彩虹，因此依背景亮度自動補回焦散能量。
+    // 指數曝光保留色帶層次並限制峰值；亮底增益回到 1，不會一起過曝。
+    float darkBackdrop = 1.0 - smoothstep(0.06, 0.72, bgLum);
+    float darkPrismGain = mix(1.0, 2.35, darkBackdrop);
+    prismLight = 1.0 - exp(
+      -prismLight * darkPrismGain * mix(1.0, 1.18, darkBackdrop)
+    );
+    // screen 合成使焦散維持透明發光感，而不是實體顏料。
+    finalColor = 1.0 - (1.0 - finalColor) * (1.0 - prismLight);
+  }
+
+  // 獨立虛擬光源驅動的光譜焦散。HDRI 不參與圖樣或顏色，只能選擇
+  // 調節總亮度，因此純色畫布不會顯示攝影棚影像。
+  float spectralCausticStrength =
+    uSpectralCausticEnabled * uSpectralCausticIntensity;
+  if (spectralCausticStrength > 0.001) {
+    float lightAzimuth = radians(uSpectralCausticAzimuth);
+    float lightElevation = radians(uSpectralCausticElevation);
+    vec3 virtualLightDir = normalize(vec3(
+      cos(lightElevation) * sin(lightAzimuth),
+      sin(lightElevation),
+      cos(lightElevation) * cos(lightAzimuth)
+    ));
+    vec3 basisUp = abs(virtualLightDir.y) > 0.94
+      ? vec3(1.0, 0.0, 0.0)
+      : vec3(0.0, 1.0, 0.0);
+    vec3 causticTangent = normalize(cross(basisUp, virtualLightDir));
+    vec3 causticBitangent = normalize(
+      cross(virtualLightDir, causticTangent)
+    );
+
+    // 用一次入射折射與一次虛擬內反射建立聚焦方向。這不是路徑追蹤，
+    // 但光斑會隨法線、視角與光源方向移動，而不是貼死在模型表面。
+    vec3 internalLight = refract(-virtualLightDir, N, 1.0 / IOR);
+    if (dot(internalLight, internalLight) < 0.0001) {
+      internalLight = -virtualLightDir;
+    }
+    vec3 internalBounce = normalize(reflect(internalLight, -N));
+    float focusAlignment = clamp(
+      dot(internalBounce, normalize(-rd)) * 0.5 + 0.5,
+      0.0,
+      1.0
+    );
+    focusAlignment = pow(
+      focusAlignment,
+      mix(1.2, 8.0, uSpectralCausticFocus)
+        * mix(0.68, 1.0, 1.0 - uSpectralCausticLightSize)
+    );
+
+    // 兩組曲面座標形成寬窄不一的聚光帶；法線項讓它在彎折與液體
+    // 融合區扭曲。光譜座標比亮度條紋更慢，單一光斑內仍能走過彩虹。
+    float loopPhase = fract(uTime / max(uLoopDuration, 0.001)) * 2.0 * PI;
+    vec2 flowOffset = vec2(cos(loopPhase), sin(loopPhase))
+      * uSpectralCausticFlow * 1.4;
+    float bandScale = mix(1.5, 8.5, uSpectralCausticDensity);
+    float fieldU = (dot(p, causticTangent) + flowOffset.x) * bandScale;
+    float fieldV = (dot(p, causticBitangent) + flowOffset.y) * bandScale;
+    float warpedBand = fieldU
+      + sin(fieldV * 1.7 + dot(N, virtualLightDir) * 4.0)
+        * 0.82 * uSpectralCausticWarp
+      + sin((fieldU - fieldV) * 0.73)
+        * 0.36 * uSpectralCausticWarp;
+    float bandWave = 0.5 + 0.5 * cos(warpedBand * PI);
+    float bounceWave = 0.5 + 0.5 * cos(
+      (warpedBand * 0.78 - fieldV * 0.36 + 1.7) * PI
+    );
+    bandWave = max(
+      bandWave,
+      bounceWave * uSpectralCausticBounce * 0.78
+    );
+    float sizeFactor = clamp(uSpectralCausticWidth / 2.5, 0.0, 1.0);
+    float focusExponent = mix(0.8, 5.5, uSpectralCausticFocus)
+      * mix(1.45, 0.52, sizeFactor)
+      * mix(1.0, 0.48, uSpectralCausticSoftness)
+      * mix(1.12, 0.78, uSpectralCausticLightSize);
+    float bandFocus = pow(
+      max(bandWave, 0.0),
+      max(0.32, focusExponent)
+    );
+    float incidenceFold = pow(
+      clamp(1.0 - abs(dot(N, virtualLightDir)), 0.0, 1.0),
+      0.72
+    );
+    // 把每一條亮帶本身展開成完整光譜，而不是讓不同亮帶各自只有
+    // 一種顏色。signedBand 是目前像素相對聚光帶中心的橫向位置。
+    float signedBand = fract(warpedBand * 0.5 + 0.5) - 0.5;
+    float rainbowCoordinate = clamp(
+      0.5 + signedBand * mix(1.8, 10.0, uSpectralCausticSeparation)
+        + dot(N, causticTangent) * 0.06,
+      0.0,
+      1.0
+    );
+    vec3 causticSpectrum = separateSpectrum(
+      visibleSpectrum(rainbowCoordinate)
+    );
+
+    // 可獨立混合的 Fresnel 與循環 Noise 遮罩。0 完全不限制焦散；
+    // Fresnel=1 時彩光集中於掠射角，Noise=1 時連續光帶拆成局部光斑。
+    float fresnelMask = pow(
+      clamp(material.edgeFactor, 0.0, 1.0),
+      0.72
+    );
+    fresnelMask = mix(1.0, fresnelMask, uSpectralCausticFresnelMask);
+    vec3 causticNoiseFlow = loopNoiseOffset(uSpectralCausticFlow);
+    float causticNoise = fbmFast(
+      p * uSpectralCausticNoiseScale + causticNoiseFlow
+    );
+    float noiseMask = smoothstep(0.32, 0.68, 0.5 + causticNoise * 0.72);
+    noiseMask = mix(1.0, noiseMask, uSpectralCausticNoiseMask);
+
+    float hdriDrive = 1.0;
+    if (uHasEnv == 1) {
+      vec3 hdriLightSample = sampleEnvironmentBackdrop(virtualLightDir);
+      float hdriLightLuma = dot(
+        hdriLightSample,
+        vec3(0.2126, 0.7152, 0.0722)
+      );
+      hdriDrive = mix(
+        1.0,
+        clamp(0.35 + hdriLightLuma * 1.25, 0.35, 1.8),
+        uSpectralCausticHdri
+      );
+    }
+
+    float causticEnergy = spectralCausticStrength * hdriDrive
+      * bandFocus
+      * (0.20 + incidenceFold * 0.80)
+      * (0.30 + focusAlignment * 0.70)
+      * mix(1.0, 0.72, uSpectralCausticLightSize)
+      * fresnelMask
+      * noiseMask
+      * mix(1.45, 0.95, brightBg);
+    vec3 causticLight = 1.0 - exp(
+      -causticSpectrum * causticEnergy * 3.2
+    );
+    finalColor = 1.0 - (1.0 - finalColor) * (1.0 - causticLight);
+  }
+
+  // 真實色散在純色／黑色畫布上只加入已去除無色 HDRI 的稜鏡光。
+  // screen 合成保留光的能量與亮度，也不會把完整攝影棚背景露出來。
+  if (realDispersionStrength > 0.001) {
+    float deltaMagnitude = length(realDispersionDelta);
+    float contrastGate = smoothstep(0.001, 0.035, deltaMagnitude);
+    float darkRealGain = mix(1.15, 2.8, 1.0 - brightBg)
+      * realDispersionStrength;
+    vec3 spectralLight = 1.0 - exp(
+      -realDispersionDelta * contrastGate * darkRealGain
+    );
+    finalColor = 1.0 - (1.0 - finalColor) * (1.0 - spectralLight);
+  }
   gl_FragColor = vec4(finalColor, 1.0);
 }
 `;

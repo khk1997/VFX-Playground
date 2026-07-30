@@ -94,6 +94,25 @@ function blurSignedVolume(source, size, passes = 2) {
   return current;
 }
 
+function dilateVolumeMask(source, size) {
+  const result = new Uint8Array(source);
+  const index = (x, y, z) => x + size * (y + size * z);
+  // 6-connected 一 voxel 膨脹：只補正交方向的薄層與小裂縫，
+  // 比 26-neighbor 更不容易讓耳朵、翼片等斜面整體過度肥厚。
+  for (let z = 1; z < size - 1; z++) {
+    for (let y = 1; y < size - 1; y++) for (let x = 1; x < size - 1; x++) {
+      const i = index(x, y, z);
+      if (source[i]
+        || source[index(x - 1, y, z)] || source[index(x + 1, y, z)]
+        || source[index(x, y - 1, z)] || source[index(x, y + 1, z)]
+        || source[index(x, y, z - 1)] || source[index(x, y, z + 1)]) {
+        result[i] = 1;
+      }
+    }
+  }
+  return result;
+}
+
 function chamferSigned(mask, w, h, d = 1) {
   const n = w * h * d;
   const inf = 1e6;
@@ -304,7 +323,10 @@ export async function gltfToField(file, size = 48) {
     mask[x + size * (y + size * (size - 1))] = 0;
   }
 
-  const field = chamferSigned(mask, size, size, size);
+  // 48³ 的薄部位可能在 scan conversion 後只剩零星 voxel，甚至斷線。
+  // 距離場建立前補一層連通性；80³／128³ 已有足夠取樣，不改原 mask。
+  const topologyMask = size <= 48 ? dilateVolumeMask(mask, size) : mask;
+  const field = chamferSigned(topologyMask, size, size, size);
   const cols = Math.ceil(Math.sqrt(size)), rows = Math.ceil(size / cols);
   const atlasW = cols * size, atlasH = rows * size;
   const atlasField = new Float32Array(atlasW * atlasH).fill(24);
@@ -314,7 +336,7 @@ export async function gltfToField(file, size = 48) {
     const src = x + size * (y + size * z);
     const ax = (z % cols) * size + x, ay = Math.floor(z / cols) * size + y;
     atlasField[ax + ay * atlasW] = field[src];
-    if (mask[src] && ((x * 13 + y * 23 + z * 37) % 71 === 0)) {
+    if (topologyMask[src] && ((x * 13 + y * 23 + z * 37) % 71 === 0)) {
       const target = new THREE.Vector3(
         (x / (size - 1) - 0.5) * 2.1,
         (y / (size - 1) - 0.5) * 2.1,
@@ -327,13 +349,13 @@ export async function gltfToField(file, size = 48) {
     }
     // 模型外部但被實體從多個方向包圍的窄區域，通常對應眼窩、嘴縫等凹陷。
     // 這些點只生成負 Metaball，不會把原始網格表面帶進 renderer。
-    if (!mask[src] && field[src] > 0 && field[src] < 3.2
+    if (!topologyMask[src] && field[src] > 0 && field[src] < 3.2
       && x > 2 && y > 2 && z > 2 && x < size - 3 && y < size - 3 && z < size - 3
       && ((x * 19 + y * 29 + z * 43) % 17 === 0)) {
       let surrounding = 0;
       for (let oz = -2; oz <= 2; oz += 2) for (let oy = -2; oy <= 2; oy += 2) for (let ox = -2; ox <= 2; ox += 2) {
         if (!ox && !oy && !oz) continue;
-        surrounding += mask[(x + ox) + size * ((y + oy) + size * (z + oz))] ? 1 : 0;
+        surrounding += topologyMask[(x + ox) + size * ((y + oy) + size * (z + oz))] ? 1 : 0;
       }
       if (surrounding >= 12) {
         const cavity = new THREE.Vector3(
@@ -349,6 +371,8 @@ export async function gltfToField(file, size = 48) {
   if (!targets.length) throw new Error('模型必須是封閉實體才能轉換');
   // Accurate Liquid Formation：保留 GLB 的零等值輪廓，但先在體積域做
   // separable Gaussian smoothing，去掉硬邊與體素階梯，再交給水滴區域式生長。
+  // 64³ 已提供較細的體素輪廓；維持兩次平滑，避免眼窩、眉骨等薄凹結構
+  // 被過度模糊後侵蝕成孔洞。表面著色的柔順度交由 voxel-aware normal 保留。
   const liquidField = blurSignedVolume(field, size, 2);
   const liquidAtlas = new Float32Array(atlasW * atlasH).fill(24);
   for (let z = 0; z < size; z++) for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {

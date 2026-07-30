@@ -17,10 +17,36 @@ const MAX_NEGATIVE_DROPS = 4;
 
 /* ===== 參數 ===== */
 const DEFAULTS = {              // 數值滑桿
-  thickness: 390,
-  thickVar: 95,
+  thickness: 195,
+  thickVar: 40,
   noiseScale: 1.0,
-  dispersion: 0.69,
+  dispersion: 0.09,
+  dispersionSeparation: 1.5,
+  causticScale: 1.0,
+  causticSharpness: 0.65,
+  realDispersion: 0.32,
+  realDispersionSeparation: 0.22,
+  spectralCausticIntensity: 1.5,
+  spectralCausticFocus: 0.31,
+  spectralCausticWidth: 0.42,
+  spectralCausticLightSize: 0.26,
+  spectralCausticDensity: 0.03,
+  spectralCausticSoftness: 1,
+  spectralCausticWarp: 0.57,
+  spectralCausticSeparation: 0.24,
+  spectralCausticBounce: 0.19,
+  spectralCausticFlow: 0.18,
+  spectralCausticFresnelMask: 1,
+  spectralCausticNoiseMask: 1,
+  spectralCausticNoiseScale: 2.5,
+  spectralCausticAzimuth: -177,
+  spectralCausticElevation: -19,
+  spectralCausticHdri: 0.3,
+  artThickness: 165,
+  artThickVar: 95,
+  artNoiseScale: 1.0,
+  artPatternSpeed: 0.21,
+  artGravity: 1,
   filmBlur: 0.25,
   saturation: 1.94,
   patternSpeed: 0.21,
@@ -39,9 +65,9 @@ const DEFAULTS = {              // 數值滑桿
   materialExposure: 1,
   hdriYaw: 0,
   hdriPitch: 0,
-  hdriBlur: 0,
-  envRefraction: 0.5,
-  cameraDistance: 5.0,
+  hdriBlur: 0.11,
+  envRefraction: 0.03,
+  cameraDistance: 4.95,
   loopDuration: 12,
   wobble: 0.305,
   wobbleScale: 0.7,
@@ -55,13 +81,25 @@ const DEFAULTS = {              // 數值滑桿
   spin: 0.08,
   gatherDuration: 0.48,
   shapeDepth: 0.28,
-  shapeSoftness: 0.06,
+  shapeSoftness: 0,
   shapeHold: 0.22,
   microCount: 14,
 };
-const SELECT_DEFAULTS = { bgMode: 'color', colorMode: 'ramp', motion: 'cinematic', shapeSource: 'svg' };
-const COLOR_DEFAULTS  = { bgColor: '#000000' };
-const P = { ...DEFAULTS, ...SELECT_DEFAULTS, ...COLOR_DEFAULTS };
+const SELECT_DEFAULTS = {
+  bgMode: 'color',
+  colorMode: 'spectral',
+  motion: 'cinematic',
+  shapeSource: 'svg',
+  shapeQuality: 'balanced',
+};
+const TOGGLE_DEFAULTS = {
+  filmEnabled: false,
+  dispersionEnabled: true,
+  realDispersionEnabled: true,
+  spectralCausticEnabled: true,
+};
+const COLOR_DEFAULTS  = { bgColor: '#bdbdbd' };
+const P = { ...DEFAULTS, ...SELECT_DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS };
 const motionCounts = { cinematic: 2, formation: FORMATION_DEFAULT_COUNT };
 
 // 自訂漸層色標（最多 6，可調位置）— reset 用
@@ -78,8 +116,16 @@ const SELECTS = {
   colorMode: { uniform: 'uColorMode', map: { spectral: 0, ramp: 1 } },
   motion:    { uniform: 'uMotion',    map: { cinematic: 0, formation: 1 } },
   shapeSource: { uniform: 'uShapeType', map: { svg: 1, gltf: 2 } },
+  // 僅控制下一次 GLB 烘焙尺寸，沒有對應 shader uniform。
+  shapeQuality: { uniform: '', map: { performance: 48, balanced: 80, high: 128 } },
 };
 const COLORS = { bgColor: 'uBgColor' };
+const TOGGLES = {
+  filmEnabled: 'uFilmEnabled',
+  dispersionEnabled: 'uDispersionEnabled',
+  realDispersionEnabled: 'uRealDispersionEnabled',
+  spectralCausticEnabled: 'uSpectralCausticEnabled',
+};
 
 const fmt = {
   thickness: v => v.toFixed(0) + 'nm',
@@ -95,6 +141,33 @@ const fmt = {
   wobbleScale: v => 'x' + v.toFixed(1),
   wobbleSpeed: v => 'x' + v.toFixed(2),
   patternSpeed: v => 'x' + v.toFixed(2),
+  dispersion: v => Math.round(v * 100) + '%',
+  dispersionSeparation: v => 'x' + v.toFixed(2),
+  causticScale: v => 'x' + v.toFixed(2),
+  causticSharpness: v => Math.round(v * 100) + '%',
+  realDispersion: v => Math.round(v * 100) + '%',
+  realDispersionSeparation: v => 'x' + v.toFixed(2),
+  spectralCausticIntensity: v => Math.round(v * 100) + '%',
+  spectralCausticFocus: v => Math.round(v * 100) + '%',
+  spectralCausticWidth: v => 'x' + v.toFixed(2),
+  spectralCausticLightSize: v => Math.round(v * 100) + '%',
+  spectralCausticDensity: v => Math.round(v * 100) + '%',
+  spectralCausticSoftness: v => Math.round(v * 100) + '%',
+  spectralCausticWarp: v => Math.round(v * 100) + '%',
+  spectralCausticSeparation: v => 'x' + v.toFixed(2),
+  spectralCausticBounce: v => Math.round(v * 100) + '%',
+  spectralCausticFlow: v => 'x' + v.toFixed(2),
+  spectralCausticFresnelMask: v => Math.round(v * 100) + '%',
+  spectralCausticNoiseMask: v => Math.round(v * 100) + '%',
+  spectralCausticNoiseScale: v => 'x' + v.toFixed(1),
+  spectralCausticAzimuth: v => v.toFixed(0) + '°',
+  spectralCausticElevation: v => v.toFixed(0) + '°',
+  spectralCausticHdri: v => Math.round(v * 100) + '%',
+  artThickness: v => v.toFixed(0) + 'nm',
+  artThickVar: v => '±' + v.toFixed(0),
+  artNoiseScale: v => 'x' + v.toFixed(1),
+  artPatternSpeed: v => 'x' + v.toFixed(2),
+  artGravity: v => Math.round(v * 100) + '%',
   filmBlur: v => v.toFixed(2),
   reflect: v => 'x' + v.toFixed(2),
   transmission: v => v.toFixed(2),
@@ -118,7 +191,7 @@ const fmt = {
   microCount: v => v.toFixed(0),
 };
 
-import { VERT, FRAG } from './shaders.js';
+import { VERT, FRAG } from './shaders.js?v=spectral-caustic-6';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -321,6 +394,23 @@ function formationAmount(phase) {
   return gather * (1 - release);
 }
 
+function formationFidelityAmount(phase) {
+  const gatherEnd = Math.max(0.15, P.gatherDuration);
+  const holdEnd = Math.min(0.94, gatherEnd + P.shapeHold);
+  // 直接使用循環 phase，而非已 smoothstep 過的 formationAmount 再平滑一次。
+  // 預設 12 秒循環約有 2.6 秒完成吸收，避免末段在幾幀內由水滴跳成模型。
+  const absorbStart = Math.max(0.08, gatherEnd - 0.22);
+  const gatherAbsorb = smoothstepCPU(phase, absorbStart, gatherEnd);
+  const releaseAbsorb = 1 - smoothstepCPU(phase, holdEnd, 0.98);
+  return gatherAbsorb * releaseAbsorb;
+}
+
+function formationReleaseAmount(phase) {
+  const gatherEnd = Math.max(0.15, P.gatherDuration);
+  const holdEnd = Math.min(0.94, gatherEnd + P.shapeHold);
+  return smoothstepCPU(phase, holdEnd, 0.98);
+}
+
 // 每顆水滴的自由段只使用整數諧波，因此 phase=0/1 的位置與速度完全相同。
 // 匯集與散開共用同一個 formationAmount，故兩段是同一路徑的正反向。
 function formationDropPosition(i, phase, count, out) {
@@ -353,7 +443,7 @@ const formationPosNow = new THREE.Vector3();
 const formationPosBefore = new THREE.Vector3();
 const formationPosAfter = new THREE.Vector3();
 
-function updateMicroDrops(phase) {
+function updateMicroDrops(phase, fidelityAbsorb = 0) {
   const activeCount = P.motion === 'formation' && shapeField
     ? Math.max(0, Math.min(MAX_MICRO_DROPS, Math.round(P.microCount)))
     : 0;
@@ -381,14 +471,16 @@ function updateMicroDrops(phase) {
     const local = smoothstepCPU(amount, arriveStart, arriveEnd);
     const eased = local * local * (3 - 2 * local);
     const target = microFormationAnchors[i % microFormationAnchors.length];
-    microDropData[o] = freeX + (target.x - freeX) * eased;
-    microDropData[o + 1] = freeY + (target.y - freeY) * eased;
-    microDropData[o + 2] = freeZ + (target.z - freeZ) * eased;
+    const insetScale = 1 - fidelityAbsorb * 0.20;
+    microDropData[o] = (freeX + (target.x - freeX) * eased) * insetScale;
+    microDropData[o + 1] = (freeY + (target.y - freeY) * eased) * insetScale;
+    microDropData[o + 2] = (freeZ + (target.z - freeZ) * eased) * insetScale;
     const targetRadius = target.radiusHint || P.radius * (0.28 + h2 * 0.16);
     // 自由飛行時仍是清楚可見的小滴；抵達後保留完整體積成為最終造型的一部分。
     // 半徑與位置共用相同 local，因此不會再出現「先縮掉、模型才淡入」。
     const freeRadius = targetRadius * (0.52 + h2 * 0.16);
-    microDropData[o + 3] = freeRadius + (targetRadius - freeRadius) * eased;
+    microDropData[o + 3] = (freeRadius + (targetRadius - freeRadius) * eased)
+      * (1 - fidelityAbsorb);
     const axis = target.axis || formationPosNow.set(1, 0, 0);
     microShapeData[o] = axis.x;
     microShapeData[o + 1] = axis.y;
@@ -400,7 +492,7 @@ function updateMicroDrops(phase) {
   return activeCount;
 }
 
-function updateNegativeDrops(phase) {
+function updateNegativeDrops(phase, fidelityAbsorb = 0) {
   const amount = smoothstepCPU(formationAmount(phase), 0.58, 0.96);
   const selected = negativeFormationAnchors;
   for (let i = 0; i < MAX_NEGATIVE_DROPS; i++) {
@@ -413,7 +505,8 @@ function updateNegativeDrops(phase) {
     negativeDropData[o] = target.x;
     negativeDropData[o + 1] = target.y;
     negativeDropData[o + 2] = target.z;
-    negativeDropData[o + 3] = (target.radiusHint || 0.09) * amount;
+    negativeDropData[o + 3] = (target.radiusHint || 0.09) * amount
+      * (1 - fidelityAbsorb);
   }
   if (negativeDropTexture) negativeDropTexture.needsUpdate = true;
   return Math.min(selected.length, MAX_NEGATIVE_DROPS);
@@ -475,13 +568,27 @@ function updateDropUniforms(t) {
   const phase = fract(t / Math.max(0.001, P.loopDuration));
   const a = phase * tau;
   const energy = 0.55 + P.flowSpeed * 0.9;
+  const amount = formationAmount(phase);
+  const fidelityAbsorb = P.motion === 'formation' && shapeField
+    ? formationFidelityAmount(phase)
+    : 0;
+  const holdEnd = Math.min(0.94, Math.max(0.15, P.gatherDuration) + P.shapeHold);
+  const releasingShape = phase > holdEnd;
+  const releaseTransfer = releasingShape ? formationReleaseAmount(phase) : 0;
   // 高密度細節場由可見主滴進入模型區域後才開始長出；它本身是預烘焙
   // Metaball union，而非原始 GLB SDF。
   const formationShapeProgress = P.motion === 'formation' && shapeField
-    ? smoothstepCPU(formationAmount(phase), 0.42, 0.96)
+    // 回程使用同一個體積交接進度：模型從第一幀開始退、水滴同步長回。
+    // 舊版先維持完整模型、再集中侵蝕，會形成「模型上冒球後突然塌掉」。
+    ? releasingShape
+      // 在水滴完全散開前清掉最後的模型核心，避免循環尾端留下 SDF 碎片。
+      ? 1 - smoothstepCPU(releaseTransfer, 0.0, 0.84)
+      : smoothstepCPU(amount, 0.42, 0.96)
     : 0;
-  const microCount = updateMicroDrops(phase);
-  const negativeCount = updateNegativeDrops(phase);
+  // 模型已大致長成後，讓可見水滴在目標體積內連續被 SDF 吸收。
+  // 最後輪廓只剩匯入模型場；吸收在模型完成前不啟動，避免「水滴先縮、模型才出現」。
+  const microCount = updateMicroDrops(phase, fidelityAbsorb);
+  const negativeCount = updateNegativeDrops(phase, fidelityAbsorb);
 
   const cinema = cinematicTimeline(phase);
   const separation = cinema.volumeSeparation;
@@ -524,7 +631,7 @@ function updateDropUniforms(t) {
       radiusFactor = 1 + cinema.anticipation * 0.01
         + breakaway * 0.006 + followThrough * 0.004;
     } else if (P.motion === 'formation') {
-      const formation = formationAmount(phase);
+      const formation = amount;
       formationDropPosition(i, phase, count, formationPosNow);
       x = formationPosNow.x;
       y = formationPosNow.y;
@@ -533,12 +640,25 @@ function updateDropUniforms(t) {
     }
     // 大滴受重力與慣性影響較明顯；常量位移不破壞循環接縫。
     y -= P.gravity * P.spread * 0.045 * Math.pow(radius, 1.35);
+    if (P.motion === 'formation') {
+      // anchor 可能落在模型表層；吸收時稍微往模型中心推入，避免半徑縮小後
+      // 先失去液橋、在輪廓旁短暫留下孤立小球。
+      const insetScale = 1 - fidelityAbsorb * 0.20;
+      x *= insetScale;
+      y *= insetScale;
+      z *= insetScale;
+    }
     const freeRadius = P.radius * radius * radiusFactor;
     if (P.motion === 'formation') {
       const targetRadius = formationAnchors[i % Math.max(1, formationAnchors.length)]?.radiusHint
         || P.radius * 0.58;
       const settle = smoothstepCPU(formationAmount(phase), 0.12, 0.88);
-      dropData[i].set(x, y, z, freeRadius + (targetRadius - freeRadius) * settle);
+      dropData[i].set(
+        x,
+        y,
+        z,
+        (freeRadius + (targetRadius - freeRadius) * settle) * (1 - fidelityAbsorb),
+      );
     } else {
       dropData[i].set(x, y, z, freeRadius);
     }
@@ -624,9 +744,17 @@ function updateDropUniforms(t) {
   if (uniforms) uniforms.uViscosity.value = effectiveViscosity;
   if (uniforms) {
     uniforms.uShapeProgress.value = formationShapeProgress;
-    uniforms.uCount.value = count;
-    uniforms.uMicroCount.value = microCount;
-    uniforms.uNegativeCount.value = negativeCount;
+    uniforms.uFidelityAbsorb.value = fidelityAbsorb;
+    // 半徑已連續收至零後才停止 shader 迴圈；切換當下幾何場完全相同。
+    const fidelityComplete = fidelityAbsorb > 0.9999;
+    uniforms.uCount.value = fidelityComplete ? 0 : count;
+    uniforms.uMicroCount.value = fidelityComplete ? 0 : microCount;
+    uniforms.uNegativeCount.value = fidelityComplete ? 0 : negativeCount;
+    // 完成時保留最多 0.02 的薄層，封住體素化在眼窩等薄區域產生的非原始孔洞；
+    // 若使用者明確設為 0 仍尊重原值，不強制膨脹模型。
+    const finalSurfaceGuard = Math.min(P.shapeSoftness, 0.02);
+    uniforms.uShapeSoftness.value = P.shapeSoftness * (1 - fidelityAbsorb)
+      + finalSurfaceGuard * fidelityAbsorb;
     uniforms.uMicroBlend.value = Math.max(
       0.035,
       effectiveViscosity * 0.60 + P.shapeSoftness * 0.35,
@@ -1019,6 +1147,36 @@ function initGL() {
     uThickVar:   { value: P.thickVar },
     uNoiseScale: { value: P.noiseScale },
     uDispersion: { value: P.dispersion },
+    uDispersionSeparation: { value: P.dispersionSeparation },
+    uCausticScale: { value: P.causticScale },
+    uCausticSharpness: { value: P.causticSharpness },
+    uRealDispersion: { value: P.realDispersion },
+    uRealDispersionSeparation: { value: P.realDispersionSeparation },
+    uSpectralCausticIntensity: { value: P.spectralCausticIntensity },
+    uSpectralCausticFocus: { value: P.spectralCausticFocus },
+    uSpectralCausticWidth: { value: P.spectralCausticWidth },
+    uSpectralCausticLightSize: { value: P.spectralCausticLightSize },
+    uSpectralCausticDensity: { value: P.spectralCausticDensity },
+    uSpectralCausticSoftness: { value: P.spectralCausticSoftness },
+    uSpectralCausticWarp: { value: P.spectralCausticWarp },
+    uSpectralCausticSeparation: { value: P.spectralCausticSeparation },
+    uSpectralCausticBounce: { value: P.spectralCausticBounce },
+    uSpectralCausticFlow: { value: P.spectralCausticFlow },
+    uSpectralCausticFresnelMask: { value: P.spectralCausticFresnelMask },
+    uSpectralCausticNoiseMask: { value: P.spectralCausticNoiseMask },
+    uSpectralCausticNoiseScale: { value: P.spectralCausticNoiseScale },
+    uSpectralCausticAzimuth: { value: P.spectralCausticAzimuth },
+    uSpectralCausticElevation: { value: P.spectralCausticElevation },
+    uSpectralCausticHdri: { value: P.spectralCausticHdri },
+    uArtThickness: { value: P.artThickness },
+    uArtThickVar: { value: P.artThickVar },
+    uArtNoiseScale: { value: P.artNoiseScale },
+    uArtPatternSpeed: { value: P.artPatternSpeed },
+    uArtGravity: { value: P.artGravity },
+    uDispersionEnabled: { value: P.dispersionEnabled ? 1 : 0 },
+    uRealDispersionEnabled: { value: P.realDispersionEnabled ? 1 : 0 },
+    uSpectralCausticEnabled: { value: P.spectralCausticEnabled ? 1 : 0 },
+    uFilmEnabled: { value: P.filmEnabled ? 1 : 0 },
     uFilmBlur:   { value: P.filmBlur },
     uSaturation: { value: P.saturation },
     uFresnel:    { value: P.fresnel },
@@ -1042,6 +1200,7 @@ function initGL() {
     uHasEnv:     { value: 0 },
     uShapeType: { value: SELECTS.shapeSource.map[P.shapeSource] },
     uShapeProgress: { value: 0 },
+    uFidelityAbsorb: { value: 0 },
     uShapeDepth: { value: P.shapeDepth },
     uShapeSoftness: { value: P.shapeSoftness },
     uShapeTex: { value: makeBlankShape() },
@@ -1172,6 +1331,9 @@ function syncPanelToUniforms() {
     const u = uniforms[SELECTS[key].uniform];
     if (u) u.value = SELECTS[key].map[P[key]];
   }
+  for (const key of Object.keys(TOGGLES)) {
+    uniforms[TOGGLES[key]].value = P[key] ? 1 : 0;
+  }
   for (const key of Object.keys(COLORS)) uniforms[COLORS[key]].value.set(P[key]);
   document.body.style.background = (P.bgMode === 'hdri') ? '#000' : P.bgColor;
 }
@@ -1198,6 +1360,7 @@ function bindControls() {
     const { uniform, map } = SELECTS[key];
     const update = () => {
       const previousMotion = P.motion;
+      const previousValue = P[key];
       P[key] = el.value;
       if (key === 'motion' && previousMotion !== P.motion) {
         motionCounts[previousMotion] = Math.round(P.count);
@@ -1208,8 +1371,37 @@ function bindControls() {
       }
       if (uniforms && uniforms[uniform]) uniforms[uniform].value = map[el.value];
       updateUIState();
+      if (key === 'shapeQuality' && previousValue !== P[key]) {
+        scheduleLastGLBRebuild();
+      }
     };
     el.value = P[key];
+    if (!el._bound) { el.addEventListener('change', update); el._bound = true; }
+    update();
+  }
+  // 材質功能開關
+  for (const key of Object.keys(TOGGLES)) {
+    const el = document.getElementById(key);
+    const valEl = document.getElementById(key + '_v');
+    const label = el.closest('.toggleRow')?.querySelector('label');
+    const update = () => {
+      P[key] = el.checked;
+      if (valEl) valEl.textContent = P[key] ? '開啟' : '關閉';
+      if (uniforms) uniforms[TOGGLES[key]].value = P[key] ? 1 : 0;
+      updateUIState();
+    };
+    el.checked = P[key];
+    // 原生 checkbox 為視覺隱藏狀態；將文字標籤正式連到 input，
+    // 讓使用者點標籤也能切換，而不必精準命中 34px 的滑軌。
+    if (label) label.htmlFor = key;
+    const track = el.nextElementSibling;
+    if (track && !track._bound) {
+      track.addEventListener('click', () => {
+        el.checked = !el.checked;
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      track._bound = true;
+    }
     if (!el._bound) { el.addEventListener('change', update); el._bound = true; }
     update();
   }
@@ -1265,8 +1457,11 @@ function resetRamp() {
 function updateUIState() {
   const spectral = P.colorMode === 'spectral';
   const rampGroup = document.getElementById('rampGroup');
-  rampGroup.style.opacity = spectral ? 0.4 : 1;
-  rampGroup.querySelectorAll('input').forEach(el => { el.disabled = spectral; });
+  const rampDisabled = spectral || !P.filmEnabled;
+  rampGroup.classList.toggle('is-disabled', rampDisabled);
+  rampGroup.querySelectorAll('input').forEach(el => {
+    el.disabled = rampDisabled;
+  });
   const colorBackground = P.bgMode === 'color';
   const bgc = document.getElementById('bgColor');
   bgc.disabled = !colorBackground;
@@ -1281,10 +1476,17 @@ function updateUIState() {
   const shapeInput = document.getElementById('shapeInput');
   shapeBtn.textContent = isSvg ? '選擇 SVG…' : '選擇 GLB / GLTF…';
   shapeInput.accept = isSvg ? '.svg,image/svg+xml' : '.glb,.gltf,model/gltf-binary,model/gltf+json';
+  const qualityRow = document.getElementById('shapeQualityRow');
+  const qualitySelect = document.getElementById('shapeQuality');
+  qualitySelect.disabled = !forming || isSvg;
+  qualityRow.style.opacity = isSvg ? 0.4 : 1;
+  const depthControl = document.getElementById('shapeDepth');
+  depthControl.disabled = !forming || !isSvg;
+  depthControl.closest('.row').style.opacity = isSvg ? 1 : 0.4;
 }
 
 document.getElementById('resetBtn').addEventListener('click', () => {
-  Object.assign(P, DEFAULTS, SELECT_DEFAULTS, COLOR_DEFAULTS);
+  Object.assign(P, DEFAULTS, SELECT_DEFAULTS, TOGGLE_DEFAULTS, COLOR_DEFAULTS);
   motionCounts.cinematic = DEFAULTS.count;
   motionCounts.formation = FORMATION_DEFAULT_COUNT;
   resetRamp();
@@ -1381,21 +1583,46 @@ hdriInput.addEventListener('change', e => {
 const shapeInput = document.getElementById('shapeInput');
 const shapeState = document.getElementById('shapeState');
 let shapeConverting = false;
+let lastGLBFile = null;
+let shapeImportRequestId = 0;
+let shapeRebuildTimer = 0;
 document.getElementById('shapeBtn').addEventListener('click', () => shapeInput.click());
-shapeInput.addEventListener('change', async e => {
-  const file = e.target.files && e.target.files[0];
-  if (!file) return;
+
+function scheduleLastGLBRebuild() {
+  if (!lastGLBFile || P.shapeSource !== 'gltf') return;
+  clearTimeout(shapeRebuildTimer);
+  // 立刻使正在進行的舊品質結果失效；短暫 debounce 避免快速連切時重複開工。
+  shapeImportRequestId++;
+  const grid = SELECTS.shapeQuality.map[P.shapeQuality] || 80;
+  const qualityLabel = document.querySelector('#shapeQuality option:checked')?.textContent
+    || `${grid}³`;
+  shapeState.textContent = `品質已切換，準備重新生成 ${qualityLabel}…`;
+  shapeRebuildTimer = window.setTimeout(() => {
+    importShapeFile(lastGLBFile, 'gltf', true);
+  }, 160);
+}
+
+async function importShapeFile(file, kind, rebuilding = false) {
   if (!inited) initGL();
-  const kind = P.shapeSource;
+  const requestId = ++shapeImportRequestId;
+  const glbGridSize = SELECTS.shapeQuality.map[P.shapeQuality] || 80;
   shapeState.textContent = kind === 'svg'
     ? `正在分析 SVG：${file.name}`
-    : `正在體素化模型：${file.name}（可能需要幾秒）`;
+    : rebuilding
+      ? `正在重新生成：${file.name} → ${glbGridSize}³（可能需要幾秒）`
+      : `正在體素化模型：${file.name} → ${glbGridSize}³（可能需要幾秒）`;
   document.getElementById('shapeBtn').disabled = true;
+  document.getElementById('shapeQuality').disabled = true;
   shapeConverting = true;
   syncLoop();
   try {
-    // 純 Metaball 模式只需要體積取樣與局部厚度，不再需要高解析 SDF 表面。
-    const next = kind === 'svg' ? await svgToField(file) : await gltfToField(file, 48);
+    const next = kind === 'svg'
+      ? await svgToField(file)
+      : await gltfToField(file, glbGridSize);
+    if (requestId !== shapeImportRequestId) {
+      next.texture?.dispose();
+      return;
+    }
     const old = shapeField?.texture;
     shapeField = next;
     shapeTargets = next.targets;
@@ -1416,16 +1643,28 @@ shapeInput.addEventListener('change', async e => {
     const topologyNote = kind === 'gltf' && next.oddScanlines > 0
       ? `；已修復 ${next.oddScanlines} 條非封閉掃描線`
       : '';
-    shapeState.textContent = `${kind === 'svg' ? 'SVG' : '3D 模型'} 已就緒：${file.name}${topologyNote}`;
+    const qualityNote = kind === 'gltf' ? `；${glbGridSize}³` : '';
+    shapeState.textContent = `${kind === 'svg' ? 'SVG' : '3D 模型'} 已就緒：${file.name}${qualityNote}${topologyNote}`;
   } catch (error) {
+    if (requestId !== shapeImportRequestId) return;
     console.error(error);
     shapeState.textContent = `轉換失敗：${error.message || '檔案格式不支援'}`;
   } finally {
-    shapeConverting = false;
-    document.getElementById('shapeBtn').disabled = false;
-    e.target.value = '';
-    syncLoop();
+    if (requestId === shapeImportRequestId) {
+      shapeConverting = false;
+      updateUIState();
+      syncLoop();
+    }
   }
+}
+
+shapeInput.addEventListener('change', e => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  const kind = P.shapeSource;
+  if (kind === 'gltf') lastGLBFile = file;
+  importShapeFile(file, kind);
+  e.target.value = '';
 });
 
 /* ===== 播放/暫停：面板按鈕、postMessage、分頁隱藏三者共同決定 ===== */
@@ -1512,8 +1751,12 @@ function frame(now) {
 
   // 匯聚完成時讓鏡頭跟著液滴群緩慢推近。模型距離場本身比自由漂浮軌道緊湊，
   // 若維持同一鏡距，外圍小滴剛收回時主體會顯得突然縮小。
+  const frameGatherEnd = Math.max(0.15, P.gatherDuration);
+  const frameHoldEnd = Math.min(0.94, frameGatherEnd + P.shapeHold);
   const formationFocus = P.motion === 'formation' && shapeField
-    ? smoothstepCPU(formationAmount(phase01), 0.42, 0.92)
+    ? phase01 > frameHoldEnd
+      ? formationFidelityAmount(phase01)
+      : smoothstepCPU(formationAmount(phase01), 0.42, 0.92)
     : 0;
   const formationDolly = 1 - formationFocus * 0.30;
   const cameraDistance = P.cameraDistance * dolly * compositionDistance * formationDolly;

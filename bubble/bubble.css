@@ -55,10 +55,104 @@
   .group { margin-bottom: 8px; border-top: 1px solid rgba(150,180,255,.12); padding-top: 6px; }
   .group h3 { font-size: 11px; color: #7fa0e6; letter-spacing: 1.5px; margin-bottom: 8px; text-transform: uppercase; }
   .group .note { font-size: 10px; color: #5f6f95; margin: 2px 0 6px; line-height: 1.4; }
+  .effectBlock {
+    --effect-accent: #7895d7;
+    position: relative;
+    margin: 0 0 10px;
+    padding: 9px 9px 7px 11px;
+    border: 1px solid rgba(150,180,255,.12);
+    border-radius: 9px;
+    background:
+      linear-gradient(115deg, color-mix(in srgb, var(--effect-accent) 9%, transparent), transparent 42%),
+      rgba(10,14,24,.34);
+    overflow: hidden;
+  }
+  .effectBlock::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 2px;
+    background: var(--effect-accent);
+    opacity: .82;
+  }
+  .effectBlock--art { --effect-accent: #b38cff; }
+  .effectBlock--physical { --effect-accent: #66bce8; }
+  .effectBlock--caustic { --effect-accent: #f0b75b; }
+  .effectBlock--ramp { --effect-accent: #79d6bd; margin-top: 10px; }
+  .effectBlock.is-disabled {
+    opacity: .38;
+    filter: saturate(.35);
+  }
+  .effectBlock.is-disabled::after {
+    content: "薄膜關閉或未使用自訂漸層";
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: end center;
+    padding: 8px;
+    color: rgba(198,207,228,.62);
+    font-size: 8px;
+    letter-spacing: .05em;
+    pointer-events: none;
+  }
+  .effectTitle {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0 0 8px;
+    color: #d8e0f2;
+    font-size: 10px;
+    font-weight: 650;
+    letter-spacing: .055em;
+  }
+  .effectTitle span {
+    min-width: 34px;
+    padding: 2px 5px;
+    border: 1px solid color-mix(in srgb, var(--effect-accent) 48%, transparent);
+    border-radius: 4px;
+    color: var(--effect-accent);
+    font-size: 8px;
+    line-height: 1;
+    text-align: center;
+    letter-spacing: .12em;
+  }
+  .effectSubhead {
+    margin: 8px 0 5px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(150,180,255,.09);
+    color: color-mix(in srgb, var(--effect-accent) 72%, #9aa6c0);
+    font-size: 9px;
+    font-weight: 650;
+    letter-spacing: .12em;
+  }
   .row { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; min-width: 0; }
   .row label { flex: 0 0 78px; font-size: 12px; color: #c6cfe4; white-space: nowrap; }
+  .toggleRow label { cursor: pointer; }
   .row input[type=range] { flex: 1 1 110px; min-width: 60px; accent-color: #5b7cff; height: 14px; cursor: pointer; }
   .row input[type=color] { flex: 1 1 110px; min-width: 60px; height: 24px; padding: 0; border: 1px solid rgba(150,180,255,.3); border-radius: 6px; background: none; cursor: pointer; }
+  .toggleRow { position: relative; }
+  .toggleRow input[type=checkbox] {
+    position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none;
+  }
+  .toggleRow .switchTrack {
+    position: relative; flex: 0 0 34px; height: 18px; margin-right: auto;
+    border: 1px solid rgba(150,180,255,.32); border-radius: 999px;
+    background: rgba(20,26,40,.9); cursor: pointer;
+    transition: background .18s ease, border-color .18s ease, box-shadow .18s ease;
+  }
+  .toggleRow .switchTrack::after {
+    content: ""; position: absolute; width: 12px; height: 12px; left: 2px; top: 2px;
+    border-radius: 50%; background: #7784a5;
+    transition: transform .18s ease, background .18s ease;
+  }
+  .toggleRow input:checked + .switchTrack {
+    background: rgba(91,124,255,.28); border-color: #6f91ff;
+    box-shadow: 0 0 12px rgba(91,124,255,.18);
+  }
+  .toggleRow input:checked + .switchTrack::after {
+    transform: translateX(16px); background: #b9c9ff;
+  }
+  .toggleRow input:focus-visible + .switchTrack { outline: 2px solid #9fb8ff; outline-offset: 2px; }
   .row select {
     flex: 1 1 110px; min-width: 60px; height: 24px; padding: 0 6px;
     background: rgba(20,26,40,.95); color: #c6cfe4;
