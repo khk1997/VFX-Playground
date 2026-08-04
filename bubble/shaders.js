@@ -165,6 +165,7 @@ uniform float uReflect;
 uniform float uTransmission;
 uniform float uMaterialExposure;
 uniform float uRoughness;
+uniform int   uReflectionSampleCount;
 uniform float uHdriYaw;
 uniform float uHdriPitch;
 uniform float uHdriBlur;
@@ -206,7 +207,41 @@ vec3 rotateEnvDir(vec3 d){
   return vec3(d.x, cp * d.y - sp * d.z, sp * d.y + cp * d.z);
 }
 vec3 sampleReflection(vec3 d, float rough){
-  if (uHasEnv == 1) return textureCubeUV(uPmremMap, rotateEnvDir(d), rough).rgb;
+  if (uHasEnv == 1) {
+    d = rotateEnvDir(d);
+    vec3 center = textureCubeUV(uPmremMap, d, rough).rgb;
+    // 高粗糙度直接取 PMREM 低階 mip 容易顯出 cube-UV 的格狀邊界。
+    // 用 roughness² 控制 GGX lobe 寬度，再以 8 點環形半球近似補樣本。
+    float blur = smoothstep(0.28, 0.92, rough);
+    if (blur > 0.001) {
+      vec3 axis = abs(d.y) < 0.92
+        ? normalize(cross(d, vec3(0.0, 1.0, 0.0)))
+        : normalize(cross(d, vec3(1.0, 0.0, 0.0)));
+      vec3 ortho = normalize(cross(d, axis));
+      float ggxAlpha = max(0.018, rough * rough);
+      float radius = mix(0.006, 0.16, clamp(ggxAlpha, 0.0, 1.0));
+      vec3 ring = vec3(0.0);
+      const float SQRT_HALF = 0.70710678;
+      ring += textureCubeUV(uPmremMap, normalize(d + axis * radius), rough).rgb;
+      ring += textureCubeUV(uPmremMap, normalize(d - axis * radius), rough).rgb;
+      ring += textureCubeUV(uPmremMap, normalize(d + ortho * radius), rough).rgb;
+      ring += textureCubeUV(uPmremMap, normalize(d - ortho * radius), rough).rgb;
+      if (uReflectionSampleCount > 4) {
+        ring += textureCubeUV(uPmremMap, normalize(d + (axis + ortho) * radius * SQRT_HALF), rough).rgb;
+        ring += textureCubeUV(uPmremMap, normalize(d + (axis - ortho) * radius * SQRT_HALF), rough).rgb;
+        ring += textureCubeUV(uPmremMap, normalize(d + (-axis + ortho) * radius * SQRT_HALF), rough).rgb;
+        ring += textureCubeUV(uPmremMap, normalize(d - (axis + ortho) * radius * SQRT_HALF), rough).rgb;
+        vec3 prefiltered = (center + ring) / 9.0;
+        float centerWeight = mix(0.68, 0.24, blur);
+        center = mix(prefiltered, center, centerWeight);
+      } else {
+        vec3 prefiltered = (center + ring) / 5.0;
+        float centerWeight = mix(0.68, 0.24, blur);
+        center = mix(prefiltered, center, centerWeight);
+      }
+    }
+    return center;
+  }
   return proceduralEnv(d, rough);
 }
 vec3 sampleEnvironmentBackdrop(vec3 d){

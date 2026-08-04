@@ -95,6 +95,7 @@
     letter-spacing: .05em;
     pointer-events: none;
   }
+  .featureGroup.is-disabled > .row:not(.toggleRow) { opacity: .38; }
   .effectTitle {
     display: flex;
     align-items: center;

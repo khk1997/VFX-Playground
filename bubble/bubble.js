@@ -1,6 +1,11 @@
 'use strict';
 import * as THREE from 'three';
 import { svgToField, gltfToField } from './shape-field.js';
+import { PMREMGenerator } from './vendor/PMREMGenerator.js';
+import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
+
+// 提高 PMREM 高粗糙度的最低預過濾解析度，避免 16×16 tile 造成方格反射。
+patchEnvMapResolution();
 
 /* ===== 預覽嵌入模式（?preview=1）===== */
 const PREVIEW = new URLSearchParams(location.search).has('preview');
@@ -200,7 +205,7 @@ const fmt = {
   microCount: v => v.toFixed(0),
 };
 
-import { VERT, FRAG } from './shaders.js?v=spectral-caustic-11';
+import { VERT, FRAG } from './shaders.js?v=spectral-caustic-16';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -1155,7 +1160,7 @@ function initGL() {
   renderer.setClearColor(0x000000, 1);
   renderer.setPixelRatio(qualityDpr);
 
-  pmremGenerator = new THREE.PMREMGenerator(renderer);
+  pmremGenerator = new PMREMGenerator(renderer);
   pmremGenerator.compileEquirectangularShader();
   const fallbackEnvScene = new THREE.Scene();
   fallbackEnvScene.background = new THREE.Color(0x000000);
@@ -1240,6 +1245,7 @@ function initGL() {
     uTransmission: { value: P.transmission },
     uMaterialExposure: { value: P.materialExposure },
     uRoughness:  { value: P.roughness },
+    uReflectionSampleCount: { value: mobileRenderQuery.matches ? 4 : 8 },
     uHdriYaw:    { value: P.hdriYaw },
     uHdriPitch:  { value: P.hdriPitch },
     uHdriBlur:   { value: P.hdriBlur },
@@ -1522,6 +1528,22 @@ function resetRamp() {
 
 // 依模式反灰不適用的控制項
 function updateUIState() {
+  const setFeatureState = (id, enabled) => {
+    const group = document.getElementById(id);
+    if (!group) return;
+    group.classList.toggle('is-disabled', !enabled);
+    group.classList.toggle('featureGroup', id === 'thinFilmGroup');
+    group.querySelectorAll('.row:not(.toggleRow) input, .row:not(.toggleRow) select, .row:not(.toggleRow) button')
+      .forEach(el => { el.disabled = !enabled; });
+    group.querySelectorAll('.effectBlock input, .effectBlock select, .effectBlock button')
+      .forEach(el => {
+        if (!el.closest('.toggleRow')) el.disabled = !enabled;
+      });
+  };
+  setFeatureState('thinFilmGroup', P.filmEnabled);
+  setFeatureState('artDispersionGroup', P.dispersionEnabled);
+  setFeatureState('physicalDispersionGroup', P.realDispersionEnabled);
+  setFeatureState('spectralCausticGroup', P.spectralCausticEnabled);
   const spectral = P.colorMode === 'spectral';
   const rampGroup = document.getElementById('rampGroup');
   const rampDisabled = spectral || !P.filmEnabled;
