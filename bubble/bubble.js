@@ -205,7 +205,7 @@ const fmt = {
   microCount: v => v.toFixed(0),
 };
 
-import { VERT, FRAG } from './shaders.js?v=spectral-caustic-17';
+import { VERT, FRAG } from './shaders.js?v=spectral-caustic-20';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -1175,6 +1175,7 @@ function initGL() {
     uResolution: { value: new THREE.Vector2(1, 1) },
     uRot:        { value: new THREE.Matrix3() },
     uCameraDistance: { value: P.cameraDistance },
+    uTanHalfFov: { value: 0.42 },
     uCompositionOffsetX: { value: 0 },
     uCompositionOffsetY: { value: 0 },
     uMaxSteps:   { value: qualitySteps },
@@ -1239,6 +1240,7 @@ function initGL() {
     uColorMode:  { value: SELECTS.colorMode.map[P.colorMode] },
     uRampTex:    { value: makeRampTexture() },
     uBgMode:     { value: SELECTS.bgMode.map[P.bgMode] },
+    uTransparentBackground: { value: 0 },
     uBgColor:    { value: new THREE.Color(P.bgColor) },
     uEnvRefraction: { value: P.envRefraction },
     uReflect:    { value: P.reflect },
@@ -1291,9 +1293,9 @@ function resize() {
   if (!renderer) return;
   // DevTools 裝置模式有時會保留較大的 layout viewport（window.innerWidth），
   // 但 documentElement client size 才是使用者實際看到的裝置畫面。
-  const w = document.documentElement.clientWidth;
-  const h = document.documentElement.clientHeight;
-  renderer.setSize(w, h, true);
+  const w = Math.max(1, canvas.clientWidth || document.documentElement.clientWidth);
+  const h = Math.max(1, canvas.clientHeight || document.documentElement.clientHeight);
+  renderer.setSize(w, h, false);
   uniforms.uResolution.value.set(w, h);
 }
 
@@ -1759,9 +1761,12 @@ shapeInput.addEventListener('change', e => {
 
 /* ===== 播放/暫停：面板按鈕、postMessage、分頁隱藏三者共同決定 ===== */
 let userPaused = false, extPaused = PREVIEW;
+let exportJob = null;
+let exportPreviewSettings = null;
+let exportPreviewContext = null;
 let rafId = 0, last = 0;
 const pauseBtn = document.getElementById('playCtl');
-function isPaused() { return userPaused || extPaused || shapeConverting || document.hidden; }
+function isPaused() { return userPaused || extPaused || shapeConverting || exportJob || document.hidden; }
 function syncLoop() {
   if (isPaused()) {
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
@@ -1784,6 +1789,380 @@ document.addEventListener('visibilitychange', syncLoop);
 /* ===== 面板開合 ===== */
 const panel = document.getElementById('panel');
 document.getElementById('toggleBtn').addEventListener('click', () => panel.classList.toggle('collapsed'));
+
+/* ===== 高解析度 PNG / PNG 序列輸出 ===== */
+function exportEvent(name, detail = {}) {
+  window.dispatchEvent(new CustomEvent(name, { detail }));
+}
+
+function nextPaint() {
+  return new Promise(resolve => requestAnimationFrame(resolve));
+}
+
+function canvasToBlob(canvas, type = 'image/png') {
+  return new Promise((resolve, reject) => canvas.toBlob(blob => {
+    if (blob) resolve(blob);
+    else reject(new Error('PNG 編碼失敗'));
+  }, type));
+}
+
+async function pixelsToPng(pixels, renderWidth, renderHeight, outputWidth, outputHeight) {
+  const supersampled = document.createElement('canvas');
+  supersampled.width = renderWidth;
+  supersampled.height = renderHeight;
+  const supersampledContext = supersampled.getContext('2d', { alpha: true });
+  const flipped = new Uint8ClampedArray(pixels.length);
+  const rowBytes = renderWidth * 4;
+  for (let y = 0; y < renderHeight; y++) {
+    const sourceStart = (renderHeight - 1 - y) * rowBytes;
+    flipped.set(pixels.subarray(sourceStart, sourceStart + rowBytes), y * rowBytes);
+  }
+  supersampledContext.putImageData(new ImageData(flipped, renderWidth, renderHeight), 0, 0);
+  if (renderWidth === outputWidth && renderHeight === outputHeight) return canvasToBlob(supersampled);
+
+  // 4× 直接縮成 1× 時，各瀏覽器採用的 filter kernel 差異很大。
+  // 固定分兩次 2× downsample，透明 coverage 與一像素高光會穩定許多。
+  let current = supersampled;
+  while (current.width > outputWidth || current.height > outputHeight) {
+    const nextWidth = Math.max(outputWidth, Math.round(current.width * 0.5));
+    const nextHeight = Math.max(outputHeight, Math.round(current.height * 0.5));
+    const next = document.createElement('canvas');
+    next.width = nextWidth;
+    next.height = nextHeight;
+    const context = next.getContext('2d', { alpha: true });
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = 'high';
+    context.clearRect(0, 0, nextWidth, nextHeight);
+    context.drawImage(current, 0, 0, nextWidth, nextHeight);
+    current = next;
+  }
+  return canvasToBlob(current);
+}
+
+function setUint16(view, offset, value) { view.setUint16(offset, value, true); }
+function setUint32(view, offset, value) { view.setUint32(offset, value >>> 0, true); }
+
+const crcTable = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let value = i;
+    for (let bit = 0; bit < 8; bit++) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    table[i] = value >>> 0;
+  }
+  return table;
+})();
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function zipDateTime(date = new Date()) {
+  return {
+    time: (date.getHours() << 11) | (date.getMinutes() << 5) | (date.getSeconds() >> 1),
+    date: ((date.getFullYear() - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate(),
+  };
+}
+
+function buildStoredZip(entries) {
+  const encoder = new TextEncoder();
+  const localParts = [];
+  const centralParts = [];
+  const stamp = zipDateTime();
+  let offset = 0;
+
+  for (const entry of entries) {
+    const name = encoder.encode(entry.name);
+    const bytes = entry.bytes;
+    const checksum = crc32(bytes);
+    const local = new Uint8Array(30 + name.length);
+    const localView = new DataView(local.buffer);
+    setUint32(localView, 0, 0x04034b50);
+    setUint16(localView, 4, 20);
+    setUint16(localView, 8, 0);
+    setUint16(localView, 10, stamp.time);
+    setUint16(localView, 12, stamp.date);
+    setUint32(localView, 14, checksum);
+    setUint32(localView, 18, bytes.length);
+    setUint32(localView, 22, bytes.length);
+    setUint16(localView, 26, name.length);
+    local.set(name, 30);
+    localParts.push(local, bytes);
+
+    const central = new Uint8Array(46 + name.length);
+    const centralView = new DataView(central.buffer);
+    setUint32(centralView, 0, 0x02014b50);
+    setUint16(centralView, 4, 20);
+    setUint16(centralView, 6, 20);
+    setUint16(centralView, 10, 0);
+    setUint16(centralView, 12, stamp.time);
+    setUint16(centralView, 14, stamp.date);
+    setUint32(centralView, 16, checksum);
+    setUint32(centralView, 20, bytes.length);
+    setUint32(centralView, 24, bytes.length);
+    setUint16(centralView, 28, name.length);
+    setUint32(centralView, 42, offset);
+    central.set(name, 46);
+    centralParts.push(central);
+    offset += local.length + bytes.length;
+  }
+
+  const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
+  const end = new Uint8Array(22);
+  const endView = new DataView(end.buffer);
+  setUint32(endView, 0, 0x06054b50);
+  setUint16(endView, 8, entries.length);
+  setUint16(endView, 10, entries.length);
+  setUint32(endView, 12, centralSize);
+  setUint32(endView, 16, offset);
+  return new Blob([...localParts, ...centralParts, end], { type: 'application/zip' });
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
+function applyExportCamera(time, width, height, fov, scale, settings = null) {
+  updateDropUniforms(time);
+  const phase01 = time / Math.max(0.001, P.loopDuration);
+  const loopAngle = phase01 * Math.PI * 2;
+  const autoYaw = (Math.sin(loopAngle) * 0.85 + Math.sin(loopAngle * 2 + 0.6) * 0.15) * P.spin * 0.6;
+  const autoPitch = Math.sin(loopAngle + 1.1) * P.spin * 0.14;
+  const dolly = 1
+    - 0.05 * Math.exp(-Math.pow((phase01 - 0.80) / 0.10, 2))
+    - 0.03 * Math.exp(-Math.pow((phase01 - 0.24) / 0.08, 2));
+  rotM4.makeRotationY(rot.y + autoYaw);
+  tmpX.makeRotationX(rot.x + autoPitch);
+  rotM4.multiply(tmpX);
+  tmpZ.makeRotationZ(-0.03);
+  rotM4.multiply(tmpZ);
+  uniforms.uRot.value.setFromMatrix4(rotM4);
+
+  const frameGatherEnd = Math.max(0.15, P.gatherDuration);
+  const frameHoldEnd = Math.min(0.94, frameGatherEnd + P.shapeHold);
+  const formationFocus = P.motion === 'formation' && shapeField
+    ? phase01 > frameHoldEnd
+      ? formationFidelityAmount(phase01)
+      : smoothstepCPU(formationAmount(phase01), 0.42, 0.92)
+    : 0;
+  uniforms.uCameraDistance.value = P.cameraDistance * dolly * (1 - formationFocus * 0.30) / scale;
+  uniforms.uCompositionOffsetX.value = settingsCenter(settingsValue(settings, 'centerX'));
+  uniforms.uCompositionOffsetY.value = settingsCenter(settingsValue(settings, 'centerY'));
+  uniforms.uTanHalfFov.value = Math.tan(Math.max(10, Math.min(120, fov)) * Math.PI / 360);
+  uniforms.uResolution.value.set(width, height);
+  uniforms.uTime.value = time;
+  uniforms.uMaxSteps.value = 88;
+}
+
+function settingsValue(settings, key) {
+  return settings && Number.isFinite(Number(settings[key])) ? Number(settings[key]) : 0;
+}
+
+function settingsCenter(value) {
+  return Math.max(-0.5, Math.min(0.5, value));
+}
+
+function applyExportDetailLOD(settings) {
+  const savedRadii = satelliteDrops.map(drop => drop.w);
+  const savedBlend = uniforms.uSatelliteBlend.value;
+  const pixelsPerWorldUnit = settings.height /
+    Math.max(0.001, 2 * uniforms.uCameraDistance.value * uniforms.uTanHalfFov.value);
+  let strongestSatellite = 0;
+
+  satelliteDrops.forEach((drop, index) => {
+    const projectedDiameter = savedRadii[index] * 2 * pixelsPerWorldUnit;
+    // 小於 1.25 個最終像素沒有穩定輪廓；在 1.25–2.75 px 間平滑淡出，
+    // 避免一幀突然消失，也避免 4× render 將不可辨識碎滴重新帶回 512 成品。
+    const visibility = smoothstepCPU(projectedDiameter, 1.25, 2.75);
+    drop.w = savedRadii[index] * visibility;
+    strongestSatellite = Math.max(strongestSatellite, visibility);
+  });
+  uniforms.uSatelliteBlend.value = savedBlend * strongestSatellite;
+
+  return () => {
+    satelliteDrops.forEach((drop, index) => { drop.w = savedRadii[index]; });
+    uniforms.uSatelliteBlend.value = savedBlend;
+  };
+}
+
+async function renderExportFrame(settings, time, target) {
+  applyExportCamera(time, settings.renderWidth, settings.renderHeight, settings.fov, settings.scale, settings);
+  const restoreDetail = applyExportDetailLOD(settings);
+  try {
+    renderer.setRenderTarget(target);
+    renderer.render(scene, camera);
+    const pixels = new Uint8Array(settings.renderWidth * settings.renderHeight * 4);
+    renderer.readRenderTargetPixels(target, 0, 0, settings.renderWidth, settings.renderHeight, pixels);
+    renderer.setRenderTarget(null);
+    return pixelsToPng(pixels, settings.renderWidth, settings.renderHeight, settings.width, settings.height);
+  } finally {
+    restoreDetail();
+  }
+}
+
+async function runExport(settings) {
+  if (exportJob) throw new Error('已有輸出工作正在進行');
+  if (!inited) initGL();
+  const width = Math.round(settings.width);
+  const height = Math.round(settings.height);
+  const antialias = 4;
+  const renderWidth = width * antialias;
+  const renderHeight = height * antialias;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 64 || height < 64) {
+    throw new Error('輸出尺寸至少需要 64 × 64');
+  }
+  const maxTexture = renderer.capabilities.maxTextureSize;
+  if (renderWidth > maxTexture || renderHeight > maxTexture) {
+    throw new Error(`${antialias}× 抗鋸齒超過此裝置限制，請降低尺寸或品質`);
+  }
+  const frames = settings.type === 'sequence'
+    ? Math.max(1, Math.round(settings.fps * settings.duration)) : 1;
+  const totalPixels = renderWidth * renderHeight * frames;
+  const safePixelBudget = mobileRenderQuery.matches ? 140000000 : 900000000;
+  if (totalPixels > safePixelBudget) {
+    throw new Error(mobileRenderQuery.matches
+      ? '手機序列輸出量過大，請降低尺寸、幀率或秒數'
+      : '序列輸出量過大，請降低尺寸、幀率或秒數');
+  }
+
+  const job = { cancelled: false };
+  exportJob = job;
+  syncLoop();
+  const saved = {
+    time: simT,
+    resolution: uniforms.uResolution.value.clone(),
+    cameraDistance: uniforms.uCameraDistance.value,
+    compositionX: uniforms.uCompositionOffsetX.value,
+    compositionY: uniforms.uCompositionOffsetY.value,
+    tanHalfFov: uniforms.uTanHalfFov.value,
+    maxSteps: uniforms.uMaxSteps.value,
+    bgMode: uniforms.uBgMode.value,
+    transparent: uniforms.uTransparentBackground.value,
+    bgColor: uniforms.uBgColor.value.clone(),
+  };
+  const target = new THREE.WebGLRenderTarget(renderWidth, renderHeight, {
+    format: THREE.RGBAFormat,
+    type: THREE.UnsignedByteType,
+    depthBuffer: false,
+    stencilBuffer: false,
+  });
+  target.texture.generateMipmaps = false;
+  uniforms.uTransparentBackground.value = settings.background === 'transparent' ? 1 : 0;
+  uniforms.uBgMode.value = settings.background === 'scene' ? SELECTS.bgMode.map[P.bgMode] : 0;
+  if (settings.background === 'transparent') uniforms.uBgColor.value.set(0x000000);
+
+  try {
+    previousDropT = null;
+    if (settings.type === 'still') {
+      exportEvent('prism-export-progress', { progress: 0.15, message: '正在渲染 PNG…' });
+      const png = await renderExportFrame({ ...settings, width, height, renderWidth, renderHeight }, saved.time, target);
+      if (job.cancelled) throw new DOMException('輸出已取消', 'AbortError');
+      downloadBlob(png, `prism-drops_${width}x${height}.png`);
+    } else {
+      const entries = [];
+      const digits = Math.max(4, String(frames).length);
+      for (let index = 0; index < frames; index++) {
+        if (job.cancelled) throw new DOMException('輸出已取消', 'AbortError');
+        const time = index / frames * P.loopDuration;
+        const png = await renderExportFrame({ ...settings, width, height, renderWidth, renderHeight }, time, target);
+        entries.push({
+          name: `prism-drops_${String(index + 1).padStart(digits, '0')}.png`,
+          bytes: new Uint8Array(await png.arrayBuffer()),
+        });
+        exportEvent('prism-export-progress', {
+          progress: (index + 1) / frames * 0.92,
+          message: `正在渲染 ${index + 1} / ${frames} 幀`,
+        });
+        await nextPaint();
+      }
+      if (job.cancelled) throw new DOMException('輸出已取消', 'AbortError');
+      exportEvent('prism-export-progress', { progress: 0.96, message: '正在封裝 ZIP…' });
+      const zip = buildStoredZip(entries);
+      downloadBlob(zip, `prism-drops_${width}x${height}_${settings.fps}fps.zip`);
+    }
+    exportEvent('prism-export-complete', { message: '輸出完成，檔案已開始下載' });
+  } catch (error) {
+    if (error.name === 'AbortError') exportEvent('prism-export-complete', { message: '已取消輸出' });
+    else throw error;
+  } finally {
+    target.dispose();
+    renderer.setRenderTarget(null);
+    uniforms.uResolution.value.copy(saved.resolution);
+    uniforms.uCameraDistance.value = saved.cameraDistance;
+    uniforms.uCompositionOffsetX.value = saved.compositionX;
+    uniforms.uCompositionOffsetY.value = saved.compositionY;
+    uniforms.uTanHalfFov.value = saved.tanHalfFov;
+    uniforms.uMaxSteps.value = saved.maxSteps;
+    uniforms.uBgMode.value = saved.bgMode;
+    uniforms.uTransparentBackground.value = saved.transparent;
+    uniforms.uBgColor.value.copy(saved.bgColor);
+    previousDropT = null;
+    simT = saved.time;
+    exportJob = null;
+    syncLoop();
+  }
+}
+
+window.addEventListener('prism-export-request', event => {
+  runExport(event.detail).catch(error => {
+    console.error(error);
+    exportEvent('prism-export-error', { message: error.message || '輸出失敗' });
+    if (exportJob) {
+      exportJob = null;
+      syncLoop();
+    }
+  });
+});
+window.addEventListener('prism-export-cancel', () => {
+  if (exportJob) exportJob.cancelled = true;
+});
+window.addEventListener('prism-export-preview', event => {
+  exportPreviewSettings = event.detail || null;
+});
+window.addEventListener('prism-export-preview-clear', () => {
+  exportPreviewSettings = null;
+});
+window.addEventListener('prism-export-workspace-resize', resize);
+
+function updateExportCameraPreview() {
+  if (!exportPreviewSettings) return;
+  const preview = document.getElementById('exportPreviewCanvas');
+  if (!preview) return;
+  const targetAspect = Math.max(0.05,
+    Number(exportPreviewSettings.width) / Math.max(1, Number(exportPreviewSettings.height)));
+  const longEdge = 480;
+  const previewWidth = targetAspect >= 1 ? longEdge : Math.max(1, Math.round(longEdge * targetAspect));
+  const previewHeight = targetAspect >= 1 ? Math.max(1, Math.round(longEdge / targetAspect)) : longEdge;
+  if (preview.width !== previewWidth || preview.height !== previewHeight) {
+    preview.width = previewWidth;
+    preview.height = previewHeight;
+    exportPreviewContext = preview.getContext('2d', { alpha: false });
+  }
+  if (!exportPreviewContext || !canvas.width || !canvas.height) return;
+
+  const sourceAspect = canvas.width / canvas.height;
+  let sourceX = 0, sourceY = 0, sourceWidth = canvas.width, sourceHeight = canvas.height;
+  if (targetAspect < sourceAspect) {
+    sourceWidth = canvas.height * targetAspect;
+    sourceX = (canvas.width - sourceWidth) * 0.5;
+  } else if (targetAspect > sourceAspect) {
+    sourceHeight = canvas.width / targetAspect;
+    sourceY = (canvas.height - sourceHeight) * 0.5;
+  }
+  exportPreviewContext.drawImage(
+    canvas,
+    sourceX, sourceY, sourceWidth, sourceHeight,
+    0, 0, previewWidth, previewHeight,
+  );
+}
 
 /* ===== 主迴圈 ===== */
 let simT = 0;
@@ -1849,7 +2228,7 @@ function frame(now) {
       : smoothstepCPU(formationAmount(phase01), 0.42, 0.92)
     : 0;
   const formationDolly = 1 - formationFocus * 0.30;
-  const cameraDistance = P.cameraDistance * dolly * compositionDistance * formationDolly;
+  let cameraDistance = P.cameraDistance * dolly * compositionDistance * formationDolly;
   if (isMobilePortrait) {
     // 以主要水滴投影外輪廓的中點校正構圖。面積重心會被較大的水滴拉動，
     // 在展開狀態下反而讓整組水滴的左右留白不對稱。
@@ -1876,9 +2255,15 @@ function frame(now) {
   } else {
     compositionOffsetX = 0;
   }
+  if (exportPreviewSettings) cameraDistance /= Math.max(0.5, Math.min(1.6, Number(exportPreviewSettings.scale) || 1));
   uniforms.uCameraDistance.value = cameraDistance;
-  uniforms.uCompositionOffsetX.value = compositionOffsetX;
-  uniforms.uCompositionOffsetY.value = compositionOffsetY;
+  uniforms.uCompositionOffsetX.value = exportPreviewSettings
+    ? settingsCenter(settingsValue(exportPreviewSettings, 'centerX')) : compositionOffsetX;
+  uniforms.uCompositionOffsetY.value = exportPreviewSettings
+    ? settingsCenter(settingsValue(exportPreviewSettings, 'centerY')) : compositionOffsetY;
+  uniforms.uTanHalfFov.value = exportPreviewSettings
+    ? Math.tan(Math.max(10, Math.min(120, Number(exportPreviewSettings.fov) || 42)) * Math.PI / 360)
+    : 0.42;
   uniforms.uTime.value = simT;
   // 多水滴 + 形狀場會增加每一步的取樣成本；64 步仍足以覆蓋保守包圍球，
   // 並避免高 DPR 桌面在 Formation 模式失去即時預覽能力。
@@ -1886,8 +2271,10 @@ function frame(now) {
     ? Math.min(qualitySteps, 60)
     : (dragging ? Math.min(qualitySteps, 56) : qualitySteps);
   renderer.render(scene, camera);
+  updateExportCameraPreview();
 }
 
 bindControls();
 syncLoop();
 if (!PREVIEW) syncLoop();
+if (!PREVIEW) exportEvent('prism-export-ready', { loopDuration: P.loopDuration });

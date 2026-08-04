@@ -10,11 +10,14 @@
   let panel;
   let home;
   let toggle;
+  let exportButton;
   let mobileNav;
   let homeParent;
   let homeNextSibling;
   let toggleParent;
   let toggleNextSibling;
+  let exportParent;
+  let exportNextSibling;
   let handle;
   let handleAction;
   let play;
@@ -93,9 +96,12 @@
   function syncMobileNavPlacement() {
     if (!mobileNav || !home || !toggle) return;
     if (mobileQuery.matches) {
-      mobileNav.append(home, toggle);
+      mobileNav.append(home);
+      if (exportButton) mobileNav.append(exportButton);
+      mobileNav.append(toggle);
     } else {
       restoreNode(home, homeParent, homeNextSibling);
+      restoreNode(exportButton, exportParent, exportNextSibling);
       restoreNode(toggle, toggleParent, toggleNextSibling);
     }
   }
@@ -265,12 +271,17 @@
     panel = document.getElementById('panel');
     home = document.getElementById('homeBtn') || document.querySelector('.home');
     toggle = document.getElementById('toggleBtn') || document.getElementById('toggle');
+    exportButton = document.getElementById('exportBtn');
     if (!panel || !home || !toggle) return;
 
     homeParent = home.parentNode;
     homeNextSibling = home.nextSibling;
     toggleParent = toggle.parentNode;
     toggleNextSibling = toggle.nextSibling;
+    if (exportButton) {
+      exportParent = exportButton.parentNode;
+      exportNextSibling = exportButton.nextSibling;
+    }
     mobileNav = document.createElement('nav');
     mobileNav.className = 'vfx-mobile-nav';
     mobileNav.setAttribute('aria-label', '特效頁面導覽');

@@ -77,6 +77,7 @@ uniform float uLoopDuration;
 uniform vec2  uResolution;
 uniform mat3  uRot;
 uniform float uCameraDistance;
+uniform float uTanHalfFov;
 uniform float uCompositionOffsetX;
 uniform float uCompositionOffsetY;
 uniform int   uMaxSteps;
@@ -159,6 +160,7 @@ uniform int       uColorMode;   // 0 光譜, 1 自訂漸層
 uniform sampler2D uRampTex;      // 自訂漸層查找表（CPU 端依色標生成）
 
 uniform int   uBgMode;      // 0 純色, 1 HDRI
+uniform int   uTransparentBackground;
 uniform vec3  uBgColor;
 uniform float uEnvRefraction;
 uniform float uReflect;
@@ -258,7 +260,7 @@ vec4 backgroundSample(vec3 rd){
   if (uBgMode == 1 && uHasEnv == 1){
     return vec4(sampleEnvironmentBackdrop(rd), 1.0);
   }
-  return vec4(uBgColor, 1.0);
+  return vec4(uBgColor, uTransparentBackground == 1 ? 0.0 : 1.0);
 }
 
 // C2 cubic smooth-min：曲率也連續，避免高光暴露每顆水滴的融合邊界。
@@ -683,7 +685,7 @@ void main(){
   uv.x *= uResolution.x / uResolution.y;
   // 桌面維持英雄鏡置中；手機依可用視覺區上移，避免主體被底部控制面板切掉。
   uv += vec2(uCompositionOffsetX, uCompositionOffsetY);
-  float tanHalfFov = 0.42; // fov ~46°：稍廣、加強近遠水滴的透視景深
+  float tanHalfFov = uTanHalfFov;
 
   vec3 ro = uRot * vec3(0.0, 0.0, uCameraDistance);
   vec3 rd = uRot * normalize(vec3(uv * tanHalfFov, -1.0));
@@ -1076,7 +1078,21 @@ void main(){
     );
     finalColor = 1.0 - (1.0 - finalColor) * (1.0 - spectralLight);
   }
-  gl_FragColor = vec4(finalColor, 1.0);
+  float outputAlpha = 1.0;
+  if (uTransparentBackground == 1) {
+    float surfaceLuma = dot(material.baseSurface + material.filmSurface, vec3(0.3333));
+    outputAlpha = clamp(
+      0.12 + material.darkAlpha * 0.52 + material.edgeFactor * 0.30 + surfaceLuma * 0.24,
+      0.08,
+      1.0
+    );
+    // finalColor 是在黑色光場上建立的 premultiplied-like 能量；PNG 的 RGBA
+    // 則需要 straight alpha。若直接寫出，瀏覽器降採樣與後續合成會再乘一次
+    // alpha，透明邊緣就會出現黑邊。輸出前反預乘，超採樣時仍由 Canvas
+    // 以正確的 premultiplied coverage 做縮圖。
+    finalColor = clamp(finalColor / max(outputAlpha, 0.001), 0.0, 1.0);
+  }
+  gl_FragColor = vec4(finalColor, outputAlpha);
 }
 `;
 

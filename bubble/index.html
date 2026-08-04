@@ -4,13 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Prism Drops VFX</title>
-<link rel="stylesheet" href="./bubble.css?v=spectral-caustic-8">
-<link rel="stylesheet" href="../switch2-theme.css?v=mobile-sheet-21">
+<link rel="stylesheet" href="./bubble.css?v=spectral-caustic-11">
+<link rel="stylesheet" href="../switch2-theme.css?v=mobile-sheet-22">
 <script src="../preview-performance.js"></script>
-<script src="../mobile-control-sheet.js?v=mobile-sheet-21"></script>
+<script src="../mobile-control-sheet.js?v=mobile-sheet-22"></script>
 </head>
 <body data-vfx-module="bubble" data-mobile-ui="compact">
 <canvas id="stage"></canvas>
+<div id="exportStageGuide" aria-hidden="true">
+  <span id="exportStageSize">2048 × 2048</span>
+  <i></i>
+</div>
 
 <a id="homeBtn" href="../index.html">← 首頁</a>
 
@@ -187,8 +191,94 @@
   </div>
   <div class="hint">水滴會依速度與尺寸產生體積守恆形變；接觸時排液壓平、融合收頸，強拉斷時可能形成衛星小滴。<br>拖曳可旋轉視角；滾輪可縮放；上色模式切「自訂漸層」可指定配色。</div>
 </div>
+<button id="exportBtn" type="button" aria-haspopup="dialog" aria-controls="exportDialog">輸出</button>
 <button id="toggleBtn">⚙ 面板</button>
 <button id="playCtl">⏸ 暫停</button>
+
+<dialog id="exportDialog" class="exportDialog" aria-labelledby="exportTitle">
+  <form method="dialog" class="exportWorkspace">
+    <header class="exportHeader">
+      <div>
+        <span class="exportEyebrow">PRISM DROPS</span>
+        <h2 id="exportTitle">輸出設定</h2>
+        <p>設定構圖、透明背景與動態序列。</p>
+      </div>
+      <button class="exportClose" value="cancel" aria-label="關閉輸出設定">×</button>
+    </header>
+
+    <div class="exportBody">
+      <div class="exportViewfinder" aria-label="輸出取景預覽">
+        <canvas id="exportPreviewCanvas" width="320" height="180"></canvas>
+        <span id="exportPreviewSize">2048 × 2048</span>
+        <i aria-hidden="true"></i>
+      </div>
+
+      <section class="exportSection">
+        <div class="exportSectionTitle"><span>01</span><h3>輸出格式</h3></div>
+        <div class="exportSegment" role="radiogroup" aria-label="輸出格式">
+          <label><input type="radio" name="exportType" value="still" checked><span>單張 PNG</span></label>
+          <label><input type="radio" name="exportType" value="sequence"><span>PNG 序列</span></label>
+        </div>
+        <div class="exportQualityLock"><span>邊緣品質</span><strong>極致 · 4× 超採樣</strong></div>
+      </section>
+
+      <section class="exportSection">
+        <div class="exportSectionTitle"><span>02</span><h3>畫面尺寸</h3><output id="exportAspect">1:1</output></div>
+        <div class="exportPresetGrid" aria-label="尺寸預設">
+          <button type="button" data-size="1920x1080">16:9</button>
+          <button type="button" data-size="1080x1920">9:16</button>
+          <button type="button" data-size="2048x2048" class="active">1:1</button>
+        </div>
+        <div class="exportDimensions">
+          <label>寬度<input id="exportWidth" type="number" min="64" max="4096" step="2" value="2048"></label>
+          <span aria-hidden="true">×</span>
+          <label>高度<input id="exportHeight" type="number" min="64" max="4096" step="2" value="2048"></label>
+        </div>
+      </section>
+
+      <section class="exportSection">
+        <div class="exportSectionTitle"><span>03</span><h3>背景</h3></div>
+        <label class="exportSelectLabel">背景模式
+          <select id="exportBackground">
+            <option value="scene">使用目前場景</option>
+            <option value="transparent">透明背景</option>
+            <option value="color">純色背景</option>
+          </select>
+        </label>
+        <p class="exportHelp">透明模式仍保留 HDRI 對水滴的反射與折射。</p>
+      </section>
+
+      <section class="exportSection">
+        <div class="exportSectionTitle"><span>04</span><h3>鏡頭與構圖</h3></div>
+        <label class="exportRange">視角 FOV <output>42°</output><input id="exportFov" type="range" min="20" max="80" value="42"></label>
+        <label class="exportRange">構圖縮放 <output>100%</output><input id="exportScale" type="range" min="50" max="160" value="100"></label>
+        <label class="exportRange">中心 X <output>0</output><input id="exportCenterX" type="range" min="-50" max="50" value="0"></label>
+        <label class="exportRange">中心 Y <output>0</output><input id="exportCenterY" type="range" min="-50" max="50" value="0"></label>
+        <button type="button" id="exportCenterReset" class="exportTextButton">重設中心點</button>
+      </section>
+
+      <section id="exportSequenceSection" class="exportSection" hidden>
+        <div class="exportSectionTitle"><span>05</span><h3>序列設定</h3><output id="exportFrameCount">180 幀</output></div>
+        <div class="exportInlineFields">
+          <label>幀率<select id="exportFps"><option>24</option><option selected>30</option><option>60</option></select></label>
+          <label>秒數<input id="exportDuration" type="number" min="1" max="10" step="1" value="6"></label>
+        </div>
+        <p class="exportHelp">輸出為依序命名的 PNG，完成後封裝成 ZIP。</p>
+      </section>
+    </div>
+
+    <footer class="exportFooter">
+      <div><strong id="exportSummary">2048 × 2048</strong><span>PNG · 單張</span></div>
+      <button type="button" id="exportStart" disabled>準備輸出引擎…</button>
+    </footer>
+    <div id="exportProgress" class="exportProgress" hidden>
+      <span id="exportProgressBar"></span>
+      <output id="exportProgressText" aria-live="polite">準備中</output>
+    </div>
+  </form>
+</dialog>
+
+<script src="./bubble-export-ui.js?v=5"></script>
 
 <script type="importmap">
 { "imports": {
@@ -197,6 +287,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=spectral-caustic-17"></script>
+<script type="module" src="./bubble.js?v=spectral-caustic-23"></script>
 </body>
 </html>

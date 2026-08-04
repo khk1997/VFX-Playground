@@ -486,6 +486,41 @@ body.leaving #rail { z-index: 10; }
   backdrop-filter: blur(18px) !important;
   transition: transform 160ms cubic-bezier(.2,.8,.2,1), background-color 160ms ease, border-color 160ms ease !important;
 }
+#exportBtn {
+  position: fixed;
+  z-index: 12;
+  top: 12px;
+  right: 158px;
+  width: 92px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 14px;
+  color: #f7fbff;
+  background: linear-gradient(180deg, #248cff, #0872df);
+  border: 1px solid rgba(132,198,255,.72);
+  border-radius: 999px;
+  box-shadow: 0 8px 26px rgba(12,116,226,.34), inset 0 1px rgba(255,255,255,.24);
+  font: 650 13px/1 var(--font-ui);
+  letter-spacing: .035em;
+  cursor: pointer;
+  transition: transform 160ms cubic-bezier(.2,.8,.2,1), filter 160ms ease, box-shadow 160ms ease;
+}
+#exportBtn::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  background: currentColor;
+  clip-path: polygon(43% 0, 57% 0, 57% 56%, 76% 37%, 86% 47%, 50% 83%, 14% 47%, 24% 37%, 43% 56%);
+}
+#exportBtn:hover {
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 30px rgba(12,116,226,.44), inset 0 1px rgba(255,255,255,.28);
+}
+#exportBtn:active { transform: scale(.97); }
 #homeBtn::before, .home::before {
   content: "";
   width: 7px;
@@ -778,7 +813,7 @@ input[type=color] {
     height: 34px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
     pointer-events: none;
   }
   .vfx-mobile-nav > #homeBtn,
@@ -804,6 +839,20 @@ input[type=color] {
     white-space: nowrap !important;
     pointer-events: auto;
   }
+  .vfx-mobile-nav > #exportBtn {
+    position: static !important;
+    inset: auto !important;
+    flex: 0 0 84px;
+    width: 84px !important;
+    height: 34px !important;
+    min-height: 34px !important;
+    margin: 0 8px 0 auto !important;
+    padding: 0 12px !important;
+    pointer-events: auto;
+    font-size: 13px !important;
+    transform: none !important;
+  }
+  .vfx-mobile-nav > #exportBtn:active { transform: scale(.97) !important; }
   .vfx-mobile-nav > #homeBtn:active,
   .vfx-mobile-nav > .home:active,
   .vfx-mobile-nav > #toggleBtn:active,
@@ -813,6 +862,7 @@ input[type=color] {
     width: 88px !important;
     min-width: 88px !important;
     gap: 6px !important;
+    margin-right: auto !important;
   }
   .vfx-mobile-nav > #toggleBtn,
   .vfx-mobile-nav > #toggle { width: 78px !important; }
