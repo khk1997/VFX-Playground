@@ -736,7 +736,8 @@ void main(){
   vec3 realDispersionDelta = vec3(0.0);
   bool needsEnvironmentTransmission =
     uBgMode == 0 && uHasEnv == 1
-      && (uEnvRefraction > 0.001 || realDispersionStrength > 0.001);
+      && (uEnvRefraction > 0.001
+        || (realDispersionStrength > 0.001 && uRealDispersionSeparation > 0.001));
   if (brightBg > 0.001 || needsEnvironmentTransmission) {
     vec3 insideDir = refract(rd, N, 1.0 / IOR);
     if (dot(insideDir, insideDir) > 0.0001) {
@@ -789,9 +790,10 @@ void main(){
   // 純色只控制畫布；水滴內部獨立取樣同一張 HDRI。若背面追蹤未命中，
   // transmissionDir 會保留前表面的 Snell 折射方向，滑桿仍能穩定產生效果。
   if (uBgMode == 0 && uHasEnv == 1
-      && (uEnvRefraction > 0.001 || realDispersionStrength > 0.001)) {
+      && (uEnvRefraction > 0.001
+        || (realDispersionStrength > 0.001 && uRealDispersionSeparation > 0.001))) {
     vec3 envRefraction = sampleEnvironmentBackdrop(transmissionDir);
-    if (realDispersionStrength > 0.001) {
+    if (realDispersionStrength > 0.001 && uRealDispersionSeparation > 0.001) {
       // 參考 Prism Tunnel 的 thin-glass 方法：不是把同一方向做任意 RGB
       // 位移，而是用三個波長各自的 IOR 做三次 Snell 折射，再抽取 R/G/B。
       // 1.50 / 1.53 / 1.57 的相對間距保留，但以目前材質 IOR 為中心。
@@ -840,7 +842,8 @@ void main(){
     }
     // 背景影像是否可見只由「環境折射」控制，與真實色散開關無關。
     refractedBg = mix(refractedBg, envRefraction, uEnvRefraction);
-  } else if (uBgMode == 1 && uHasEnv == 1 && realDispersionStrength > 0.001) {
+  } else if (uBgMode == 1 && uHasEnv == 1
+    && realDispersionStrength > 0.001 && uRealDispersionSeparation > 0.001) {
     // HDRI 畫布同樣使用三個物理 IOR；此模式保留完整折射影像。
     float wavelengthScale = realDispersionStrength * uRealDispersionSeparation;
     vec3 redDir = refract(rd, N, 1.0 / max(1.01, IOR - 0.03 * wavelengthScale));
@@ -1063,7 +1066,7 @@ void main(){
 
   // 真實色散在純色／黑色畫布上只加入已去除無色 HDRI 的稜鏡光。
   // screen 合成保留光的能量與亮度，也不會把完整攝影棚背景露出來。
-  if (realDispersionStrength > 0.001) {
+  if (realDispersionStrength > 0.001 && uRealDispersionSeparation > 0.001) {
     float deltaMagnitude = length(realDispersionDelta);
     float contrastGate = smoothstep(0.001, 0.035, deltaMagnitude);
     float darkRealGain = mix(1.15, 2.8, 1.0 - brightBg)

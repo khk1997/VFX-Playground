@@ -21,7 +21,7 @@
   <div class="group">
     <h3>背景與 HDRI Background</h3>
     <div class="row"><label>背景模式</label><select id="bgMode"><option value="color">純色</option><option value="hdri">HDRI</option></select><span class="val"></span></div>
-    <div class="row"><label>背景顏色</label><input type="color" id="bgColor" value="#bdbdbd"><span class="val"></span></div>
+    <div class="row"><label>背景顏色</label><input type="color" id="bgColor" value="#000000"><span class="val"></span></div>
     <div class="row"><label>HDRI 水平</label><input type="range" id="hdriYaw" min="-180" max="180" step="1" value="0"><span class="val" id="hdriYaw_v"></span></div>
     <div class="row"><label>HDRI 垂直</label><input type="range" id="hdriPitch" min="-90" max="90" step="1" value="0"><span class="val" id="hdriPitch_v"></span></div>
     <div class="row"><label>HDRI 模糊</label><input type="range" id="hdriBlur" min="0" max="1" step="0.01" value="0.11"><span class="val" id="hdriBlur_v"></span></div>
@@ -90,9 +90,9 @@
 
     <div class="effectBlock effectBlock--physical" id="physicalDispersionGroup">
       <div class="effectTitle"><span>IOR</span> 環境物理色散</div>
-      <div class="row toggleRow"><label>真實色散</label><input type="checkbox" id="realDispersionEnabled" checked><span class="switchTrack" aria-hidden="true"></span><span class="val" id="realDispersionEnabled_v">開啟</span></div>
-      <div class="row"><label>真實強度</label><input type="range" id="realDispersion" min="0" max="1" step="0.01" value="0.32"><span class="val" id="realDispersion_v"></span></div>
-      <div class="row"><label>波長分離</label><input type="range" id="realDispersionSeparation" min="0" max="1.5" step="0.01" value="0.22"><span class="val" id="realDispersionSeparation_v"></span></div>
+      <div class="row toggleRow"><label>真實色散</label><input type="checkbox" id="realDispersionEnabled"><span class="switchTrack" aria-hidden="true"></span><span class="val" id="realDispersionEnabled_v">關閉</span></div>
+      <div class="row"><label>真實強度</label><input type="range" id="realDispersion" min="0" max="1" step="0.01" value="1"><span class="val" id="realDispersion_v"></span></div>
+      <div class="row"><label>波長分離</label><input type="range" id="realDispersionSeparation" min="0" max="1.5" step="0.01" value="0.6"><span class="val" id="realDispersionSeparation_v"></span></div>
       <div class="note">以 HDRI 明暗邊界驅動三組 IOR 折射，不與藝術配色共用。</div>
     </div>
 
@@ -197,6 +197,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=spectral-caustic-16"></script>
+<script type="module" src="./bubble.js?v=spectral-caustic-17"></script>
 </body>
 </html>

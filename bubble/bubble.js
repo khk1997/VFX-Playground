@@ -29,8 +29,8 @@ const DEFAULTS = {              // 數值滑桿
   dispersionSeparation: 1.5,
   causticScale: 1.0,
   causticSharpness: 0.65,
-  realDispersion: 0.32,
-  realDispersionSeparation: 0.22,
+  realDispersion: 1,
+  realDispersionSeparation: 0.6,
   spectralCausticIntensity: 1.5,
   spectralCausticFocus: 0.31,
   spectralCausticWidth: 0.42,
@@ -100,11 +100,11 @@ const SELECT_DEFAULTS = {
 const TOGGLE_DEFAULTS = {
   filmEnabled: false,
   dispersionEnabled: true,
-  realDispersionEnabled: true,
+  realDispersionEnabled: false,
   spectralCausticEnabled: true,
 };
 const COLOR_DEFAULTS  = {
-  bgColor: '#bdbdbd',
+  bgColor: '#000000',
 };
 const P = { ...DEFAULTS, ...SELECT_DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS };
 const motionCounts = { cinematic: 2, formation: FORMATION_DEFAULT_COUNT };
@@ -205,7 +205,7 @@ const fmt = {
   microCount: v => v.toFixed(0),
 };
 
-import { VERT, FRAG } from './shaders.js?v=spectral-caustic-16';
+import { VERT, FRAG } from './shaders.js?v=spectral-caustic-17';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
