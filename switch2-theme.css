@@ -921,7 +921,7 @@ input[type=color] {
   #panel .mobile-sheet-handle #playCtl:hover,
   #panel .mobile-sheet-handle #playCtl:active { transform: none !important; }
 
-  /* Shared compact sheet header, established by Thin Film Droplets. */
+  /* Shared compact sheet header, established by Prism Drops. */
   body[data-mobile-ui="compact"] .mobile-sheet-handle {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto 34px;

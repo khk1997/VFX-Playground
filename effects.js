@@ -4,7 +4,7 @@
    為了效能，只有 active 卡片附近的 iframe 會播放，其餘會收到 'vfx-pause' postMessage。 */
 const EFFECTS = [
   {
-    title: '櫻吹雪 Sakura Blizzard',
+    title: '櫻花飄落 Sakura Storm',
     category: 'PARTICLE SYSTEM',
     description: '風場驅動的櫻花粒子場景',
     theme: ['239, 105, 143', '119, 171, 255'],
@@ -13,22 +13,13 @@ const EFFECTS = [
     previewSrc: 'sakura-blizzard/index.html?preview=1',
   },
   {
-    title: '能量光環 Energy Ring',
+    title: '動態光環 Energy Ring',
     category: 'ENERGY SIMULATION',
     description: '多層電弧構成的旋轉能量核心',
     theme: ['85, 255, 121', '36, 178, 107'],
     href: 'energy-ring/index.html',
     tags: ['HTML5 Canvas', 'CSS', 'JavaScript'],
     previewSrc: 'energy-ring/index.html?preview=1',
-  },
-  {
-    title: '電漿閃電 Lightning',
-    category: 'ELECTRIC STORM',
-    description: '具有分支與殘影的程序閃電',
-    theme: ['104, 173, 255', '92, 111, 255'],
-    href: 'lightning/index.html',
-    tags: ['HTML5 Canvas', 'CSS', 'JavaScript'],
-    previewSrc: 'lightning/index.html?preview=1',
   },
   {
     title: '粒子星雲 Nebula',
@@ -49,24 +40,6 @@ const EFFECTS = [
     previewSrc: 'fluid-ink/index.html?preview=1',
   },
   {
-    title: '文字粒子 Text Particles',
-    category: 'TYPOGRAPHIC VFX',
-    description: '文字聚合、爆散與重新組構',
-    theme: ['70, 240, 180', '44, 146, 255'],
-    href: 'text-particles/index.html',
-    tags: ['HTML5 Canvas', 'CSS', 'JavaScript'],
-    previewSrc: 'text-particles/index.html?preview=1',
-  },
-  {
-    title: '璀璨烟火 Fireworks',
-    category: 'PYROTECHNICS',
-    description: '多種爆炸型態的夜空煙火',
-    theme: ['255, 167, 73', '255, 79, 92'],
-    href: 'fireworks/index.html',
-    tags: ['HTML5 Canvas', 'CSS', 'JavaScript'],
-    previewSrc: 'fireworks/index.html?preview=1',
-  },
-  {
     title: '極光 Aurora',
     category: 'AUDIO REACTIVE',
     description: '隨音訊頻率起伏的極光簾幕',
@@ -76,7 +49,7 @@ const EFFECTS = [
     previewSrc: 'aurora/index.html?preview=1',
   },
   {
-    title: '薄膜水滴 Thin Film Droplets',
+    title: '虹彩水滴 Prism Drops',
     category: 'RAYMARCHING',
     description: '具有薄膜干涉色彩的融合水滴',
     theme: ['91, 181, 255', '238, 117, 204'],

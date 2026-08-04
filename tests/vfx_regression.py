@@ -17,18 +17,14 @@ PAGES = [
     ("aurora", "/aurora/index.html"),
     ("bubble", "/bubble/index.html"),
     ("energy-ring", "/energy-ring/index.html"),
-    ("fireworks", "/fireworks/index.html"),
     ("fluid-ink", "/fluid-ink/index.html"),
-    ("lightning", "/lightning/index.html"),
     ("nebula", "/nebula/index.html"),
     ("sakura-blizzard", "/sakura-blizzard/index.html"),
-    ("text-particles", "/text-particles/index.html"),
 ]
 ONLY_PAGE = os.environ.get("VFX_ONLY_PAGE")
 PLAY_CONTROL_PAGES = {
-    "aurora", "bubble", "energy-ring", "fireworks",
-    "fluid-ink", "lightning", "nebula", "sakura-blizzard",
-    "text-particles",
+    "aurora", "bubble", "energy-ring", "fluid-ink", "nebula",
+    "sakura-blizzard",
 }
 
 
@@ -117,9 +113,9 @@ def main():
                 if play.count() and play.is_visible():
                     before = play.inner_text()
                     play.click()
-                    # Energy Ring and Text Particles finish their panel-centering
-                    # transition while simulation time is paused. Observe only
-                    # after that UI-only transition has settled.
+                    # Some effects finish their panel-centering transition while
+                    # simulation time is paused. Observe only after that UI-only
+                    # transition has settled.
                     page.wait_for_timeout(1400)
                     after = play.inner_text()
                     metrics["playToggleChanged"] = before != after

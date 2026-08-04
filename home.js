@@ -308,7 +308,7 @@ function setActive(i, silent, direct = false, instant = false) {
 
   // 保留目前這組卡片，避免跨過首尾時在轉場結束後換成另一個 iframe 實例。
   // 只有真的要走出三組實體卡片時才先無動畫回到中間的等價位置；一般在
-  // 櫻吹雪與薄膜水滴之間來回時會持續使用索引 8/9 的同一對預覽。
+  // 首尾模組之間來回時會持續使用同一對預覽實例。
   if (!direct) {
     const wrapsForward = active === EFFECTS.length - 1 && next === 0;
     const wrapsBackward = active === 0 && next === EFFECTS.length - 1;
