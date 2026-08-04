@@ -12,8 +12,9 @@ const nextBtn = document.getElementById('nextBtn');
 const selectionIndexEl = document.getElementById('selectionIndex');
 const selectionCategoryEl = document.getElementById('selectionCategory');
 const selectionDescriptionEl = document.getElementById('selectionDescription');
-let active = 0;
-let position = EFFECTS.length; // 三組完整清單中的中間組起點
+const initialEffectIndex = Math.max(0, EFFECTS.findIndex(fx => fx.href === 'bubble/index.html'));
+let active = initialEffectIndex;
+let position = EFFECTS.length + initialEffectIndex;
 let motionTimer = null;
 let activeThemeLayer = 0;
 const cardEls = [];
@@ -389,10 +390,10 @@ document.addEventListener('visibilitychange', () => {
 });
 
 buildCards();
-active = 0;
-position = EFFECTS.length;
+active = initialEffectIndex;
+position = EFFECTS.length + initialEffectIndex;
 cardEls[position].classList.add('active');
-dotEls[0].classList.add('on');
+dotEls[active].classList.add('on');
 updateCardDepth();
 updateSelectionUI(true);
 centerActive(true);
