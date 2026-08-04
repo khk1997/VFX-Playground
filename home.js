@@ -14,7 +14,6 @@ const selectionCategoryEl = document.getElementById('selectionCategory');
 const selectionDescriptionEl = document.getElementById('selectionDescription');
 let active = 0;
 let position = EFFECTS.length; // 三組完整清單中的中間組起點
-let snapTimer = null;
 let motionTimer = null;
 let activeThemeLayer = 0;
 const cardEls = [];
@@ -307,7 +306,22 @@ function setActive(i, silent, direct = false, instant = false) {
   const next = (i + EFFECTS.length) % EFFECTS.length;
   if (next !== active && !silent) sndMove();
 
-  clearTimeout(snapTimer);
+  // 保留目前這組卡片，避免跨過首尾時在轉場結束後換成另一個 iframe 實例。
+  // 只有真的要走出三組實體卡片時才先無動畫回到中間的等價位置；一般在
+  // 櫻吹雪與薄膜水滴之間來回時會持續使用索引 8/9 的同一對預覽。
+  if (!direct) {
+    const wrapsForward = active === EFFECTS.length - 1 && next === 0;
+    const wrapsBackward = active === 0 && next === EFFECTS.length - 1;
+    const delta = wrapsForward ? 1 : wrapsBackward ? -1 : next - active;
+    if (position + delta < 0 || position + delta >= cardEls.length) {
+      position = EFFECTS.length + active;
+      cardEls.forEach((el, idx) => el.classList.toggle('active', idx === position));
+      updateCardDepth();
+      centerActive(true);
+      updatePreviewPlayback();
+    }
+  }
+
   const previousPosition = position;
   if (direct) {
     position = EFFECTS.length + next;
@@ -327,19 +341,6 @@ function setActive(i, silent, direct = false, instant = false) {
   updateSelectionUI(instant);
   centerActive(instant);
   updatePreviewPlayback();
-
-  // 滑過接續卡後，無動畫跳回中間那組完全相同的卡片。
-  if (position < EFFECTS.length || position >= EFFECTS.length * 2) {
-    const targetPosition = EFFECTS.length + active;
-    ensurePreviewLoaded(targetPosition);
-    snapTimer = setTimeout(() => {
-      position = targetPosition;
-      cardEls.forEach((el, idx) => el.classList.toggle('active', idx === position));
-      updateCardDepth();
-      centerActive(true);
-      updatePreviewPlayback();
-    }, 450);
-  }
 }
 
 /* 進場轉場：卡片放大 + 其他元素淡出，再跳頁 */
