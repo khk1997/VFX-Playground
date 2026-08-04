@@ -141,6 +141,7 @@ uniform float uSpectralCausticNoiseScale;
 uniform float uSpectralCausticAzimuth;
 uniform float uSpectralCausticElevation;
 uniform float uSpectralCausticHdri;
+uniform sampler2D uSpectralCausticRamp;
 uniform float uArtThickness;
 uniform float uArtThickVar;
 uniform float uArtNoiseScale;
@@ -980,14 +981,14 @@ void main(){
       1.0
     );
     vec3 causticSpectrum = separateSpectrum(
-      visibleSpectrum(rainbowCoordinate)
+      texture2D(uSpectralCausticRamp, vec2(rainbowCoordinate, 0.5)).rgb
     );
 
     // 可獨立混合的 Fresnel 與循環 Noise 遮罩。0 完全不限制焦散；
     // Fresnel=1 時彩光集中於掠射角，Noise=1 時連續光帶拆成局部光斑。
     float fresnelMask = pow(
       clamp(material.edgeFactor, 0.0, 1.0),
-      0.72
+      1.8
     );
     fresnelMask = mix(1.0, fresnelMask, uSpectralCausticFresnelMask);
     vec3 causticNoiseFlow = loopNoiseOffset(uSpectralCausticFlow);

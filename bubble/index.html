@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Thin Film Bubble VFX</title>
-<link rel="stylesheet" href="./bubble.css?v=spectral-caustic-6">
+<link rel="stylesheet" href="./bubble.css?v=spectral-caustic-8">
 <link rel="stylesheet" href="../switch2-theme.css?v=mobile-sheet-14">
 <script src="../preview-performance.js"></script>
 <script src="../mobile-control-sheet.js?v=mobile-sheet-14"></script>
@@ -100,6 +100,15 @@
       <div class="effectTitle"><span>LIGHT</span> 虛擬光譜焦散</div>
       <div class="row toggleRow"><label>光譜焦散</label><input type="checkbox" id="spectralCausticEnabled" checked><span class="switchTrack" aria-hidden="true"></span><span class="val" id="spectralCausticEnabled_v">開啟</span></div>
       <div class="effectSubhead">輸出</div>
+      <div class="spectralColorEditor" aria-label="焦散七色編輯器">
+        <label><span>紫</span><input type="color" id="spectralCausticCol0" value="#4700ff" aria-label="焦散紫色"></label>
+        <label><span>靛</span><input type="color" id="spectralCausticCol1" value="#001bff" aria-label="焦散靛色"></label>
+        <label><span>藍</span><input type="color" id="spectralCausticCol2" value="#00ecd2" aria-label="焦散藍色"></label>
+        <label><span>綠</span><input type="color" id="spectralCausticCol3" value="#0eff42" aria-label="焦散綠色"></label>
+        <label><span>黃</span><input type="color" id="spectralCausticCol4" value="#ddff00" aria-label="焦散黃色"></label>
+        <label><span>橙</span><input type="color" id="spectralCausticCol5" value="#ff5400" aria-label="焦散橙色"></label>
+        <label><span>紅</span><input type="color" id="spectralCausticCol6" value="#ff0000" aria-label="焦散紅色"></label>
+      </div>
       <div class="row"><label>焦散強度</label><input type="range" id="spectralCausticIntensity" min="0" max="1.5" step="0.01" value="1.5"><span class="val" id="spectralCausticIntensity_v"></span></div>
       <div class="row"><label>聚焦程度</label><input type="range" id="spectralCausticFocus" min="0" max="1" step="0.01" value="0.31"><span class="val" id="spectralCausticFocus_v"></span></div>
       <div class="row"><label>光譜分離</label><input type="range" id="spectralCausticSeparation" min="0" max="1" step="0.01" value="0.24"><span class="val" id="spectralCausticSeparation_v"></span></div>
@@ -119,7 +128,7 @@
       <div class="row"><label>光源水平</label><input type="range" id="spectralCausticAzimuth" min="-180" max="180" step="1" value="-177"><span class="val" id="spectralCausticAzimuth_v"></span></div>
       <div class="row"><label>光源高度</label><input type="range" id="spectralCausticElevation" min="-80" max="80" step="1" value="-19"><span class="val" id="spectralCausticElevation_v"></span></div>
       <div class="row"><label>HDRI 連動</label><input type="range" id="spectralCausticHdri" min="0" max="1" step="0.01" value="0.3"><span class="val" id="spectralCausticHdri_v"></span></div>
-      <div class="note">焦散圖樣與顏色由虛擬光源生成；HDRI 僅可調節整體亮度。</div>
+      <div class="note">七個色標可獨立編輯，色標之間會平滑混色。HDRI 僅可調節整體亮度。</div>
     </div>
   </div>
 
@@ -188,6 +197,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=spectral-caustic-6"></script>
+<script type="module" src="./bubble.js?v=spectral-caustic-11"></script>
 </body>
 </html>

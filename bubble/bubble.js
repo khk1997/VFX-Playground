@@ -98,7 +98,9 @@ const TOGGLE_DEFAULTS = {
   realDispersionEnabled: true,
   spectralCausticEnabled: true,
 };
-const COLOR_DEFAULTS  = { bgColor: '#bdbdbd' };
+const COLOR_DEFAULTS  = {
+  bgColor: '#bdbdbd',
+};
 const P = { ...DEFAULTS, ...SELECT_DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS };
 const motionCounts = { cinematic: 2, formation: FORMATION_DEFAULT_COUNT };
 
@@ -119,7 +121,14 @@ const SELECTS = {
   // 僅控制下一次 GLB 烘焙尺寸，沒有對應 shader uniform。
   shapeQuality: { uniform: '', map: { performance: 48, balanced: 80, high: 128 } },
 };
-const COLORS = { bgColor: 'uBgColor' };
+const COLORS = {
+  bgColor: 'uBgColor',
+};
+// shader 的光譜座標由紫端（0）走向紅端（1）。七個色標固定等距，
+// 讓每種彩虹顏色都能單獨編輯，同時保持色帶之間連續混色。
+const SPECTRAL_CAUSTIC_DEFAULTS = [
+  '#4700ff', '#001bff', '#00ecd2', '#0eff42', '#ddff00', '#ff5400', '#ff0000',
+];
 const TOGGLES = {
   filmEnabled: 'uFilmEnabled',
   dispersionEnabled: 'uDispersionEnabled',
@@ -191,7 +200,7 @@ const fmt = {
   microCount: v => v.toFixed(0),
 };
 
-import { VERT, FRAG } from './shaders.js?v=spectral-caustic-6';
+import { VERT, FRAG } from './shaders.js?v=spectral-caustic-11';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -1099,6 +1108,44 @@ function makeRampTexture() {
   return rampTex;
 }
 
+/* ===== 虛擬光譜焦散七色查找表 ===== */
+let spectralCausticTex = null;
+function readSpectralCausticColors() {
+  return SPECTRAL_CAUSTIC_DEFAULTS.map((fallback, i) => {
+    const input = document.getElementById('spectralCausticCol' + i);
+    return hexToRgb(input ? input.value : fallback);
+  });
+}
+function buildSpectralCausticLUT() {
+  if (!spectralCausticTex) return;
+  const colors = readSpectralCausticColors();
+  const data = spectralCausticTex.image.data;
+  for (let x = 0; x < RAMP_W; x++) {
+    const position = (x / (RAMP_W - 1)) * (colors.length - 1);
+    const left = Math.min(colors.length - 1, Math.floor(position));
+    const right = Math.min(colors.length - 1, left + 1);
+    const mixAmount = position - left;
+    for (let channel = 0; channel < 3; channel++) {
+      data[x * 4 + channel] = Math.round(
+        colors[left][channel] + (colors[right][channel] - colors[left][channel]) * mixAmount
+      );
+    }
+    data[x * 4 + 3] = 255;
+  }
+  spectralCausticTex.needsUpdate = true;
+}
+function makeSpectralCausticTexture() {
+  spectralCausticTex = new THREE.DataTexture(
+    new Uint8Array(RAMP_W * 4), RAMP_W, 1, THREE.RGBAFormat
+  );
+  spectralCausticTex.colorSpace = THREE.SRGBColorSpace;
+  spectralCausticTex.wrapS = spectralCausticTex.wrapT = THREE.ClampToEdgeWrapping;
+  spectralCausticTex.minFilter = spectralCausticTex.magFilter = THREE.LinearFilter;
+  spectralCausticTex.generateMipmaps = false;
+  buildSpectralCausticLUT();
+  return spectralCausticTex;
+}
+
 function initGL() {
   if (inited) return;
   inited = true;
@@ -1168,6 +1215,7 @@ function initGL() {
     uSpectralCausticAzimuth: { value: P.spectralCausticAzimuth },
     uSpectralCausticElevation: { value: P.spectralCausticElevation },
     uSpectralCausticHdri: { value: P.spectralCausticHdri },
+    uSpectralCausticRamp: { value: makeSpectralCausticTexture() },
     uArtThickness: { value: P.artThickness },
     uArtThickVar: { value: P.artThickVar },
     uArtNoiseScale: { value: P.artNoiseScale },
@@ -1418,8 +1466,27 @@ function bindControls() {
     if (!el._bound) { el.addEventListener('input', update); el._bound = true; }
     update();
   }
+  bindSpectralCausticColors();
   bindRamp();
   updateUIState();
+}
+
+function bindSpectralCausticColors() {
+  for (let i = 0; i < SPECTRAL_CAUSTIC_DEFAULTS.length; i++) {
+    const el = document.getElementById('spectralCausticCol' + i);
+    if (!el._bound) {
+      el.addEventListener('input', buildSpectralCausticLUT);
+      el._bound = true;
+    }
+  }
+  buildSpectralCausticLUT();
+}
+
+function resetSpectralCausticColors() {
+  SPECTRAL_CAUSTIC_DEFAULTS.forEach((color, i) => {
+    document.getElementById('spectralCausticCol' + i).value = color;
+  });
+  buildSpectralCausticLUT();
 }
 
 // 自訂漸層色標：數量 + 每色位置
@@ -1489,6 +1556,7 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   Object.assign(P, DEFAULTS, SELECT_DEFAULTS, TOGGLE_DEFAULTS, COLOR_DEFAULTS);
   motionCounts.cinematic = DEFAULTS.count;
   motionCounts.formation = FORMATION_DEFAULT_COUNT;
+  resetSpectralCausticColors();
   resetRamp();
   bindControls();
   if (inited) loadDefaultEnvironment();
