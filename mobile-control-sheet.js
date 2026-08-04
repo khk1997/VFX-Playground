@@ -8,15 +8,33 @@
   const mobileQuery = window.matchMedia('(max-width: 760px)');
   const states = ['peek', 'half', 'full'];
   let panel;
+  let home;
   let toggle;
+  let mobileNav;
+  let homeParent;
+  let homeNextSibling;
+  let toggleParent;
+  let toggleNextSibling;
   let handle;
   let handleAction;
   let play;
   let playParent;
   let playNextSibling;
   let state = 'half';
+  let activePointerId = null;
   let dragStartY = 0;
   let dragDeltaY = 0;
+  let dragStartOffset = 0;
+  let dragOffset = 0;
+  let dragVelocity = 0;
+  let lastDragY = 0;
+  let lastDragTime = 0;
+  let dragFrame = 0;
+  let didDrag = false;
+  let suppressHandleClick = false;
+  let sheetHeight = 0;
+  let sheetHalf = 0;
+  let sheetPeek = 64;
   const selectSyncers = [];
 
   function isPreview() {
@@ -29,10 +47,19 @@
     const root = document.documentElement;
     const width = root.clientWidth;
     const height = root.clientHeight;
+    const safeAreaProbe = document.createElement('div');
+    safeAreaProbe.style.cssText = 'position:fixed;visibility:hidden;padding-bottom:env(safe-area-inset-bottom)';
+    document.body.append(safeAreaProbe);
+    const safeAreaBottom = parseFloat(getComputedStyle(safeAreaProbe).paddingBottom) || 0;
+    safeAreaProbe.remove();
+    sheetHeight = Math.min(height * 0.78, 720);
+    sheetHalf = height * 0.46;
+    sheetPeek = 64 + safeAreaBottom;
     panel.style.setProperty('--mobile-viewport-width', `${width}px`);
     panel.style.setProperty('--mobile-viewport-height', `${height}px`);
-    panel.style.setProperty('--mobile-sheet-height', `${Math.min(height * 0.78, 720)}px`);
-    panel.style.setProperty('--mobile-sheet-half', `${height * 0.46}px`);
+    panel.style.setProperty('--mobile-sheet-height', `${sheetHeight}px`);
+    panel.style.setProperty('--mobile-sheet-half', `${sheetHalf}px`);
+    panel.style.setProperty('--mobile-sheet-peek', `${sheetPeek}px`);
   }
 
   function applyState(next) {
@@ -57,6 +84,22 @@
     applyState(state === 'peek' ? 'half' : state === 'half' ? 'full' : 'peek');
   }
 
+  function restoreNode(node, parent, nextSibling) {
+    if (!node || !parent) return;
+    if (nextSibling?.parentNode === parent) parent.insertBefore(node, nextSibling);
+    else parent.append(node);
+  }
+
+  function syncMobileNavPlacement() {
+    if (!mobileNav || !home || !toggle) return;
+    if (mobileQuery.matches) {
+      mobileNav.append(home, toggle);
+    } else {
+      restoreNode(home, homeParent, homeNextSibling);
+      restoreNode(toggle, toggleParent, toggleNextSibling);
+    }
+  }
+
   function syncPlayPlacement() {
     if (!play || !handle || !playParent) return;
     if (mobileQuery.matches) {
@@ -77,14 +120,49 @@
     play.title = label;
   }
 
-  function settleDrag() {
-    panel.style.removeProperty('--mobile-sheet-drag');
-    if (dragDeltaY > 54) {
-      applyState(state === 'full' ? 'half' : 'peek');
-    } else if (dragDeltaY < -54) {
-      applyState(state === 'peek' ? 'half' : 'full');
+  function stateOffset(name) {
+    if (name === 'full') return 0;
+    if (name === 'half') return Math.max(0, sheetHeight - sheetHalf);
+    return Math.max(0, sheetHeight - sheetPeek);
+  }
+
+  function renderDrag() {
+    dragFrame = 0;
+    panel.style.setProperty('transform', `translate3d(0, ${dragOffset}px, 0)`, 'important');
+  }
+
+  function nearestState(offset) {
+    return states.reduce((nearest, name) => (
+      Math.abs(stateOffset(name) - offset) < Math.abs(stateOffset(nearest) - offset) ? name : nearest
+    ), states[0]);
+  }
+
+  function settleDrag(event, cancelled = false) {
+    if (event && event.pointerId !== activePointerId) return;
+    if (dragFrame) {
+      cancelAnimationFrame(dragFrame);
+      renderDrag();
     }
+
+    if (event && event.timeStamp - lastDragTime > 80) dragVelocity = 0;
+    let next = nearestState(dragOffset);
+    const travelled = Math.abs(dragDeltaY);
+    if (!cancelled && travelled > 12 && Math.abs(dragVelocity) > 0.25) {
+      const verticalStates = ['full', 'half', 'peek'];
+      const currentIndex = verticalStates.indexOf(state);
+      const direction = dragVelocity > 0 ? 1 : -1;
+      next = verticalStates[Math.max(0, Math.min(verticalStates.length - 1, currentIndex + direction))];
+    }
+
+    applyState(next);
+    panel.getBoundingClientRect();
+    panel.classList.remove('mobile-sheet--dragging');
+    panel.style.removeProperty('transform');
+    if (didDrag && !cancelled) suppressHandleClick = true;
+    activePointerId = null;
     dragDeltaY = 0;
+    dragVelocity = 0;
+    didDrag = false;
   }
 
   function enhanceSelect(select) {
@@ -185,8 +263,19 @@
   function init() {
     if (isPreview()) return;
     panel = document.getElementById('panel');
+    home = document.getElementById('homeBtn') || document.querySelector('.home');
     toggle = document.getElementById('toggleBtn') || document.getElementById('toggle');
-    if (!panel || !toggle) return;
+    if (!panel || !home || !toggle) return;
+
+    homeParent = home.parentNode;
+    homeNextSibling = home.nextSibling;
+    toggleParent = toggle.parentNode;
+    toggleNextSibling = toggle.nextSibling;
+    mobileNav = document.createElement('nav');
+    mobileNav.className = 'vfx-mobile-nav';
+    mobileNav.setAttribute('aria-label', '特效頁面導覽');
+    document.body.append(mobileNav);
+    syncMobileNavPlacement();
 
     handle = document.createElement('div');
     handle.className = 'mobile-sheet-handle';
@@ -210,7 +299,8 @@
       syncPlayPlacement();
     }
     const reset = document.getElementById('resetBtn');
-    if (reset) {
+    const usesCompactMobileLayout = document.body.dataset.mobileUi === 'compact';
+    if (reset && !usesCompactMobileLayout) {
       const mobileReset = document.createElement('button');
       mobileReset.type = 'button';
       mobileReset.className = 'mobile-sheet-reset';
@@ -226,6 +316,11 @@
 
     handle.addEventListener('click', event => {
       if (event.target.closest('#playCtl, .mobile-sheet-reset')) return;
+      if (suppressHandleClick) {
+        suppressHandleClick = false;
+        event.preventDefault();
+        return;
+      }
       cycleSheet();
     });
 
@@ -240,25 +335,40 @@
     });
 
     handle.addEventListener('pointerdown', event => {
-      if (!mobileQuery.matches || event.target === play) return;
+      if (!mobileQuery.matches || activePointerId !== null ||
+          (event.pointerType === 'mouse' && event.button !== 0) ||
+          event.target.closest('#playCtl, .mobile-sheet-reset')) return;
+      activePointerId = event.pointerId;
       dragStartY = event.clientY;
       dragDeltaY = 0;
+      dragStartOffset = stateOffset(state);
+      dragOffset = dragStartOffset;
+      dragVelocity = 0;
+      lastDragY = event.clientY;
+      lastDragTime = event.timeStamp;
+      didDrag = false;
       handle.setPointerCapture(event.pointerId);
       panel.classList.add('mobile-sheet--dragging');
     });
     handle.addEventListener('pointermove', event => {
-      if (!panel.classList.contains('mobile-sheet--dragging')) return;
+      if (event.pointerId !== activePointerId) return;
       dragDeltaY = event.clientY - dragStartY;
-      panel.style.setProperty('--mobile-sheet-drag', `${dragDeltaY}px`);
+      const elapsed = event.timeStamp - lastDragTime;
+      if (elapsed > 0) dragVelocity = (event.clientY - lastDragY) / elapsed;
+      lastDragY = event.clientY;
+      lastDragTime = event.timeStamp;
+      didDrag ||= Math.abs(dragDeltaY) > 5;
+
+      const minOffset = 0;
+      const maxOffset = stateOffset('peek');
+      const rawOffset = dragStartOffset + dragDeltaY;
+      if (rawOffset < minOffset) dragOffset = minOffset + (rawOffset - minOffset) * 0.22;
+      else if (rawOffset > maxOffset) dragOffset = maxOffset + (rawOffset - maxOffset) * 0.22;
+      else dragOffset = rawOffset;
+      if (!dragFrame) dragFrame = requestAnimationFrame(renderDrag);
     });
-    handle.addEventListener('pointerup', () => {
-      panel.classList.remove('mobile-sheet--dragging');
-      settleDrag();
-    });
-    handle.addEventListener('pointercancel', () => {
-      panel.classList.remove('mobile-sheet--dragging');
-      settleDrag();
-    });
+    handle.addEventListener('pointerup', event => settleDrag(event));
+    handle.addEventListener('pointercancel', event => settleDrag(event, true));
 
     document.addEventListener('click', event => {
       if (!event.target.closest('.mobile-select-shell')) {
@@ -284,6 +394,7 @@
     }, true);
 
     mobileQuery.addEventListener('change', event => {
+      syncMobileNavPlacement();
       syncPlayPlacement();
       if (event.matches) {
         panel.classList.remove('collapsed', 'hidden');
@@ -291,7 +402,7 @@
         applyState('half');
       } else {
         states.forEach(name => panel.classList.remove(`mobile-sheet--${name}`));
-        panel.style.removeProperty('--mobile-sheet-drag');
+        panel.style.removeProperty('transform');
         delete document.body.dataset.mobileSheet;
       }
     });
