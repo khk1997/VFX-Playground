@@ -13,8 +13,8 @@ if (PREVIEW) document.documentElement.classList.add('preview-mode');
 
 const canvas = document.getElementById('stage');
 const mobileRenderQuery = window.matchMedia('(max-width: 760px)');
-const DEFAULT_HDRI_URL = new URL('./assets/photo_studio_london_hall_1k.hdr', import.meta.url).href;
-const DEFAULT_HDRI_LABEL = 'photo_studio_london_hall_1k.hdr';
+const DEFAULT_HDRI_URL = new URL('./assets/photo_studio2_london_hall_1k.hdr', import.meta.url).href;
+const DEFAULT_HDRI_LABEL = 'photo_studio2_london_hall_1k.hdr';
 const MAX_DROPS = 12;
 const FORMATION_DEFAULT_COUNT = 6;
 const MAX_MICRO_DROPS = 20;
@@ -25,33 +25,33 @@ const DEFAULTS = {              // 數值滑桿
   thickness: 195,
   thickVar: 40,
   noiseScale: 1.0,
-  dispersion: 0.09,
+  dispersion: 0.02,
   dispersionSeparation: 1.5,
   causticScale: 1.0,
   causticSharpness: 0.65,
   realDispersion: 1,
   realDispersionSeparation: 0.6,
   spectralCausticIntensity: 1.5,
-  spectralCausticFocus: 0.31,
+  spectralCausticFocus: 0.12,
   spectralCausticWidth: 0.42,
-  spectralCausticLightSize: 0.26,
+  spectralCausticLightSize: 0.33,
   spectralCausticDensity: 0.03,
   spectralCausticSoftness: 1,
   spectralCausticWarp: 0.57,
-  spectralCausticSeparation: 0.24,
+  spectralCausticSeparation: 0,
   spectralCausticBounce: 0.19,
   spectralCausticFlow: 0.18,
   spectralCausticFresnelMask: 1,
   spectralCausticNoiseMask: 1,
   spectralCausticNoiseScale: 2.5,
-  spectralCausticAzimuth: -177,
+  spectralCausticAzimuth: 5,
   spectralCausticElevation: -19,
   spectralCausticHdri: 0.3,
-  artThickness: 165,
-  artThickVar: 95,
-  artNoiseScale: 1.0,
-  artPatternSpeed: 0.21,
-  artGravity: 1,
+  artThickness: 295,
+  artThickVar: 130,
+  artNoiseScale: 1.2,
+  artPatternSpeed: 0.27,
+  artGravity: 0.52,
   filmBlur: 0.25,
   saturation: 1.94,
   patternSpeed: 0.21,
@@ -63,16 +63,18 @@ const DEFAULTS = {              // 數值滑桿
   spread: 0.75,
   fresnel: 0.8,
   gravity: 1,
-  roughness: 0.2,
+  roughness: 0.26,
   flowSpeed: 0.47,
   reflect: 1.6,
-  transmission: 0.96,
+  transmission: 1.0,
   materialExposure: 1,
-  hdriYaw: 0,
-  hdriPitch: 0,
-  hdriBlur: 0.11,
-  envRefraction: 0.03,
-  cameraDistance: 4.95,
+  hdriYaw: -45,
+  hdriPitch: 20,
+  hdriBlur: 0.21,
+  envRefraction: 0.21,
+  cameraDistance: 3.1,
+  cameraRotationX: 9.7,
+  cameraRotationY: 29.8,
   loopDuration: 12,
   wobble: 0.305,
   wobbleScale: 0.7,
@@ -107,6 +109,8 @@ const COLOR_DEFAULTS  = {
   bgColor: '#000000',
 };
 const P = { ...DEFAULTS, ...SELECT_DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS };
+const MOBILE_CAMERA_DISTANCE_DEFAULT = 4.3;
+if (mobileRenderQuery.matches && !PREVIEW) P.cameraDistance = MOBILE_CAMERA_DISTANCE_DEFAULT;
 const motionCounts = { cinematic: 2, formation: FORMATION_DEFAULT_COUNT };
 
 // 自訂漸層色標（最多 6，可調位置）— reset 用
@@ -132,7 +136,7 @@ const COLORS = {
 // shader 的光譜座標由紫端（0）走向紅端（1）。七個色標固定等距，
 // 讓每種彩虹顏色都能單獨編輯，同時保持色帶之間連續混色。
 const SPECTRAL_CAUSTIC_DEFAULTS = [
-  '#4700ff', '#001bff', '#00ecd2', '#0eff42', '#ddff00', '#ff5400', '#ff0000',
+  '#52e6fc', '#40b3f9', '#3aa3e3', '#3fabf9', '#4dd8fb', '#3ba6f9', '#52e6fc',
 ];
 const TOGGLES = {
   filmEnabled: 'uFilmEnabled',
@@ -191,6 +195,8 @@ const fmt = {
   hdriBlur: v => Math.round(v * 100) + '%',
   envRefraction: v => Math.round(v * 100) + '%',
   cameraDistance: v => v.toFixed(2),
+  cameraRotationX: v => v.toFixed(1) + '°',
+  cameraRotationY: v => v.toFixed(1) + '°',
   loopDuration: v => v.toFixed(1) + 's',
   elasticStrength: v => v.toFixed(3),
   elasticDensity: v => 'x' + v.toFixed(1),
@@ -205,7 +211,7 @@ const fmt = {
   microCount: v => v.toFixed(0),
 };
 
-import { VERT, FRAG } from './shaders.js?v=spectral-caustic-20';
+import { VERT, FRAG } from './shaders.js?v=spectral-caustic-21';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -224,7 +230,7 @@ let qualitySampleFrames = 0;
 let qualityLowSamples = 0;
 let qualityHighSamples = 0;
 
-const rot = { x: 0.17, y: 0.52 };
+const rot = { x: P.cameraRotationX * Math.PI / 180, y: P.cameraRotationY * Math.PI / 180 };
 const vel = { x: 0, y: 0 };
 let compositionOffsetX = 0;
 let dragging = false, lastX = 0, lastY = 0;
@@ -1355,7 +1361,12 @@ function bindPointer() {
     if (!dragging) return;
     const dx = e.clientX - lastX, dy = e.clientY - lastY;
     lastX = e.clientX; lastY = e.clientY;
-    rot.y += dx * 0.006; rot.x += dy * 0.006;
+    rot.y = Math.max(-Math.PI, Math.min(Math.PI, rot.y + dx * 0.006));
+    rot.x = Math.max(-Math.PI * 0.5, Math.min(Math.PI * 0.5, rot.x + dy * 0.006));
+    const rotationX = document.getElementById('cameraRotationX');
+    const rotationY = document.getElementById('cameraRotationY');
+    if (rotationX) { rotationX.value = (rot.x * 180 / Math.PI).toFixed(1); rotationX.dispatchEvent(new Event('input', { bubbles: true })); }
+    if (rotationY) { rotationY.value = (rot.y * 180 / Math.PI).toFixed(1); rotationY.dispatchEvent(new Event('input', { bubbles: true })); }
     vel.y = dx * 0.006; vel.x = dy * 0.006;
   });
   const end = e => {
@@ -1402,6 +1413,8 @@ function bindControls() {
     const uName = 'u' + key.charAt(0).toUpperCase() + key.slice(1);
     const update = () => {
       P[key] = parseFloat(el.value);
+      if (key === 'cameraRotationX') rot.x = P[key] * Math.PI / 180;
+      if (key === 'cameraRotationY') rot.y = P[key] * Math.PI / 180;
       if (key === 'count') motionCounts[P.motion] = Math.round(P[key]);
       if (valEl) valEl.textContent = (fmt[key] || (v => +v.toFixed(2)))(P[key]);
       if (uniforms && uniforms[uName]) uniforms[uName].value = (key === 'count') ? Math.round(P[key]) : P[key];
@@ -1578,6 +1591,7 @@ function updateUIState() {
 
 document.getElementById('resetBtn').addEventListener('click', () => {
   Object.assign(P, DEFAULTS, SELECT_DEFAULTS, TOGGLE_DEFAULTS, COLOR_DEFAULTS);
+  if (mobileRenderQuery.matches && !PREVIEW) P.cameraDistance = MOBILE_CAMERA_DISTANCE_DEFAULT;
   motionCounts.cinematic = DEFAULTS.count;
   motionCounts.formation = FORMATION_DEFAULT_COUNT;
   resetSpectralCausticColors();
@@ -2228,7 +2242,10 @@ function frame(now) {
       : smoothstepCPU(formationAmount(phase01), 0.42, 0.92)
     : 0;
   const formationDolly = 1 - formationFocus * 0.30;
-  let cameraDistance = P.cameraDistance * dolly * compositionDistance * formationDolly;
+  // 首頁卡片預覽沿用上一版較寬鬆的取景距離，避免分裂時右側大滴貼近邊緣；
+  // 完整調參頁仍使用面板中的鏡頭距離。
+  const previewCameraDistance = PREVIEW ? 4.95 : P.cameraDistance;
+  let cameraDistance = previewCameraDistance * dolly * compositionDistance * formationDolly;
   if (isMobilePortrait) {
     // 以主要水滴投影外輪廓的中點校正構圖。面積重心會被較大的水滴拉動，
     // 在展開狀態下反而讓整組水滴的左右留白不對稱。

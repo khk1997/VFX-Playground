@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Prism Drops VFX</title>
+<script>if (new URLSearchParams(location.search).has('preview')) document.documentElement.classList.add('preview-mode');</script>
+<style>html.preview-mode #homeBtn,html.preview-mode #toggleBtn,html.preview-mode #exportBtn,html.preview-mode #exportDialog,html.preview-mode #playCtl,html.preview-mode #panel{display:none!important}</style>
 <link rel="stylesheet" href="./bubble.css?v=spectral-caustic-11">
 <link rel="stylesheet" href="../switch2-theme.css?v=mobile-sheet-22">
 <script src="../preview-performance.js"></script>
@@ -31,13 +33,15 @@
     <div class="row"><label>HDRI 模糊</label><input type="range" id="hdriBlur" min="0" max="1" step="0.01" value="0.11"><span class="val" id="hdriBlur_v"></span></div>
     <div class="row"><label>環境折射</label><input type="range" id="envRefraction" min="0" max="1" step="0.01" value="0.03"><span class="val" id="envRefraction_v"></span></div>
     <div class="row"><button id="hdriBtn">更換 HDRI…</button></div>
-    <div id="hdriState" class="note">預設 HDRI：photo_studio_london_hall_1k.hdr</div>
+    <div id="hdriState" class="note">預設 HDRI：photo_studio2_london_hall_1k.hdr</div>
     <input type="file" id="hdriInput" accept=".hdr,image/*" hidden>
   </div>
 
   <div class="group">
     <h3>鏡頭 Camera</h3>
     <div class="row"><label>鏡頭距離</label><input type="range" id="cameraDistance" min="2.8" max="10" step="0.05" value="4.95"><span class="val" id="cameraDistance_v"></span></div>
+    <div class="row"><label>水平視角</label><input type="range" id="cameraRotationY" min="-180" max="180" step="0.1" value="29.8"><span class="val" id="cameraRotationY_v"></span></div>
+    <div class="row"><label>垂直視角</label><input type="range" id="cameraRotationX" min="-90" max="90" step="0.1" value="9.7"><span class="val" id="cameraRotationX_v"></span></div>
     <div class="note">可使用滑鼠滾輪或觸控板拉近、拉遠</div>
   </div>
 
@@ -105,13 +109,13 @@
       <div class="row toggleRow"><label>光譜焦散</label><input type="checkbox" id="spectralCausticEnabled" checked><span class="switchTrack" aria-hidden="true"></span><span class="val" id="spectralCausticEnabled_v">開啟</span></div>
       <div class="effectSubhead">輸出</div>
       <div class="spectralColorEditor" aria-label="焦散七色編輯器">
-        <label><span>紫</span><input type="color" id="spectralCausticCol0" value="#4700ff" aria-label="焦散紫色"></label>
-        <label><span>靛</span><input type="color" id="spectralCausticCol1" value="#001bff" aria-label="焦散靛色"></label>
-        <label><span>藍</span><input type="color" id="spectralCausticCol2" value="#00ecd2" aria-label="焦散藍色"></label>
-        <label><span>綠</span><input type="color" id="spectralCausticCol3" value="#0eff42" aria-label="焦散綠色"></label>
-        <label><span>黃</span><input type="color" id="spectralCausticCol4" value="#ddff00" aria-label="焦散黃色"></label>
-        <label><span>橙</span><input type="color" id="spectralCausticCol5" value="#ff5400" aria-label="焦散橙色"></label>
-        <label><span>紅</span><input type="color" id="spectralCausticCol6" value="#ff0000" aria-label="焦散紅色"></label>
+        <label><span>紫</span><input type="color" id="spectralCausticCol0" value="#52e6fc" aria-label="焦散紫色"></label>
+        <label><span>靛</span><input type="color" id="spectralCausticCol1" value="#40b3f9" aria-label="焦散靛色"></label>
+        <label><span>藍</span><input type="color" id="spectralCausticCol2" value="#3aa3e3" aria-label="焦散藍色"></label>
+        <label><span>綠</span><input type="color" id="spectralCausticCol3" value="#3fabf9" aria-label="焦散綠色"></label>
+        <label><span>黃</span><input type="color" id="spectralCausticCol4" value="#4dd8fb" aria-label="焦散黃色"></label>
+        <label><span>橙</span><input type="color" id="spectralCausticCol5" value="#3ba6f9" aria-label="焦散橙色"></label>
+        <label><span>紅</span><input type="color" id="spectralCausticCol6" value="#52e6fc" aria-label="焦散紅色"></label>
       </div>
       <div class="row"><label>焦散強度</label><input type="range" id="spectralCausticIntensity" min="0" max="1.5" step="0.01" value="1.5"><span class="val" id="spectralCausticIntensity_v"></span></div>
       <div class="row"><label>聚焦程度</label><input type="range" id="spectralCausticFocus" min="0" max="1" step="0.01" value="0.31"><span class="val" id="spectralCausticFocus_v"></span></div>
