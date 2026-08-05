@@ -1547,7 +1547,8 @@ function updateUIState() {
     const group = document.getElementById(id);
     if (!group) return;
     group.classList.toggle('is-disabled', !enabled);
-    group.classList.toggle('featureGroup', id === 'thinFilmGroup');
+    // 這裡管理的區塊都自帶主開關，一律套用「只反灰內容、開關保持清晰」的樣式
+    group.classList.add('featureGroup');
     group.querySelectorAll('.row:not(.toggleRow) input, .row:not(.toggleRow) select, .row:not(.toggleRow) button')
       .forEach(el => { el.disabled = !enabled; });
     group.querySelectorAll('.effectBlock input, .effectBlock select, .effectBlock button')
@@ -2292,6 +2293,31 @@ function frame(now) {
 }
 
 bindControls();
+
+// 參數組合匯出/匯入。預覽模式要呈現正規預設值，不套用個人的自動保存狀態。
+if (!PREVIEW && window.PresetIO) {
+  window.PresetIO.init({
+    effect: 'prism-drops',
+    panel: '#panel',
+    mount: '#presetIO',
+    // 模式類控件必須先套用：切換動態模式會連帶覆寫水滴數量，
+    // 配色數量會決定色標列的顯示，順序顛倒會讓後套的值被蓋掉。
+    applyFirst: [
+      'motion', 'bgMode', 'colorMode', 'shapeSource', 'shapeQuality',
+      'filmEnabled', 'dispersionEnabled', 'realDispersionEnabled',
+      'spectralCausticEnabled', 'rampCount',
+    ],
+    assetNote: 'HDRI 與 SVG / GLB 素材無法存進參數檔，請自行載入',
+    saveOn: ['#resetBtn'],
+    afterApply: () => {
+      updateRampRows();
+      buildRampLUT();
+      buildSpectralCausticLUT();
+      updateUIState();
+    },
+  }).restore();
+}
+
 syncLoop();
 if (!PREVIEW) syncLoop();
 if (!PREVIEW) exportEvent('prism-export-ready', { loopDuration: P.loopDuration });

@@ -89,7 +89,14 @@
   .effectBlock.is-disabled::after {
     display: none;
   }
-  .featureGroup.is-disabled > .row:not(.toggleRow) { opacity: .38; }
+  /* 擁有主開關的區塊（薄膜、三種色散）：關閉時只反灰受它控制的參數，
+     主開關那行與區塊標題維持正常亮度，使用者才看得清楚要從哪裡打開。
+     巢狀的 .effectBlock 交給它自己的 is-disabled 處理，排除以免疊加後過暗。 */
+  .featureGroup.is-disabled { opacity: 1; filter: none; }
+  .featureGroup.is-disabled > :not(.toggleRow):not(.effectTitle):not(h3):not(.effectBlock) {
+    opacity: .38;
+    filter: saturate(.35);
+  }
   .effectTitle {
     display: flex;
     align-items: center;
@@ -178,6 +185,113 @@
   #hdriBtn:hover, .fileBtn:hover { background: rgba(150,180,255,.22); }
   #formationGroup { border-color: rgba(105,225,255,.3); }
   #formationGroup h3 { color: #78ddf4; }
+  /* ===== 參數組合匯出/匯入（preset-io.js） ===== */
+  .presetIO {
+    --effect-accent: #8fd0a8;
+    position: relative;
+    margin: 0;
+    padding: 9px 9px 8px 11px;
+    border: 1px solid rgba(150,180,255,.12);
+    border-radius: 9px;
+    background:
+      linear-gradient(115deg, color-mix(in srgb, var(--effect-accent) 9%, transparent), transparent 42%),
+      rgba(10,14,24,.34);
+    overflow: hidden;
+  }
+  .presetIO::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 2px;
+    background: var(--effect-accent);
+    opacity: .82;
+  }
+  .presetIOCount {
+    margin-left: auto;
+    color: color-mix(in srgb, var(--effect-accent) 70%, #9aa6c0);
+    font-size: 9px;
+    font-style: normal;
+    font-weight: 500;
+    letter-spacing: .04em;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .presetIOGrid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    margin: 2px 0 0;
+  }
+  .presetIOGrid button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 7px 4px;
+    border: 1px solid color-mix(in srgb, var(--effect-accent) 30%, transparent);
+    border-radius: 7px;
+    background: rgba(150,180,255,.07);
+    color: #cfe0d7;
+    font: 500 11.5px inherit;
+    letter-spacing: .02em;
+    cursor: pointer;
+    transition: background .16s ease, border-color .16s ease, color .16s ease;
+  }
+  .presetIOGrid button:hover {
+    background: color-mix(in srgb, var(--effect-accent) 16%, transparent);
+    border-color: color-mix(in srgb, var(--effect-accent) 55%, transparent);
+    color: #eaf5ee;
+  }
+  .presetIOGrid button:active { transform: translateY(1px); }
+  .presetIOGrid button:focus-visible { outline: 2px solid var(--effect-accent); outline-offset: 1px; }
+  .presetIOGrid button i {
+    color: var(--effect-accent);
+    font-style: normal;
+    font-size: 11px;
+    line-height: 1;
+  }
+  .presetIODrawer { margin-top: 6px; }
+  .presetIODrawer textarea {
+    width: 100%;
+    height: 84px;
+    padding: 6px 7px;
+    border: 1px solid rgba(150,180,255,.24);
+    border-radius: 6px;
+    background: rgba(8,10,16,.55);
+    color: #c6cfe4;
+    font: 10px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+    resize: vertical;
+  }
+  .presetIODrawer textarea:focus-visible { outline: 1px solid var(--effect-accent); border-color: var(--effect-accent); }
+  .presetIODrawerBtns { display: flex; gap: 5px; margin-top: 5px; }
+  .presetIODrawerBtns button {
+    flex: 1;
+    padding: 5px 0;
+    border: 1px solid color-mix(in srgb, var(--effect-accent) 42%, transparent);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--effect-accent) 15%, transparent);
+    color: #e2f1e8;
+    font: 500 11px inherit;
+    cursor: pointer;
+  }
+  .presetIODrawerBtns button.ghost {
+    border-color: rgba(150,180,255,.22);
+    background: transparent;
+    color: #8b97b4;
+  }
+  .presetIODrawerBtns button:hover { filter: brightness(1.18); }
+  .presetIOStatus {
+    display: block;
+    min-height: 13px;
+    margin-top: 6px;
+    color: color-mix(in srgb, var(--effect-accent) 78%, #9aa6c0);
+    font-size: 10px;
+    line-height: 1.4;
+  }
+  .presetIOStatus[data-tone=warn] { color: #f0b75b; }
+  .presetIOStatus[data-tone=error] { color: #ff8f94; }
+  .presetIOStatus:empty { min-height: 0; margin-top: 0; }
+
   .btns { display: flex; gap: 8px; margin-top: 12px; }
   .btns button {
     flex: 1; background: rgba(150,180,255,.1); color: #c3d3ff;

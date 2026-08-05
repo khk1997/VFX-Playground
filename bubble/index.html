@@ -6,10 +6,11 @@
 <title>Prism Drops VFX</title>
 <script>if (new URLSearchParams(location.search).has('preview')) document.documentElement.classList.add('preview-mode');</script>
 <style>html.preview-mode #homeBtn,html.preview-mode #toggleBtn,html.preview-mode #exportBtn,html.preview-mode #exportDialog,html.preview-mode #playCtl,html.preview-mode #panel{display:none!important}</style>
-<link rel="stylesheet" href="./bubble.css?v=spectral-caustic-11">
+<link rel="stylesheet" href="./bubble.css?v=preset-io-2">
 <link rel="stylesheet" href="../switch2-theme.css?v=mobile-sheet-22">
 <script src="../preview-performance.js"></script>
 <script src="../mobile-control-sheet.js?v=mobile-sheet-22"></script>
+<script src="../preset-io.js?v=preset-io-2"></script>
 </head>
 <body data-vfx-module="bubble" data-mobile-ui="compact">
 <canvas id="stage"></canvas>
@@ -190,6 +191,11 @@
     <div class="note">模型品質會在下一次匯入 GLB 時生效；提高品質主要增加匯入時間與記憶體，每幀 SDF 取樣次數不變。</div>
   </div>
 
+  <div class="group">
+    <h3>參數交換 Share</h3>
+    <div id="presetIO"></div>
+  </div>
+
   <div class="btns">
     <button id="resetBtn">↺ 重設</button>
   </div>
@@ -291,6 +297,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=spectral-caustic-23"></script>
+<script type="module" src="./bubble.js?v=preset-io-2"></script>
 </body>
 </html>
