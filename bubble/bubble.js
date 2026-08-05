@@ -1,6 +1,6 @@
 'use strict';
 import * as THREE from 'three';
-import { svgToField, gltfToField } from './shape-field.js';
+import { svgToField, gltfToField } from './shape-field.js?v=svg-shape-3';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -86,10 +86,12 @@ const DEFAULTS = {              // 數值滑桿
   satelliteSize: 0.22,
   satelliteCount: 3,
   spin: 0.08,
-  gatherDuration: 0.48,
+  // 較快匯聚 + 較長停留：成形後的定格時間由 2.6 秒拉到 5.4 秒（12 秒循環），
+  // 讓形狀本身而不是散開過程佔據大部分畫面。
+  gatherDuration: 0.25,
   shapeDepth: 0.28,
   shapeSoftness: 0,
-  shapeHold: 0.22,
+  shapeHold: 0.45,
   microCount: 14,
 };
 const SELECT_DEFAULTS = {
@@ -211,7 +213,7 @@ const fmt = {
   microCount: v => v.toFixed(0),
 };
 
-import { VERT, FRAG } from './shaders.js?v=spectral-caustic-21';
+import { VERT, FRAG } from './shaders.js?v=svg-shape-3';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -1724,7 +1726,9 @@ async function importShapeFile(file, kind, rebuilding = false) {
   syncLoop();
   try {
     const next = kind === 'svg'
-      ? await svgToField(file)
+      // 超取樣的距離場暫時佔用 (size*ss)² 個 float；桌面用 3（1536²，約 38MB
+      // 峰值），行動裝置降一級避免配置失敗。
+      ? await svgToField(file, { supersample: mobileRenderQuery.matches ? 2 : 3 })
       : await gltfToField(file, glbGridSize);
     if (requestId !== shapeImportRequestId) {
       next.texture?.dispose();

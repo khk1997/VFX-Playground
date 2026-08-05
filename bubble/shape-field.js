@@ -156,19 +156,72 @@ function chamferSigned(mask, w, h, d = 1) {
   return signed;
 }
 
-function encode2D(field, w, h, range = 24) {
-  const data = new Uint8Array(w * h * 4);
-  for (let i = 0; i < field.length; i++) {
-    const v = Math.round(clamp(0.5 + field[i] / (range * 2), 0, 1) * 255);
-    data[i * 4] = data[i * 4 + 1] = data[i * 4 + 2] = v;
-    data[i * 4 + 3] = 255;
+/* ===== 精確歐氏距離場（Felzenszwalb & Huttenlocher, O(n)）=====
+ * chamfer 3×3 每步只能走八個方向，累積誤差 2–4%，且誤差有方向性 ——
+ * 斜向輪廓會被拉成八角形，正是鋸齒的一部分。這裡沿各軸做一維拋物線下包絡，
+ * 得到精確的平方距離，沒有方向偏差。GLB 的 3D 路徑仍用 chamferSigned。
+ */
+function edt1d(f, d, v, z, n) {
+  const INF = 1e20;
+  let k = 0;
+  v[0] = 0;
+  z[0] = -INF;
+  z[1] = INF;
+  for (let q = 1; q < n; q++) {
+    let s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+    while (s <= z[k]) {
+      k--;
+      s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+    }
+    k++;
+    v[k] = q;
+    z[k] = s;
+    z[k + 1] = INF;
   }
-  const tex = new THREE.DataTexture(data, w, h, THREE.RGBAFormat);
-  tex.minFilter = tex.magFilter = THREE.LinearFilter;
-  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
-  tex.generateMipmaps = false;
-  tex.needsUpdate = true;
-  return tex;
+  k = 0;
+  for (let q = 0; q < n; q++) {
+    while (z[k + 1] < q) k++;
+    const dist = q - v[k];
+    d[q] = dist * dist + f[v[k]];
+  }
+}
+
+function edt2dSquared(f, w, h) {
+  const span = Math.max(w, h);
+  const line = new Float32Array(span);
+  const out = new Float32Array(span);
+  const v = new Int32Array(span);
+  const z = new Float32Array(span + 1);
+  for (let x = 0; x < w; x++) {
+    for (let y = 0; y < h; y++) line[y] = f[x + y * w];
+    edt1d(line, out, v, z, h);
+    for (let y = 0; y < h; y++) f[x + y * w] = out[y];
+  }
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    for (let x = 0; x < w; x++) line[x] = f[row + x];
+    edt1d(line, out, v, z, w);
+    for (let x = 0; x < w; x++) f[row + x] = out[x];
+  }
+  return f;
+}
+
+function exactSigned2D(mask, w, h) {
+  const INF = 1e20;
+  const n = w * h;
+  const inside = new Float32Array(n);
+  const outside = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    inside[i] = mask[i] ? INF : 0;
+    outside[i] = mask[i] ? 0 : INF;
+  }
+  edt2dSquared(inside, w, h);
+  edt2dSquared(outside, w, h);
+  const signed = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    signed[i] = mask[i] ? -Math.sqrt(inside[i]) : Math.sqrt(outside[i]);
+  }
+  return signed;
 }
 
 function encodeFloat2D(field, w, h, range = 24) {
@@ -190,7 +243,13 @@ function encodeFloat2D(field, w, h, range = 24) {
   return tex;
 }
 
-export async function svgToField(file, size = 160) {
+const SVG_WORLD = 3;
+// 距離場以世界單位編碼，範圍剛好覆蓋整個取樣盒（|x|,|y| ≤ 1.5）。
+// 舊版存的是「像素距離 + range 24」，一旦提高解析度，可表示範圍會跟著縮小
+// （512² 時只剩 0.14 世界單位），ray marcher 會被迫用極小步長前進。
+const SVG_RANGE = SVG_WORLD / 2;
+
+export async function svgToField(file, { size = 512, supersample = 3 } = {}) {
   const text = await file.text();
   if (!/<svg[\s>]/i.test(text)) throw new Error('不是有效的 SVG');
   const url = URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' }));
@@ -198,42 +257,100 @@ export async function svgToField(file, size = 160) {
     const img = new Image();
     img.src = url;
     await img.decode();
+    // 距離場先在 supersample 倍的解析度上算，再降採樣回 size。
+    // 只在最終解析度上做 EDT 是不夠的：EDT 量的是「到最近的異類『像素中心』」，
+    // 值因此被鎖在 √(整數²+整數²) 這組階梯上（實測 512² 時，離邊界 1~4 texel
+    // 的 7788 個像素只有 11 種不同的值）。零等值面可以靠下面的次像素修正救回來，
+    // 但梯度仍是一塊塊的常數 —— 而擠出側面的法線正是這個梯度，於是側壁出現面片。
+    // 在高解析度上計算再做箱型平均，能把階梯細化並抹平成連續梯度。
+    const ss = Math.max(1, Math.round(supersample));
+    const hi = size * ss;
     const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = size;
+    canvas.width = canvas.height = hi;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    const pad = 12;
-    const scale = Math.min((size - pad * 2) / Math.max(1, img.width), (size - pad * 2) / Math.max(1, img.height));
+    const pad = Math.round(hi * 0.075);
+    const scale = Math.min((hi - pad * 2) / Math.max(1, img.width), (hi - pad * 2) / Math.max(1, img.height));
     const dw = img.width * scale, dh = img.height * scale;
-    ctx.clearRect(0, 0, size, size);
-    ctx.drawImage(img, (size - dw) / 2, (size - dh) / 2, dw, dh);
-    const pixels = ctx.getImageData(0, 0, size, size).data;
-    const mask = new Uint8Array(size * size);
-    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-      const i = x + y * size;
-      mask[i] = pixels[i * 4 + 3] > 32 ? 1 : 0;
+    ctx.clearRect(0, 0, hi, hi);
+    ctx.drawImage(img, (hi - dw) / 2, (hi - dh) / 2, dw, dh);
+    const pixels = ctx.getImageData(0, 0, hi, hi).data;
+    // canvas 的抗鋸齒 alpha 就是次像素覆蓋率，先完整保留下來
+    const coverage = new Float32Array(hi * hi);
+    const mask = new Uint8Array(hi * hi);
+    for (let i = 0; i < hi * hi; i++) {
+      const a = pixels[i * 4 + 3] / 255;
+      coverage[i] = a;
+      mask[i] = a >= 0.5 ? 1 : 0;
     }
-    const field = chamferSigned(mask, size, size);
+    const hiField = exactSigned2D(mask, hi, hi);
+    // 部分覆蓋的像素改用覆蓋率推出的次像素距離：直線邊界穿過像素時，
+    // 有號距離約為 0.5 - 覆蓋率。少了這步，零等值面只能落在整數格線上，
+    // 輪廓就是階梯；這是正面鋸齒最主要的來源。
+    for (let i = 0; i < hi * hi; i++) {
+      if (coverage[i] > 0.02 && coverage[i] < 0.98) hiField[i] = 0.5 - coverage[i];
+    }
+    // 像素距離 → 世界距離，之後所有消費端都用世界單位
+    const perPixel = SVG_WORLD / hi;
+    for (let i = 0; i < hi * hi; i++) hiField[i] *= perPixel;
+
+    // 箱型平均降採樣。距離場在局部近似線性，取區塊平均即區塊中心的距離；
+    // 高曲率處會略微圓化，對液體外觀無害。
+    let field;
+    if (ss === 1) {
+      field = hiField;
+    } else {
+      field = new Float32Array(size * size);
+      const inv = 1 / (ss * ss);
+      for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+        let sum = 0;
+        for (let dy = 0; dy < ss; dy++) {
+          const row = (y * ss + dy) * hi;
+          for (let dx = 0; dx < ss; dx++) sum += hiField[row + x * ss + dx];
+        }
+        field[x + y * size] = sum * inv;
+      }
+    }
+
     const targets = [];
-    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    // 以固定的世界空間密度取樣，讓候選點數不隨解析度暴增
+    // （160² 的雜湊步長換算後約等於 5px 網格；此處沿用同樣的世界間距）。
+    const step = Math.max(1, Math.round(size / 32));
+    for (let y = 0; y < size; y += step) for (let x = 0; x < size; x += step) {
       const i = x + y * size;
-      if (!mask[i] || (x * 17 + y * 31) % 29 !== 0) continue;
+      if (field[i] >= 0) continue;
       const target = new THREE.Vector3(
-        (x / (size - 1) - 0.5) * 3,
-        (0.5 - y / (size - 1)) * 3,
+        (x / (size - 1) - 0.5) * SVG_WORLD,
+        (0.5 - y / (size - 1)) * SVG_WORLD,
         0,
       );
       // SVG 只當作球心分布模具；局部 2D 內距決定水滴尺寸，使寬區域鼓起、
       // 細部由小滴補足，而不是直接顯示原始向量硬邊。
-      target.radiusHint = clamp(-field[i] * (3 / size) * 0.58, 0.09, 0.24);
-      target.surface = field[i] > -3.0;
+      target.radiusHint = clamp(-field[i] * 0.58, 0.09, 0.24);
+      target.surface = field[i] > -0.056;
       targets.push(target);
     }
     if (!targets.length) throw new Error('SVG 沒有可見的填色區域');
+    // DataTexture 的第一列資料對應 v=0，也就是貼圖下緣；但 mask/field 沿用
+    // canvas 的列序（y=0 是影像上緣）。直接上傳的話，shader 以
+    // uv = p.xy / 3 + 0.5 取樣時會把影像上緣讀成世界下方，成品上下顛倒；
+    // 而上面的 targets 已自行翻轉過 Y，兩者因此互為鏡像 —— 水滴飛向正立的
+    // 錨點，長出來的表面卻是倒的。這裡只為貼圖翻轉列序，讓貼圖與 targets
+    // 一致採用「世界 +Y 朝上」，與 GLB 路徑的 atlas 方向也就一致了。
+    const texField = new Float32Array(size * size);
+    for (let y = 0; y < size; y++) {
+      const src = y * size;
+      const dst = (size - 1 - y) * size;
+      for (let x = 0; x < size; x++) texField[dst + x] = field[src + x];
+    }
     return {
-      texture: encode2D(field, size, size),
+      // 8-bit 只有 256 階，calcNormal 的微分會把量化階梯放大成邊緣鋸齒與
+      // 反射色塊；float 貼圖保留連續距離梯度（GLB 路徑早已如此）。
+      texture: encodeFloat2D(texField, size, size, SVG_RANGE),
       targets,
       cavityTargets: [],
-      grid: 0,
+      // 烘焙解析度。SVG 模式只用它推導盒外 epsilon 與法線微分半徑；
+      // volumeShapeDistance 只在 uShapeType == 2 時呼叫，設值不影響 GLB。
+      grid: size,
       atlas: new THREE.Vector2(1, 1),
     };
   } finally {

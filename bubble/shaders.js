@@ -306,11 +306,13 @@ float microDropletDistance(vec3 p, vec4 sphere, vec4 shape){
 float decodeShape(float v){ return (v - 0.5) * 48.0; }
 float svgShapeDistance(vec3 p){
   vec2 uv = p.xy / 3.0 + 0.5;
-  float edge = decodeShape(texture2D(uShapeTex, uv).r) * (3.0 / 160.0);
+  // SVG 距離場直接以世界單位編碼（範圍 ±1.5，覆蓋整個取樣盒），
+  // 因此解碼與烘焙解析度無關；不再需要「像素距離 × texel」那層換算。
+  float edge = (texture2D(uShapeTex, uv).r - 0.5) * 3.0;
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
     // 包圍盒不是形狀表面；盒外距離不可在盒面回傳 0，否則 ray marcher
     // 會先命中矩形外框，而不是繼續走進 SVG 的真正零等值面。
-    edge = length(max(abs(p.xy) - vec2(1.5), 0.0)) + 3.0 / 160.0;
+    edge = length(max(abs(p.xy) - vec2(1.5), 0.0)) + 3.0 / max(1.0, uShapeGrid);
   }
   float depth = abs(p.z) - uShapeDepth;
   return max(edge, depth) - uShapeSoftness;
@@ -476,7 +478,11 @@ vec3 calcNormal(vec3 p){
   float voxelH = 2.1 / max(1.0, uShapeGrid - 1.0);
   // 80³ 桌面場維持約 64³ 時相同的世界空間法線半徑，細化輪廓時不讓
   // 鏡面反射重新顯出 voxel cell。
-  float shapeH = uShapeType == 2 ? voxelH * 1.70 : 0.014;
+  // SVG 同理：微分半徑若小於一個 texel，bilinear 在單一 texel 內是線性的，
+  // 相鄰像素會取到同一個常數梯度，反射就顯出方格。舊版寫死 0.014，在 160²
+  // 時只有 0.75 個 texel，正是上面註解警告的情形；改為隨 texel 縮放。
+  float svgH = 3.0 / max(1.0, uShapeGrid) * 1.5;
+  float shapeH = uShapeType == 2 ? voxelH * 1.70 : svgH;
   float h = mix(0.0009, shapeH, uShapeProgress);
   return normalize(
     k.xyy * mapScene(p + k.xyy * h) +
