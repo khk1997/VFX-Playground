@@ -185,7 +185,7 @@
     <input type="file" id="shapeInput" accept=".svg,image/svg+xml" hidden>
     <div class="row"><label>匯集時間</label><input type="range" id="gatherDuration" min="0.15" max="0.75" step="0.01" value="0.25"><span class="val" id="gatherDuration_v"></span></div>
     <div class="row"><label>輪廓細節滴</label><input type="range" id="microCount" min="8" max="20" step="1" value="14"><span class="val" id="microCount_v"></span></div>
-    <div class="row"><label>形狀厚度</label><input type="range" id="shapeDepth" min="0.05" max="0.8" step="0.01" value="0.28"><span class="val" id="shapeDepth_v"></span></div>
+    <div class="row"><label>SVG 擠出厚度</label><input type="range" id="shapeDepth" min="0.025" max="1.0" step="0.005" value="0.28"><span class="val" id="shapeDepth_v"></span></div>
     <div class="row"><label>邊緣液化</label><input type="range" id="shapeSoftness" min="0" max="0.25" step="0.005" value="0"><span class="val" id="shapeSoftness_v"></span></div>
     <div class="row"><label>完成停留</label><input type="range" id="shapeHold" min="0.05" max="0.45" step="0.01" value="0.45"><span class="val" id="shapeHold_v"></span></div>
     <div class="note">模型品質會在下一次匯入 GLB 時生效；提高品質主要增加匯入時間與記憶體，每幀 SDF 取樣次數不變。</div>
@@ -297,6 +297,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=svg-shape-3"></script>
+<script type="module" src="./bubble.js?v=svg-shape-5"></script>
 </body>
 </html>
