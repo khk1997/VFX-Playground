@@ -16,7 +16,7 @@ const mobileRenderQuery = window.matchMedia('(max-width: 760px)');
 const DEFAULT_HDRI_URL = new URL('./assets/photo_studio2_london_hall_1k.hdr', import.meta.url).href;
 const DEFAULT_HDRI_LABEL = 'photo_studio2_london_hall_1k.hdr';
 const MAX_DROPS = 12;
-const FORMATION_DEFAULT_COUNT = 6;
+const FORMATION_DEFAULT_COUNT = 1;
 const MAX_MICRO_DROPS = 20;
 const MAX_EDGE_DROPS = 8;
 const MAX_NEGATIVE_DROPS = 4;
@@ -92,9 +92,9 @@ const DEFAULTS = {              // 數值滑桿
   gatherDuration: 0.25,
   shapeDepth: 0.1,
   shapeSoftness: 0,
-  shapeLiquid: 0.65,
-  shapeLiquidPosition: 0,
-  shapeLiquidSize: 1,
+  shapeLiquid: 0.55,
+  shapeLiquidPosition: 2,
+  shapeLiquidSize: 1.5,
   shapeLiquidSpeed: 1,
   shapeHold: 0.45,
   microCount: 14,
