@@ -207,14 +207,13 @@ const fmt = {
   satelliteSize: v => v.toFixed(2),
   satelliteCount: v => v.toFixed(0),
   gatherDuration: v => Math.round(v * 100) + '%',
-  // uShapeDepth 是中心到單側的半厚度；面板顯示使用者真正看到的總擠出厚度。
-  shapeDepth: v => (v * 2).toFixed(2),
+  shapeDepth: v => v.toFixed(2),
   shapeSoftness: v => v.toFixed(3),
   shapeHold: v => Math.round(v * 100) + '%',
   microCount: v => v.toFixed(0),
 };
 
-import { VERT, FRAG } from './shaders.js?v=svg-shape-5';
+import { VERT, FRAG } from './shaders.js?v=svg-shape-3';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -222,12 +221,12 @@ let pmremGenerator = null, pmremTarget = null;
 let inited = false;
 const maxRenderDpr = PREVIEW ? 1 : mobileRenderQuery.matches
   ? Math.min(window.devicePixelRatio || 1, 1.5)
-  : Math.min(window.devicePixelRatio || 1, 1.5);
+  : Math.min(window.devicePixelRatio || 1, 2);
 const minRenderDpr = PREVIEW ? 1 : mobileRenderQuery.matches
   ? Math.min(maxRenderDpr, 1.25)
-  : Math.min(maxRenderDpr, 1);
+  : Math.max(1, maxRenderDpr - 0.25);
 let qualityDpr = maxRenderDpr;
-let qualitySteps = PREVIEW ? 56 : mobileRenderQuery.matches ? 64 : 72;
+let qualitySteps = PREVIEW ? 56 : mobileRenderQuery.matches ? 64 : 88;
 let qualitySampleStarted = performance.now();
 let qualitySampleFrames = 0;
 let qualityLowSamples = 0;
@@ -1256,7 +1255,7 @@ function initGL() {
     uTransmission: { value: P.transmission },
     uMaterialExposure: { value: P.materialExposure },
     uRoughness:  { value: P.roughness },
-    uReflectionSampleCount: { value: 4 },
+    uReflectionSampleCount: { value: mobileRenderQuery.matches ? 4 : 8 },
     uHdriYaw:    { value: P.hdriYaw },
     uHdriPitch:  { value: P.hdriPitch },
     uHdriBlur:   { value: P.hdriBlur },
@@ -1320,7 +1319,7 @@ function refreshRenderQuality() {
 }
 
 function sampleRenderQuality(now) {
-  if (PREVIEW) return;
+  if (PREVIEW || !mobileRenderQuery.matches) return;
   qualitySampleFrames++;
   const elapsed = now - qualitySampleStarted;
   if (elapsed < 2000) return;
@@ -1341,10 +1340,9 @@ function sampleRenderQuality(now) {
   } else if (fps > 55) {
     qualityHighSamples++;
     qualityLowSamples = 0;
-    const targetSteps = mobileRenderQuery.matches ? 64 : 72;
-    if (qualityHighSamples >= 3 && (qualityDpr < maxRenderDpr || qualitySteps < targetSteps)) {
+    if (qualityHighSamples >= 3 && (qualityDpr < maxRenderDpr || qualitySteps < 64)) {
       qualityDpr = maxRenderDpr;
-      qualitySteps = targetSteps;
+      qualitySteps = 64;
       qualityHighSamples = 0;
       refreshRenderQuality();
     }

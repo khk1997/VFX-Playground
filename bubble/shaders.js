@@ -478,11 +478,10 @@ vec3 calcNormal(vec3 p){
   float voxelH = 2.1 / max(1.0, uShapeGrid - 1.0);
   // 80³ 桌面場維持約 64³ 時相同的世界空間法線半徑，細化輪廓時不讓
   // 鏡面反射重新顯出 voxel cell。
-  // SVG 同理：微分半徑若太接近一個 texel，bilinear 的分段梯度會被高光放大；
-  // 低解析度時隨 texel 放大，高解析度時仍保留足夠的世界空間平滑半徑。
-  // 512² 場的 1.5 texel 只有 0.0088 世界單位，會把 EDT/降採樣殘留的細微
-  // 分段重新帶進鏡面法線。至少跨越舊版已驗證平滑的 0.014，再隨低解析度放大。
-  float svgH = max(0.014, 3.0 / max(1.0, uShapeGrid) * 1.5);
+  // SVG 同理：微分半徑若小於一個 texel，bilinear 在單一 texel 內是線性的，
+  // 相鄰像素會取到同一個常數梯度，反射就顯出方格。舊版寫死 0.014，在 160²
+  // 時只有 0.75 個 texel，正是上面註解警告的情形；改為隨 texel 縮放。
+  float svgH = 3.0 / max(1.0, uShapeGrid) * 1.5;
   float shapeH = uShapeType == 2 ? voxelH * 1.70 : svgH;
   float h = mix(0.0009, shapeH, uShapeProgress);
   return normalize(
@@ -714,33 +713,15 @@ void main(){
 
   float t = max(0.0, -qb - qh);
   bool hit = false;
-  bool silhouetteHit = false;
-  float silhouetteCoverage = 1.0;
-  float closestRatio = 1e9;
-  float closestT = t;
   for (int i = 0; i < 88; i++){
     if (i >= uMaxSteps) break;
     vec3 p = ro + rd * t;
     float d = mapScene(p);
-    // 射線在深度 t 時覆蓋的世界空間像素半徑。記錄最近擦過表面的射線，
-    // 讓未真正命中、但落在一個像素內的輪廓像素取得部分 coverage。
-    float pixelRadius = max(0.0008, t * uTanHalfFov * 2.0 / uResolution.y);
-    float ratio = max(d, 0.0) / pixelRadius;
-    if (ratio < closestRatio) {
-      closestRatio = ratio;
-      closestT = t;
-    }
     if (d < 0.0008){ hit = true; break; }
     t += d * 0.85;               // wobble 讓場非嚴格 Lipschitz → 縮步保險
     if (t > tEnd) break;
   }
 
-  if (!hit && closestRatio < 1.0) {
-    hit = true;
-    silhouetteHit = true;
-    t = closestT;
-    silhouetteCoverage = 1.0 - smoothstep(0.15, 1.0, closestRatio);
-  }
   if (!hit){ gl_FragColor = bg; return; }
 
   vec3 p = ro + rd * t;
@@ -1116,9 +1097,6 @@ void main(){
     // alpha，透明邊緣就會出現黑邊。輸出前反預乘，超採樣時仍由 Canvas
     // 以正確的 premultiplied coverage 做縮圖。
     finalColor = clamp(finalColor / max(outputAlpha, 0.001), 0.0, 1.0);
-    outputAlpha *= silhouetteCoverage;
-  } else if (silhouetteHit) {
-    finalColor = mix(bg.rgb, finalColor, silhouetteCoverage);
   }
   gl_FragColor = vec4(finalColor, outputAlpha);
 }
