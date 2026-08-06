@@ -107,6 +107,7 @@ const SELECT_DEFAULTS = {
   shapeQuality: 'balanced',
 };
 const TOGGLE_DEFAULTS = {
+  edgeDropsEnabled: true,
   filmEnabled: false,
   dispersionEnabled: true,
   realDispersionEnabled: false,
@@ -145,12 +146,22 @@ const COLORS = {
 const SPECTRAL_CAUSTIC_DEFAULTS = [
   '#52e6fc', '#40b3f9', '#3aa3e3', '#3fabf9', '#4dd8fb', '#3ba6f9', '#52e6fc',
 ];
+// 值為 uniform 名稱（直接寫 0/1），或一個套用函式 —— 輪廓液滴的開關不是
+// 布林 uniform，而是把 uEdgeDropCount 歸零，這樣關閉液滴時仍保留邊緣圓角
+// （圓角由 uShapeLiquid 控制，見 svgShapeDistance 的 smin 半徑）。
 const TOGGLES = {
   filmEnabled: 'uFilmEnabled',
   dispersionEnabled: 'uDispersionEnabled',
   realDispersionEnabled: 'uRealDispersionEnabled',
   spectralCausticEnabled: 'uSpectralCausticEnabled',
+  edgeDropsEnabled: () => applyEdgeDropDistribution(),
 };
+
+function applyToggle(key) {
+  const target = TOGGLES[key];
+  if (typeof target === 'function') target();
+  else if (uniforms && uniforms[target]) uniforms[target].value = P[key] ? 1 : 0;
+}
 
 const fmt = {
   thickness: v => v.toFixed(0) + 'nm',
@@ -310,7 +321,9 @@ function applyEdgeDropDistribution(index = P.shapeLiquidPosition) {
       travel: drop.travel || 0,
     });
   }
-  if (uniforms) uniforms.uEdgeDropCount.value = activeEdgeDrops.length;
+  if (uniforms) {
+    uniforms.uEdgeDropCount.value = P.edgeDropsEnabled ? activeEdgeDrops.length : 0;
+  }
   syncEdgeDropMotion(uniforms ? uniforms.uTime.value : 0);
 }
 
@@ -1488,9 +1501,7 @@ function syncPanelToUniforms() {
     const u = uniforms[SELECTS[key].uniform];
     if (u) u.value = SELECTS[key].map[P[key]];
   }
-  for (const key of Object.keys(TOGGLES)) {
-    uniforms[TOGGLES[key]].value = P[key] ? 1 : 0;
-  }
+  for (const key of Object.keys(TOGGLES)) applyToggle(key);
   for (const key of Object.keys(COLORS)) uniforms[COLORS[key]].value.set(P[key]);
   document.body.style.background = (P.bgMode === 'hdri') ? '#000' : P.bgColor;
 }
@@ -1547,7 +1558,7 @@ function bindControls() {
     const update = () => {
       P[key] = el.checked;
       if (valEl) valEl.textContent = P[key] ? '開啟' : '關閉';
-      if (uniforms) uniforms[TOGGLES[key]].value = P[key] ? 1 : 0;
+      applyToggle(key);
       updateUIState();
     };
     el.checked = P[key];
@@ -1640,7 +1651,11 @@ function updateUIState() {
     group.classList.toggle('is-disabled', !enabled);
     // 這裡管理的區塊都自帶主開關，一律套用「只反灰內容、開關保持清晰」的樣式
     group.classList.add('featureGroup');
-    group.querySelectorAll('.row:not(.toggleRow) input, .row:not(.toggleRow) select, .row:not(.toggleRow) button')
+    // .keepEnabled 的控制項不受主開關影響（見 bubble.css 的同名說明）
+    group.querySelectorAll(
+      '.row:not(.toggleRow):not(.keepEnabled) input,'
+      + ' .row:not(.toggleRow):not(.keepEnabled) select,'
+      + ' .row:not(.toggleRow):not(.keepEnabled) button')
       .forEach(el => { el.disabled = !enabled; });
     group.querySelectorAll('.effectBlock input, .effectBlock select, .effectBlock button')
       .forEach(el => {
@@ -1667,10 +1682,20 @@ function updateUIState() {
   const formationGroup = document.getElementById('formationGroup');
   formationGroup.style.opacity = forming ? 1 : 0.38;
   formationGroup.querySelectorAll('input, select, button').forEach(el => { el.disabled = !forming; });
+  // 輪廓液滴有兩層閘門：外層是模式（只有 SVG 擠出的 formation 用得到），
+  // 內層是自己的主開關。主開關關閉時只停掉會移動的液滴，「邊緣水滴」因為同時
+  // 決定擠出邊緣的圓角，標了 .keepEnabled 而保持可用 —— 這樣才做得出
+  // 「圓角擠出但沒有液滴」。
   const edgeDropGroup = document.getElementById('edgeDropGroup');
-  edgeDropGroup.style.opacity = forming && P.shapeSource === 'svg' ? 1 : 0.38;
+  const edgeDropUsable = forming && P.shapeSource === 'svg';
+  edgeDropGroup.style.opacity = edgeDropUsable ? 1 : 0.38;
+  edgeDropGroup.classList.add('featureGroup');
+  edgeDropGroup.classList.toggle('is-disabled', edgeDropUsable && !P.edgeDropsEnabled);
   edgeDropGroup.querySelectorAll('input').forEach(el => {
-    el.disabled = !(forming && P.shapeSource === 'svg');
+    const row = el.closest('.row');
+    const survivesToggle = !!row && (row.classList.contains('keepEnabled')
+      || row.classList.contains('toggleRow'));
+    el.disabled = !edgeDropUsable || (!P.edgeDropsEnabled && !survivesToggle);
   });
   const isSvg = P.shapeSource === 'svg';
   const shapeBtn = document.getElementById('shapeBtn');

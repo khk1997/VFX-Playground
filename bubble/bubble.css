@@ -92,8 +92,10 @@
   /* 擁有主開關的區塊（薄膜、三種色散）：關閉時只反灰受它控制的參數，
      主開關那行與區塊標題維持正常亮度，使用者才看得清楚要從哪裡打開。
      巢狀的 .effectBlock 交給它自己的 is-disabled 處理，排除以免疊加後過暗。 */
+  /* .keepEnabled 標記「主開關關閉後仍然有效」的控制項：例如輪廓液滴的
+     「邊緣水滴」同時控制擠出邊緣的圓角，關掉液滴後仍需可調。 */
   .featureGroup.is-disabled { opacity: 1; filter: none; }
-  .featureGroup.is-disabled > :not(.toggleRow):not(.effectTitle):not(h3):not(.effectBlock) {
+  .featureGroup.is-disabled > :not(.toggleRow):not(.effectTitle):not(h3):not(.effectBlock):not(.keepEnabled) {
     opacity: .38;
     filter: saturate(.35);
   }
