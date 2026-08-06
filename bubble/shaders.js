@@ -306,13 +306,16 @@ float microDropletDistance(vec3 p, vec4 sphere, vec4 shape){
 float decodeShape(float v){ return (v - 0.5) * 48.0; }
 float svgShapeDistance(vec3 p){
   vec2 uv = p.xy / 3.0 + 0.5;
+  vec2 safeUv = clamp(uv, vec2(0.0), vec2(1.0));
   // SVG 距離場直接以世界單位編碼（範圍 ±1.5，覆蓋整個取樣盒），
   // 因此解碼與烘焙解析度無關；不再需要「像素距離 × texel」那層換算。
-  float edge = (texture2D(uShapeTex, uv).r - 0.5) * 3.0;
+  float edge = (texture2D(uShapeTex, safeUv).r - 0.5) * 3.0;
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
-    // 包圍盒不是形狀表面；盒外距離不可在盒面回傳 0，否則 ray marcher
-    // 會先命中矩形外框，而不是繼續走進 SVG 的真正零等值面。
-    edge = length(max(abs(p.xy) - vec2(1.5), 0.0)) + 3.0 / max(1.0, uShapeGrid);
+    // 延續貼圖邊界上的真實正距離，再加上離開取樣盒的距離。舊版在盒外
+    // 把 edge 重設成約一個 texel；uShapeSoftness 比它大時，減去 softness
+    // 會令整個方形取樣盒外圍變成負距離實體，形成偶發的矩形「邊框」。
+    // SVG 烘焙時已有透明 padding，因此邊界樣本應保持在形狀外部。
+    edge += length((uv - safeUv) * 3.0);
   }
   float depth = abs(p.z) - uShapeDepth;
   return max(edge, depth) - uShapeSoftness;

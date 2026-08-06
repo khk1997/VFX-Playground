@@ -1,6 +1,6 @@
 'use strict';
 import * as THREE from 'three';
-import { svgToField, gltfToField } from './shape-field.js?v=svg-shape-3';
+import { svgToField, gltfToField } from './shape-field.js?v=svg-shape-4';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -213,7 +213,7 @@ const fmt = {
   microCount: v => v.toFixed(0),
 };
 
-import { VERT, FRAG } from './shaders.js?v=svg-shape-3';
+import { VERT, FRAG } from './shaders.js?v=svg-shape-4';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
