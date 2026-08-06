@@ -231,9 +231,10 @@ let inited = false;
 const maxRenderDpr = PREVIEW ? 1 : mobileRenderQuery.matches
   ? Math.min(window.devicePixelRatio || 1, 1.5)
   : Math.min(window.devicePixelRatio || 1, 2);
-const minRenderDpr = PREVIEW ? 1 : mobileRenderQuery.matches
-  ? Math.min(maxRenderDpr, 1.25)
-  : Math.max(1, maxRenderDpr - 0.25);
+// 拖曳時的解析度。fragment 成本與像素面積成線性（實測 1/12 像素 → 1/8.5 幀時），
+// 所以這個下限是互動流暢度最大的單一槓桿：舊版桌面只從 2.0 降到 1.75，像素僅少
+// 23%；降到 1.25 後只剩 39%。放手後會立刻回到 maxRenderDpr。
+const minRenderDpr = PREVIEW ? 1 : Math.min(maxRenderDpr, 1.25);
 let qualityDpr = maxRenderDpr;
 let qualitySteps = PREVIEW ? 56 : mobileRenderQuery.matches ? 64 : 88;
 let qualitySampleStarted = performance.now();
@@ -271,8 +272,12 @@ let shapeTargets = [];
 let formationAnchors = [];
 let microFormationAnchors = [];
 let negativeFormationAnchors = [];
+const TAU = Math.PI * 2;
+// shader 用的兩組 uniform 每幀重算（syncEdgeDropMotion）；activeEdgeDrops 保存
+// 它們的靜態來源資料（輪廓位置、切線、相位），切換分佈時才更新。
 const edgeDropData = Array.from({ length: MAX_EDGE_DROPS }, () => new THREE.Vector4());
 const edgeMotionData = Array.from({ length: MAX_EDGE_DROPS }, () => new THREE.Vector4());
+const activeEdgeDrops = [];
 const microDropData = new Float32Array(MAX_MICRO_DROPS * 4);
 const microShapeData = new Float32Array(MAX_MICRO_DROPS * 4);
 const negativeDropData = new Float32Array(MAX_NEGATIVE_DROPS * 4);
@@ -285,14 +290,57 @@ function applyEdgeDropDistribution(index = P.shapeLiquidPosition) {
   const selected = sets.length
     ? sets[Math.max(0, Math.min(sets.length - 1, Math.round(index)))]
     : (shapeField?.edgeDrops || []);
+  activeEdgeDrops.length = 0;
   for (let i = 0; i < MAX_EDGE_DROPS; i++) {
     const drop = selected[i];
-    edgeDropData[i].set(drop?.x || 0, drop?.y || 0, drop?.radius || 0, drop?.phase || 0);
-    edgeMotionData[i].set(
-      drop?.tangentX || 1, drop?.tangentY || 0, drop?.speed || 1, drop?.travel || 0,
-    );
+    if (!drop) break;
+    // 切線在這裡就正規化一次，shader 端不必每步再做一次 normalize。
+    // 沿用 shader 原本的 1e-5 偏置，讓兩者在退化（零長度）切線上也完全一致。
+    const tx = (drop.tangentX || 1) + 0.00001;
+    const ty = (drop.tangentY || 0) + 0.00001;
+    const len = Math.hypot(tx, ty) || 1;
+    activeEdgeDrops.push({
+      x: drop.x || 0,
+      y: drop.y || 0,
+      radius: drop.radius || 0,
+      phase: drop.phase || 0,
+      tangentX: tx / len,
+      tangentY: ty / len,
+      speed: drop.speed || 1,
+      travel: drop.travel || 0,
+    });
   }
-  if (uniforms) uniforms.uEdgeDropCount.value = Math.min(MAX_EDGE_DROPS, selected.length);
+  if (uniforms) uniforms.uEdgeDropCount.value = activeEdgeDrops.length;
+  syncEdgeDropMotion(uniforms ? uniforms.uTime.value : 0);
+}
+
+/*
+ * 邊緣水滴的本幀位置、脈動半徑與融合半徑全部與著色點無關，卻曾經在 shader 裡
+ * 每一次 mapScene、每一顆水滴重算一次（每像素最多 124 次 mapScene × 8 顆
+ * × 3 個 sin）。這裡每幀算一次，打包成 shader 直接可用的形式。
+ */
+function syncEdgeDropMotion(time) {
+  if (!uniforms) return;
+  // 讀 uniform 而非 P：輸出時的 LOD 覆寫也才會被一併尊重。
+  const liquid = uniforms.uShapeLiquid.value;
+  const size = uniforms.uShapeLiquidSize.value;
+  const speed = uniforms.uShapeLiquidSpeed.value;
+  const loopPhase = TAU * time / Math.max(uniforms.uLoopDuration.value, 0.001);
+  for (let i = 0; i < activeEdgeDrops.length; i++) {
+    const drop = activeEdgeDrops[i];
+    const phase = loopPhase * drop.speed * speed + drop.phase * TAU;
+    // 主位移沿輪廓切線；微小二次諧波讓速度不會像機械式往返。
+    const travel = (Math.sin(phase) + Math.sin(phase * 2 + 1.7) * 0.16) * drop.travel;
+    const radius = drop.radius * size;
+    const pulse = 1 + Math.sin(phase - 0.9) * 0.08;
+    edgeDropData[i].set(
+      drop.x + drop.tangentX * travel * size,
+      drop.y + drop.tangentY * travel * size,
+      radius * pulse,
+      radius * (0.48 + liquid * 0.16),
+    );
+    edgeMotionData[i].set(drop.tangentX, drop.tangentY, (1 - liquid) * radius * 1.35, 0);
+  }
 }
 
 const fract = x => x - Math.floor(x);
@@ -1339,15 +1387,23 @@ function resize() {
   uniforms.uResolution.value.set(w, h);
 }
 
+// 每一幀的步數上限。舊版在 refreshRenderQuality 裡也算過一份，但那份每幀都被
+// frame() 覆寫掉，等於死碼；而 frame() 的 formation 分支又漏看了 dragging，
+// 於是 Formation 模式拖曳時完全沒有降級。現在只有這一個決策點。
+function resolveMaxSteps() {
+  // 多水滴 + 形狀場會增加每一步的取樣成本；60 步仍足以覆蓋保守包圍球，
+  // 並避免高 DPR 桌面在 Formation 模式失去即時預覽能力。
+  if (P.motion === 'formation') return Math.min(qualitySteps, dragging ? 48 : 60);
+  return dragging ? Math.min(qualitySteps, 56) : qualitySteps;
+}
+
 function refreshRenderQuality() {
   if (!renderer || !uniforms) return;
   const interactionDpr = dragging ? Math.min(qualityDpr, minRenderDpr) : qualityDpr;
-  const interactionSteps = dragging ? Math.min(qualitySteps, 56) : qualitySteps;
   if (Math.abs(renderer.getPixelRatio() - interactionDpr) > 0.01) {
     renderer.setPixelRatio(interactionDpr);
     resize();
   }
-  uniforms.uMaxSteps.value = interactionSteps;
 }
 
 function sampleRenderQuality(now) {
@@ -2031,6 +2087,7 @@ function applyExportCamera(time, width, height, fov, scale, settings = null) {
   uniforms.uTanHalfFov.value = Math.tan(Math.max(10, Math.min(120, fov)) * Math.PI / 360);
   uniforms.uResolution.value.set(width, height);
   uniforms.uTime.value = time;
+  syncEdgeDropMotion(time);
   uniforms.uMaxSteps.value = 88;
 }
 
@@ -2340,11 +2397,8 @@ function frame(now) {
     ? Math.tan(Math.max(10, Math.min(120, Number(exportPreviewSettings.fov) || 42)) * Math.PI / 360)
     : 0.42;
   uniforms.uTime.value = simT;
-  // 多水滴 + 形狀場會增加每一步的取樣成本；64 步仍足以覆蓋保守包圍球，
-  // 並避免高 DPR 桌面在 Formation 模式失去即時預覽能力。
-  uniforms.uMaxSteps.value = P.motion === 'formation'
-    ? Math.min(qualitySteps, 60)
-    : (dragging ? Math.min(qualitySteps, 56) : qualitySteps);
+  syncEdgeDropMotion(simT);
+  uniforms.uMaxSteps.value = resolveMaxSteps();
   renderer.render(scene, camera);
   updateExportCameraPreview();
 }
