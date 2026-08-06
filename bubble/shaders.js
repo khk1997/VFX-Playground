@@ -310,13 +310,41 @@ float microDropletDistance(vec3 p, vec4 sphere, vec4 shape){
 }
 
 float decodeShape(float v){ return (v - 0.5) * 48.0; }
+// 硬體雙線性只有 C0 連續：梯度在每條 texel 邊界跳一次，格內近似常數。
+// 擠出側壁的法線完全等於這個 xy 梯度，而 edge 不隨 z 變化，於是每格 texel
+// 的固定法線會沿整個厚度重複，形成貫穿擠出深度的條紋（掠射角還會把 texel
+// 網格橫向放大數十倍）。三次 B-spline 的梯度連續，且能精確重現線性函數 ——
+// 距離場在局部本來就近似線性，所以輪廓不會被磨圓，只有高曲率處略微收斂。
+// 以 4 次雙線性取樣合成 16 taps 的權重（Sigg & Hadwiger 的快速三階濾波）。
+float sampleShapeField(vec2 uv){
+  float n = max(uShapeGrid, 1.0);
+  vec2 texSize = vec2(n);
+  vec2 coord = uv * texSize - 0.5;
+  vec2 base = floor(coord);
+  vec2 f = coord - base;
+  vec2 f2 = f * f;
+  vec2 f3 = f2 * f;
+  vec2 w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0;
+  vec2 w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+  vec2 w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0;
+  vec2 w3 = f3 / 6.0;
+  vec2 s0 = w0 + w1;
+  vec2 s1 = w2 + w3;
+  // 每一對相鄰 texel 用一次雙線性取樣代替，取樣點偏移由該對的權重比決定。
+  vec2 uv0 = (base + 0.5 + w1 / s0 - 1.0) / texSize;
+  vec2 uv1 = (base + 0.5 + w3 / s1 + 1.0) / texSize;
+  float a = texture2D(uShapeTex, vec2(uv0.x, uv0.y)).r;
+  float b = texture2D(uShapeTex, vec2(uv1.x, uv0.y)).r;
+  float c = texture2D(uShapeTex, vec2(uv0.x, uv1.y)).r;
+  float d = texture2D(uShapeTex, vec2(uv1.x, uv1.y)).r;
+  return mix(mix(a, b, s1.x), mix(c, d, s1.x), s1.y);
+}
 float svgShapeDistance(vec3 p){
   vec2 uv = p.xy / 3.0 + 0.5;
   vec2 safeUv = clamp(uv, vec2(0.0), vec2(1.0));
-  vec4 shapeSample = texture2D(uShapeTex, safeUv);
   // SVG 距離場直接以世界單位編碼（範圍 ±1.5，覆蓋整個取樣盒），
   // 因此解碼與烘焙解析度無關；不再需要「像素距離 × texel」那層換算。
-  float edge = (shapeSample.r - 0.5) * 3.0;
+  float edge = (sampleShapeField(safeUv) - 0.5) * 3.0;
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
     // 延續貼圖邊界上的真實正距離，再加上離開取樣盒的距離。舊版在盒外
     // 把 edge 重設成約一個 texel；uShapeSoftness 比它大時，減去 softness
