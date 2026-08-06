@@ -1,6 +1,6 @@
 'use strict';
 import * as THREE from 'three';
-import { svgToField, gltfToField } from './shape-field.js?v=svg-shape-4';
+import { svgToField, gltfToField } from './shape-field.js?v=svg-shape-8';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -18,6 +18,7 @@ const DEFAULT_HDRI_LABEL = 'photo_studio2_london_hall_1k.hdr';
 const MAX_DROPS = 12;
 const FORMATION_DEFAULT_COUNT = 6;
 const MAX_MICRO_DROPS = 20;
+const MAX_EDGE_DROPS = 8;
 const MAX_NEGATIVE_DROPS = 4;
 
 /* ===== 參數 ===== */
@@ -89,8 +90,12 @@ const DEFAULTS = {              // 數值滑桿
   // 較快匯聚 + 較長停留：成形後的定格時間由 2.6 秒拉到 5.4 秒（12 秒循環），
   // 讓形狀本身而不是散開過程佔據大部分畫面。
   gatherDuration: 0.25,
-  shapeDepth: 0.28,
+  shapeDepth: 0.1,
   shapeSoftness: 0,
+  shapeLiquid: 0.65,
+  shapeLiquidPosition: 0,
+  shapeLiquidSize: 1,
+  shapeLiquidSpeed: 1,
   shapeHold: 0.45,
   microCount: 14,
 };
@@ -209,11 +214,15 @@ const fmt = {
   gatherDuration: v => Math.round(v * 100) + '%',
   shapeDepth: v => v.toFixed(2),
   shapeSoftness: v => v.toFixed(3),
+  shapeLiquid: v => Math.round(v * 100) + '%',
+  shapeLiquidPosition: v => `分佈 ${Math.round(v) + 1}`,
+  shapeLiquidSize: v => 'x' + v.toFixed(2),
+  shapeLiquidSpeed: v => v === 0 ? '停止' : 'x' + v.toFixed(0),
   shapeHold: v => Math.round(v * 100) + '%',
   microCount: v => v.toFixed(0),
 };
 
-import { VERT, FRAG } from './shaders.js?v=svg-shape-4';
+import { VERT, FRAG } from './shaders.js?v=svg-shape-8';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -262,12 +271,29 @@ let shapeTargets = [];
 let formationAnchors = [];
 let microFormationAnchors = [];
 let negativeFormationAnchors = [];
+const edgeDropData = Array.from({ length: MAX_EDGE_DROPS }, () => new THREE.Vector4());
+const edgeMotionData = Array.from({ length: MAX_EDGE_DROPS }, () => new THREE.Vector4());
 const microDropData = new Float32Array(MAX_MICRO_DROPS * 4);
 const microShapeData = new Float32Array(MAX_MICRO_DROPS * 4);
 const negativeDropData = new Float32Array(MAX_NEGATIVE_DROPS * 4);
 let microDropTexture = null;
 let microShapeTexture = null;
 let negativeDropTexture = null;
+
+function applyEdgeDropDistribution(index = P.shapeLiquidPosition) {
+  const sets = shapeField?.edgeDropSets || [];
+  const selected = sets.length
+    ? sets[Math.max(0, Math.min(sets.length - 1, Math.round(index)))]
+    : (shapeField?.edgeDrops || []);
+  for (let i = 0; i < MAX_EDGE_DROPS; i++) {
+    const drop = selected[i];
+    edgeDropData[i].set(drop?.x || 0, drop?.y || 0, drop?.radius || 0, drop?.phase || 0);
+    edgeMotionData[i].set(
+      drop?.tangentX || 1, drop?.tangentY || 0, drop?.speed || 1, drop?.travel || 0,
+    );
+  }
+  if (uniforms) uniforms.uEdgeDropCount.value = Math.min(MAX_EDGE_DROPS, selected.length);
+}
 
 const fract = x => x - Math.floor(x);
 const hash11CPU = n => fract(Math.sin(n * 127.1) * 43758.5453123);
@@ -1267,6 +1293,12 @@ function initGL() {
     uFidelityAbsorb: { value: 0 },
     uShapeDepth: { value: P.shapeDepth },
     uShapeSoftness: { value: P.shapeSoftness },
+    uShapeLiquid: { value: P.shapeLiquid },
+    uShapeLiquidSize: { value: P.shapeLiquidSize },
+    uShapeLiquidSpeed: { value: P.shapeLiquidSpeed },
+    uEdgeDropCount: { value: 0 },
+    uEdgeDrops: { value: edgeDropData },
+    uEdgeMotion: { value: edgeMotionData },
     uShapeTex: { value: makeBlankShape() },
     uShapeGrid: { value: 0 },
     uShapeAtlas: { value: new THREE.Vector2(1, 1) },
@@ -1418,6 +1450,7 @@ function bindControls() {
       if (key === 'cameraRotationX') rot.x = P[key] * Math.PI / 180;
       if (key === 'cameraRotationY') rot.y = P[key] * Math.PI / 180;
       if (key === 'count') motionCounts[P.motion] = Math.round(P[key]);
+      if (key === 'shapeLiquidPosition') applyEdgeDropDistribution(P[key]);
       if (valEl) valEl.textContent = (fmt[key] || (v => +v.toFixed(2)))(P[key]);
       if (uniforms && uniforms[uName]) uniforms[uName].value = (key === 'count') ? Math.round(P[key]) : P[key];
     };
@@ -1578,6 +1611,11 @@ function updateUIState() {
   const formationGroup = document.getElementById('formationGroup');
   formationGroup.style.opacity = forming ? 1 : 0.38;
   formationGroup.querySelectorAll('input, select, button').forEach(el => { el.disabled = !forming; });
+  const edgeDropGroup = document.getElementById('edgeDropGroup');
+  edgeDropGroup.style.opacity = forming && P.shapeSource === 'svg' ? 1 : 0.38;
+  edgeDropGroup.querySelectorAll('input').forEach(el => {
+    el.disabled = !(forming && P.shapeSource === 'svg');
+  });
   const isSvg = P.shapeSource === 'svg';
   const shapeBtn = document.getElementById('shapeBtn');
   const shapeInput = document.getElementById('shapeInput');
@@ -1601,6 +1639,20 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   resetRamp();
   bindControls();
   if (inited) loadDefaultEnvironment();
+});
+
+// 離開效果頁後，下一次從首頁進入應從乾淨的預設狀態開始；
+// 手動匯出／匯入的 JSON 不受影響，只清除 PresetIO 的自動保存快照。
+const homeButton = document.getElementById('homeBtn');
+const clearAutoSavedPreset = () => {
+  try { localStorage.removeItem('vfx:prism-drops:last'); } catch (_) {}
+};
+homeButton?.addEventListener('click', clearAutoSavedPreset);
+window.addEventListener('pageshow', event => {
+  if (event.persisted) {
+    clearAutoSavedPreset();
+    document.getElementById('resetBtn')?.click();
+  }
 });
 
 /* ===== HDRI 載入（動態 import，離線也不會弄壞主程式）===== */
@@ -1743,6 +1795,7 @@ async function importShapeFile(file, kind, rebuilding = false) {
       next.cavityTargets || [],
       MAX_NEGATIVE_DROPS,
     );
+    applyEdgeDropDistribution(P.shapeLiquidPosition);
     uniforms.uShapeTex.value = next.texture;
     uniforms.uShapeGrid.value = next.grid;
     uniforms.uShapeAtlas.value.copy(next.atlas);

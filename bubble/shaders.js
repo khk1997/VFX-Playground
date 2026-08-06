@@ -104,6 +104,12 @@ uniform float uShapeProgress;
 uniform float uFidelityAbsorb;
 uniform float uShapeDepth;
 uniform float uShapeSoftness;
+uniform float uShapeLiquid;
+uniform float uShapeLiquidSize;
+uniform float uShapeLiquidSpeed;
+uniform int   uEdgeDropCount;
+uniform vec4  uEdgeDrops[8];   // xy：中心，z：半徑，w：循環相位
+uniform vec4  uEdgeMotion[8];  // xy：輪廓切線，z：整數速度，w：移動距離
 uniform sampler2D uShapeTex;
 uniform float uShapeGrid;
 uniform vec2  uShapeAtlas;
@@ -307,9 +313,10 @@ float decodeShape(float v){ return (v - 0.5) * 48.0; }
 float svgShapeDistance(vec3 p){
   vec2 uv = p.xy / 3.0 + 0.5;
   vec2 safeUv = clamp(uv, vec2(0.0), vec2(1.0));
+  vec4 shapeSample = texture2D(uShapeTex, safeUv);
   // SVG 距離場直接以世界單位編碼（範圍 ±1.5，覆蓋整個取樣盒），
   // 因此解碼與烘焙解析度無關；不再需要「像素距離 × texel」那層換算。
-  float edge = (texture2D(uShapeTex, safeUv).r - 0.5) * 3.0;
+  float edge = (shapeSample.r - 0.5) * 3.0;
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
     // 延續貼圖邊界上的真實正距離，再加上離開取樣盒的距離。舊版在盒外
     // 把 edge 重設成約一個 texel；uShapeSoftness 比它大時，減去 softness
@@ -318,7 +325,36 @@ float svgShapeDistance(vec3 p){
     edge += length((uv - safeUv) * 3.0);
   }
   float depth = abs(p.z) - uShapeDepth;
-  return max(edge, depth) - uShapeSoftness;
+  // smooth-max 只圓化正面與側壁交界；液滴關閉時完全退回原始硬擠出。
+  float rounded = -smin(-edge, -depth, uShapeLiquid * 0.045);
+  float result = rounded;
+  if (uShapeLiquid > 0.001) {
+    float loopPhase = TAU * uTime / max(uLoopDuration, 0.001);
+    for (int i = 0; i < 8; i++) {
+      if (i >= uEdgeDropCount) break;
+      vec4 drop = uEdgeDrops[i];
+      vec4 motion = uEdgeMotion[i];
+      float phase = loopPhase * motion.z * uShapeLiquidSpeed + drop.w * TAU;
+      // 主位移沿輪廓切線；微小二次諧波讓速度不會像機械式往返。
+      float travel = (sin(phase) + sin(phase * 2.0 + 1.7) * 0.16) * motion.w;
+      float radius = drop.z * uShapeLiquidSize;
+      vec2 tangent = normalize(motion.xy + vec2(0.00001));
+      vec2 center = drop.xy + tangent * travel * uShapeLiquidSize;
+      float pulse = 1.0 + sin(phase - 0.9) * 0.08;
+      vec2 local = p.xy - center;
+      vec2 normal = vec2(-tangent.y, tangent.x);
+      // 沿移動方向略拉長、法向與厚度方向較扁，呈現滑動中的液滴而非圓珠。
+      vec3 q = vec3(
+        dot(local, tangent) / 1.28,
+        dot(local, normal) / 0.92,
+        p.z / 0.86
+      );
+      float movingDrop = length(q) - radius * pulse;
+      movingDrop += (1.0 - uShapeLiquid) * radius * 1.35;
+      result = smin(result, movingDrop, radius * (0.48 + uShapeLiquid * 0.16));
+    }
+  }
+  return result - uShapeSoftness;
 }
 float atlasVoxel(vec3 cell){
   float n = uShapeGrid;

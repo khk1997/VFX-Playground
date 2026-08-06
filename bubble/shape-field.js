@@ -243,6 +243,63 @@ function encodeFloat2D(field, w, h, range = 24) {
   return tex;
 }
 
+function selectSvgEdgeDroplets(field, size, seedText) {
+  let seed = 2166136261;
+  for (let i = 0; i < seedText.length; i++) {
+    seed ^= seedText.charCodeAt(i);
+    seed = Math.imul(seed, 16777619);
+  }
+  const random = () => {
+    seed += 0x6D2B79F5;
+    let t = seed;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const texel = SVG_WORLD / Math.max(1, size - 1);
+  const candidates = [];
+  for (let y = 2; y < size - 2; y += 2) for (let x = 2; x < size - 2; x += 2) {
+    const i = x + y * size;
+    if (Math.abs(field[i]) <= texel * 1.4) candidates.push({ x, y });
+  }
+  for (let i = candidates.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+  }
+
+  const drops = [];
+  const desired = Math.min(8, Math.max(6, Math.round(candidates.length / 100)));
+  for (const candidate of candidates) {
+    const radius = 0.085 + random() * 0.065;
+    const gx = field[candidate.x + 1 + candidate.y * size]
+      - field[candidate.x - 1 + candidate.y * size];
+    const gy = field[candidate.x + (candidate.y + 1) * size]
+      - field[candidate.x + (candidate.y - 1) * size];
+    const gl = Math.hypot(gx, gy) || 1;
+    // 大部分球體埋入 Logo，只保留一個柔軟鼓包；避免像珠子黏在表面。
+    const cx = candidate.x - gx / gl * radius * 0.46 / texel;
+    const cy = candidate.y - gy / gl * radius * 0.46 / texel;
+    const separated = drops.every(drop =>
+      Math.hypot((cx - drop.x) * texel, (cy - drop.y) * texel)
+        > (radius + drop.radius) * 1.65);
+    if (!separated) continue;
+    const normalX = gx / gl;
+    const normalY = -gy / gl;
+    drops.push({
+      x: (cx / (size - 1) - 0.5) * SVG_WORLD,
+      y: (0.5 - cy / (size - 1)) * SVG_WORLD,
+      radius,
+      phase: random(),
+      tangentX: -normalY,
+      tangentY: normalX,
+      speed: random() < 0.72 ? 1 : 2,
+      travel: radius * (0.38 + random() * 0.24),
+    });
+    if (drops.length >= desired) break;
+  }
+  return drops;
+}
+
 const SVG_WORLD = 3;
 // 距離場以世界單位編碼，範圍剛好覆蓋整個取樣盒（|x|,|y| ≤ 1.5）。
 // 舊版存的是「像素距離 + range 24」，一旦提高解析度，可表示範圍會跟著縮小
@@ -311,6 +368,10 @@ export async function svgToField(file, { size = 512, supersample = 3 } = {}) {
       }
     }
 
+    // 預先建立多組可重現的輪廓亂數分佈。UI 切換時只換 uniform 資料，
+    // 不必重新計算 SVG 距離場，也不會在拖動控制時卡住。
+    const edgeDropSets = Array.from({ length: 8 }, (_, i) =>
+      selectSvgEdgeDroplets(field, size, `${text}\nedge-distribution:${i}`));
     const targets = [];
     // 以固定的世界空間密度取樣，讓候選點數不隨解析度暴增
     // （160² 的雜湊步長換算後約等於 5px 網格；此處沿用同樣的世界間距）。
@@ -347,6 +408,8 @@ export async function svgToField(file, { size = 512, supersample = 3 } = {}) {
       // 反射色塊；float 貼圖保留連續距離梯度（GLB 路徑早已如此）。
       texture: encodeFloat2D(texField, size, size, SVG_RANGE),
       targets,
+      edgeDrops: edgeDropSets[0],
+      edgeDropSets,
       cavityTargets: [],
       // 烘焙解析度。SVG 模式只用它推導盒外 epsilon 與法線微分半徑；
       // volumeShapeDistance 只在 uShapeType == 2 時呼叫，設值不影響 GLB。
