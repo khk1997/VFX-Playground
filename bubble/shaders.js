@@ -104,6 +104,7 @@ uniform float uShapeProgress;
 uniform float uFidelityAbsorb;
 uniform float uShapeDepth;
 uniform float uShapeSoftness;
+uniform float uShapeEdgeBevel;
 uniform float uShapeLiquid;
 uniform float uShapeLiquidSize;
 uniform float uShapeLiquidSpeed;
@@ -360,8 +361,9 @@ float svgShapeDistance(vec3 p, bool smoothShape){
     edge += length((uv - safeUv) * 3.0);
   }
   float depth = abs(p.z) - uShapeDepth;
-  // smooth-max 只圓化正面與側壁交界；液滴關閉時完全退回原始硬擠出。
-  float rounded = -smin(-edge, -depth, uShapeLiquid * 0.045);
+  // smooth-max 只圓化正面與側壁交界；半徑由 uShapeEdgeBevel 獨立控制，
+  // 與液滴效果（uShapeLiquid）脫鉤，因此關閉液滴後仍可單獨調整圓角。
+  float rounded = -smin(-edge, -depth, uShapeEdgeBevel);
   float result = rounded;
   if (uShapeLiquid > 0.001) {
     for (int i = 0; i < 8; i++) {

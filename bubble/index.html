@@ -179,7 +179,7 @@
     <div class="row"><label>水滴分佈</label><input type="range" id="shapeLiquidPosition" min="0" max="7" step="1" value="2"><span class="val" id="shapeLiquidPosition_v"></span></div>
     <div class="row"><label>水滴大小</label><input type="range" id="shapeLiquidSize" min="0.5" max="2" step="0.01" value="1.5"><span class="val" id="shapeLiquidSize_v"></span></div>
     <div class="row"><label>水滴流速</label><input type="range" id="shapeLiquidSpeed" min="0" max="3" step="1" value="1"><span class="val" id="shapeLiquidSpeed_v"></span></div>
-    <div class="note">液滴會沿 SVG 擠出輪廓附近移動；分佈組合固定，可重現同一段動畫。<br>「邊緣水滴」同時決定擠出正面與側壁交界的圓角，因此關閉液滴後它仍可調整 —— 這樣才能做出「圓角擠出但沒有液滴」的外觀。</div>
+    <div class="note">液滴會沿 SVG 擠出輪廓附近移動；分佈組合固定，可重現同一段動畫。<br>擠出正面與側壁交界的圓角由「形狀匯聚」分組裡的「邊緣圓角」獨立控制，與液滴效果無關。</div>
   </div>
 
   <div class="group" id="formationGroup">
@@ -196,6 +196,7 @@
     <div class="row"><label>匯集時間</label><input type="range" id="gatherDuration" min="0.15" max="0.75" step="0.01" value="0.25"><span class="val" id="gatherDuration_v"></span></div>
     <div class="row"><label>輪廓細節滴</label><input type="range" id="microCount" min="8" max="20" step="1" value="14"><span class="val" id="microCount_v"></span></div>
     <div class="row"><label>形狀厚度</label><input type="range" id="shapeDepth" min="0.05" max="0.8" step="0.01" value="0.1"><span class="val" id="shapeDepth_v"></span></div>
+    <div class="row"><label>邊緣圓角</label><input type="range" id="shapeEdgeBevel" min="0" max="0.15" step="0.001" value="0.025"><span class="val" id="shapeEdgeBevel_v"></span></div>
     <div class="row"><label>邊緣液化</label><input type="range" id="shapeSoftness" min="0" max="0.25" step="0.005" value="0"><span class="val" id="shapeSoftness_v"></span></div>
     <div class="row"><label>完成停留</label><input type="range" id="shapeHold" min="0.05" max="0.45" step="0.01" value="0.45"><span class="val" id="shapeHold_v"></span></div>
     <div class="note">模型品質會在下一次匯入 GLB 時生效；提高品質主要增加匯入時間與記憶體，每幀 SDF 取樣次數不變。</div>

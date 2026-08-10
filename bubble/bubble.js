@@ -92,6 +92,7 @@ const DEFAULTS = {              // 數值滑桿
   gatherDuration: 0.25,
   shapeDepth: 0.1,
   shapeSoftness: 0,
+  shapeEdgeBevel: 0.025,
   shapeLiquid: 0.55,
   shapeLiquidPosition: 2,
   shapeLiquidSize: 1.5,
@@ -148,7 +149,7 @@ const SPECTRAL_CAUSTIC_DEFAULTS = [
 ];
 // 值為 uniform 名稱（直接寫 0/1），或一個套用函式 —— 輪廓液滴的開關不是
 // 布林 uniform，而是把 uEdgeDropCount 歸零，這樣關閉液滴時仍保留邊緣圓角
-// （圓角由 uShapeLiquid 控制，見 svgShapeDistance 的 smin 半徑）。
+// （圓角半徑由獨立的 uShapeEdgeBevel 控制，見 svgShapeDistance 的 smin 半徑）。
 const TOGGLES = {
   filmEnabled: 'uFilmEnabled',
   dispersionEnabled: 'uDispersionEnabled',
@@ -225,6 +226,7 @@ const fmt = {
   gatherDuration: v => Math.round(v * 100) + '%',
   shapeDepth: v => v.toFixed(2),
   shapeSoftness: v => v.toFixed(3),
+  shapeEdgeBevel: v => v.toFixed(3),
   shapeLiquid: v => Math.round(v * 100) + '%',
   shapeLiquidPosition: v => `分佈 ${Math.round(v) + 1}`,
   shapeLiquidSize: v => 'x' + v.toFixed(2),
@@ -1354,6 +1356,7 @@ function initGL() {
     uFidelityAbsorb: { value: 0 },
     uShapeDepth: { value: P.shapeDepth },
     uShapeSoftness: { value: P.shapeSoftness },
+    uShapeEdgeBevel: { value: P.shapeEdgeBevel },
     uShapeLiquid: { value: P.shapeLiquid },
     uShapeLiquidSize: { value: P.shapeLiquidSize },
     uShapeLiquidSpeed: { value: P.shapeLiquidSpeed },
