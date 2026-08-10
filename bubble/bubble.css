@@ -82,6 +82,8 @@
   .effectBlock--physical { --effect-accent: #66bce8; }
   .effectBlock--caustic { --effect-accent: #f0b75b; }
   .effectBlock--ramp { --effect-accent: #79d6bd; margin-top: 10px; }
+  .effectBlock--shape { --effect-accent: #7fa0e6; }
+  .effectBlock--drop { --effect-accent: #5dbded; }
   .effectBlock.is-disabled {
     opacity: .38;
     filter: saturate(.35);
