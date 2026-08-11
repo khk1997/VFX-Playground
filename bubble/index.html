@@ -174,6 +174,7 @@
       <option value="formation">形狀匯聚 Formation</option>
       <option value="pulse">脈動呼吸 Pulse</option>
       <option value="weave">穿梭環繞 Weave</option>
+      <option value="shatter">崩解噴濺 Shatter</option>
     </select><span class="val"></span></div>
     <div class="row" id="pulseDepthRow"><label>脈動幅度</label><input type="range" id="pulseDepth" min="0" max="0.8" step="0.01" value="0.4"><span class="val" id="pulseDepth_v"></span></div>
     <div class="row" id="weaveSizeMinRow"><label>大小差異下限</label><input type="range" id="weaveSizeMin" min="0.1" max="2" step="0.01" value="0.1"><span class="val" id="weaveSizeMin_v"></span></div>
@@ -181,6 +182,12 @@
     <div id="weaveSizeNote" class="note">會乘在上方「水滴形態」的「水滴大小」基準值上，決定同一批水滴彼此的大小差異。</div>
     <div class="row" id="weaveDriftAmountRow"><label>飄浮幅度</label><input type="range" id="weaveDriftAmount" min="0" max="2" step="0.01" value="1"><span class="val" id="weaveDriftAmount_v"></span></div>
     <div class="row" id="weaveDriftSpeedRow"><label>飄浮速度</label><input type="range" id="weaveDriftSpeed" min="1" max="5" step="1" value="1"><span class="val" id="weaveDriftSpeed_v"></span></div>
+    <div class="row" id="shatterAtRow"><label>崩解時機</label><input type="range" id="shatterAt" min="0.05" max="0.7" step="0.01" value="0.28"><span class="val" id="shatterAt_v"></span></div>
+    <div class="row" id="shatterForceRow"><label>噴散力道</label><input type="range" id="shatterForce" min="0.2" max="3" step="0.01" value="1"><span class="val" id="shatterForce_v"></span></div>
+    <div class="row" id="shatterGravityRow"><label>噴散重力</label><input type="range" id="shatterGravity" min="0" max="2" step="0.01" value="0.6"><span class="val" id="shatterGravity_v"></span></div>
+    <div class="row" id="shatterFadeRow"><label>碎片消散</label><input type="range" id="shatterFade" min="0" max="1" step="0.01" value="0.35"><span class="val" id="shatterFade_v"></span></div>
+    <div class="row" id="shatterReformRow"><label>重組時間</label><input type="range" id="shatterReform" min="0.05" max="0.6" step="0.01" value="0.3"><span class="val" id="shatterReform_v"></span></div>
+    <div id="shatterNote" class="note">形狀先完整靜止，到「崩解時機」炸開成碎片四散；「重組時間」是循環尾端把碎片收回、形狀重新長回來的長度，收得太短會看到形狀突然出現。</div>
     <div class="row" id="flowSpeedRow"><label>動態張力</label><input type="range" id="flowSpeed" min="0" max="1.5" step="0.01" value="0.47"><span class="val" id="flowSpeed_v"></span></div>
   </div>
 
@@ -327,6 +334,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=svg-shape-19"></script>
+<script type="module" src="./bubble.js?v=svg-shape-20"></script>
 </body>
 </html>
