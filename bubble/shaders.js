@@ -177,6 +177,7 @@ uniform float uReflect;
 uniform float uTransmission;
 uniform float uMaterialExposure;
 uniform float uRoughness;
+uniform float uIOR;
 uniform int   uReflectionSampleCount;
 uniform float uHdriYaw;
 uniform float uHdriPitch;
@@ -190,7 +191,6 @@ uniform int   uHasEnv;
 const int   MAXN = 12;
 const int   MAX_MICRO = 20;
 const int   MAX_NEGATIVE = 4;
-const float IOR  = 1.33;
 const float PI   = 3.14159265359;
 const float TAU  = 6.28318530718;
 
@@ -670,8 +670,8 @@ float artisticDispersionOPD(vec3 p, vec3 N, vec3 V){
   thickness -= pow(top, 2.5) * uArtGravity * uArtThickness * 0.95;
   thickness = max(thickness, 0.0);
   float sinI = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
-  float cosT = sqrt(max(0.0, 1.0 - (sinI / IOR) * (sinI / IOR)));
-  return 2.0 * IOR * thickness * cosT;
+  float cosT = sqrt(max(0.0, 1.0 - (sinI / uIOR) * (sinI / uIOR)));
+  return 2.0 * uIOR * thickness * cosT;
 }
 
 // 薄膜反射與透射分開計算；避免以暗色 alpha 覆蓋白色背景。
@@ -694,8 +694,8 @@ FilmMaterial thinFilm(vec3 p, vec3 N, vec3 V){
 
   // Snell 折射角：掠射角時 cosT 仍可觀 → 邊緣才有彩虹
   float sinI = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
-  float cosT = sqrt(max(0.0, 1.0 - (sinI / IOR) * (sinI / IOR)));
-  float opd = 2.0 * IOR * thickness * cosT;
+  float cosT = sqrt(max(0.0, 1.0 - (sinI / uIOR) * (sinI / uIOR)));
+  float opd = 2.0 * uIOR * thickness * cosT;
 
   vec3 interf = vec3(0.0);
   if (uFilmEnabled > 0.5) interf = sampleFilmInterference(opd);
@@ -707,7 +707,7 @@ FilmMaterial thinFilm(vec3 p, vec3 N, vec3 V){
   interf = max(interf, vec3(0.0));
 
   // 水膜 F0 約 2%；藝術化邊緣光只增強掠射角，不會讓中心變成灰色實體。
-  float f0 = pow((IOR - 1.0) / (IOR + 1.0), 2.0);
+  float f0 = pow((uIOR - 1.0) / (uIOR + 1.0), 2.0);
   float schlick = f0 + (1.0 - f0) * pow(1.0 - cosTheta, 5.0);
   float rim = pow(1.0 - cosTheta, 3.0) * uFresnel;
   float fres = mix(schlick, 1.0, clamp(rim * 0.28, 0.0, 0.82));
@@ -820,7 +820,7 @@ void main(){
       && (uEnvRefraction > 0.001
         || (realDispersionStrength > 0.001 && uRealDispersionSeparation > 0.001));
   if (brightBg > 0.001 || needsEnvironmentTransmission) {
-    vec3 insideDir = refract(rd, N, 1.0 / IOR);
+    vec3 insideDir = refract(rd, N, 1.0 / uIOR);
     if (dot(insideDir, insideDir) > 0.0001) {
       transmissionDir = normalize(insideDir);
       vec3 exitPoint;
@@ -829,11 +829,11 @@ void main(){
       if (traceExitSurface(p, normalize(insideDir), exitPoint, exitNormal, pathLength)) {
         insideDir = normalize(insideDir);
         float exitFacing = clamp(dot(exitNormal, insideDir), 0.0, 1.0);
-        float f0 = pow((IOR - 1.0) / (IOR + 1.0), 2.0);
+        float f0 = pow((uIOR - 1.0) / (uIOR + 1.0), 2.0);
         backFres = f0 + (1.0 - f0) * pow(1.0 - exitFacing, 5.0);
         backRim = pow(1.0 - exitFacing, 3.0) * uFresnel;
 
-        vec3 exitDir = refract(insideDir, -exitNormal, IOR);
+        vec3 exitDir = refract(insideDir, -exitNormal, uIOR);
         if (dot(exitDir, exitDir) < 0.0001) exitDir = rd;
         exitDir = normalize(exitDir);
         transmissionDir = exitDir;
@@ -855,7 +855,7 @@ void main(){
         float backTop = clamp(exitNormal.y * 0.5 + 0.5, 0.0, 1.0);
         backThickness -= pow(backTop, 2.5) * uGravity * uThickness * 0.95;
         backThickness = max(backThickness, 0.0);
-        float backOpd = 2.0 * IOR * backThickness * max(exitFacing, 0.12);
+        float backOpd = 2.0 * uIOR * backThickness * max(exitFacing, 0.12);
 
         vec3 backInterf = sampleFilmInterference(backOpd);
         float backLum = dot(backInterf, vec3(0.2126, 0.7152, 0.0722));
@@ -876,12 +876,12 @@ void main(){
     vec3 envRefraction = sampleEnvironmentBackdrop(transmissionDir);
     if (realDispersionStrength > 0.001 && uRealDispersionSeparation > 0.001) {
       // 參考 Prism Tunnel 的 thin-glass 方法：不是把同一方向做任意 RGB
-      // 位移，而是用三個波長各自的 IOR 做三次 Snell 折射，再抽取 R/G/B。
-      // 1.50 / 1.53 / 1.57 的相對間距保留，但以目前材質 IOR 為中心。
+      // 位移，而是用三個波長各自的 uIOR 做三次 Snell 折射，再抽取 R/G/B。
+      // 1.50 / 1.53 / 1.57 的相對間距保留，但以目前材質 uIOR 為中心。
       float wavelengthScale = realDispersionStrength * uRealDispersionSeparation;
-      float redIor = max(1.01, IOR - 0.03 * wavelengthScale);
-      float greenIor = IOR;
-      float blueIor = IOR + 0.04 * wavelengthScale;
+      float redIor = max(1.01, uIOR - 0.03 * wavelengthScale);
+      float greenIor = uIOR;
+      float blueIor = uIOR + 0.04 * wavelengthScale;
       vec3 redDir = refract(rd, N, 1.0 / redIor);
       vec3 greenDir = refract(rd, N, 1.0 / greenIor);
       vec3 blueDir = refract(rd, N, 1.0 / blueIor);
@@ -925,11 +925,11 @@ void main(){
     refractedBg = mix(refractedBg, envRefraction, uEnvRefraction);
   } else if (uBgMode == 1 && uHasEnv == 1
     && realDispersionStrength > 0.001 && uRealDispersionSeparation > 0.001) {
-    // HDRI 畫布同樣使用三個物理 IOR；此模式保留完整折射影像。
+    // HDRI 畫布同樣使用三個物理 uIOR；此模式保留完整折射影像。
     float wavelengthScale = realDispersionStrength * uRealDispersionSeparation;
-    vec3 redDir = refract(rd, N, 1.0 / max(1.01, IOR - 0.03 * wavelengthScale));
-    vec3 greenDir = refract(rd, N, 1.0 / IOR);
-    vec3 blueDir = refract(rd, N, 1.0 / (IOR + 0.04 * wavelengthScale));
+    vec3 redDir = refract(rd, N, 1.0 / max(1.01, uIOR - 0.03 * wavelengthScale));
+    vec3 greenDir = refract(rd, N, 1.0 / uIOR);
+    vec3 blueDir = refract(rd, N, 1.0 / (uIOR + 0.04 * wavelengthScale));
     if (dot(redDir, redDir) < 0.0001) redDir = transmissionDir;
     if (dot(greenDir, greenDir) < 0.0001) greenDir = transmissionDir;
     if (dot(blueDir, blueDir) < 0.0001) blueDir = transmissionDir;
@@ -1040,7 +1040,7 @@ void main(){
 
     // 用一次入射折射與一次虛擬內反射建立聚焦方向。這不是路徑追蹤，
     // 但光斑會隨法線、視角與光源方向移動，而不是貼死在模型表面。
-    vec3 internalLight = refract(-virtualLightDir, N, 1.0 / IOR);
+    vec3 internalLight = refract(-virtualLightDir, N, 1.0 / uIOR);
     if (dot(internalLight, internalLight) < 0.0001) {
       internalLight = -virtualLightDir;
     }

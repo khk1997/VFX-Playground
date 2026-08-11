@@ -1,9 +1,9 @@
 'use strict';
 import * as THREE from 'three';
-import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-9';
+import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-10';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
-} from './default-shapes.js?v=svg-shape-9';
+} from './default-shapes.js?v=svg-shape-10';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -72,6 +72,9 @@ const DEFAULTS = {              // 數值滑桿
   reflect: 1.6,
   transmission: 1.0,
   materialExposure: 1,
+  // 水的折射率約 1.33，玻璃約 1.5；預設維持原本水滴的手感，改高會讓邊緣
+  // 反射（Fresnel）變強、折射彎曲角度變陡，看起來更像玻璃而不是水珠。
+  ior: 1.33,
   hdriYaw: -45,
   hdriPitch: 20,
   hdriBlur: 0.21,
@@ -189,6 +192,13 @@ function applyToggle(key) {
   else if (uniforms && uniforms[target]) uniforms[target].value = P[key] ? 1 : 0;
 }
 
+// DEFAULTS 的 key 一律用 'u' + 首字大寫推導 uniform 名稱（uReflect、uRoughness...），
+// 但 IOR 照慣例整個縮寫大寫，'uIor' 對不上 shader 裡宣告的 uIOR，需要例外表。
+const UNIFORM_NAME_OVERRIDES = { ior: 'uIOR' };
+function uniformNameFor(key) {
+  return UNIFORM_NAME_OVERRIDES[key] || ('u' + key.charAt(0).toUpperCase() + key.slice(1));
+}
+
 const fmt = {
   thickness: v => v.toFixed(0) + 'nm',
   thickVar: v => '±' + v.toFixed(0),
@@ -234,6 +244,7 @@ const fmt = {
   reflect: v => 'x' + v.toFixed(2),
   transmission: v => v.toFixed(2),
   materialExposure: v => 'x' + v.toFixed(2),
+  ior: v => v.toFixed(2),
   hdriYaw: v => v.toFixed(0) + '°',
   hdriPitch: v => v.toFixed(0) + '°',
   hdriBlur: v => Math.round(v * 100) + '%',
@@ -264,7 +275,7 @@ const fmt = {
   pulseDepth: v => Math.round(v * 100) + '%',
 };
 
-import { VERT, FRAG } from './shaders.js?v=svg-shape-9';
+import { VERT, FRAG } from './shaders.js?v=svg-shape-10';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -1388,6 +1399,7 @@ function initGL() {
     uTransmission: { value: P.transmission },
     uMaterialExposure: { value: P.materialExposure },
     uRoughness:  { value: P.roughness },
+    uIOR:        { value: P.ior },
     uReflectionSampleCount: { value: mobileRenderQuery.matches ? 4 : 8 },
     uHdriYaw:    { value: P.hdriYaw },
     uHdriPitch:  { value: P.hdriPitch },
@@ -1541,7 +1553,7 @@ function bindPointer() {
 function syncPanelToUniforms() {
   if (!uniforms) return;
   for (const key of Object.keys(DEFAULTS)) {
-    const u = 'u' + key.charAt(0).toUpperCase() + key.slice(1);
+    const u = uniformNameFor(key);
     if (uniforms[u]) uniforms[u].value = (key === 'count') ? Math.round(P[key]) : P[key];
   }
   for (const key of Object.keys(SELECTS)) {
@@ -1574,7 +1586,7 @@ function bindControls() {
   for (const key of Object.keys(DEFAULTS)) {
     const el = document.getElementById(key);
     const valEl = document.getElementById(key + '_v');
-    const uName = 'u' + key.charAt(0).toUpperCase() + key.slice(1);
+    const uName = uniformNameFor(key);
     const update = () => {
       P[key] = parseFloat(el.value);
       if (key === 'cameraRotationX') rot.x = P[key] * Math.PI / 180;

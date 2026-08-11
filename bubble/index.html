@@ -54,6 +54,8 @@
     <div class="row"><label>材質曝光</label><input type="range" id="materialExposure" min="0.25" max="2.5" step="0.05" value="1"><span class="val" id="materialExposure_v"></span></div>
     <div class="row"><label>粗糙度</label><input type="range" id="roughness" min="0" max="1" step="0.01" value="0.2"><span class="val" id="roughness_v"></span></div>
     <div class="row"><label>邊緣光</label><input type="range" id="fresnel" min="0" max="3" step="0.05" value="0.8"><span class="val" id="fresnel_v"></span></div>
+    <div class="row"><label>折射率</label><input type="range" id="ior" min="1.0" max="1.8" step="0.01" value="1.33"><span class="val" id="ior_v"></span></div>
+    <div class="note">水約 1.33、玻璃約 1.5；調高會讓邊緣反射變強、折射彎曲角度變陡，偏向玻璃質感。</div>
   </div>
 
   <div class="group" id="thinFilmGroup">
@@ -319,6 +321,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=svg-shape-9"></script>
+<script type="module" src="./bubble.js?v=svg-shape-10"></script>
 </body>
 </html>
