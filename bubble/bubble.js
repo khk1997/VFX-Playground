@@ -248,7 +248,10 @@ const fmt = {
   elasticSpeed: v => 'x' + v.toFixed(2),
   satelliteSize: v => v.toFixed(2),
   satelliteCount: v => v.toFixed(0),
-  gatherDuration: v => Math.round(v * 100) + '%',
+  // 顯示成秒數而不是循環比例：匯集時間／完成停留描述的是「這段實際花多久」，
+  // 但循環秒數是另一個獨立滑桿，同樣的百分比在 6 秒與 30 秒的循環裡代表天差
+  // 地遠的時間長度。換算成秒數後兩個滑桿放在一起看才有直覺意義。
+  gatherDuration: v => (v * P.loopDuration).toFixed(1) + 's',
   shapeDepth: v => v.toFixed(2),
   shapeSoftness: v => v.toFixed(3),
   shapeEdgeBevel: v => v.toFixed(3),
@@ -256,7 +259,7 @@ const fmt = {
   shapeLiquidPosition: v => `分佈 ${Math.round(v) + 1}`,
   shapeLiquidSize: v => 'x' + v.toFixed(2),
   shapeLiquidSpeed: v => v === 0 ? '停止' : 'x' + v.toFixed(0),
-  shapeHold: v => Math.round(v * 100) + '%',
+  shapeHold: v => (v * P.loopDuration).toFixed(1) + 's',
   microCount: v => v.toFixed(0),
   pulseDepth: v => Math.round(v * 100) + '%',
 };
@@ -1550,6 +1553,22 @@ function syncPanelToUniforms() {
   document.body.style.background = (P.bgMode === 'hdri') ? '#000' : P.bgColor;
 }
 
+// 把「匯集時間／完成停留」換算回具體秒數並列出散開段，讓使用者一次看到循環
+// 秒數怎麼被這三段分配掉——這三個數字本身就是 formationAmount 用來畫時間軸
+// 的同一組邊界，這裡只是把它們攤開顯示，不影響實際計算。
+function updateTimelineSummary() {
+  const el = document.getElementById('timelineSummary');
+  if (!el) return;
+  const gatherEnd = Math.max(0.15, P.gatherDuration);
+  const holdEnd = Math.min(0.94, gatherEnd + P.shapeHold);
+  const loop = P.loopDuration;
+  const gatherSec = gatherEnd * loop;
+  const holdSec = (holdEnd - gatherEnd) * loop;
+  const releaseSec = (1 - holdEnd) * loop;
+  el.textContent = `匯集 ${gatherSec.toFixed(1)}s → 停留 ${holdSec.toFixed(1)}s → 散開 `
+    + `${releaseSec.toFixed(1)}s（循環共 ${loop.toFixed(1)}s）`;
+}
+
 function bindControls() {
   // 數值滑桿
   for (const key of Object.keys(DEFAULTS)) {
@@ -1565,6 +1584,15 @@ function bindControls() {
       if (key === 'shapeLiquidPosition') applyEdgeDropDistribution(P[key]);
       if (valEl) valEl.textContent = (fmt[key] || (v => +v.toFixed(2)))(P[key]);
       if (uniforms && uniforms[uName]) uniforms[uName].value = (key === 'count') ? Math.round(P[key]) : P[key];
+      if (key === 'gatherDuration' || key === 'shapeHold' || key === 'loopDuration') {
+        updateTimelineSummary();
+        // 循環秒數變了，匯集時間／完成停留的秒數顯示也要跟著換算，
+        // 但不動使用者設定的比例值，所以只重畫文字，不重新觸發 input。
+        if (key === 'loopDuration') {
+          document.getElementById('gatherDuration_v').textContent = fmt.gatherDuration(P.gatherDuration);
+          document.getElementById('shapeHold_v').textContent = fmt.shapeHold(P.shapeHold);
+        }
+      }
     };
     el.value = P[key];
     if (!el._bound) { el.addEventListener('input', update); el._bound = true; }
@@ -1738,10 +1766,21 @@ function updateUIState() {
   pulseDepthEl.disabled = !pulsing;
   document.getElementById('pulseDepthRow').style.opacity = pulsing ? 1 : 0.4;
   const formationGroup = document.getElementById('formationGroup');
-  formationGroup.style.opacity = forming ? 1 : 0.38;
-  formationGroup.querySelectorAll('input, select, button').forEach(el => { el.disabled = !forming; });
+  // 「循環秒數」搬進時間軸區塊只是視覺上跟匯集/停留放在一起，它本身是分裂模式
+  // 也在用的共用參數，不能被「只有形狀匯聚才啟用」這條規則反灰或鎖住。用逐個
+  // 子項套用取代原本直接對整個 formationGroup 設 opacity ——inline opacity 會
+  // 對子樹整體生效，子項再怎麼把自己設回 1 也蓋不掉祖先的半透明。
+  formationGroup.querySelectorAll(':scope > .row, :scope > .effectSubhead, :scope > .note, :scope > .effectTitle')
+    .forEach(el => {
+      if (el.id === 'loopDurationRow') { el.style.opacity = 1; return; }
+      el.style.opacity = forming ? 1 : 0.38;
+    });
+  formationGroup.querySelectorAll('input, select, button').forEach(el => {
+    if (el.id === 'loopDuration') { el.disabled = false; return; }
+    el.disabled = !forming;
+  });
   formationGroup.querySelectorAll('.timelineRow').forEach(row => {
-    row.style.opacity = pulsing ? 0.4 : 1;
+    row.style.opacity = !forming ? 0.38 : pulsing ? 0.4 : 1;
     row.querySelectorAll('input').forEach(el => { el.disabled = !forming || pulsing; });
   });
   // 輪廓液滴有兩層閘門：外層是模式（只有 SVG 擠出的 formation 用得到），
@@ -1771,6 +1810,22 @@ function updateUIState() {
   const depthControl = document.getElementById('shapeDepth');
   depthControl.disabled = !forming || !isSvg;
   depthControl.closest('.row').style.opacity = isSvg ? 1 : 0.4;
+  // 邊緣圓角只圓化 SVG 擠出正面與側壁的交界（svgShapeDistance 專用），GLB 走
+  // volumeShapeDistance 完全不會讀這個 uniform，調它在 GLB 來源下沒有任何效果。
+  const bevelControl = document.getElementById('shapeEdgeBevel');
+  bevelControl.disabled = !forming || !isSvg;
+  bevelControl.closest('.row').style.opacity = isSvg ? 1 : 0.4;
+
+  // 分裂 Split 以外的兩個模式都不會觸發毛細回彈或衛星滴串（updateDropUniforms
+  // 裡整段邏輯鎖在 P.motion === 'cinematic'），這六個滑桿在形狀匯聚／脈動呼吸
+  // 下完全沒有視覺效果。動態張力（flowSpeed）同理——它只餵給分裂模式的群體
+  // 漂移位移，形狀匯聚／脈動呼吸的位置完全由 formationDropPosition 決定。
+  const splitOnly = P.motion === 'cinematic';
+  document.getElementById('flowSpeedRow').style.opacity = splitOnly ? 1 : 0.4;
+  document.getElementById('flowSpeed').disabled = !splitOnly;
+  const capillaryGroup = document.getElementById('capillaryGroup');
+  capillaryGroup.style.opacity = splitOnly ? 1 : 0.4;
+  capillaryGroup.querySelectorAll('input').forEach(el => { el.disabled = !splitOnly; });
 }
 
 document.getElementById('resetBtn').addEventListener('click', () => {

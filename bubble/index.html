@@ -43,7 +43,8 @@
     <div class="row"><label>鏡頭距離</label><input type="range" id="cameraDistance" min="2.8" max="10" step="0.05" value="5.5"><span class="val" id="cameraDistance_v"></span></div>
     <div class="row"><label>水平視角</label><input type="range" id="cameraRotationY" min="-180" max="180" step="0.1" value="29.8"><span class="val" id="cameraRotationY_v"></span></div>
     <div class="row"><label>垂直視角</label><input type="range" id="cameraRotationX" min="-90" max="90" step="0.1" value="9.7"><span class="val" id="cameraRotationX_v"></span></div>
-    <div class="note">可使用滑鼠滾輪或觸控板拉近、拉遠</div>
+    <div class="row"><label>環繞幅度</label><input type="range" id="spin" min="0" max="1" step="0.01" value="0.08"><span class="val" id="spin_v"></span></div>
+    <div class="note">可使用滑鼠滾輪或觸控板拉近、拉遠；環繞幅度控制鏡頭隨循環自動環繞的幅度。</div>
   </div>
 
   <div class="group">
@@ -151,13 +152,17 @@
     <div class="row"><label>漂浮範圍</label><input type="range" id="spread" min="0.6" max="2.4" step="0.05" value="0.75"><span class="val" id="spread_v"></span></div>
     <div class="row"><label>表面起伏</label><input type="range" id="wobble" min="0" max="0.4" step="0.005" value="0.305"><span class="val" id="wobble_v"></span></div>
     <div class="row"><label>起伏尺度</label><input type="range" id="wobbleScale" min="0.3" max="6" step="0.1" value="0.7"><span class="val" id="wobbleScale_v"></span></div>
-    <div class="note">分離彈性 Capillary Wave</div>
-    <div class="row"><label>分離回彈</label><input type="range" id="elasticStrength" min="0" max="0.2" step="0.005" value="0.024"><span class="val" id="elasticStrength_v"></span></div>
-    <div class="row"><label>波紋密度</label><input type="range" id="elasticDensity" min="1" max="8" step="0.1" value="3.5"><span class="val" id="elasticDensity_v"></span></div>
-    <div class="row"><label>波紋衰減</label><input type="range" id="elasticDamping" min="0" max="1" step="0.01" value="0.55"><span class="val" id="elasticDamping_v"></span></div>
-    <div class="row"><label>傳播速度</label><input type="range" id="elasticSpeed" min="0.5" max="2" step="0.05" value="1.75"><span class="val" id="elasticSpeed_v"></span></div>
-    <div class="row"><label>衛星滴大小</label><input type="range" id="satelliteSize" min="0" max="1" step="0.01" value="0.22"><span class="val" id="satelliteSize_v"></span></div>
-    <div class="row"><label>衛星滴數量</label><input type="range" id="satelliteCount" min="0" max="3" step="1" value="3"><span class="val" id="satelliteCount_v"></span></div>
+    <div class="row"><label>起伏動畫</label><input type="range" id="wobbleSpeed" min="0" max="2" step="0.01" value="0.65"><span class="val" id="wobbleSpeed_v"></span></div>
+    <div id="capillaryGroup">
+      <div class="effectSubhead">分離彈性 Capillary Wave</div>
+      <div class="note">毛細回彈與衛星滴串只在分裂 Split 模式的斷裂瞬間發生，形狀匯聚／脈動呼吸不會用到。</div>
+      <div class="row"><label>分離回彈</label><input type="range" id="elasticStrength" min="0" max="0.2" step="0.005" value="0.024"><span class="val" id="elasticStrength_v"></span></div>
+      <div class="row"><label>波紋密度</label><input type="range" id="elasticDensity" min="1" max="8" step="0.1" value="3.5"><span class="val" id="elasticDensity_v"></span></div>
+      <div class="row"><label>波紋衰減</label><input type="range" id="elasticDamping" min="0" max="1" step="0.01" value="0.55"><span class="val" id="elasticDamping_v"></span></div>
+      <div class="row"><label>傳播速度</label><input type="range" id="elasticSpeed" min="0.5" max="2" step="0.05" value="1.75"><span class="val" id="elasticSpeed_v"></span></div>
+      <div class="row"><label>衛星滴大小</label><input type="range" id="satelliteSize" min="0" max="1" step="0.01" value="0.22"><span class="val" id="satelliteSize_v"></span></div>
+      <div class="row"><label>衛星滴數量</label><input type="range" id="satelliteCount" min="0" max="3" step="1" value="3"><span class="val" id="satelliteCount_v"></span></div>
+    </div>
   </div>
 
   <div class="group">
@@ -168,10 +173,7 @@
       <option value="pulse">脈動呼吸 Pulse</option>
     </select><span class="val"></span></div>
     <div class="row" id="pulseDepthRow"><label>脈動幅度</label><input type="range" id="pulseDepth" min="0" max="0.8" step="0.01" value="0.4"><span class="val" id="pulseDepth_v"></span></div>
-    <div class="row"><label>循環秒數</label><input type="range" id="loopDuration" min="4" max="30" step="0.5" value="12"><span class="val" id="loopDuration_v"></span></div>
-    <div class="row"><label>動態張力</label><input type="range" id="flowSpeed" min="0" max="1.5" step="0.01" value="0.47"><span class="val" id="flowSpeed_v"></span></div>
-    <div class="row"><label>起伏動畫</label><input type="range" id="wobbleSpeed" min="0" max="2" step="0.01" value="0.65"><span class="val" id="wobbleSpeed_v"></span></div>
-    <div class="row"><label>環繞幅度</label><input type="range" id="spin" min="0" max="1" step="0.01" value="0.08"><span class="val" id="spin_v"></span></div>
+    <div class="row" id="flowSpeedRow"><label>動態張力</label><input type="range" id="flowSpeed" min="0" max="1.5" step="0.01" value="0.47"><span class="val" id="flowSpeed_v"></span></div>
   </div>
 
   <div class="group">
@@ -188,8 +190,10 @@
       <div id="shapeState" class="note">切到「形狀匯聚 / 脈動呼吸」會先套用內建預設造型，可再自行匯入取代</div>
       <input type="file" id="shapeInput" accept=".svg,image/svg+xml" hidden>
       <div class="effectSubhead">時間軸</div>
+      <div class="row" id="loopDurationRow"><label>循環秒數</label><input type="range" id="loopDuration" min="4" max="30" step="0.5" value="12"><span class="val" id="loopDuration_v"></span></div>
       <div class="row timelineRow"><label>匯集時間</label><input type="range" id="gatherDuration" min="0.15" max="0.75" step="0.01" value="0.25"><span class="val" id="gatherDuration_v"></span></div>
       <div class="row timelineRow"><label>完成停留</label><input type="range" id="shapeHold" min="0.05" max="0.45" step="0.01" value="0.45"><span class="val" id="shapeHold_v"></span></div>
+      <div id="timelineSummary" class="note timelineRow"></div>
       <div class="effectSubhead">外形細節</div>
       <div class="row"><label>輪廓細節滴</label><input type="range" id="microCount" min="8" max="20" step="1" value="14"><span class="val" id="microCount_v"></span></div>
       <div class="row"><label>形狀厚度</label><input type="range" id="shapeDepth" min="0.05" max="0.8" step="0.01" value="0.1"><span class="val" id="shapeDepth_v"></span></div>
