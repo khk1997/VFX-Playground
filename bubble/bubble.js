@@ -1,9 +1,9 @@
 'use strict';
 import * as THREE from 'three';
-import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-21';
+import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-22';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
-} from './default-shapes.js?v=svg-shape-21';
+} from './default-shapes.js?v=svg-shape-22';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -132,6 +132,9 @@ const DEFAULTS = {              // 數值滑桿
   shatterReform: 0.3,
   // 噴散亂數種子（見 shatterSeed）。0 是加這個參數之前的那一組飛散路徑。
   shatterSeed: 0,
+  // 崩解切法（見 shatterAnchorSets）。換的是形狀被切成哪幾塊，跟 shatterSeed
+  // 換飛散路徑是兩件不同的事。0 沿用共用錨點，不額外重算。
+  shatterCut: 0,
 };
 
 // 「形狀匯聚」與「脈動呼吸」共用同一套 SDF 匯聚管線（錨點、細節滴、負滴、
@@ -316,9 +319,10 @@ const fmt = {
   shatterFade: v => Math.round(v * 100) + '%',
   shatterReform: v => (v * P.loopDuration).toFixed(1) + 's',
   shatterSeed: v => '#' + v.toFixed(0),
+  shatterCut: v => v === 0 ? '預設' : '#' + v.toFixed(0),
 };
 
-import { VERT, FRAG } from './shaders.js?v=svg-shape-21';
+import { VERT, FRAG } from './shaders.js?v=svg-shape-22';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -364,6 +368,9 @@ let previousDropT = null;
 let previousPairKey = '';
 let previousPairGap = 0;
 let shapeField = null;
+// 每匯入一次形狀就 +1。崩解切法的錨點快取用它當 key 的一部分，換了形狀
+// 才不會拿上一顆造型算出來的碎片繼續用。
+let shapeFieldSerial = 0;
 let shapeTargets = [];
 let formationAnchors = [];
 let microFormationAnchors = [];
@@ -375,6 +382,51 @@ let weaveSurfaceAnchors = [];
 function rebuildWeaveAnchorSets() {
   weaveSurfaceAnchors = formationAnchors.filter(a => a.surface);
   if (!weaveSurfaceAnchors.length) weaveSurfaceAnchors = formationAnchors;
+}
+
+// 崩解切法專用的錨點組。不能直接把種子套進 formationAnchors／microFormationAnchors，
+// 那兩組是形狀匯聚／脈動呼吸／穿梭環繞共用的，動了會連帶改掉那三個模式的外觀。
+// 這裡另外算一份，只有崩解噴濺會讀。
+//
+// 重算是 O(候選點 × 錨點數) 的貪婪取樣，不便宜，所以用 key 快取：切法種子沒變
+// 就直接沿用上一份。種子 0 連算都不算，直接指回共用的那兩組（也就保證切法 0
+// 與加這個參數之前完全相同）。
+let shatterCutAnchors = null;
+let shatterCutMicroAnchors = null;
+let shatterCutKey = null;
+let shatterCutPending = null;
+let shatterCutTimer = 0;
+
+function buildShatterCutAnchors(seed, key) {
+  shatterCutKey = key;
+  shatterCutPending = null;
+  shatterCutAnchors = distributePrimaryAnchors(shapeTargets, MAX_DROPS, seed);
+  shatterCutMicroAnchors = distributeDetailedAnchors(shapeTargets, MAX_MICRO_DROPS, seed);
+}
+
+function shatterAnchorSets() {
+  const seed = Math.round(P.shatterCut);
+  if (!seed) return { primary: formationAnchors, micro: microFormationAnchors };
+  const key = `${seed}:${shapeFieldSerial}`;
+  if (key !== shatterCutKey && shatterCutPending !== key) {
+    // 重算的量級跟候選點數成正比：SVG 只有上百個點（實測 3.8ms），但 GLB 在
+    // 128³ 下可以到近萬個，直接在幀迴圈裡算會讓拖動滑桿變成一格一頓。改成等
+    // 滑桿停下來才算，拖動期間先沿用上一組錨點。
+    shatterCutPending = key;
+    clearTimeout(shatterCutTimer);
+    shatterCutTimer = setTimeout(() => buildShatterCutAnchors(seed, key), 140);
+  }
+  // 還沒算出第一組之前先用共用錨點頂著，不要回傳 null 讓呼叫端炸掉。
+  return shatterCutAnchors && shatterCutMicroAnchors
+    ? { primary: shatterCutAnchors, micro: shatterCutMicroAnchors }
+    : { primary: formationAnchors, micro: microFormationAnchors };
+}
+
+// 輸出時不能等 debounce：整段序列必須用同一組錨點，否則前幾幀會是舊切法。
+function flushShatterCutAnchors() {
+  if (!shatterCutPending) return;
+  clearTimeout(shatterCutTimer);
+  buildShatterCutAnchors(Math.round(P.shatterCut), shatterCutPending);
 }
 const TAU = Math.PI * 2;
 // shader 用的兩組 uniform 每幀重算（syncEdgeDropMotion）；activeEdgeDrops 保存
@@ -458,23 +510,38 @@ const dropSeeds = Array.from({ length: MAX_DROPS }, (_, i) => ({
   radius: 0.72 + 0.55 * hash11CPU(i * 3.17 + 5),
 }));
 
-function distributeFormationAnchors(candidates, count = MAX_DROPS) {
+// 切法種子：這幾個分佈函式本身完全是決定性的（最遠點取樣、貪婪評分），同一顆
+// 形狀永遠切出同一組錨點。要換一種切法，就替每個候選點配一個穩定的權重去擾動
+// 評分——名次一變，最遠點取樣的整條鏈就跟著換，Lloyd 收斂到的區塊也不同。
+// 種子 0 回傳 null，呼叫端會完全走原本的式子，因此既有模式一格都不會變。
+function cutWeights(candidates, seed, salt) {
+  if (!seed) return null;
+  const base = Math.round(seed) * 29.7 + salt;
+  return candidates.map((_, i) => 0.74 + 0.52 * hash11CPU(i * 1.37 + base));
+}
+
+function distributeFormationAnchors(candidates, count = MAX_DROPS, seed = 0) {
   if (!candidates.length) return [];
+  const weights = cutWeights(candidates, seed, 3.1);
   const center = candidates.reduce((sum, p) => sum.add(p), new THREE.Vector3())
     .multiplyScalar(1 / candidates.length);
   const chosen = [];
   let first = candidates[0];
   let farthest = -1;
-  for (const p of candidates) {
-    const d = p.distanceToSquared(center);
+  for (let i = 0; i < candidates.length; i++) {
+    const p = candidates[i];
+    // 起點換了，後面整條最遠點取樣鏈就全部跟著換——這是切法差異最大的來源。
+    const d = p.distanceToSquared(center) * (weights ? weights[i] : 1);
     if (d > farthest) { farthest = d; first = p; }
   }
   chosen.push(first);
   while (chosen.length < Math.min(count, candidates.length)) {
     let best = candidates[0], bestDistance = -1;
-    for (const p of candidates) {
+    for (let i = 0; i < candidates.length; i++) {
+      const p = candidates[i];
       let nearest = Infinity;
       for (const q of chosen) nearest = Math.min(nearest, p.distanceToSquared(q));
+      if (weights) nearest *= weights[i];
       if (nearest > bestDistance) { bestDistance = nearest; best = p; }
     }
     chosen.push(best);
@@ -494,10 +561,13 @@ function distributeFormationAnchors(candidates, count = MAX_DROPS) {
   });
 }
 
-function distributePrimaryAnchors(candidates, count = MAX_DROPS) {
+function distributePrimaryAnchors(candidates, count = MAX_DROPS, seed = 0) {
   if (!candidates.length) return [];
   const chosen = [];
   const remaining = candidates.slice();
+  // remaining 會被 splice，索引跟著位移，所以權重必須同步 splice，不能用索引
+  // 回頭查原陣列 —— 否則挑掉幾顆之後每個點拿到的都是別人的權重。
+  const remainingWeights = cutWeights(candidates, seed, 8.6);
   while (chosen.length < Math.min(count, candidates.length)) {
     let bestIndex = 0;
     let bestScore = -Infinity;
@@ -508,13 +578,15 @@ function distributePrimaryAnchors(candidates, count = MAX_DROPS) {
         ? Math.min(...chosen.map(q => p.distanceTo(q)))
         : thickness;
       // 主滴服務於體積與重量，優先落在厚實內部；間距僅防止全部擠在同一區。
-      const score = thickness * 3.2 + spacing * 0.42;
+      const score = (thickness * 3.2 + spacing * 0.42)
+        * (remainingWeights ? remainingWeights[i] : 1);
       if (score > bestScore) {
         bestScore = score;
         bestIndex = i;
       }
     }
     const source = remaining.splice(bestIndex, 1)[0];
+    if (remainingWeights) remainingWeights.splice(bestIndex, 1);
     const copy = source.clone();
     copy.radiusHint = Math.min(0.24, Math.max(0.14, source.radiusHint || 0.14));
     chosen.push(copy);
@@ -522,21 +594,30 @@ function distributePrimaryAnchors(candidates, count = MAX_DROPS) {
   return chosen;
 }
 
-function distributeDetailedAnchors(candidates, count = MAX_MICRO_DROPS) {
+function distributeDetailedAnchors(candidates, count = MAX_MICRO_DROPS, seed = 0) {
   if (!candidates.length) return [];
   const weighted = [
     ...candidates,
     ...candidates.filter(p => p.surface),
   ];
-  const centers = distributeFormationAnchors(weighted, count);
+  const centers = distributeFormationAnchors(weighted, count, seed);
   const groups = Array.from({ length: centers.length }, () => []);
+  // 只把種子餵給初始中心點是不夠的：Lloyd iterations 會收斂到重心 Voronoi，
+  // 不管從哪裡起步都趨向同一組區塊，實測換種子後畫面幾乎沒變。真正要換切法，
+  // 得改變分割本身 —— 給每個中心一個固定權重、用加權距離指派，等於畫一張
+  // 乘法加權 Voronoi 圖：有的中心搶到大塊、有的只分到小塊，碎片大小與邊界
+  // 都跟著換。權重固定不隨 iteration 變，所以照樣會收斂。
+  const centerWeights = seed
+    ? centers.map((_, i) => 0.62 + 0.85 * hash11CPU(i * 4.19 + Math.round(seed) * 51.3))
+    : null;
   // 少量 Lloyd iterations，把每顆橢球變成一塊模型區域的代表，而非單一體素。
   for (let iteration = 0; iteration < 5; iteration++) {
     groups.forEach(group => { group.length = 0; });
     for (const point of weighted) {
       let best = 0, bestD = Infinity;
       for (let i = 0; i < centers.length; i++) {
-        const d = point.distanceToSquared(centers[i]);
+        let d = point.distanceToSquared(centers[i]);
+        if (centerWeights) d *= centerWeights[i];
         if (d < bestD) { bestD = d; best = i; }
       }
       groups[best].push(point);
@@ -760,10 +841,11 @@ function updateMicroDrops(phase, fidelityAbsorb = 0) {
     : 0;
   const amount = formationAmount(phase);
   const shatter = shattering ? shatterTimeline(phase) : null;
+  const shatterAnchors = shattering ? shatterAnchorSets().micro : null;
   const a = phase * Math.PI * 2;
   for (let i = 0; i < MAX_MICRO_DROPS; i++) {
     const o = i * 4;
-    if (i >= activeCount || !microFormationAnchors.length) {
+    if (i >= activeCount || !(shattering ? shatterAnchors : microFormationAnchors).length) {
       microDropData[o + 3] = 0;
       continue;
     }
@@ -771,7 +853,7 @@ function updateMicroDrops(phase, fidelityAbsorb = 0) {
     const h2 = hash11CPU(i * 3.77 + 47);
     const h3 = hash11CPU(i * 5.13 + 61);
     if (shattering) {
-      const target = microFormationAnchors[i % microFormationAnchors.length];
+      const target = shatterAnchors[i % shatterAnchors.length];
       shatterOffset(
         target,
         shatterSeed(i * 2.31 + 31, i * 3.77 + 47, i * 5.13 + 61),
@@ -916,6 +998,7 @@ function updateDropUniforms(t) {
   // Metaball union，而非原始 GLB SDF。
   // 穿梭環繞的形狀是恆定的背景主體，不走匯聚／散開的體積交接，永遠滿值顯示。
   const shatter = P.motion === 'shatter' ? shatterTimeline(phase) : null;
+  const shatterPrimary = shatter ? shatterAnchorSets().primary : null;
   const formationShapeProgress = !shapeField
     ? 0
     : P.motion === 'weave'
@@ -986,8 +1069,8 @@ function updateDropUniforms(t) {
       // 半徑固定不隨 phase 變化，只是「這顆水滴本來就比較大/小」。
       radiusFactor = P.weaveSizeMin + h3 * (P.weaveSizeMax - P.weaveSizeMin);
     } else if (shatter) {
-      const target = formationAnchors.length
-        ? formationAnchors[i % formationAnchors.length]
+      const target = shatterPrimary.length
+        ? shatterPrimary[i % shatterPrimary.length]
         : null;
       if (target) {
         shatterOffset(target, shatterSeed(i + 1, i + 7, i + 13), shatter, formationPosNow);
@@ -2011,7 +2094,7 @@ function updateUIState() {
     .forEach(id => { document.getElementById(id).style.opacity = weaving ? 1 : 0.4; });
   // 崩解噴濺的專屬控制項同理：它的參數只有 shatterTimeline 會讀，而那整段
   // 鎖在 P.motion === 'shatter' 分支裡，其他模式下調了完全沒有效果。
-  ['shatterAt', 'shatterForce', 'shatterGravity', 'shatterFade', 'shatterReform', 'shatterSeed'].forEach(id => {
+  ['shatterAt', 'shatterForce', 'shatterGravity', 'shatterFade', 'shatterReform', 'shatterSeed', 'shatterCut'].forEach(id => {
     document.getElementById(id).disabled = !shattering;
     document.getElementById(id + 'Row').style.opacity = shattering ? 1 : 0.4;
   });
@@ -2265,6 +2348,7 @@ async function importShapeFile(file, kind, { rebuilding = false } = {}) {
     }
     const old = shapeField?.texture;
     shapeField = next;
+    shapeFieldSerial++;
     shapeTargets = next.targets;
     formationAnchors = distributePrimaryAnchors(shapeTargets);
     microFormationAnchors = distributeDetailedAnchors(shapeTargets, MAX_MICRO_DROPS);
@@ -2612,6 +2696,7 @@ async function runExport(settings) {
 
   const job = { cancelled: false };
   exportJob = job;
+  flushShatterCutAnchors();
   syncLoop();
   const saved = {
     time: simT,
