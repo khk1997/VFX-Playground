@@ -530,14 +530,20 @@ export async function gltfToField(file, size = 48) {
   const url = URL.createObjectURL(file);
   let gltf;
   try { gltf = await new GLTFLoader().loadAsync(url); } finally { URL.revokeObjectURL(url); }
-  const box = new THREE.Box3().setFromObject(gltf.scene);
+  return objectToField(gltf.scene, size);
+}
+
+// 體素化與距離場烘焙本身與「資料從哪來」無關，因此和 GLB 載入拆開：
+// 內建預設造型是程式生成的 THREE.Mesh，走的是同一條路徑。
+export async function objectToField(root, size = 48) {
+  const box = new THREE.Box3().setFromObject(root);
   if (box.isEmpty()) throw new Error('模型沒有可用網格');
   const center = box.getCenter(new THREE.Vector3());
   const maxDim = Math.max(...box.getSize(new THREE.Vector3()).toArray());
-  gltf.scene.position.sub(center);
-  gltf.scene.scale.setScalar(1.72 / Math.max(maxDim, 1e-5));
-  gltf.scene.updateMatrixWorld(true);
-  const tris = collectTriangles(gltf.scene);
+  root.position.sub(center);
+  root.scale.setScalar(1.72 / Math.max(maxDim, 1e-5));
+  root.updateMatrixWorld(true);
+  const tris = collectTriangles(root);
   if (!tris.length) throw new Error('模型沒有三角形');
 
   const mask = new Uint8Array(size ** 3);

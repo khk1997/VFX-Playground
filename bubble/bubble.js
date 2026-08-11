@@ -1,6 +1,9 @@
 'use strict';
 import * as THREE from 'three';
-import { svgToField, gltfToField } from './shape-field.js?v=svg-shape-8';
+import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-9';
+import {
+  DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
+} from './default-shapes.js?v=svg-shape-9';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -93,13 +96,21 @@ const DEFAULTS = {              // 數值滑桿
   shapeDepth: 0.1,
   shapeSoftness: 0,
   shapeEdgeBevel: 0.025,
-  shapeLiquid: 0.55,
+  shapeLiquid: 0.1,
   shapeLiquidPosition: 2,
   shapeLiquidSize: 1.5,
   shapeLiquidSpeed: 1,
   shapeHold: 0.45,
   microCount: 14,
+  // 脈動呼吸：匯聚程度在 [1-pulseDepth, 1] 之間來回，0 等於完全靜止的成形狀態。
+  pulseDepth: 0.4,
 };
+
+// 「形狀匯聚」與「脈動呼吸」共用同一套 SDF 匯聚管線（錨點、細節滴、負滴、
+// 體積交接），差別只在 formationAmount 的時間軸：前者匯聚→停留→散開，
+// 後者恆為成形狀態、只讓匯聚程度呼吸。凡是「需要形狀距離場」的判斷都走這裡。
+const FORMATION_MOTIONS = new Set(['formation', 'pulse']);
+const isFormationMotion = motion => FORMATION_MOTIONS.has(motion);
 const SELECT_DEFAULTS = {
   bgMode: 'color',
   colorMode: 'spectral',
@@ -120,7 +131,21 @@ const COLOR_DEFAULTS  = {
 const P = { ...DEFAULTS, ...SELECT_DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS };
 const MOBILE_CAMERA_DISTANCE_DEFAULT = 4.3;
 if (mobileRenderQuery.matches && !PREVIEW) P.cameraDistance = MOBILE_CAMERA_DISTANCE_DEFAULT;
-const motionCounts = { cinematic: 2, formation: FORMATION_DEFAULT_COUNT };
+const motionCounts = {
+  cinematic: 2,
+  formation: FORMATION_DEFAULT_COUNT,
+  pulse: FORMATION_DEFAULT_COUNT,
+};
+// 水滴大小的預設值依模式不同：分裂維持原本較大的滴徑，形狀匯聚／脈動呼吸這兩個
+// 依賴外部形狀的模式改用較小的滴徑，讓吸附進外形時的顆粒感更細。切換模式時的
+// 記憶方式與 motionCounts 相同——使用者在某個模式下調過的值會被保留，只有預設
+// 的初始值不同。
+const FORMATION_DEFAULT_RADIUS = 0.25;
+const motionRadius = {
+  cinematic: DEFAULTS.radius,
+  formation: FORMATION_DEFAULT_RADIUS,
+  pulse: FORMATION_DEFAULT_RADIUS,
+};
 
 // 自訂漸層色標（最多 6，可調位置）— reset 用
 const STOP_MAX = 6;
@@ -134,7 +159,7 @@ const RAMP_DEFAULT = {
 const SELECTS = {
   bgMode:    { uniform: 'uBgMode',    map: { color: 0, hdri: 1 } },
   colorMode: { uniform: 'uColorMode', map: { spectral: 0, ramp: 1 } },
-  motion:    { uniform: 'uMotion',    map: { cinematic: 0, formation: 1 } },
+  motion:    { uniform: 'uMotion',    map: { cinematic: 0, formation: 1, pulse: 2 } },
   shapeSource: { uniform: 'uShapeType', map: { svg: 1, gltf: 2 } },
   // 僅控制下一次 GLB 烘焙尺寸，沒有對應 shader uniform。
   shapeQuality: { uniform: '', map: { performance: 48, balanced: 80, high: 128 } },
@@ -233,9 +258,10 @@ const fmt = {
   shapeLiquidSpeed: v => v === 0 ? '停止' : 'x' + v.toFixed(0),
   shapeHold: v => Math.round(v * 100) + '%',
   microCount: v => v.toFixed(0),
+  pulseDepth: v => Math.round(v * 100) + '%',
 };
 
-import { VERT, FRAG } from './shaders.js?v=svg-shape-8';
+import { VERT, FRAG } from './shaders.js?v=svg-shape-9';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -497,7 +523,16 @@ function smoothstepCPU(value, edge0, edge1) {
   return x * x * (3 - 2 * x);
 }
 
+// 脈動呼吸的匯聚包絡：恆為成形狀態，只沿餘弦在 [1-pulseDepth, 1] 之間呼吸。
+// 用 cos(2π·phase) 而不是 smoothstep 出入場，是因為它在 phase=0/1 的值與一階
+// 導數都相同 —— 循環接縫沒有位置跳變，也沒有速度跳變（慣性形變會讀速度）。
+function pulseAmount(phase) {
+  const wave = 0.5 * (1 - Math.cos(phase * Math.PI * 2));
+  return 1 - P.pulseDepth * wave;
+}
+
 function formationAmount(phase) {
+  if (P.motion === 'pulse') return pulseAmount(phase);
   const gatherEnd = Math.max(0.15, P.gatherDuration);
   const holdEnd = Math.min(0.94, gatherEnd + P.shapeHold);
   const gather = smoothstepCPU(phase, 0.04, gatherEnd);
@@ -506,6 +541,10 @@ function formationAmount(phase) {
 }
 
 function formationFidelityAmount(phase) {
+  // 脈動模式沒有匯集／散開兩段，體積交接直接跟著呼吸包絡走：吸飽時完全變成
+  // 模型 SDF，吐氣時把體積交還給可見水滴。門檻起點壓在 0.55，pulseDepth 只要
+  // 超過 ~0.45 就會在每個循環露出水滴，再往下則是純粹的模型微幅呼吸。
+  if (P.motion === 'pulse') return smoothstepCPU(formationAmount(phase), 0.55, 0.995);
   const gatherEnd = Math.max(0.15, P.gatherDuration);
   const holdEnd = Math.min(0.94, gatherEnd + P.shapeHold);
   // 直接使用循環 phase，而非已 smoothstep 過的 formationAmount 再平滑一次。
@@ -555,7 +594,7 @@ const formationPosBefore = new THREE.Vector3();
 const formationPosAfter = new THREE.Vector3();
 
 function updateMicroDrops(phase, fidelityAbsorb = 0) {
-  const activeCount = P.motion === 'formation' && shapeField
+  const activeCount = isFormationMotion(P.motion) && shapeField
     ? Math.max(0, Math.min(MAX_MICRO_DROPS, Math.round(P.microCount)))
     : 0;
   const amount = formationAmount(phase);
@@ -680,15 +719,17 @@ function updateDropUniforms(t) {
   const a = phase * tau;
   const energy = 0.55 + P.flowSpeed * 0.9;
   const amount = formationAmount(phase);
-  const fidelityAbsorb = P.motion === 'formation' && shapeField
+  const fidelityAbsorb = isFormationMotion(P.motion) && shapeField
     ? formationFidelityAmount(phase)
     : 0;
   const holdEnd = Math.min(0.94, Math.max(0.15, P.gatherDuration) + P.shapeHold);
-  const releasingShape = phase > holdEnd;
+  // 脈動模式永遠處於「成形」半段，沒有散開的回程，因此不走 release 分支 ——
+  // 匯集時間／完成停留這兩個滑桿在這個模式下不參與運算。
+  const releasingShape = P.motion !== 'pulse' && phase > holdEnd;
   const releaseTransfer = releasingShape ? formationReleaseAmount(phase) : 0;
   // 高密度細節場由可見主滴進入模型區域後才開始長出；它本身是預烘焙
   // Metaball union，而非原始 GLB SDF。
-  const formationShapeProgress = P.motion === 'formation' && shapeField
+  const formationShapeProgress = isFormationMotion(P.motion) && shapeField
     // 回程使用同一個體積交接進度：模型從第一幀開始退、水滴同步長回。
     // 舊版先維持完整模型、再集中侵蝕，會形成「模型上冒球後突然塌掉」。
     ? releasingShape
@@ -714,7 +755,7 @@ function updateDropUniforms(t) {
   // 接觸時增黏，拉伸時開始收頸，斷裂時快速卸除 smooth-min 的連接。
   let viscosityScale = P.motion === 'cinematic'
     ? Math.max(0.35, 1 + merge * 0.15 - tension * 0.25 - breakaway * 0.55)
-    : P.motion === 'formation'
+    : isFormationMotion(P.motion)
       // smooth-min 連續合併很多顆時會累積膨脹；依數量正規化融合半徑，
       // 讓 12–16 顆仍只在真正接觸處形成液橋，不把整組擴成巨大距離場。
       ? Math.max(0.10, 0.42 / Math.sqrt(count))
@@ -741,7 +782,7 @@ function updateDropUniforms(t) {
       // 形變本身已近似守恆體積，避免再用半徑做一次「呼吸」而產生橫向縮放感。
       radiusFactor = 1 + cinema.anticipation * 0.01
         + breakaway * 0.006 + followThrough * 0.004;
-    } else if (P.motion === 'formation') {
+    } else if (isFormationMotion(P.motion)) {
       const formation = amount;
       formationDropPosition(i, phase, count, formationPosNow);
       x = formationPosNow.x;
@@ -751,7 +792,7 @@ function updateDropUniforms(t) {
     }
     // 大滴受重力與慣性影響較明顯；常量位移不破壞循環接縫。
     y -= P.gravity * P.spread * 0.045 * Math.pow(radius, 1.35);
-    if (P.motion === 'formation') {
+    if (isFormationMotion(P.motion)) {
       // anchor 可能落在模型表層；吸收時稍微往模型中心推入，避免半徑縮小後
       // 先失去液橋、在輪廓旁短暫留下孤立小球。
       const insetScale = 1 - fidelityAbsorb * 0.20;
@@ -760,7 +801,7 @@ function updateDropUniforms(t) {
       z *= insetScale;
     }
     const freeRadius = P.radius * radius * radiusFactor;
-    if (P.motion === 'formation') {
+    if (isFormationMotion(P.motion)) {
       const targetRadius = formationAnchors[i % Math.max(1, formationAnchors.length)]?.radiusHint
         || P.radius * 0.58;
       const settle = smoothstepCPU(formationAmount(phase), 0.12, 0.88);
@@ -828,7 +869,7 @@ function updateDropUniforms(t) {
   let pairAxisX = 1, pairAxisY = 0, pairAxisZ = 0;
 
   // 非電影模式仍可依實際接觸做黏性融合；電影模式已在上方守恆轉移體積。
-  if (P.motion !== 'formation' && P.motion !== 'cinematic' && count >= 2 && fusionAmount > 0) {
+  if (!isFormationMotion(P.motion) && P.motion !== 'cinematic' && count >= 2 && fusionAmount > 0) {
     const da = dropData[pairA], db = dropData[pairB];
     const axisX = db.x - da.x, axisY = db.y - da.y, axisZ = db.z - da.z;
     const axisInv = 1 / Math.max(0.0001, Math.hypot(axisX, axisY, axisZ));
@@ -883,7 +924,7 @@ function updateDropUniforms(t) {
       vy = (d.y - prev.y) / frameDt;
       vz = (d.z - prev.z) / frameDt;
     }
-    if (P.motion === 'formation') {
+    if (isFormationMotion(P.motion)) {
       const epsilon = 1 / 2048;
       formationDropPosition(i, fract(phase - epsilon), count, formationPosBefore);
       formationDropPosition(i, fract(phase + epsilon), count, formationPosAfter);
@@ -1107,7 +1148,7 @@ function updateDropUniforms(t) {
     }
   }
   dropBounds.set(cx, cy, cz, boundRadius);
-  if (P.motion === 'formation' && shapeField) {
+  if (isFormationMotion(P.motion) && shapeField) {
     dropBounds.set(0, 0, 0, Math.max(boundRadius, 2.25));
     for (let i = 0; i < microCount; i++) {
       const o = i * 4;
@@ -1409,7 +1450,7 @@ function resize() {
 function resolveMaxSteps() {
   // 多水滴 + 形狀場會增加每一步的取樣成本；60 步仍足以覆蓋保守包圍球，
   // 並避免高 DPR 桌面在 Formation 模式失去即時預覽能力。
-  if (P.motion === 'formation') return Math.min(qualitySteps, dragging ? 48 : 60);
+  if (isFormationMotion(P.motion)) return Math.min(qualitySteps, dragging ? 48 : 60);
   return dragging ? Math.min(qualitySteps, 56) : qualitySteps;
 }
 
@@ -1520,6 +1561,7 @@ function bindControls() {
       if (key === 'cameraRotationX') rot.x = P[key] * Math.PI / 180;
       if (key === 'cameraRotationY') rot.y = P[key] * Math.PI / 180;
       if (key === 'count') motionCounts[P.motion] = Math.round(P[key]);
+      if (key === 'radius') motionRadius[P.motion] = P[key];
       if (key === 'shapeLiquidPosition') applyEdgeDropDistribution(P[key]);
       if (valEl) valEl.textContent = (fmt[key] || (v => +v.toFixed(2)))(P[key]);
       if (uniforms && uniforms[uName]) uniforms[uName].value = (key === 'count') ? Math.round(P[key]) : P[key];
@@ -1541,12 +1583,19 @@ function bindControls() {
         const countEl = document.getElementById('count');
         countEl.value = motionCounts[P.motion];
         countEl.dispatchEvent(new Event('input', { bubbles: true }));
+        motionRadius[previousMotion] = P.radius;
+        const radiusEl = document.getElementById('radius');
+        radiusEl.value = motionRadius[P.motion];
+        radiusEl.dispatchEvent(new Event('input', { bubbles: true }));
         previousDropT = null;
       }
       if (uniforms && uniforms[uniform]) uniforms[uniform].value = map[el.value];
       updateUIState();
       if (key === 'shapeQuality' && previousValue !== P[key]) {
         scheduleLastGLBRebuild();
+      }
+      if ((key === 'motion' || key === 'shapeSource') && previousValue !== P[key]) {
+        ensureShapeForCurrentSource();
       }
     };
     el.value = P[key];
@@ -1681,10 +1730,20 @@ function updateUIState() {
   bgc.disabled = !colorBackground;
   bgc.closest('.row').style.opacity = colorBackground ? 1 : 0.4;
   document.body.style.background = colorBackground ? P.bgColor : '#000';
-  const forming = P.motion === 'formation';
+  const forming = isFormationMotion(P.motion);
+  // 脈動幅度只在脈動模式有意義；反過來，匯集時間／完成停留描述的是匯聚→散開
+  // 的時間軸，脈動模式不走那條分支，所以兩邊互相反灰。
+  const pulsing = P.motion === 'pulse';
+  const pulseDepthEl = document.getElementById('pulseDepth');
+  pulseDepthEl.disabled = !pulsing;
+  document.getElementById('pulseDepthRow').style.opacity = pulsing ? 1 : 0.4;
   const formationGroup = document.getElementById('formationGroup');
   formationGroup.style.opacity = forming ? 1 : 0.38;
   formationGroup.querySelectorAll('input, select, button').forEach(el => { el.disabled = !forming; });
+  formationGroup.querySelectorAll('.timelineRow').forEach(row => {
+    row.style.opacity = pulsing ? 0.4 : 1;
+    row.querySelectorAll('input').forEach(el => { el.disabled = !forming || pulsing; });
+  });
   // 輪廓液滴有兩層閘門：外層是模式（只有 SVG 擠出的 formation 用得到），
   // 內層是自己的主開關。主開關關閉時只停掉會移動的液滴，「邊緣水滴」因為同時
   // 決定擠出邊緣的圓角，標了 .keepEnabled 而保持可用 —— 這樣才做得出
@@ -1719,6 +1778,10 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   if (mobileRenderQuery.matches && !PREVIEW) P.cameraDistance = MOBILE_CAMERA_DISTANCE_DEFAULT;
   motionCounts.cinematic = DEFAULTS.count;
   motionCounts.formation = FORMATION_DEFAULT_COUNT;
+  motionCounts.pulse = FORMATION_DEFAULT_COUNT;
+  motionRadius.cinematic = DEFAULTS.radius;
+  motionRadius.formation = FORMATION_DEFAULT_RADIUS;
+  motionRadius.pulse = FORMATION_DEFAULT_RADIUS;
   resetSpectralCausticColors();
   resetRamp();
   bindControls();
@@ -1831,6 +1894,13 @@ let shapeConverting = false;
 let lastGLBFile = null;
 let shapeImportRequestId = 0;
 let shapeRebuildTimer = 0;
+// 目前 shapeField 是由哪個來源烘出來的。切換「形狀來源」時用它判斷是否需要
+// 重新烘焙 —— 舊版切到 GLB 但沒選檔案，畫面仍是上一個 SVG 的距離場。
+let shapeFieldSource = null;
+// 烘焙途中要求換來源時記在這裡，等當前烘焙結束再補做。
+let shapeEnsurePending = false;
+// 使用者自己匯入的檔案，依來源分開記住。有記錄就不再套用內建預設。
+const userShapeFiles = { svg: null, gltf: null };
 document.getElementById('shapeBtn').addEventListener('click', () => shapeInput.click());
 
 function scheduleLastGLBRebuild() {
@@ -1843,19 +1913,24 @@ function scheduleLastGLBRebuild() {
     || `${grid}³`;
   shapeState.textContent = `品質已切換，準備重新生成 ${qualityLabel}…`;
   shapeRebuildTimer = window.setTimeout(() => {
-    importShapeFile(lastGLBFile, 'gltf', true);
+    importShapeFile(lastGLBFile, 'gltf', { rebuilding: true });
   }, 160);
 }
 
-async function importShapeFile(file, kind, rebuilding = false) {
+// file 為 null 代表套用內建預設造型（SVG 內嵌字串／3D 程式生成的環形）。
+async function importShapeFile(file, kind, { rebuilding = false } = {}) {
   if (!inited) initGL();
   const requestId = ++shapeImportRequestId;
+  const builtin = !file;
+  const label = builtin
+    ? (kind === 'svg' ? DEFAULT_SVG_NAME : DEFAULT_SOLID_NAME)
+    : file.name;
   const glbGridSize = SELECTS.shapeQuality.map[P.shapeQuality] || 80;
   shapeState.textContent = kind === 'svg'
-    ? `正在分析 SVG：${file.name}`
+    ? `正在分析 SVG：${label}`
     : rebuilding
-      ? `正在重新生成：${file.name} → ${glbGridSize}³（可能需要幾秒）`
-      : `正在體素化模型：${file.name} → ${glbGridSize}³（可能需要幾秒）`;
+      ? `正在重新生成：${label} → ${glbGridSize}³（可能需要幾秒）`
+      : `正在體素化模型：${label} → ${glbGridSize}³（可能需要幾秒）`;
   document.getElementById('shapeBtn').disabled = true;
   document.getElementById('shapeQuality').disabled = true;
   shapeConverting = true;
@@ -1864,8 +1939,11 @@ async function importShapeFile(file, kind, rebuilding = false) {
     const next = kind === 'svg'
       // 超取樣的距離場暫時佔用 (size*ss)² 個 float；桌面用 3（1536²，約 38MB
       // 峰值），行動裝置降一級避免配置失敗。
-      ? await svgToField(file, { supersample: mobileRenderQuery.matches ? 2 : 3 })
-      : await gltfToField(file, glbGridSize);
+      ? await svgToField(builtin ? makeDefaultSvgFile() : file,
+        { supersample: mobileRenderQuery.matches ? 2 : 3 })
+      : builtin
+        ? await objectToField(buildDefaultSolid(), glbGridSize)
+        : await gltfToField(file, glbGridSize);
     if (requestId !== shapeImportRequestId) {
       next.texture?.dispose();
       return;
@@ -1885,14 +1963,21 @@ async function importShapeFile(file, kind, rebuilding = false) {
     uniforms.uShapeAtlas.value.copy(next.atlas);
     uniforms.uShapeType.value = kind === 'svg' ? 1 : 2;
     if (old) old.dispose();
-    document.getElementById('motion').value = 'formation';
-    document.getElementById('motion').dispatchEvent(new Event('change', { bubbles: true }));
+    shapeFieldSource = kind;
+    // 只有在還停在非匯聚模式時才強制跳過去；已經在「形狀匯聚」或「脈動呼吸」
+    // 的話保持原模式，否則自動載入預設會把使用者從脈動踢回匯聚。
+    if (!isFormationMotion(P.motion)) {
+      const motionEl = document.getElementById('motion');
+      motionEl.value = 'formation';
+      motionEl.dispatchEvent(new Event('change', { bubbles: true }));
+    }
     simT = 0;
     const topologyNote = kind === 'gltf' && next.oddScanlines > 0
       ? `；已修復 ${next.oddScanlines} 條非封閉掃描線`
       : '';
     const qualityNote = kind === 'gltf' ? `；${glbGridSize}³` : '';
-    shapeState.textContent = `${kind === 'svg' ? 'SVG' : '3D 模型'} 已就緒：${file.name}${qualityNote}${topologyNote}`;
+    const builtinNote = builtin ? '（內建預設，可自行匯入取代）' : '';
+    shapeState.textContent = `${kind === 'svg' ? 'SVG' : '3D 模型'} 已就緒：${label}${qualityNote}${topologyNote}${builtinNote}`;
   } catch (error) {
     if (requestId !== shapeImportRequestId) return;
     console.error(error);
@@ -1902,6 +1987,10 @@ async function importShapeFile(file, kind, rebuilding = false) {
       shapeConverting = false;
       updateUIState();
       syncLoop();
+      if (shapeEnsurePending) {
+        shapeEnsurePending = false;
+        ensureShapeForCurrentSource();
+      }
     }
   }
 }
@@ -1911,9 +2000,23 @@ shapeInput.addEventListener('change', e => {
   if (!file) return;
   const kind = P.shapeSource;
   if (kind === 'gltf') lastGLBFile = file;
+  userShapeFiles[kind] = file;
   importShapeFile(file, kind);
   e.target.value = '';
 });
+
+// 切到需要距離場的模式、或換了形狀來源時，確保手上就有對應來源的形狀可用。
+// 沒有使用者匯入的檔案就退回內建預設，讓這兩個模式不必先匯入檔案就看得到東西。
+function ensureShapeForCurrentSource() {
+  if (!isFormationMotion(P.motion)) return;
+  if (shapeFieldSource === P.shapeSource) return;
+  // 烘焙中不併行開第二份：兩者都是幾秒的 CPU 工作，同時跑只會互相拖慢。
+  // 改成記下待辦，等當前這份收工後在 finally 裡補做，否則在烘焙途中切換來源
+  // 會被整個吞掉 —— 畫面停在上一個來源的距離場，且沒有任何東西會再觸發。
+  if (shapeConverting) { shapeEnsurePending = true; return; }
+  shapeEnsurePending = false;
+  importShapeFile(userShapeFiles[P.shapeSource], P.shapeSource);
+}
 
 /* ===== 播放/暫停：面板按鈕、postMessage、分頁隱藏三者共同決定 ===== */
 let userPaused = false, extPaused = PREVIEW;
@@ -2104,8 +2207,9 @@ function applyExportCamera(time, width, height, fov, scale, settings = null) {
 
   const frameGatherEnd = Math.max(0.15, P.gatherDuration);
   const frameHoldEnd = Math.min(0.94, frameGatherEnd + P.shapeHold);
-  const formationFocus = P.motion === 'formation' && shapeField
-    ? phase01 > frameHoldEnd
+  // 脈動模式沒有 hold 之後的散開段，取景一律走成形分支，鏡頭只隨呼吸微幅推拉。
+  const formationFocus = isFormationMotion(P.motion) && shapeField
+    ? (P.motion !== 'pulse' && phase01 > frameHoldEnd)
       ? formationFidelityAmount(phase01)
       : smoothstepCPU(formationAmount(phase01), 0.42, 0.92)
     : 0;
@@ -2379,8 +2483,9 @@ function frame(now) {
   // 若維持同一鏡距，外圍小滴剛收回時主體會顯得突然縮小。
   const frameGatherEnd = Math.max(0.15, P.gatherDuration);
   const frameHoldEnd = Math.min(0.94, frameGatherEnd + P.shapeHold);
-  const formationFocus = P.motion === 'formation' && shapeField
-    ? phase01 > frameHoldEnd
+  // 脈動模式沒有 hold 之後的散開段，取景一律走成形分支，鏡頭只隨呼吸微幅推拉。
+  const formationFocus = isFormationMotion(P.motion) && shapeField
+    ? (P.motion !== 'pulse' && phase01 > frameHoldEnd)
       ? formationFidelityAmount(phase01)
       : smoothstepCPU(formationAmount(phase01), 0.42, 0.92)
     : 0;

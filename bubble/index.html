@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Prism Drops VFX</title>
+<title>Liquid Glass Drops VFX</title>
 <script>if (new URLSearchParams(location.search).has('preview')) document.documentElement.classList.add('preview-mode');</script>
 <style>html.preview-mode #homeBtn,html.preview-mode #toggleBtn,html.preview-mode #exportBtn,html.preview-mode #exportDialog,html.preview-mode #playCtl,html.preview-mode #panel{display:none!important}</style>
 <link rel="stylesheet" href="./bubble.css?v=svg-shape-1">
@@ -22,8 +22,8 @@
 <a id="homeBtn" href="../index.html">← 首頁</a>
 
 <div id="panel">
-  <h2>PRISM DROPS</h2>
-  <div class="sub">Three.js + GLSL 虹彩水滴 — Metaball 融合/分裂・拖曳可旋轉</div>
+  <h2>LIQUID GLASS DROPS</h2>
+  <div class="sub">Three.js + GLSL 液態玻璃水滴 — Metaball 融合/分裂・拖曳可旋轉</div>
 
   <div class="group">
     <h3>背景與 HDRI Background</h3>
@@ -163,9 +163,11 @@
   <div class="group">
     <h3>動態 Motion</h3>
     <div class="row"><label>動態模式</label><select id="motion">
-      <option value="cinematic">電影循環 Cinematic</option>
+      <option value="cinematic">分裂 Split</option>
       <option value="formation">形狀匯聚 Formation</option>
+      <option value="pulse">脈動呼吸 Pulse</option>
     </select><span class="val"></span></div>
+    <div class="row" id="pulseDepthRow"><label>脈動幅度</label><input type="range" id="pulseDepth" min="0" max="0.8" step="0.01" value="0.4"><span class="val" id="pulseDepth_v"></span></div>
     <div class="row"><label>循環秒數</label><input type="range" id="loopDuration" min="4" max="30" step="0.5" value="12"><span class="val" id="loopDuration_v"></span></div>
     <div class="row"><label>動態張力</label><input type="range" id="flowSpeed" min="0" max="1.5" step="0.01" value="0.47"><span class="val" id="flowSpeed_v"></span></div>
     <div class="row"><label>起伏動畫</label><input type="range" id="wobbleSpeed" min="0" max="2" step="0.01" value="0.65"><span class="val" id="wobbleSpeed_v"></span></div>
@@ -183,11 +185,11 @@
         <option value="high">高品質 128³</option>
       </select><span class="val"></span></div>
       <div class="row"><button class="fileBtn" id="shapeBtn">選擇 SVG…</button></div>
-      <div id="shapeState" class="note">請選擇一個有填色輪廓的 SVG</div>
+      <div id="shapeState" class="note">切到「形狀匯聚 / 脈動呼吸」會先套用內建預設造型，可再自行匯入取代</div>
       <input type="file" id="shapeInput" accept=".svg,image/svg+xml" hidden>
       <div class="effectSubhead">時間軸</div>
-      <div class="row"><label>匯集時間</label><input type="range" id="gatherDuration" min="0.15" max="0.75" step="0.01" value="0.25"><span class="val" id="gatherDuration_v"></span></div>
-      <div class="row"><label>完成停留</label><input type="range" id="shapeHold" min="0.05" max="0.45" step="0.01" value="0.45"><span class="val" id="shapeHold_v"></span></div>
+      <div class="row timelineRow"><label>匯集時間</label><input type="range" id="gatherDuration" min="0.15" max="0.75" step="0.01" value="0.25"><span class="val" id="gatherDuration_v"></span></div>
+      <div class="row timelineRow"><label>完成停留</label><input type="range" id="shapeHold" min="0.05" max="0.45" step="0.01" value="0.45"><span class="val" id="shapeHold_v"></span></div>
       <div class="effectSubhead">外形細節</div>
       <div class="row"><label>輪廓細節滴</label><input type="range" id="microCount" min="8" max="20" step="1" value="14"><span class="val" id="microCount_v"></span></div>
       <div class="row"><label>形狀厚度</label><input type="range" id="shapeDepth" min="0.05" max="0.8" step="0.01" value="0.1"><span class="val" id="shapeDepth_v"></span></div>
@@ -199,7 +201,7 @@
     <div class="effectBlock effectBlock--drop" id="edgeDropGroup">
       <div class="effectTitle"><span>DROP</span> 輪廓液滴</div>
       <div class="row toggleRow"><label>輪廓液滴</label><input type="checkbox" id="edgeDropsEnabled" checked><span class="switchTrack" aria-hidden="true"></span><span class="val" id="edgeDropsEnabled_v">開啟</span></div>
-      <div class="row keepEnabled"><label>邊緣水滴</label><input type="range" id="shapeLiquid" min="0" max="1" step="0.01" value="0.55"><span class="val" id="shapeLiquid_v"></span></div>
+      <div class="row keepEnabled"><label>邊緣水滴</label><input type="range" id="shapeLiquid" min="0" max="1" step="0.01" value="0.1"><span class="val" id="shapeLiquid_v"></span></div>
       <div class="row"><label>水滴分佈</label><input type="range" id="shapeLiquidPosition" min="0" max="7" step="1" value="2"><span class="val" id="shapeLiquidPosition_v"></span></div>
       <div class="row"><label>水滴大小</label><input type="range" id="shapeLiquidSize" min="0.5" max="2" step="0.01" value="1.5"><span class="val" id="shapeLiquidSize_v"></span></div>
       <div class="row"><label>水滴流速</label><input type="range" id="shapeLiquidSpeed" min="0" max="3" step="1" value="1"><span class="val" id="shapeLiquidSpeed_v"></span></div>
@@ -225,7 +227,7 @@
   <form method="dialog" class="exportWorkspace">
     <header class="exportHeader">
       <div>
-        <span class="exportEyebrow">PRISM DROPS</span>
+        <span class="exportEyebrow">LIQUID GLASS DROPS</span>
         <h2 id="exportTitle">輸出設定</h2>
         <p>設定構圖、透明背景與動態序列。</p>
       </div>
@@ -313,6 +315,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=svg-shape-8"></script>
+<script type="module" src="./bubble.js?v=svg-shape-9"></script>
 </body>
 </html>

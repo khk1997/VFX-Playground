@@ -49,7 +49,7 @@ const EFFECTS = [
     previewSrc: 'aurora/index.html?preview=1',
   },
   {
-    title: '虹彩水滴 Prism Drops',
+    title: '液態玻璃水滴 Liquid Glass Drops',
     category: 'RAYMARCHING',
     description: '具有薄膜干涉色彩的融合水滴',
     theme: ['91, 181, 255', '238, 117, 204'],
