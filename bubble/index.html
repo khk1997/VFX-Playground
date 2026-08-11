@@ -173,8 +173,14 @@
       <option value="cinematic">分裂 Split</option>
       <option value="formation">形狀匯聚 Formation</option>
       <option value="pulse">脈動呼吸 Pulse</option>
+      <option value="weave">穿梭環繞 Weave</option>
     </select><span class="val"></span></div>
     <div class="row" id="pulseDepthRow"><label>脈動幅度</label><input type="range" id="pulseDepth" min="0" max="0.8" step="0.01" value="0.4"><span class="val" id="pulseDepth_v"></span></div>
+    <div class="row" id="weaveSizeMinRow"><label>大小差異下限</label><input type="range" id="weaveSizeMin" min="0.1" max="2" step="0.01" value="0.1"><span class="val" id="weaveSizeMin_v"></span></div>
+    <div class="row" id="weaveSizeMaxRow"><label>大小差異上限</label><input type="range" id="weaveSizeMax" min="0.1" max="2" step="0.01" value="0.25"><span class="val" id="weaveSizeMax_v"></span></div>
+    <div id="weaveSizeNote" class="note">會乘在上方「水滴形態」的「水滴大小」基準值上，決定同一批水滴彼此的大小差異。</div>
+    <div class="row" id="weaveDriftAmountRow"><label>飄浮幅度</label><input type="range" id="weaveDriftAmount" min="0" max="2" step="0.01" value="1"><span class="val" id="weaveDriftAmount_v"></span></div>
+    <div class="row" id="weaveDriftSpeedRow"><label>飄浮速度</label><input type="range" id="weaveDriftSpeed" min="1" max="5" step="1" value="1"><span class="val" id="weaveDriftSpeed_v"></span></div>
     <div class="row" id="flowSpeedRow"><label>動態張力</label><input type="range" id="flowSpeed" min="0" max="1.5" step="0.01" value="0.47"><span class="val" id="flowSpeed_v"></span></div>
   </div>
 
@@ -189,7 +195,7 @@
         <option value="high">高品質 128³</option>
       </select><span class="val"></span></div>
       <div class="row"><button class="fileBtn" id="shapeBtn">選擇 SVG…</button></div>
-      <div id="shapeState" class="note">切到「形狀匯聚 / 脈動呼吸」會先套用內建預設造型，可再自行匯入取代</div>
+      <div id="shapeState" class="note">切到「形狀匯聚 / 脈動呼吸 / 穿梭環繞」會先套用內建預設造型，可再自行匯入取代</div>
       <input type="file" id="shapeInput" accept=".svg,image/svg+xml" hidden>
       <div class="effectSubhead">時間軸</div>
       <div class="row" id="loopDurationRow"><label>循環秒數</label><input type="range" id="loopDuration" min="4" max="30" step="0.5" value="12"><span class="val" id="loopDuration_v"></span></div>
@@ -197,7 +203,7 @@
       <div class="row timelineRow"><label>完成停留</label><input type="range" id="shapeHold" min="0.05" max="0.45" step="0.01" value="0.45"><span class="val" id="shapeHold_v"></span></div>
       <div id="timelineSummary" class="note timelineRow"></div>
       <div class="effectSubhead">外形細節</div>
-      <div class="row"><label>輪廓細節滴</label><input type="range" id="microCount" min="8" max="20" step="1" value="14"><span class="val" id="microCount_v"></span></div>
+      <div class="row" id="microCountRow"><label>輪廓細節滴</label><input type="range" id="microCount" min="8" max="20" step="1" value="14"><span class="val" id="microCount_v"></span></div>
       <div class="row"><label>形狀厚度</label><input type="range" id="shapeDepth" min="0.05" max="0.8" step="0.01" value="0.1"><span class="val" id="shapeDepth_v"></span></div>
       <div class="row"><label>邊緣圓角</label><input type="range" id="shapeEdgeBevel" min="0" max="0.15" step="0.001" value="0.025"><span class="val" id="shapeEdgeBevel_v"></span></div>
       <div class="row"><label>邊緣液化</label><input type="range" id="shapeSoftness" min="0" max="0.25" step="0.005" value="0"><span class="val" id="shapeSoftness_v"></span></div>
@@ -321,6 +327,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=svg-shape-11"></script>
+<script type="module" src="./bubble.js?v=svg-shape-19"></script>
 </body>
 </html>
