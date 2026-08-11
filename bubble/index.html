@@ -187,7 +187,8 @@
     <div class="row" id="shatterGravityRow"><label>噴散重力</label><input type="range" id="shatterGravity" min="0" max="2" step="0.01" value="0.6"><span class="val" id="shatterGravity_v"></span></div>
     <div class="row" id="shatterFadeRow"><label>碎片消散</label><input type="range" id="shatterFade" min="0" max="1" step="0.01" value="0.35"><span class="val" id="shatterFade_v"></span></div>
     <div class="row" id="shatterReformRow"><label>重組時間</label><input type="range" id="shatterReform" min="0.05" max="0.6" step="0.01" value="0.3"><span class="val" id="shatterReform_v"></span></div>
-    <div id="shatterNote" class="note">形狀先完整靜止，到「崩解時機」炸開成碎片四散；「重組時間」是循環尾端把碎片收回、形狀重新長回來的長度，收得太短會看到形狀突然出現。</div>
+    <div class="row" id="shatterSeedRow"><label>噴散種子</label><input type="range" id="shatterSeed" min="0" max="30" step="1" value="0"><span class="val" id="shatterSeed_v"></span></div>
+    <div id="shatterNote" class="note">形狀先完整靜止，到「崩解時機」炸開成碎片四散；「重組時間」是循環尾端把碎片收回、形狀重新長回來的長度，收得太短會看到形狀突然出現。「噴散種子」換一整組飛散路徑（碎片往哪飛、飛多快），但不會改變形狀被切成哪幾塊。</div>
     <div class="row" id="flowSpeedRow"><label>動態張力</label><input type="range" id="flowSpeed" min="0" max="1.5" step="0.01" value="0.47"><span class="val" id="flowSpeed_v"></span></div>
   </div>
 
@@ -334,6 +335,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=svg-shape-20"></script>
+<script type="module" src="./bubble.js?v=svg-shape-21"></script>
 </body>
 </html>

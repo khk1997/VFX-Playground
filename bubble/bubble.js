@@ -1,9 +1,9 @@
 'use strict';
 import * as THREE from 'three';
-import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-20';
+import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-21';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
-} from './default-shapes.js?v=svg-shape-20';
+} from './default-shapes.js?v=svg-shape-21';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -130,6 +130,8 @@ const DEFAULTS = {              // 數值滑桿
   // 循環尾端用來把碎片收回錨點、形狀重新長回來的長度。收在這裡才能讓
   // phase=0/1 兩端都是「完整形狀 + 零半徑碎片」，循環接縫不跳。
   shatterReform: 0.3,
+  // 噴散亂數種子（見 shatterSeed）。0 是加這個參數之前的那一組飛散路徑。
+  shatterSeed: 0,
 };
 
 // 「形狀匯聚」與「脈動呼吸」共用同一套 SDF 匯聚管線（錨點、細節滴、負滴、
@@ -313,9 +315,10 @@ const fmt = {
   shatterGravity: v => 'x' + v.toFixed(2),
   shatterFade: v => Math.round(v * 100) + '%',
   shatterReform: v => (v * P.loopDuration).toFixed(1) + 's',
+  shatterSeed: v => '#' + v.toFixed(0),
 };
 
-import { VERT, FRAG } from './shaders.js?v=svg-shape-20';
+import { VERT, FRAG } from './shaders.js?v=svg-shape-21';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -633,6 +636,19 @@ function shatterTimeline(phase) {
   return { burst, flight, reform };
 }
 
+// 噴散亂數種子。碎片的初速快慢與噴散方向的擾動都由這三個雜湊值決定，換一個
+// 種子就換一整組飛散路徑。實作只是把雜湊的取樣點整段平移 —— 種子 0 會讓參數
+// 退化回原本的式子（主滴 hash11CPU(i+1)、微滴 hash11CPU(i*2.31+31)…），所以
+// 預設值與加種子之前的畫面完全一致。
+//
+// 注意這個種子不會改變「形狀被切成哪幾塊」：碎片的出發點是匯入形狀算出來的
+// 錨點，由幾何決定而非亂數，換種子只換它們往哪飛、飛多快。
+const SHATTER_SEED_STRIDE = 17.3;
+function shatterSeed(k1, k2, k3) {
+  const s = Math.round(P.shatterSeed) * SHATTER_SEED_STRIDE;
+  return { h1: hash11CPU(k1 + s), h2: hash11CPU(k2 + s), h3: hash11CPU(k3 + s) };
+}
+
 // 碎片的彈道位移：從造型中心往外炸開（每顆錨點自己的方向），加上往下累積的
 // 重力。重組期把位移整個收回 0，所以最後一定回得到錨點上。
 function shatterOffset(anchor, seed, timeline, out) {
@@ -756,7 +772,12 @@ function updateMicroDrops(phase, fidelityAbsorb = 0) {
     const h3 = hash11CPU(i * 5.13 + 61);
     if (shattering) {
       const target = microFormationAnchors[i % microFormationAnchors.length];
-      shatterOffset(target, { h1, h2, h3 }, shatter, formationPosNow);
+      shatterOffset(
+        target,
+        shatterSeed(i * 2.31 + 31, i * 3.77 + 47, i * 5.13 + 61),
+        shatter,
+        formationPosNow,
+      );
       microDropData[o] = formationPosNow.x;
       microDropData[o + 1] = formationPosNow.y;
       microDropData[o + 2] = formationPosNow.z;
@@ -969,7 +990,7 @@ function updateDropUniforms(t) {
         ? formationAnchors[i % formationAnchors.length]
         : null;
       if (target) {
-        shatterOffset(target, { h1, h2, h3 }, shatter, formationPosNow);
+        shatterOffset(target, shatterSeed(i + 1, i + 7, i + 13), shatter, formationPosNow);
         x = formationPosNow.x;
         y = formationPosNow.y;
         z = formationPosNow.z;
@@ -1990,7 +2011,7 @@ function updateUIState() {
     .forEach(id => { document.getElementById(id).style.opacity = weaving ? 1 : 0.4; });
   // 崩解噴濺的專屬控制項同理：它的參數只有 shatterTimeline 會讀，而那整段
   // 鎖在 P.motion === 'shatter' 分支裡，其他模式下調了完全沒有效果。
-  ['shatterAt', 'shatterForce', 'shatterGravity', 'shatterFade', 'shatterReform'].forEach(id => {
+  ['shatterAt', 'shatterForce', 'shatterGravity', 'shatterFade', 'shatterReform', 'shatterSeed'].forEach(id => {
     document.getElementById(id).disabled = !shattering;
     document.getElementById(id + 'Row').style.opacity = shattering ? 1 : 0.4;
   });
