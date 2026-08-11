@@ -834,6 +834,28 @@ void main(){
         backRim = pow(1.0 - exitFacing, 3.0) * uFresnel;
 
         vec3 exitDir = refract(insideDir, -exitNormal, uIOR);
+        // 第一個出口若全內反射（GLSL refract 在超過臨界角時回傳零向量；uIOR
+        // 越高、臨界角越窄，掠射角附近很容易發生），真正的厚玻璃球通常會在
+        // 內部再彈一次才穿得出去，不是直接放棄折射、退回原始視線方向。這裡
+        // 只補一次彈跳（够蓋大部分情形，又不必把整段追蹤邏輯包成迴圈）：
+        // 沿反射方向重新找下一個出口，Fresnel、光程長度、背面薄膜全部改用
+        // 第二個出口的結果，讓厚玻璃的內部光路看起來有轉折而不是一次到底。
+        if (dot(exitDir, exitDir) < 0.0001) {
+          vec3 bounceDir = normalize(reflect(insideDir, exitNormal));
+          vec3 exitPoint2;
+          vec3 exitNormal2;
+          float pathLength2;
+          if (traceExitSurface(exitPoint, bounceDir, exitPoint2, exitNormal2, pathLength2)) {
+            insideDir = bounceDir;
+            exitFacing = clamp(dot(exitNormal2, bounceDir), 0.0, 1.0);
+            backFres = f0 + (1.0 - f0) * pow(1.0 - exitFacing, 5.0);
+            backRim = pow(1.0 - exitFacing, 3.0) * uFresnel;
+            exitDir = refract(bounceDir, -exitNormal2, uIOR);
+            pathLength += pathLength2;
+            exitPoint = exitPoint2;
+            exitNormal = exitNormal2;
+          }
+        }
         if (dot(exitDir, exitDir) < 0.0001) exitDir = rd;
         exitDir = normalize(exitDir);
         transmissionDir = exitDir;
