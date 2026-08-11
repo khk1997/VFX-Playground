@@ -1,9 +1,9 @@
 'use strict';
 import * as THREE from 'three';
-import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-22';
+import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-23';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
-} from './default-shapes.js?v=svg-shape-22';
+} from './default-shapes.js?v=svg-shape-23';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -25,6 +25,8 @@ const FORMATION_DEFAULT_COUNT = 1;
 const WEAVE_DEFAULT_COUNT = 6;
 // 崩解噴濺相反：畫面上的碎片愈多愈像噴濺，主水滴與微滴一起當碎片用。
 const SHATTER_DEFAULT_COUNT = 8;
+// 崩解噴濺的碎片大小基準：「水滴大小」滑桿的最小值，在這個模式代表 ×1 原尺寸。
+const SHATTER_RADIUS_BASE = 0.25;
 const MAX_MICRO_DROPS = 20;
 const MAX_EDGE_DROPS = 8;
 const MAX_NEGATIVE_DROPS = 4;
@@ -135,6 +137,9 @@ const DEFAULTS = {              // 數值滑桿
   // 崩解切法（見 shatterAnchorSets）。換的是形狀被切成哪幾塊，跟 shatterSeed
   // 換飛散路徑是兩件不同的事。0 沿用共用錨點，不額外重算。
   shatterCut: 0,
+  // 碎片彼此的大小差異（見 shatterFragmentRadius）。乘在各自的局部厚度上，
+  // 所以調大只是讓大小更參差，不會讓任何一顆撐出輪廓。
+  shatterVariety: 0.3,
 };
 
 // 「形狀匯聚」與「脈動呼吸」共用同一套 SDF 匯聚管線（錨點、細節滴、負滴、
@@ -183,7 +188,8 @@ const motionRadius = {
   formation: FORMATION_DEFAULT_RADIUS,
   pulse: FORMATION_DEFAULT_RADIUS,
   weave: FORMATION_DEFAULT_RADIUS,
-  shatter: 0.2,
+  // 崩解噴濺的「水滴大小」是碎片的整體乘數，滑桿最小值 0.25 剛好＝×1 原尺寸。
+  shatter: SHATTER_RADIUS_BASE,
 };
 
 // 自訂漸層色標（最多 6，可調位置）— reset 用
@@ -320,9 +326,10 @@ const fmt = {
   shatterReform: v => (v * P.loopDuration).toFixed(1) + 's',
   shatterSeed: v => '#' + v.toFixed(0),
   shatterCut: v => v === 0 ? '預設' : '#' + v.toFixed(0),
+  shatterVariety: v => '±' + Math.round(v * 100) + '%',
 };
 
-import { VERT, FRAG } from './shaders.js?v=svg-shape-22';
+import { VERT, FRAG } from './shaders.js?v=svg-shape-23';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -588,6 +595,10 @@ function distributePrimaryAnchors(candidates, count = MAX_DROPS, seed = 0) {
     const source = remaining.splice(bestIndex, 1)[0];
     if (remainingWeights) remainingWeights.splice(bestIndex, 1);
     const copy = source.clone();
+    // 下面那個 0.14 下限是形狀匯聚要的：主滴在那裡負責撐體積、接液橋，寧可比
+    // 真實厚度粗。崩解噴濺剛好相反，碎片一旦比所在位置的造型厚就會撐破輪廓，
+    // 所以把沒有夾過的原始厚度另存一份給它用。
+    copy.thickness = source.radiusHint || 0.1;
     copy.radiusHint = Math.min(0.24, Math.max(0.14, source.radiusHint || 0.14));
     chosen.push(copy);
   }
@@ -765,6 +776,20 @@ function shatterShapeAmount(timeline) {
   return Math.max(1 - timeline.burst, smoothstepCPU(timeline.reform, 0.4, 1));
 }
 
+// 碎片的基準大小一律由「它代表的那塊造型有多厚」決定，而不是沿用其他模式那個
+// 與形狀無關的全域水滴大小。這是「炸開瞬間主體會變形」的根治：舊版主滴半徑
+// 0.166–0.260、微滴只有 0.089–0.098（實測差 2.65 倍、體積 18.6 倍），主滴在
+// 問號那種細筆畫上等於長出三倍粗的球，形狀還沒退場就先被撐出一個包。
+//
+// 「水滴大小」滑桿在這個模式退化成整體乘數（最小值 0.25 = 原尺寸）；碎片之間
+// 的大小差異改由「碎片大小差異」控制，且是乘在各自的局部厚度上，所以厚的地方
+// 剝下大塊、細的地方是小屑，不會有哪一顆突出到輪廓外。
+function shatterFragmentRadius(anchor, h) {
+  const thickness = anchor.thickness || anchor.radiusHint || 0.1;
+  const variety = 1 + (h - 0.5) * 2 * P.shatterVariety;
+  return thickness * (P.radius / SHATTER_RADIUS_BASE) * Math.max(0.2, variety);
+}
+
 // 碎片半徑：炸開瞬間由 0 長出，飛行途中依「碎片消散」縮小，重組期收回 0。
 function shatterRadius(base, timeline) {
   return base * timeline.burst * (1 - timeline.flight * P.shatterFade)
@@ -863,7 +888,7 @@ function updateMicroDrops(phase, fidelityAbsorb = 0) {
       microDropData[o] = formationPosNow.x;
       microDropData[o + 1] = formationPosNow.y;
       microDropData[o + 2] = formationPosNow.z;
-      microDropData[o + 3] = shatterRadius(target.radiusHint || 0.12, shatter);
+      microDropData[o + 3] = shatterRadius(shatterFragmentRadius(target, h2), shatter);
       // 碎片是自由飛散的獨立液滴，不該保留「貼在造型上被拉長」的橢球形變。
       microShapeData[o] = 1;
       microShapeData[o + 1] = 0;
@@ -1046,6 +1071,9 @@ function updateDropUniforms(t) {
   for (let i = 0; i < MAX_DROPS; i++) {
     const { h1, h2, h3, radius } = dropSeeds[i];
     let x = 0, y = 0, z = 0, radiusFactor = 1;
+    // 崩解噴濺的半徑不走 freeRadius 那條（見 shatterFragmentRadius），改記下
+    // 這顆碎片配到的錨點，等下面統一由它的局部厚度算大小。
+    let shatterTarget = null;
 
     if (P.motion === 'cinematic') {
       // 所有水滴共用同一個緩慢旋轉的分離軸；不再各自沿亂數弧線交叉碰撞。
@@ -1078,7 +1106,7 @@ function updateDropUniforms(t) {
         y = formationPosNow.y;
         z = formationPosNow.z;
       }
-      radiusFactor = target ? 1 : 0;
+      shatterTarget = target;
     } else if (isFormationMotion(P.motion)) {
       const formation = amount;
       formationDropPosition(i, phase, count, formationPosNow);
@@ -1099,7 +1127,10 @@ function updateDropUniforms(t) {
     }
     const freeRadius = P.radius * radius * radiusFactor;
     if (shatter) {
-      dropData[i].set(x, y, z, shatterRadius(freeRadius, shatter));
+      const fragment = shatterTarget
+        ? shatterFragmentRadius(shatterTarget, h3)
+        : 0;
+      dropData[i].set(x, y, z, shatterRadius(fragment, shatter));
     } else if (isFormationMotion(P.motion)) {
       const targetRadius = formationAnchors[i % Math.max(1, formationAnchors.length)]?.radiusHint
         || P.radius * 0.58;
@@ -2094,7 +2125,7 @@ function updateUIState() {
     .forEach(id => { document.getElementById(id).style.opacity = weaving ? 1 : 0.4; });
   // 崩解噴濺的專屬控制項同理：它的參數只有 shatterTimeline 會讀，而那整段
   // 鎖在 P.motion === 'shatter' 分支裡，其他模式下調了完全沒有效果。
-  ['shatterAt', 'shatterForce', 'shatterGravity', 'shatterFade', 'shatterReform', 'shatterSeed', 'shatterCut'].forEach(id => {
+  ['shatterAt', 'shatterForce', 'shatterGravity', 'shatterFade', 'shatterReform', 'shatterSeed', 'shatterCut', 'shatterVariety'].forEach(id => {
     document.getElementById(id).disabled = !shattering;
     document.getElementById(id + 'Row').style.opacity = shattering ? 1 : 0.4;
   });
@@ -2179,7 +2210,7 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   motionRadius.formation = FORMATION_DEFAULT_RADIUS;
   motionRadius.pulse = FORMATION_DEFAULT_RADIUS;
   motionRadius.weave = FORMATION_DEFAULT_RADIUS;
-  motionRadius.shatter = 0.2;
+  motionRadius.shatter = SHATTER_RADIUS_BASE;
   resetSpectralCausticColors();
   resetRamp();
   bindControls();
