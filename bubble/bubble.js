@@ -1,9 +1,9 @@
 'use strict';
 import * as THREE from 'three';
-import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-23';
+import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-24';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
-} from './default-shapes.js?v=svg-shape-23';
+} from './default-shapes.js?v=svg-shape-24';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -329,7 +329,7 @@ const fmt = {
   shatterVariety: v => '±' + Math.round(v * 100) + '%',
 };
 
-import { VERT, FRAG } from './shaders.js?v=svg-shape-23';
+import { VERT, FRAG } from './shaders.js?v=svg-shape-24';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -1005,7 +1005,11 @@ function cinematicTimeline(phase) {
 
 // 水滴動畫只在 CPU 每幀計算一次；shader 的每個 march step 僅讀取 vec4 array。
 function updateDropUniforms(t) {
-  const count = Math.max(1, Math.min(MAX_DROPS, Math.round(P.count)));
+  // 水滴數量可以是 0（例如崩解噴濺只想要微滴碎片、穿梭環繞只想留形狀本身）。
+  // count 本身允許 0，交給 uCount 讓 shader 直接跳過主滴迴圈；但凡是拿它當
+  // 除數或版面基準的地方一律改用 layoutCount，否則 0 會變成 Infinity／NaN。
+  const count = Math.max(0, Math.min(MAX_DROPS, Math.round(P.count)));
+  const layoutCount = Math.max(1, count);
   const tau = Math.PI * 2;
   const phase = fract(t / Math.max(0.001, P.loopDuration));
   const a = phase * tau;
@@ -1061,7 +1065,7 @@ function updateDropUniforms(t) {
     : isFormationMotion(P.motion) || P.motion === 'shatter'
       // smooth-min 連續合併很多顆時會累積膨脹；依數量正規化融合半徑，
       // 讓 12–16 顆仍只在真正接觸處形成液橋，不把整組擴成巨大距離場。
-      ? Math.max(0.10, 0.42 / Math.sqrt(count))
+      ? Math.max(0.10, 0.42 / Math.sqrt(layoutCount))
       : 1;
   let effectiveViscosity = P.viscosity * viscosityScale;
   const groupX = Math.sin(a) * P.spread * 0.12 * energy;
@@ -1077,7 +1081,7 @@ function updateDropUniforms(t) {
 
     if (P.motion === 'cinematic') {
       // 所有水滴共用同一個緩慢旋轉的分離軸；不再各自沿亂數弧線交叉碰撞。
-      const anchor = i * tau / count + Math.sin(a) * 0.18;
+      const anchor = i * tau / layoutCount + Math.sin(a) * 0.18;
       const radial = P.spread * (1.04 + h2 * 0.06) * energy;
       const recoil = 1 + breakaway * (0.11 + h2 * 0.018)
         + followThrough * (0.035 + h3 * 0.012);
@@ -1109,7 +1113,7 @@ function updateDropUniforms(t) {
       shatterTarget = target;
     } else if (isFormationMotion(P.motion)) {
       const formation = amount;
-      formationDropPosition(i, phase, count, formationPosNow);
+      formationDropPosition(i, phase, layoutCount, formationPosNow);
       x = formationPosNow.x;
       y = formationPosNow.y;
       z = formationPosNow.z;
@@ -1268,8 +1272,8 @@ function updateDropUniforms(t) {
     }
     if (isFormationMotion(P.motion)) {
       const epsilon = 1 / 2048;
-      formationDropPosition(i, fract(phase - epsilon), count, formationPosBefore);
-      formationDropPosition(i, fract(phase + epsilon), count, formationPosAfter);
+      formationDropPosition(i, fract(phase - epsilon), layoutCount, formationPosBefore);
+      formationDropPosition(i, fract(phase + epsilon), layoutCount, formationPosAfter);
       const invDelta = 1 / (epsilon * 2 * Math.max(0.001, P.loopDuration));
       vx = (formationPosAfter.x - formationPosBefore.x) * invDelta;
       vy = (formationPosAfter.y - formationPosBefore.y) * invDelta;
@@ -1473,9 +1477,12 @@ function updateDropUniforms(t) {
     minY = Math.min(minY, d.y - r); maxY = Math.max(maxY, d.y + r);
     minZ = Math.min(minZ, d.z - r); maxZ = Math.max(maxZ, d.z + r);
   }
-  const cx = (minX + maxX) * 0.5;
-  const cy = (minY + maxY) * 0.5;
-  const cz = (minZ + maxZ) * 0.5;
+  // count=0 時上面的迴圈一次都沒跑，minX/maxX 還是 ±Infinity，相加會得到 NaN
+  // 並一路傳進 uDropBounds。沒有主滴就沒有需要涵蓋的範圍，直接退回原點。
+  const hasBounds = Number.isFinite(minX);
+  const cx = hasBounds ? (minX + maxX) * 0.5 : 0;
+  const cy = hasBounds ? (minY + maxY) * 0.5 : 0;
+  const cz = hasBounds ? (minZ + maxZ) * 0.5 : 0;
   let boundRadius = 0;
   for (let i = 0; i < count; i++) {
     const d = dropData[i];
@@ -2930,7 +2937,10 @@ function frame(now) {
     // 以主要水滴投影外輪廓的中點校正構圖。面積重心會被較大的水滴拉動，
     // 在展開狀態下反而讓整組水滴的左右留白不對稱。
     const e = rotM4.elements;
-    const count = Math.max(1, Math.min(MAX_DROPS, Math.round(P.count)));
+    // 同樣要允許 0：dropData 的每個槽位不論 count 多少都會被算過，夾成 1 會
+    // 讓「沒有主滴」時仍拿第 0 顆去校正構圖。0 會讓下面的迴圈直接不跑，
+    // hasProjectedBounds 落到 false，構圖偏移歸零。
+    const count = Math.max(0, Math.min(MAX_DROPS, Math.round(P.count)));
     let minProjectedX = Infinity, maxProjectedX = -Infinity;
     for (let i = 0; i < count; i++) {
       const d = dropData[i];
