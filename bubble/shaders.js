@@ -102,6 +102,8 @@ uniform vec4  uBounds;         // xyz：包圍球中心，w：半徑
 uniform int   uShapeType;      // 0 無, 1 SVG 擠出, 2 GLB/GLTF 體積
 uniform float uShapeProgress;
 uniform float uFidelityAbsorb;
+uniform float uShapeSwell;
+uniform float uContactLead;
 uniform float uShapeDepth;
 uniform float uShapeSoftness;
 uniform float uShapeEdgeBevel;
@@ -528,9 +530,11 @@ float mapScene(vec3 p, bool smoothShape){
     float contactLead = needsArrivalDistance
       ? clamp((0.72 - arrivalDistance) * 0.42, -0.12, 0.24)
       : 0.0;
-    contactLead *= 1.0 - uFidelityAbsorb;
+    contactLead *= (1.0 - uFidelityAbsorb) * uContactLead;
     float localGrowth = smoothstep(0.0, 1.0, growth + contactLead);
-    float growingDetail = detailD + (1.0 - localGrowth) * 0.38;
+    // uShapeSwell 是崩解噴濺炸開前的蓄力：對距離場做等距膨脹，讓造型像被內壓
+    // 撐大。等距偏移是均勻的，不會像 contactLead 那樣在碎片附近結出局部的瘤。
+    float growingDetail = detailD + (1.0 - localGrowth) * 0.38 - uShapeSwell;
     d = smin(
       d,
       growingDetail,

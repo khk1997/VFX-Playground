@@ -1,9 +1,9 @@
 'use strict';
 import * as THREE from 'three';
-import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-25';
+import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-26';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
-} from './default-shapes.js?v=svg-shape-25';
+} from './default-shapes.js?v=svg-shape-26';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -140,6 +140,10 @@ const DEFAULTS = {              // 數值滑桿
   // 碎片彼此的大小差異（見 shatterFragmentRadius）。乘在各自的局部厚度上，
   // 所以調大只是讓大小更參差，不會讓任何一顆撐出輪廓。
   shatterVariety: 0.3,
+  // 蓄力：炸開前形狀被內壓撐大的量（距離場的等距膨脹，單位同世界座標），
+  // 以及這股力道累積多久。0 = 完全不蓄力，維持原本直接炸開。
+  shatterCharge: 0.045,
+  shatterChargeTime: 0.18,
 };
 
 // 「形狀匯聚」與「脈動呼吸」共用同一套 SDF 匯聚管線（錨點、細節滴、負滴、
@@ -327,9 +331,11 @@ const fmt = {
   shatterSeed: v => '#' + v.toFixed(0),
   shatterCut: v => v === 0 ? '預設' : '#' + v.toFixed(0),
   shatterVariety: v => '±' + Math.round(v * 100) + '%',
+  shatterCharge: v => v === 0 ? '關閉' : '+' + v.toFixed(3),
+  shatterChargeTime: v => (v * P.loopDuration).toFixed(1) + 's',
 };
 
-import { VERT, FRAG } from './shaders.js?v=svg-shape-25';
+import { VERT, FRAG } from './shaders.js?v=svg-shape-26';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -715,17 +721,36 @@ function formationFidelityAmount(phase) {
 // 崩解噴濺的時間軸。跟其他模式最大的不同是它的「靜止態」不是散開的水滴而是
 // 完整的形狀：phase=0 與 phase=1 兩端都必須是「形狀滿值 + 碎片零半徑」，循環
 // 才接得起來。所以尾端一定要留一段重組期，把碎片收回錨點、形狀重新長回來。
-//   burst  0→1：形狀讓位給碎片的那一瞬（短，才有「炸開」的爆發感）
-//   flight 0→1：碎片的飛行時間，用來算彈道位移
-//   reform 0→1：收尾。用 smoothstep 讓 phase=1 處的速度也是 0，不只位置對上。
-const SHATTER_BURST = 0.05;
+//   burst    0→1：碎片由零半徑長到滿
+//   shapeOut 0→1：形狀退場。刻意比 burst 晚起步、也拖得更久（見下）
+//   charge   0→1：炸開前的蓄力，形狀被內壓撐大
+//   flight   0→1：碎片的飛行時間，用來算彈道位移
+//   reform   0→1：收尾。用 smoothstep 讓 phase=1 處的速度也是 0，不只位置對上。
+//
+// burst 與 shapeOut 一定要分成兩條並且重疊。它們原本共用一條曲線，但形狀是靠
+// 「距離場侵蝕」退場的，而侵蝕量是固定的 0.38 —— 問號筆畫半厚只有 ~0.09，才削
+// 到四成形狀就整個不見了，碎片那時卻只長到四成大小，中間會出現一段剪影變細的
+// 空窗。（現況之所以看不出來，是因為 contactLead 讓形狀黏在碎片上硬撐，也就是
+// 那些疙瘩——等於用一個瑕疵蓋掉另一個。）
+// 讓碎片先長滿、形狀才開始退，任何一刻至少有一邊是滿的，剪影就不會塌下去。
+const SHATTER_BURST_IN = 0.022;
+const SHATTER_BURST_OUT_START = 0.014;
+const SHATTER_BURST_OUT_END = 0.06;
 function shatterTimeline(phase) {
   const at = Math.max(0.02, Math.min(0.85, P.shatterAt));
   const reformStart = Math.max(at + 0.1, 1 - P.shatterReform);
-  const burst = smoothstepCPU(phase, at, at + SHATTER_BURST);
+  const burst = smoothstepCPU(phase, at, at + SHATTER_BURST_IN);
+  const shapeOut = smoothstepCPU(phase, at + SHATTER_BURST_OUT_START, at + SHATTER_BURST_OUT_END);
   const flight = Math.max(0, Math.min(1, (phase - at) / Math.max(0.02, reformStart - at)));
   const reform = smoothstepCPU(phase, reformStart, 0.998);
-  return { burst, flight, reform };
+  // 蓄力：從 chargeStart 一路漲到炸開那一刻，再隨形狀退場釋放。
+  // 兩端的連續性：phase=0 時 charge=0（chargeStart 夾在 0 以上，smoothstep 起點
+  // 導數為 0）；phase→1 時 shapeOut 早已飽和成 1，(1 - shapeOut) 把 swell 壓回 0。
+  // 所以循環接縫兩側的膨脹量與變化率都是 0，不會在 phase 0 突然鼓一下。
+  const chargeStart = Math.max(0, at - P.shatterChargeTime);
+  const charge = smoothstepCPU(phase, chargeStart, at);
+  const swell = P.shatterCharge * charge * (1 - shapeOut);
+  return { burst, shapeOut, flight, reform, swell };
 }
 
 // 噴散亂數種子。碎片的初速快慢與噴散方向的擾動都由這三個雜湊值決定，換一個
@@ -773,7 +798,7 @@ function shatterOffset(anchor, seed, timeline, out) {
 function shatterShapeAmount(timeline) {
   // 形狀的重新長出刻意落後碎片的回收一段：兩者同步的話，碎片還飄在遠處時
   // 造型就已經幾乎補滿，看起來像憑空冒出一個鬼影，而不是被碎片重新填回去。
-  return Math.max(1 - timeline.burst, smoothstepCPU(timeline.reform, 0.4, 1));
+  return Math.max(1 - timeline.shapeOut, smoothstepCPU(timeline.reform, 0.4, 1));
 }
 
 // 碎片的基準大小一律由「它代表的那塊造型有多厚」決定，而不是沿用其他模式那個
@@ -1243,6 +1268,8 @@ function updateDropUniforms(t) {
   if (uniforms) {
     uniforms.uShapeProgress.value = formationShapeProgress;
     uniforms.uFidelityAbsorb.value = fidelityAbsorb;
+    uniforms.uShapeSwell.value = shatter ? shatter.swell : 0;
+    uniforms.uContactLead.value = shatter ? 0 : 1;
     // 半徑已連續收至零後才停止 shader 迴圈；切換當下幾何場完全相同。
     const fidelityComplete = fidelityAbsorb > 0.9999;
     uniforms.uCount.value = fidelityComplete ? 0 : count;
@@ -1747,6 +1774,12 @@ function initGL() {
     uShapeType: { value: SELECTS.shapeSource.map[P.shapeSource] },
     uShapeProgress: { value: 0 },
     uFidelityAbsorb: { value: 0 },
+    // 崩解噴濺的蓄力膨脹量（等距擴張形狀距離場）；其他模式恆為 0。
+    uShapeSwell: { value: 0 },
+    // contactLead（形狀在已抵達水滴附近先成形）是形狀匯聚專用的邏輯。崩解噴濺
+    // 是它的反向過程，同一條規則會變成「形狀黏著碎片不肯消失、碎片之間先溶掉」，
+    // 在輪廓上結出一顆顆瘤。用這個 0/1 開關在崩解模式關掉它。
+    uContactLead: { value: 1 },
     uShapeDepth: { value: P.shapeDepth },
     uShapeSoftness: { value: P.shapeSoftness },
     uShapeEdgeBevel: { value: P.shapeEdgeBevel },
@@ -1942,6 +1975,7 @@ function bindControls() {
           document.getElementById('shapeHold_v').textContent = fmt.shapeHold(P.shapeHold);
           document.getElementById('shatterAt_v').textContent = fmt.shatterAt(P.shatterAt);
           document.getElementById('shatterReform_v').textContent = fmt.shatterReform(P.shatterReform);
+          document.getElementById('shatterChargeTime_v').textContent = fmt.shatterChargeTime(P.shatterChargeTime);
         }
       }
     };
@@ -2132,7 +2166,7 @@ function updateUIState() {
     .forEach(id => { document.getElementById(id).style.opacity = weaving ? 1 : 0.4; });
   // 崩解噴濺的專屬控制項同理：它的參數只有 shatterTimeline 會讀，而那整段
   // 鎖在 P.motion === 'shatter' 分支裡，其他模式下調了完全沒有效果。
-  ['shatterAt', 'shatterForce', 'shatterGravity', 'shatterFade', 'shatterReform', 'shatterSeed', 'shatterCut', 'shatterVariety'].forEach(id => {
+  ['shatterAt', 'shatterForce', 'shatterGravity', 'shatterFade', 'shatterReform', 'shatterSeed', 'shatterCut', 'shatterVariety', 'shatterCharge', 'shatterChargeTime'].forEach(id => {
     document.getElementById(id).disabled = !shattering;
     document.getElementById(id + 'Row').style.opacity = shattering ? 1 : 0.4;
   });
