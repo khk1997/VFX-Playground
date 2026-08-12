@@ -94,7 +94,7 @@ uniform float uElasticDamping;
 uniform float uElasticSpeed;
 uniform vec4  uDrops[12];       // xyz：中心，w：半徑（CPU 每幀更新）
 uniform vec4  uDropShape[12];   // xyz：形變主軸，w：體積守恆的縱向伸縮
-uniform vec4  uDropPhysics[12]; // x：接觸壓平，y：形狀振盪，z：斷裂尖端，w：配對權重
+uniform vec4  uDropPhysics[12]; // x：接觸壓平，y：形狀振盪，z：斷裂尖端，w：融合權重
 uniform vec2  uElasticPair;    // 正在接觸／斷裂的水滴索引
 uniform vec4  uSatellites[3];  // xyz：衛星滴中心，w：半徑（斷裂處的小滴串）
 uniform float uSatelliteBlend; // 衛星滴與頸部的融合度：成形時高（相連），掐斷時→0（分離）
@@ -479,7 +479,10 @@ float mapScene(vec3 p, bool smoothShape){
     if (uElasticEvent.x > 0.0001 && (i == pairA || i == pairB) && abs(sphereD) < 0.3) {
       sphereD -= capillaryWave(p, i);
     }
-    d = smin(d, sphereD, mainBlend);
+    // 每滴融合權重只在分裂模式的子滴出生／吸收尾端低於 1；其餘模式固定為 1。
+    // 讓 k 與子滴半徑一起平滑歸零，才能連續接上上方的零半徑守衛。
+    float dropBlend = mainBlend * clamp(uDropPhysics[i].w, 0.0, 1.0);
+    d = smin(d, sphereD, dropBlend);
     if (needsArrivalDistance) {
       vec3 arrivalDelta = p - uDrops[i].xyz;
       arrivalDistanceSq = min(arrivalDistanceSq, dot(arrivalDelta, arrivalDelta));

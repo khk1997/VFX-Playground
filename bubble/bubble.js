@@ -134,13 +134,13 @@ const DEFAULTS = {              // 數值滑桿
   weaveDriftSpeed: 1,
   // 崩解噴濺的時間軸拆成四段時長（見 shatterSegments）：靜止 → 蓄力 → 飛散 →
   // 重組。四個值是相對權重，正規化後填滿整個循環，所以任何組合都合法、不會出現
-  // 「滑桿有數字但實際被夾住」的情形。預設 1.0 / 1.8 / 4.2 / 3.0 合計剛好 10，
-  // 等同舊版「第 0.28 處炸開、尾端 0.3 重組」的節奏。
-  shatterRest: 1.0,
-  shatterFlight: 4.2,
+  // 「滑桿有數字但實際被夾住」的情形。崩解模式預設循環為 4 秒，四段權重
+  // 1.1 / 0.5 / 0.4 / 2.0 合計正好也是 4，因此右側直接顯示實際秒數。
+  shatterRest: 1.1,
+  shatterFlight: 0.4,
   // 噴散運動拆成三軸（見 shatterTravel／shatterOffset）：散多遠、曲線多前傾、
   // 每顆差多少。減速預設 1.0 —— 真實的爆炸碎片會被空氣阻力拖慢，0 是舊版的等速。
-  shatterRange: 0.54,
+  shatterRange: 0.3,
   shatterDecel: 1,
   shatterSpeedVary: 0.9,
   shatterGravity: 0,
@@ -148,7 +148,7 @@ const DEFAULTS = {              // 數值滑桿
   shatterFade: 1,
   // 收尾：把碎片收回錨點、形狀重新長回來。這一段必須存在，phase=0/1 兩端才
   // 都是「完整形狀 + 零半徑碎片」，循環接縫不跳。
-  shatterReform: 3.0,
+  shatterReform: 2.0,
   // 噴散亂數種子（見 shatterSeed）。0 是加這個參數之前的那一組飛散路徑。
   shatterSeed: 0,
   // 崩解切法（見 shatterAnchorSets）。換的是形狀被切成哪幾塊，跟 shatterSeed
@@ -160,7 +160,7 @@ const DEFAULTS = {              // 數值滑桿
   // 蓄力：炸開前形狀被內壓撐大的量（距離場的等距膨脹，單位同世界座標），
   // 以及這股力道累積多久。0 = 完全不蓄力，維持原本直接炸開。
   shatterCharge: 0.005,
-  shatterChargeTime: 1.8,
+  shatterChargeTime: 0.5,
 };
 
 // 走完整 SDF 匯聚管線（錨點、細節滴、負滴、體積交接）＋ 匯聚→停留→散開時間軸
@@ -254,6 +254,15 @@ const motionCounts = {
   formation: FORMATION_DEFAULT_COUNT,
   weave: WEAVE_DEFAULT_COUNT,
   shatter: SHATTER_DEFAULT_COUNT,
+};
+// 循環秒數與水滴數量／大小一樣按動態模式各自記憶。崩解的四段預設合計 4 秒；
+// 切去其他模式時恢復各自的循環長度，避免為了調整崩解節奏改壞分裂或匯聚。
+const SHATTER_DEFAULT_LOOP_DURATION = 4;
+const motionLoopDuration = {
+  cinematic: DEFAULTS.loopDuration,
+  formation: DEFAULTS.loopDuration,
+  weave: DEFAULTS.loopDuration,
+  shatter: SHATTER_DEFAULT_LOOP_DURATION,
 };
 // 水滴大小的預設值依模式不同：分裂維持原本較大的滴徑，形狀匯聚這個
 // 依賴外部形狀的模式改用較小的滴徑，讓吸附進外形時的顆粒感更細。切換模式時的
@@ -426,7 +435,7 @@ function refreshShatterTimelineReadouts() {
   if (total) total.textContent = `四段合計 ${P.loopDuration.toFixed(1)}s（＝循環秒數）`;
 }
 
-import { VERT, FRAG } from './shaders.js?v=membrane-depth-2';
+import { VERT, FRAG } from './shaders.js?v=split-continuity-1';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -1494,7 +1503,7 @@ function updateDropUniforms(t) {
     const tensionResistance = 0.58 + P.surfaceTension * 0.42;
     let stretch = 1 + Math.min(0.24,
       speed * 0.055 * P.inertiaDeform * sizeResponse / tensionResistance);
-    let flatten = 0, shapeOscillation = 0, tip = 0, paired = 0;
+    let flatten = 0, shapeOscillation = 0, tip = 0, blendWeight = 1;
 
     if (P.motion === 'cinematic' && count >= 2 && (i === pairA || i === pairB)) {
       const other = dropData[i === pairA ? pairB : pairA];
@@ -1563,7 +1572,6 @@ function updateDropUniforms(t) {
         shapeOscillation = Math.max(-1.2, Math.min(1.2,
           (sepWobble + mergeWobble * 1.1) * wobbleGain));
       }
-      paired = 1;
       // 鎖定合體後兩個 SDF 使用完全相同的主軸與伸縮，視覺上成為單一液滴。
       ax += (pairAxisX - ax) * fusionLock;
       ay += (pairAxisY - ay) * fusionLock;
@@ -1571,8 +1579,15 @@ function updateDropUniforms(t) {
       stretch += (1 - stretch) * fusionLock;
       flatten *= 1 - fusionLock;
     }
+    // 分裂模式的子滴在出生／吸收尾端半徑會趨近 0。若 smooth-min 融合半徑仍
+    // 維持滿值，極小子滴仍會留下約 k/6 的鼓包，直到半徑守衛下一幀把它整顆
+    // 跳過，輪廓便瞬間縮小。只讓子滴的融合權重隨體積交接平滑淡入／淡出；
+    // 其他模式固定為 1，崩解模式的零半徑守衛也維持原語意。
+    if (P.motion === 'cinematic' && i > 0) {
+      blendWeight = separation;
+    }
     dropShapeData[i].set(ax, ay, az, stretch);
-    dropPhysicsData[i].set(flatten, shapeOscillation, tip, paired);
+    dropPhysicsData[i].set(flatten, shapeOscillation, tip, blendWeight);
   }
   for (let i = count; i < MAX_DROPS; i++) {
     dropShapeData[i].set(1, 0, 0, 1);
@@ -2170,6 +2185,7 @@ function bindControls() {
       if (key === 'cameraRotationY') rot.y = P[key] * Math.PI / 180;
       if (key === 'count') motionCounts[P.motion] = Math.round(P[key]);
       if (key === 'radius') motionRadius[P.motion] = P[key];
+      if (key === 'loopDuration') motionLoopDuration[P.motion] = P[key];
       if (key === 'shapeLiquidPosition') applyEdgeDropDistribution(P[key]);
       if (valEl) valEl.textContent = (fmt[key] || (v => +v.toFixed(2)))(P[key]);
       if (uniforms && uniforms[uName]) uniforms[uName].value = (key === 'count') ? Math.round(P[key]) : P[key];
@@ -2215,6 +2231,10 @@ function bindControls() {
         const radiusEl = document.getElementById('radius');
         radiusEl.value = motionRadius[P.motion];
         radiusEl.dispatchEvent(new Event('input', { bubbles: true }));
+        motionLoopDuration[previousMotion] = P.loopDuration;
+        const loopDurationEl = document.getElementById('loopDuration');
+        loopDurationEl.value = motionLoopDuration[P.motion];
+        loopDurationEl.dispatchEvent(new Event('input', { bubbles: true }));
         previousDropT = null;
       }
       if (uniforms && uniforms[uniform]) uniforms[uniform].value = map[el.value];
@@ -2498,6 +2518,10 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   motionRadius.formation = FORMATION_DEFAULT_RADIUS;
   motionRadius.weave = FORMATION_DEFAULT_RADIUS;
   motionRadius.shatter = SHATTER_RADIUS_BASE;
+  motionLoopDuration.cinematic = DEFAULTS.loopDuration;
+  motionLoopDuration.formation = DEFAULTS.loopDuration;
+  motionLoopDuration.weave = DEFAULTS.loopDuration;
+  motionLoopDuration.shatter = SHATTER_DEFAULT_LOOP_DURATION;
   resetSpectralCausticColors();
   resetRamp();
   bindControls();

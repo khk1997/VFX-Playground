@@ -161,13 +161,14 @@
   .row input[type=range] { flex: 1 1 110px; min-width: 60px; accent-color: #5b7cff; height: 14px; cursor: pointer; }
   .row input[type=color] { flex: 1 1 110px; min-width: 60px; height: 24px; padding: 0; border: 1px solid rgba(150,180,255,.3); border-radius: 6px; background: none; cursor: pointer; }
   .spectralColorEditor {
-    display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px;
-    margin: 1px 0 8px;
+    display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px;
+    margin: 0 0 10px;
   }
-  .spectralColorEditor label { display: grid; gap: 3px; color: #9aa8c6; font-size: 9px; text-align: center; }
+  .spectralOutputTitle { margin-bottom: 7px; }
+  .spectralColorEditor label { display: block; min-width: 0; }
   .spectralColorEditor input[type=color] {
-    width: 100%; min-width: 0; height: 27px; padding: 1px;
-    border: 1px solid rgba(150,180,255,.28); border-radius: 5px;
+    display: block; width: 100%; min-width: 0; height: 30px; padding: 2px;
+    border: 1px solid rgba(150,180,255,.3); border-radius: 6px;
     background: rgba(8,10,16,.5); cursor: pointer;
   }
   .spectralColorEditor input[type=color]:focus-visible { outline: 2px solid #f0b75b; outline-offset: 1px; }

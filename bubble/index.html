@@ -6,7 +6,7 @@
 <title>Liquid Glass Drops VFX</title>
 <script>if (new URLSearchParams(location.search).has('preview')) document.documentElement.classList.add('preview-mode');</script>
 <style>html.preview-mode #homeBtn,html.preview-mode #toggleBtn,html.preview-mode #exportBtn,html.preview-mode #exportDialog,html.preview-mode #playCtl,html.preview-mode #panel{display:none!important}</style>
-<link rel="stylesheet" href="./bubble.css?v=quick-slots-2">
+<link rel="stylesheet" href="./bubble.css?v=spectral-swatches-1">
 <link rel="stylesheet" href="../switch2-theme.css?v=mobile-sheet-22">
 <script src="../preview-performance.js"></script>
 <script src="../mobile-control-sheet.js?v=mobile-sheet-22"></script>
@@ -127,15 +127,15 @@
     <div class="effectBlock effectBlock--caustic" id="spectralCausticGroup">
       <div class="effectTitle"><span>LIGHT</span> 虛擬光譜焦散</div>
       <div class="row toggleRow"><label>光譜焦散</label><input type="checkbox" id="spectralCausticEnabled" checked><span class="switchTrack" aria-hidden="true"></span><span class="val" id="spectralCausticEnabled_v">開啟</span></div>
-      <div class="effectSubhead">輸出</div>
-      <div class="spectralColorEditor" aria-label="焦散七色編輯器">
-        <label><span>紫</span><input type="color" id="spectralCausticCol0" value="#52e6fc" aria-label="焦散紫色"></label>
-        <label><span>靛</span><input type="color" id="spectralCausticCol1" value="#40b3f9" aria-label="焦散靛色"></label>
-        <label><span>藍</span><input type="color" id="spectralCausticCol2" value="#3aa3e3" aria-label="焦散藍色"></label>
-        <label><span>綠</span><input type="color" id="spectralCausticCol3" value="#3fabf9" aria-label="焦散綠色"></label>
-        <label><span>黃</span><input type="color" id="spectralCausticCol4" value="#4dd8fb" aria-label="焦散黃色"></label>
-        <label><span>橙</span><input type="color" id="spectralCausticCol5" value="#3ba6f9" aria-label="焦散橙色"></label>
-        <label><span>紅</span><input type="color" id="spectralCausticCol6" value="#52e6fc" aria-label="焦散紅色"></label>
+      <div class="effectSubhead spectralOutputTitle">輸出</div>
+      <div class="spectralColorEditor" aria-label="焦散色彩編輯器">
+        <label><input type="color" id="spectralCausticCol0" value="#52e6fc" aria-label="焦散色標 1"></label>
+        <label><input type="color" id="spectralCausticCol1" value="#40b3f9" aria-label="焦散色標 2"></label>
+        <label><input type="color" id="spectralCausticCol2" value="#3aa3e3" aria-label="焦散色標 3"></label>
+        <label><input type="color" id="spectralCausticCol3" value="#3fabf9" aria-label="焦散色標 4"></label>
+        <label><input type="color" id="spectralCausticCol4" value="#4dd8fb" aria-label="焦散色標 5"></label>
+        <label><input type="color" id="spectralCausticCol5" value="#3ba6f9" aria-label="焦散色標 6"></label>
+        <label><input type="color" id="spectralCausticCol6" value="#52e6fc" aria-label="焦散色標 7"></label>
       </div>
       <div class="row"><label>焦散強度</label><input type="range" id="spectralCausticIntensity" min="0" max="1.5" step="0.01" value="1.5"><span class="val" id="spectralCausticIntensity_v"></span></div>
       <div class="row"><label>聚焦程度</label><input type="range" id="spectralCausticFocus" min="0" max="1" step="0.01" value="0.31"><span class="val" id="spectralCausticFocus_v"></span></div>
@@ -202,13 +202,13 @@
     <div id="weaveSizeNote" class="note">會乘在上方「水滴形態」的「水滴大小」基準值上，決定同一批水滴彼此的大小差異。</div>
     <div class="row" id="weaveDriftAmountRow"><label>飄浮幅度</label><input type="range" id="weaveDriftAmount" min="0" max="2" step="0.01" value="1"><span class="val" id="weaveDriftAmount_v"></span></div>
     <div class="row" id="weaveDriftSpeedRow"><label>飄浮速度</label><input type="range" id="weaveDriftSpeed" min="1" max="5" step="1" value="1"><span class="val" id="weaveDriftSpeed_v"></span></div>
-    <div class="row" id="shatterRestRow"><label>靜止時間</label><input type="range" id="shatterRest" min="0" max="10" step="0.1" value="1"><span class="val" id="shatterRest_v"></span></div>
-    <div class="row" id="shatterChargeTimeRow"><label>蓄力時間</label><input type="range" id="shatterChargeTime" min="0" max="10" step="0.1" value="1.8"><span class="val" id="shatterChargeTime_v"></span></div>
-    <div class="row" id="shatterFlightRow"><label>飛散時間</label><input type="range" id="shatterFlight" min="0.2" max="10" step="0.1" value="4.2"><span class="val" id="shatterFlight_v"></span></div>
-    <div class="row" id="shatterReformRow"><label>重組時間</label><input type="range" id="shatterReform" min="0.2" max="10" step="0.1" value="3"><span class="val" id="shatterReform_v"></span></div>
+    <div class="row" id="shatterRestRow"><label>靜止時間</label><input type="range" id="shatterRest" min="0" max="10" step="0.1" value="1.1"><span class="val" id="shatterRest_v"></span></div>
+    <div class="row" id="shatterChargeTimeRow"><label>蓄力時間</label><input type="range" id="shatterChargeTime" min="0" max="10" step="0.1" value="0.5"><span class="val" id="shatterChargeTime_v"></span></div>
+    <div class="row" id="shatterFlightRow"><label>飛散時間</label><input type="range" id="shatterFlight" min="0.2" max="10" step="0.1" value="0.4"><span class="val" id="shatterFlight_v"></span></div>
+    <div class="row" id="shatterReformRow"><label>重組時間</label><input type="range" id="shatterReform" min="0.2" max="10" step="0.1" value="2"><span class="val" id="shatterReform_v"></span></div>
     <div id="shatterTotal" class="note"></div>
     <div class="row" id="shatterChargeRow"><label>蓄力幅度</label><input type="range" id="shatterCharge" min="0" max="0.12" step="0.005" value="0.005"><span class="val" id="shatterCharge_v"></span></div>
-    <div class="row" id="shatterRangeRow"><label>擴散範圍</label><input type="range" id="shatterRange" min="0.2" max="3" step="0.01" value="0.54"><span class="val" id="shatterRange_v"></span></div>
+    <div class="row" id="shatterRangeRow"><label>擴散範圍</label><input type="range" id="shatterRange" min="0.2" max="3" step="0.01" value="0.3"><span class="val" id="shatterRange_v"></span></div>
     <div class="row" id="shatterDecelRow"><label>噴發減速</label><input type="range" id="shatterDecel" min="0" max="1" step="0.01" value="1"><span class="val" id="shatterDecel_v"></span></div>
     <div class="row" id="shatterSpeedVaryRow"><label>力道差異</label><input type="range" id="shatterSpeedVary" min="0" max="0.9" step="0.01" value="0.9"><span class="val" id="shatterSpeedVary_v"></span></div>
     <div class="row" id="shatterGravityRow"><label>噴散重力</label><input type="range" id="shatterGravity" min="0" max="2" step="0.01" value="0"><span class="val" id="shatterGravity_v"></span></div>
@@ -364,6 +364,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=material-profiles-2"></script>
+<script type="module" src="./bubble.js?v=shatter-timing-2"></script>
 </body>
 </html>
