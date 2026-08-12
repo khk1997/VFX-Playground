@@ -47,7 +47,7 @@
     <div class="row"><label>環境折射</label><input type="range" id="envRefraction" min="0" max="1" step="0.01" value="0.03"><span class="val" id="envRefraction_v"></span></div>
     <div class="row toggleRow"><label>亮底保色</label><input type="checkbox" id="brightBgAssist" checked><span class="switchTrack" aria-hidden="true"></span><span class="val" id="brightBgAssist_v">開啟</span></div>
     <div class="row"><button id="hdriBtn">更換 HDRI…</button></div>
-    <div id="hdriState" class="note">預設 HDRI：photo_studio2_london_hall_1k.hdr</div>
+    <div id="hdriState" class="note">厚玻璃預設 HDRI：photo_studio2_london_hall_1k.hdr</div>
     <div class="note">亮底保色只在純色背景接近白色時介入：保留 HDRI 折射明暗、去除暖色偏色，並讓彩色焦散改以透射顯色。</div>
     <input type="file" id="hdriInput" accept=".hdr,image/*" hidden>
   </div>
@@ -71,7 +71,7 @@
     <div class="row"><label>粗糙度</label><input type="range" id="roughness" min="0" max="1" step="0.01" value="0.2"><span class="val" id="roughness_v"></span></div>
     <div class="row"><label>邊緣光</label><input type="range" id="fresnel" min="0" max="3" step="0.05" value="0.8"><span class="val" id="fresnel_v"></span></div>
     <div class="row"><label>折射率</label><input type="range" id="ior" min="1.0" max="1.8" step="0.01" value="1.33"><span class="val" id="ior_v"></span></div>
-    <div class="note" id="materialStyleNote">厚玻璃保留實心體積與 HDRI 反射；液態薄膜僅適用純白背景，使用前後表面干涉，中央更透明，彩色集中在輪廓與曲面折疊處。</div>
+    <div class="note" id="materialStyleNote">厚玻璃與液態薄膜各自記住材質及 HDRI 參數；液態薄膜僅適用純白背景，中央更透明，彩色集中在輪廓與曲面折疊處。</div>
   </div>
 
   <div class="group" id="thinFilmGroup">
@@ -209,8 +209,8 @@
     <div id="shatterTotal" class="note"></div>
     <div class="row" id="shatterChargeRow"><label>蓄力幅度</label><input type="range" id="shatterCharge" min="0" max="0.12" step="0.005" value="0.005"><span class="val" id="shatterCharge_v"></span></div>
     <div class="row" id="shatterRangeRow"><label>擴散範圍</label><input type="range" id="shatterRange" min="0.2" max="3" step="0.01" value="0.54"><span class="val" id="shatterRange_v"></span></div>
-    <div class="row" id="shatterDecelRow"><label>噴發減速</label><input type="range" id="shatterDecel" min="0" max="1" step="0.01" value="0.5"><span class="val" id="shatterDecel_v"></span></div>
-    <div class="row" id="shatterSpeedVaryRow"><label>力道差異</label><input type="range" id="shatterSpeedVary" min="0" max="0.9" step="0.01" value="0.45"><span class="val" id="shatterSpeedVary_v"></span></div>
+    <div class="row" id="shatterDecelRow"><label>噴發減速</label><input type="range" id="shatterDecel" min="0" max="1" step="0.01" value="1"><span class="val" id="shatterDecel_v"></span></div>
+    <div class="row" id="shatterSpeedVaryRow"><label>力道差異</label><input type="range" id="shatterSpeedVary" min="0" max="0.9" step="0.01" value="0.9"><span class="val" id="shatterSpeedVary_v"></span></div>
     <div class="row" id="shatterGravityRow"><label>噴散重力</label><input type="range" id="shatterGravity" min="0" max="2" step="0.01" value="0"><span class="val" id="shatterGravity_v"></span></div>
     <div class="row" id="shatterFadeRow"><label>碎片消散</label><input type="range" id="shatterFade" min="0" max="1" step="0.01" value="1"><span class="val" id="shatterFade_v"></span></div>
     <div class="row" id="shatterVarietyRow"><label>碎片大小差異</label><input type="range" id="shatterVariety" min="0" max="0.9" step="0.01" value="0.3"><span class="val" id="shatterVariety_v"></span></div>
@@ -364,6 +364,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=shatter-defaults-2"></script>
+<script type="module" src="./bubble.js?v=material-profiles-2"></script>
 </body>
 </html>

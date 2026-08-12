@@ -16,8 +16,10 @@ if (PREVIEW) document.documentElement.classList.add('preview-mode');
 
 const canvas = document.getElementById('stage');
 const mobileRenderQuery = window.matchMedia('(max-width: 760px)');
-const DEFAULT_HDRI_URL = new URL('./assets/photo_studio2_london_hall_1k.hdr', import.meta.url).href;
-const DEFAULT_HDRI_LABEL = 'photo_studio2_london_hall_1k.hdr';
+const GLASS_HDRI_URL = new URL('./assets/photo_studio2_london_hall_1k.hdr', import.meta.url).href;
+const GLASS_HDRI_LABEL = 'photo_studio2_london_hall_1k.hdr';
+const MEMBRANE_HDRI_URL = new URL('./assets/christmas_photo_studio_04_1k.hdr', import.meta.url).href;
+const MEMBRANE_HDRI_LABEL = 'christmas_photo_studio_04_1k.hdr';
 const MAX_DROPS = 12;
 const FORMATION_DEFAULT_COUNT = 1;
 // 穿梭環繞沒有「逐漸填滿」的微滴群，畫面上的豐富度全靠主水滴撐，
@@ -137,10 +139,10 @@ const DEFAULTS = {              // 數值滑桿
   shatterRest: 1.0,
   shatterFlight: 4.2,
   // 噴散運動拆成三軸（見 shatterTravel／shatterOffset）：散多遠、曲線多前傾、
-  // 每顆差多少。減速預設 0.5 —— 真實的爆炸碎片會被空氣阻力拖慢，0 是舊版的等速。
+  // 每顆差多少。減速預設 1.0 —— 真實的爆炸碎片會被空氣阻力拖慢，0 是舊版的等速。
   shatterRange: 0.54,
-  shatterDecel: 0.5,
-  shatterSpeedVary: 0.45,
+  shatterDecel: 1,
+  shatterSpeedVary: 0.9,
   shatterGravity: 0,
   // 碎片在飛散途中縮小的比例（0 = 保持原大小飛到底）。
   shatterFade: 1,
@@ -200,6 +202,51 @@ const COLOR_DEFAULTS  = {
   bgColor: '#000000',
 };
 const P = { ...DEFAULTS, ...SELECT_DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS };
+
+// 材質切換不是同一組滑桿換 shader 分支：厚玻璃與液態薄膜各自保留一份
+// HDRI／材質狀態。離開時記住使用者微調，回來時恢復；第一次進入薄膜則使用
+// 白底參考圖的校準值。鏡頭、動畫與配色不在這裡，切材質時不應改變構圖或動作。
+const MATERIAL_PROFILE_KEYS = [
+  'hdriYaw', 'hdriPitch', 'hdriBlur', 'envRefraction',
+  'membraneDepth', 'reflect', 'transmission', 'materialExposure',
+  'roughness', 'fresnel', 'ior',
+];
+const pickMaterialProfile = source => Object.fromEntries(
+  MATERIAL_PROFILE_KEYS.map(key => [key, source[key]])
+);
+const MATERIAL_PROFILE_DEFAULTS = {
+  glass: pickMaterialProfile(P),
+  membrane: {
+    hdriYaw: -45,
+    hdriPitch: 20,
+    hdriBlur: 0.18,
+    envRefraction: 0.21,
+    membraneDepth: 0.65,
+    reflect: 1.6,
+    transmission: 1,
+    materialExposure: 1,
+    roughness: 0.17,
+    fresnel: 1.05,
+    ior: 1.6,
+  },
+};
+const MATERIAL_ENVIRONMENT_DEFAULTS = {
+  glass: { url: GLASS_HDRI_URL, label: GLASS_HDRI_LABEL, isHDR: true, file: null },
+  membrane: { url: MEMBRANE_HDRI_URL, label: MEMBRANE_HDRI_LABEL, isHDR: true, file: null },
+};
+let materialProfiles = {};
+let materialEnvironments = {};
+function resetMaterialProfiles() {
+  materialProfiles = {
+    glass: { ...MATERIAL_PROFILE_DEFAULTS.glass },
+    membrane: { ...MATERIAL_PROFILE_DEFAULTS.membrane },
+  };
+  materialEnvironments = {
+    glass: { ...MATERIAL_ENVIRONMENT_DEFAULTS.glass },
+    membrane: { ...MATERIAL_ENVIRONMENT_DEFAULTS.membrane },
+  };
+}
+resetMaterialProfiles();
 const MOBILE_CAMERA_DISTANCE_DEFAULT = 4.3;
 if (mobileRenderQuery.matches && !PREVIEW) P.cameraDistance = MOBILE_CAMERA_DISTANCE_DEFAULT;
 const motionCounts = {
@@ -1953,7 +2000,7 @@ function initGL() {
   window.addEventListener('resize', resize);
   bindPointer();
   syncPanelToUniforms();
-  loadDefaultEnvironment();
+  loadMaterialEnvironment(P.materialStyle);
 }
 
 function resize() {
@@ -2088,6 +2135,29 @@ function updateTimelineSummary() {
     + `${releaseSec.toFixed(1)}s（循環共 ${loop.toFixed(1)}s）`;
 }
 
+function saveMaterialProfile(style) {
+  if (!materialProfiles[style]) return;
+  materialProfiles[style] = pickMaterialProfile(P);
+}
+
+function applyMaterialProfile(style) {
+  const profile = materialProfiles[style];
+  if (!profile) return;
+  for (const key of MATERIAL_PROFILE_KEYS) {
+    const el = document.getElementById(key);
+    if (!el || profile[key] === undefined) continue;
+    el.value = String(profile[key]);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+}
+
+function switchMaterialProfile(previousStyle, nextStyle) {
+  if (previousStyle === nextStyle || !materialProfiles[nextStyle]) return;
+  saveMaterialProfile(previousStyle);
+  applyMaterialProfile(nextStyle);
+  if (inited) loadMaterialEnvironment(nextStyle);
+}
+
 function bindControls() {
   // 數值滑桿
   for (const key of Object.keys(DEFAULTS)) {
@@ -2133,6 +2203,9 @@ function bindControls() {
       const previousMotion = P.motion;
       const previousValue = P[key];
       P[key] = el.value;
+      if (key === 'materialStyle' && previousValue !== P[key]) {
+        switchMaterialProfile(previousValue, P[key]);
+      }
       if (key === 'motion' && previousMotion !== P.motion) {
         motionCounts[previousMotion] = Math.round(P.count);
         const countEl = document.getElementById('count');
@@ -2296,8 +2369,10 @@ function updateUIState() {
     && P.bgColor.toLowerCase() === '#ffffff';
   membraneOption.disabled = !pureWhiteBackground;
   if (!pureWhiteBackground && P.materialStyle === 'membrane') {
+    const previousStyle = P.materialStyle;
     P.materialStyle = 'glass';
     materialStyle.value = 'glass';
+    switchMaterialProfile(previousStyle, 'glass');
     if (uniforms) uniforms.uMaterialStyle.value = SELECTS.materialStyle.map.glass;
   }
   const membraneMaterial = P.materialStyle === 'membrane';
@@ -2413,6 +2488,7 @@ function updateUIState() {
 
 document.getElementById('resetBtn').addEventListener('click', () => {
   Object.assign(P, DEFAULTS, SELECT_DEFAULTS, TOGGLE_DEFAULTS, COLOR_DEFAULTS);
+  resetMaterialProfiles();
   if (mobileRenderQuery.matches && !PREVIEW) P.cameraDistance = MOBILE_CAMERA_DISTANCE_DEFAULT;
   motionCounts.cinematic = DEFAULTS.count;
   motionCounts.formation = FORMATION_DEFAULT_COUNT;
@@ -2425,7 +2501,7 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   resetSpectralCausticColors();
   resetRamp();
   bindControls();
-  if (inited) loadDefaultEnvironment();
+  if (inited) loadMaterialEnvironment('glass');
 });
 
 // 離開效果頁後，下一次從首頁進入應從乾淨的預設狀態開始；
@@ -2513,8 +2589,16 @@ function loadEnvironment(url, label, isHDR, revokeURL = false) {
   }
 }
 
-function loadDefaultEnvironment() {
-  loadEnvironment(DEFAULT_HDRI_URL, DEFAULT_HDRI_LABEL, true);
+function loadMaterialEnvironment(style = P.materialStyle) {
+  const environment = materialEnvironments[style]
+    || MATERIAL_ENVIRONMENT_DEFAULTS[style]
+    || MATERIAL_ENVIRONMENT_DEFAULTS.glass;
+  if (environment.file) {
+    const url = URL.createObjectURL(environment.file);
+    loadEnvironment(url, environment.label, environment.isHDR, true);
+  } else {
+    loadEnvironment(environment.url, environment.label, environment.isHDR);
+  }
 }
 
 document.getElementById('hdriBtn').addEventListener('click', () => hdriInput.click());
@@ -2522,8 +2606,13 @@ hdriInput.addEventListener('change', e => {
   const file = e.target.files && e.target.files[0];
   if (!file) return;
   if (!inited) initGL();
-  const url = URL.createObjectURL(file);
-  loadEnvironment(url, file.name, /\.hdr$/i.test(file.name), true);
+  materialEnvironments[P.materialStyle] = {
+    url: '',
+    label: file.name,
+    isHDR: /\.hdr$/i.test(file.name),
+    file,
+  };
+  loadMaterialEnvironment(P.materialStyle);
   e.target.value = '';
 });
 
