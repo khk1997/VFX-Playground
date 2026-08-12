@@ -210,6 +210,12 @@ const MATERIAL_PROFILE_KEYS = [
   'hdriYaw', 'hdriPitch', 'hdriBlur', 'envRefraction',
   'membraneDepth', 'reflect', 'transmission', 'materialExposure',
   'roughness', 'fresnel', 'ior',
+  // 薄膜式藝術色散：白底薄膜的顯色幾乎全靠它，跟厚玻璃要的分佈差很多
+  // （厚玻璃靠折射堆疊出顏色，薄膜是整片透光、顏色要自己長出來），
+  // 所以兩種材質也各記一份。
+  'dispersion', 'dispersionSeparation', 'artThickness', 'artThickVar',
+  'artNoiseScale', 'artPatternSpeed', 'artGravity',
+  'causticScale', 'causticSharpness',
 ];
 const pickMaterialProfile = source => Object.fromEntries(
   MATERIAL_PROFILE_KEYS.map(key => [key, source[key]])
@@ -228,6 +234,15 @@ const MATERIAL_PROFILE_DEFAULTS = {
     roughness: 0.17,
     fresnel: 1.05,
     ior: 1.6,
+    dispersion: 0.39,
+    dispersionSeparation: 1.5,
+    artThickness: 295,
+    artThickVar: 130,
+    artNoiseScale: 0.5,
+    artPatternSpeed: 0.01,
+    artGravity: 0.52,
+    causticScale: 1,
+    causticSharpness: 0.65,
   },
 };
 const MATERIAL_ENVIRONMENT_DEFAULTS = {
