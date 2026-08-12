@@ -1,9 +1,9 @@
 'use strict';
 import * as THREE from 'three';
-import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-26';
+import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-27';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
-} from './default-shapes.js?v=svg-shape-26';
+} from './default-shapes.js?v=svg-shape-27';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -123,15 +123,19 @@ const DEFAULTS = {              // 數值滑桿
   // 自由段的「只用整數諧波」是同一個限制）。
   weaveDriftAmount: 1,
   weaveDriftSpeed: 1,
-  // 崩解噴濺：形狀在循環的第幾成處炸開。之前是完整靜止的形狀。
-  shatterAt: 0.28,
+  // 崩解噴濺的時間軸拆成四段時長（見 shatterSegments）：靜止 → 蓄力 → 飛散 →
+  // 重組。四個值是相對權重，正規化後填滿整個循環，所以任何組合都合法、不會出現
+  // 「滑桿有數字但實際被夾住」的情形。預設 1.0 / 1.8 / 4.2 / 3.0 合計剛好 10，
+  // 等同舊版「第 0.28 處炸開、尾端 0.3 重組」的節奏。
+  shatterRest: 1.0,
+  shatterFlight: 4.2,
   shatterForce: 1,
   shatterGravity: 0.6,
   // 碎片在飛散途中縮小的比例（0 = 保持原大小飛到底）。
   shatterFade: 1,
-  // 循環尾端用來把碎片收回錨點、形狀重新長回來的長度。收在這裡才能讓
-  // phase=0/1 兩端都是「完整形狀 + 零半徑碎片」，循環接縫不跳。
-  shatterReform: 0.3,
+  // 收尾：把碎片收回錨點、形狀重新長回來。這一段必須存在，phase=0/1 兩端才
+  // 都是「完整形狀 + 零半徑碎片」，循環接縫不跳。
+  shatterReform: 3.0,
   // 噴散亂數種子（見 shatterSeed）。0 是加這個參數之前的那一組飛散路徑。
   shatterSeed: 0,
   // 崩解切法（見 shatterAnchorSets）。換的是形狀被切成哪幾塊，跟 shatterSeed
@@ -143,7 +147,7 @@ const DEFAULTS = {              // 數值滑桿
   // 蓄力：炸開前形狀被內壓撐大的量（距離場的等距膨脹，單位同世界座標），
   // 以及這股力道累積多久。0 = 完全不蓄力，維持原本直接炸開。
   shatterCharge: 0.045,
-  shatterChargeTime: 0.18,
+  shatterChargeTime: 1.8,
 };
 
 // 「形狀匯聚」與「脈動呼吸」共用同一套 SDF 匯聚管線（錨點、細節滴、負滴、
@@ -323,19 +327,32 @@ const fmt = {
   weaveSizeMax: v => 'x' + v.toFixed(2),
   weaveDriftAmount: v => 'x' + v.toFixed(2),
   weaveDriftSpeed: v => 'x' + v.toFixed(0),
-  shatterAt: v => (v * P.loopDuration).toFixed(1) + 's',
   shatterForce: v => 'x' + v.toFixed(2),
   shatterGravity: v => 'x' + v.toFixed(2),
   shatterFade: v => Math.round(v * 100) + '%',
-  shatterReform: v => (v * P.loopDuration).toFixed(1) + 's',
+  shatterRest: () => shatterSegmentSeconds('rest'),
+  shatterFlight: () => shatterSegmentSeconds('flight'),
+  shatterReform: () => shatterSegmentSeconds('reform'),
   shatterSeed: v => '#' + v.toFixed(0),
   shatterCut: v => v === 0 ? '預設' : '#' + v.toFixed(0),
   shatterVariety: v => '±' + Math.round(v * 100) + '%',
   shatterCharge: v => v === 0 ? '關閉' : '+' + v.toFixed(3),
-  shatterChargeTime: v => (v * P.loopDuration).toFixed(1) + 's',
+  shatterChargeTime: () => shatterSegmentSeconds('charge'),
 };
 
-import { VERT, FRAG } from './shaders.js?v=svg-shape-26';
+// 崩解噴濺的四段時長是正規化的相對權重，所以動任何一段，其他三段實際佔的秒數
+// 都會跟著變 —— 讀數必須一起重畫，不能只更新被拖動的那一個。
+const SHATTER_TIMELINE_KEYS = ['shatterRest', 'shatterChargeTime', 'shatterFlight', 'shatterReform'];
+function refreshShatterTimelineReadouts() {
+  for (const key of SHATTER_TIMELINE_KEYS) {
+    const valEl = document.getElementById(key + '_v');
+    if (valEl) valEl.textContent = fmt[key]();
+  }
+  const total = document.getElementById('shatterTotal');
+  if (total) total.textContent = `四段合計 ${P.loopDuration.toFixed(1)}s（＝循環秒數）`;
+}
+
+import { VERT, FRAG } from './shaders.js?v=svg-shape-27';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -736,19 +753,57 @@ function formationFidelityAmount(phase) {
 const SHATTER_BURST_IN = 0.022;
 const SHATTER_BURST_OUT_START = 0.014;
 const SHATTER_BURST_OUT_END = 0.06;
+
+// 四段時長 → 循環上的絕對位置。四個滑桿是「相對權重」而不是循環佔比：先加總再
+// 正規化，所以任何組合都填滿整個循環、永遠不會互相擠爆。
+//
+// 舊版是「崩解時機（從頭算的絕對位置）」＋「重組時間（從尾端倒推）」兩個方向相反
+// 的座標，而真正想控制的飛散長度是 reformStart - at 這個殘值 —— 動任何一邊都會
+// 連帶改到它。更糟的是 reformStart = max(at + 0.1, 1 - reform) 這個夾制：崩解時機
+// 拉到 0.7、重組拉到 0.6 時實際重組只有 0.2，滑桿卻仍顯示 7.2s，數字是假的。
+// 改成四段時長之後，每個滑桿各自對應時間軸上的一段，讀數就是它真正的長度。
+//
+// 飛散與重組不能為 0：前者沒有飛散就沒有崩解可言，後者是循環接縫的必要條件
+// （phase=0/1 兩端都必須回到「完整形狀 + 零半徑碎片」）。
+function shatterSegments() {
+  const rest = Math.max(0, P.shatterRest);
+  const charge = Math.max(0, P.shatterChargeTime);
+  const flight = Math.max(0.2, P.shatterFlight);
+  const reform = Math.max(0.2, P.shatterReform);
+  const total = rest + charge + flight + reform;
+  return {
+    rest: rest / total,
+    charge: charge / total,
+    flight: flight / total,
+    reform: reform / total,
+  };
+}
+
+// 面板讀數：每段實際佔幾秒。四段相加恆等於循環秒數。
+function shatterSegmentSeconds(key) {
+  return (shatterSegments()[key] * P.loopDuration).toFixed(1) + 's';
+}
+
 function shatterTimeline(phase) {
-  const at = Math.max(0.02, Math.min(0.85, P.shatterAt));
-  const reformStart = Math.max(at + 0.1, 1 - P.shatterReform);
-  const burst = smoothstepCPU(phase, at, at + SHATTER_BURST_IN);
-  const shapeOut = smoothstepCPU(phase, at + SHATTER_BURST_OUT_START, at + SHATTER_BURST_OUT_END);
+  const seg = shatterSegments();
+  const at = seg.rest + seg.charge;
+  const reformStart = at + seg.flight;
+  // 交接視窗是固定的絕對長度，飛散段被調得很短時要一起縮，否則形狀還沒退完
+  // 重組就開始了，兩段會互相打架。
+  const outEnd = Math.min(SHATTER_BURST_OUT_END, seg.flight * 0.8);
+  const outStart = Math.min(SHATTER_BURST_OUT_START, outEnd * 0.25);
+  const inEnd = Math.min(SHATTER_BURST_IN, outEnd * 0.45);
+  const burst = smoothstepCPU(phase, at, at + inEnd);
+  const shapeOut = smoothstepCPU(phase, at + outStart, at + outEnd);
   const flight = Math.max(0, Math.min(1, (phase - at) / Math.max(0.02, reformStart - at)));
   const reform = smoothstepCPU(phase, reformStart, 0.998);
-  // 蓄力：從 chargeStart 一路漲到炸開那一刻，再隨形狀退場釋放。
-  // 兩端的連續性：phase=0 時 charge=0（chargeStart 夾在 0 以上，smoothstep 起點
-  // 導數為 0）；phase→1 時 shapeOut 早已飽和成 1，(1 - shapeOut) 把 swell 壓回 0。
+  // 蓄力：從靜止段結束一路漲到炸開那一刻，再隨形狀退場釋放。
+  // 兩端的連續性：phase=0 時 charge=0（smoothstep 起點導數為 0，靜止段為 0 也
+  // 一樣）；phase→1 時 shapeOut 早已飽和成 1，(1 - shapeOut) 把 swell 壓回 0。
   // 所以循環接縫兩側的膨脹量與變化率都是 0，不會在 phase 0 突然鼓一下。
-  const chargeStart = Math.max(0, at - P.shatterChargeTime);
-  const charge = smoothstepCPU(phase, chargeStart, at);
+  // 蓄力時間歸零時 seg.rest === at，smoothstepCPU 會在 phase 剛好等於邊界時算出
+  // 0/0＝NaN 並一路汙染 uShapeSwell。沒有蓄力時間本來就等於沒有蓄力，直接給 0。
+  const charge = seg.charge > 1e-6 ? smoothstepCPU(phase, seg.rest, at) : 0;
   const swell = P.shatterCharge * charge * (1 - shapeOut);
   return { burst, shapeOut, flight, reform, swell };
 }
@@ -1966,6 +2021,7 @@ function bindControls() {
       if (key === 'shapeLiquidPosition') applyEdgeDropDistribution(P[key]);
       if (valEl) valEl.textContent = (fmt[key] || (v => +v.toFixed(2)))(P[key]);
       if (uniforms && uniforms[uName]) uniforms[uName].value = (key === 'count') ? Math.round(P[key]) : P[key];
+      if (SHATTER_TIMELINE_KEYS.includes(key)) refreshShatterTimelineReadouts();
       if (key === 'gatherDuration' || key === 'shapeHold' || key === 'loopDuration') {
         updateTimelineSummary();
         // 循環秒數變了，匯集時間／完成停留的秒數顯示也要跟著換算，
@@ -1973,9 +2029,7 @@ function bindControls() {
         if (key === 'loopDuration') {
           document.getElementById('gatherDuration_v').textContent = fmt.gatherDuration(P.gatherDuration);
           document.getElementById('shapeHold_v').textContent = fmt.shapeHold(P.shapeHold);
-          document.getElementById('shatterAt_v').textContent = fmt.shatterAt(P.shatterAt);
-          document.getElementById('shatterReform_v').textContent = fmt.shatterReform(P.shatterReform);
-          document.getElementById('shatterChargeTime_v').textContent = fmt.shatterChargeTime(P.shatterChargeTime);
+          refreshShatterTimelineReadouts();
         }
       }
     };
@@ -2166,7 +2220,9 @@ function updateUIState() {
     .forEach(id => { document.getElementById(id).style.opacity = weaving ? 1 : 0.4; });
   // 崩解噴濺的專屬控制項同理：它的參數只有 shatterTimeline 會讀，而那整段
   // 鎖在 P.motion === 'shatter' 分支裡，其他模式下調了完全沒有效果。
-  ['shatterAt', 'shatterForce', 'shatterGravity', 'shatterFade', 'shatterReform', 'shatterSeed', 'shatterCut', 'shatterVariety', 'shatterCharge', 'shatterChargeTime'].forEach(id => {
+  ['shatterRest', 'shatterChargeTime', 'shatterCharge', 'shatterFlight', 'shatterReform',
+   'shatterForce', 'shatterGravity', 'shatterFade', 'shatterVariety',
+   'shatterSeed', 'shatterCut'].forEach(id => {
     document.getElementById(id).disabled = !shattering;
     document.getElementById(id + 'Row').style.opacity = shattering ? 1 : 0.4;
   });

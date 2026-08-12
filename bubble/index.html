@@ -182,17 +182,19 @@
     <div id="weaveSizeNote" class="note">會乘在上方「水滴形態」的「水滴大小」基準值上，決定同一批水滴彼此的大小差異。</div>
     <div class="row" id="weaveDriftAmountRow"><label>飄浮幅度</label><input type="range" id="weaveDriftAmount" min="0" max="2" step="0.01" value="1"><span class="val" id="weaveDriftAmount_v"></span></div>
     <div class="row" id="weaveDriftSpeedRow"><label>飄浮速度</label><input type="range" id="weaveDriftSpeed" min="1" max="5" step="1" value="1"><span class="val" id="weaveDriftSpeed_v"></span></div>
-    <div class="row" id="shatterAtRow"><label>崩解時機</label><input type="range" id="shatterAt" min="0.05" max="0.7" step="0.01" value="0.28"><span class="val" id="shatterAt_v"></span></div>
+    <div class="row" id="shatterRestRow"><label>靜止時間</label><input type="range" id="shatterRest" min="0" max="10" step="0.1" value="1"><span class="val" id="shatterRest_v"></span></div>
+    <div class="row" id="shatterChargeTimeRow"><label>蓄力時間</label><input type="range" id="shatterChargeTime" min="0" max="10" step="0.1" value="1.8"><span class="val" id="shatterChargeTime_v"></span></div>
+    <div class="row" id="shatterFlightRow"><label>飛散時間</label><input type="range" id="shatterFlight" min="0.2" max="10" step="0.1" value="4.2"><span class="val" id="shatterFlight_v"></span></div>
+    <div class="row" id="shatterReformRow"><label>重組時間</label><input type="range" id="shatterReform" min="0.2" max="10" step="0.1" value="3"><span class="val" id="shatterReform_v"></span></div>
+    <div id="shatterTotal" class="note"></div>
+    <div class="row" id="shatterChargeRow"><label>蓄力幅度</label><input type="range" id="shatterCharge" min="0" max="0.12" step="0.005" value="0.045"><span class="val" id="shatterCharge_v"></span></div>
     <div class="row" id="shatterForceRow"><label>噴散力道</label><input type="range" id="shatterForce" min="0.2" max="3" step="0.01" value="1"><span class="val" id="shatterForce_v"></span></div>
     <div class="row" id="shatterGravityRow"><label>噴散重力</label><input type="range" id="shatterGravity" min="0" max="2" step="0.01" value="0.6"><span class="val" id="shatterGravity_v"></span></div>
     <div class="row" id="shatterFadeRow"><label>碎片消散</label><input type="range" id="shatterFade" min="0" max="1" step="0.01" value="1"><span class="val" id="shatterFade_v"></span></div>
-    <div class="row" id="shatterReformRow"><label>重組時間</label><input type="range" id="shatterReform" min="0.05" max="0.6" step="0.01" value="0.3"><span class="val" id="shatterReform_v"></span></div>
-    <div class="row" id="shatterSeedRow"><label>噴散種子</label><input type="range" id="shatterSeed" min="0" max="30" step="1" value="0"><span class="val" id="shatterSeed_v"></span></div>
-    <div class="row" id="shatterChargeRow"><label>蓄力幅度</label><input type="range" id="shatterCharge" min="0" max="0.12" step="0.005" value="0.045"><span class="val" id="shatterCharge_v"></span></div>
-    <div class="row" id="shatterChargeTimeRow"><label>蓄力時間</label><input type="range" id="shatterChargeTime" min="0.03" max="0.5" step="0.01" value="0.18"><span class="val" id="shatterChargeTime_v"></span></div>
     <div class="row" id="shatterVarietyRow"><label>碎片大小差異</label><input type="range" id="shatterVariety" min="0" max="0.9" step="0.01" value="0.3"><span class="val" id="shatterVariety_v"></span></div>
+    <div class="row" id="shatterSeedRow"><label>噴散種子</label><input type="range" id="shatterSeed" min="0" max="30" step="1" value="0"><span class="val" id="shatterSeed_v"></span></div>
     <div class="row" id="shatterCutRow"><label>崩解切法</label><input type="range" id="shatterCut" min="0" max="30" step="1" value="0"><span class="val" id="shatterCut_v"></span></div>
-    <div id="shatterNote" class="note">形狀先完整靜止，接著被內壓撐大（蓄力幅度／時間），到「崩解時機」炸開成碎片四散；「重組時間」是循環尾端把碎片收回、形狀重新長回來的長度，收得太短會看到形狀突然出現。碎片大小由它所在位置的造型厚度決定（厚的地方剝下大塊、細的地方是小屑），「水滴大小」在這個模式是整體乘數、「碎片大小差異」控制彼此的參差程度。「噴散種子」換碎片往哪飛、飛多快；「崩解切法」換的是形狀被切成哪幾塊（碎片從哪裡剝離），需要重算錨點，所以放開滑桿後才會套用。</div>
+    <div id="shatterNote" class="note">時間軸依序是「靜止 → 蓄力 → 飛散 → 重組」，四個滑桿是相對長度，會自動正規化填滿整個循環，所以任何組合都合法、右側秒數就是它實際佔的時間。重組是循環接縫的必要段落，收得太短會看到形狀突然出現。「蓄力幅度」是炸開前被內壓撐大的程度。碎片大小由它所在位置的造型厚度決定（厚的地方剝下大塊、細的地方是小屑），「水滴大小」在這個模式是整體乘數、「碎片大小差異」控制彼此的參差程度。「噴散種子」換碎片往哪飛、飛多快；「崩解切法」換的是形狀被切成哪幾塊（碎片從哪裡剝離），需要重算錨點，所以放開滑桿後才會套用。</div>
     <div class="row" id="flowSpeedRow"><label>動態張力</label><input type="range" id="flowSpeed" min="0" max="1.5" step="0.01" value="0.47"><span class="val" id="flowSpeed_v"></span></div>
   </div>
 
@@ -339,6 +341,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=svg-shape-26"></script>
+<script type="module" src="./bubble.js?v=svg-shape-27"></script>
 </body>
 </html>
