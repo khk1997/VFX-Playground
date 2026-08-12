@@ -138,7 +138,7 @@ const DEFAULTS = {              // 數值滑桿
   shatterFlight: 4.2,
   // 噴散運動拆成三軸（見 shatterTravel／shatterOffset）：散多遠、曲線多前傾、
   // 每顆差多少。減速預設 0.5 —— 真實的爆炸碎片會被空氣阻力拖慢，0 是舊版的等速。
-  shatterRange: 1,
+  shatterRange: 0.54,
   shatterDecel: 0.5,
   shatterSpeedVary: 0.45,
   shatterGravity: 0,
@@ -157,7 +157,7 @@ const DEFAULTS = {              // 數值滑桿
   shatterVariety: 0.3,
   // 蓄力：炸開前形狀被內壓撐大的量（距離場的等距膨脹，單位同世界座標），
   // 以及這股力道累積多久。0 = 完全不蓄力，維持原本直接炸開。
-  shatterCharge: 0.045,
+  shatterCharge: 0.005,
   shatterChargeTime: 1.8,
 };
 
@@ -189,7 +189,7 @@ const LEGACY_SELECT_VALUES = {
   motion: { pulse: 'formation' },
 };
 const TOGGLE_DEFAULTS = {
-  edgeDropsEnabled: true,
+  edgeDropsEnabled: false,
   brightBgAssist: true,
   filmEnabled: false,
   dispersionEnabled: true,
