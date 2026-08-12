@@ -128,7 +128,7 @@ const DEFAULTS = {              // 數值滑桿
   shatterForce: 1,
   shatterGravity: 0.6,
   // 碎片在飛散途中縮小的比例（0 = 保持原大小飛到底）。
-  shatterFade: 0.35,
+  shatterFade: 1,
   // 循環尾端用來把碎片收回錨點、形狀重新長回來的長度。收在這裡才能讓
   // phase=0/1 兩端都是「完整形狀 + 零半徑碎片」，循環接縫不跳。
   shatterReform: 0.3,
