@@ -457,6 +457,12 @@ float mapScene(vec3 p, bool smoothShape){
   bool needsArrivalDistance = uShapeProgress > 0.0001;
   for (int i = 0; i < MAXN; i++){
     if (i >= uCount) break;
+    // 半徑 0 的主滴必須整顆跳過，不能只靠半徑歸零。smooth-min 對一個落在表面上
+    // 的零半徑點仍會鼓出約 k/4 —— 崩解噴濺在炸開前正是這個狀態（碎片半徑 0、
+    // uCount 卻是完整顆數），於是每顆未出生的碎片都在造型上頂出一個包，而 k 又
+    // 是 uViscosity ∝ 1/sqrt(count)，水滴數量就這樣改變了形狀本身的外觀。
+    // 微滴迴圈早就有同樣的 w > 0.0001 守衛，這裡補上。
+    if (uDrops[i].w <= 0.0001) continue;
     float sphereD = dropletDistance(p, i);
     int pairA = int(uElasticPair.x + 0.5);
     int pairB = int(uElasticPair.y + 0.5);
