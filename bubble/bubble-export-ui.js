@@ -12,7 +12,13 @@
   const sequenceSection = document.getElementById('exportSequenceSection');
   const frameCount = document.getElementById('exportFrameCount');
   const fps = document.getElementById('exportFps');
+  const fpsCustom = document.getElementById('exportFpsCustom');
+  const fpsCustomField = document.getElementById('exportFpsCustomField');
   const duration = document.getElementById('exportDuration');
+  // 面板上的「循環秒數」。輸出秒數預設就是它 —— 一個完整循環，接縫剛好接得起來。
+  // 使用者自己動過秒數之後就不再跟隨，改以填的值為準（要客製長度的情形）。
+  const loopDuration = document.getElementById('loopDuration');
+  let durationCustomized = false;
   const start = document.getElementById('exportStart');
   const progress = document.getElementById('exportProgress');
   const progressBar = document.getElementById('exportProgressBar');
@@ -45,11 +51,23 @@
     });
   }
 
+  // 幀率選單選到「自訂…」時才讀數字框；其餘照選項本身的值。
+  function effectiveFps() {
+    if (fps.value !== 'custom') return Number(fps.value);
+    return Math.max(1, Math.min(240, Math.round(Number(fpsCustom.value) || 1)));
+  }
+
+  function followLoopDuration() {
+    if (durationCustomized || !loopDuration) return;
+    duration.value = Number(loopDuration.value);
+  }
+
   function syncSequence() {
     const sequence = document.querySelector('input[name="exportType"]:checked')?.value === 'sequence';
     sequenceSection.hidden = !sequence;
     document.querySelector('.exportFooter span').textContent = sequence ? 'PNG · 序列 ZIP' : 'PNG · 單張';
-    frameCount.value = `${Number(fps.value) * Number(duration.value)} 幀`;
+    fpsCustomField.hidden = fps.value !== 'custom';
+    frameCount.value = `${Math.round(effectiveFps() * Number(duration.value))} 幀`;
     if (engineReady && !exporting) start.textContent = sequence ? '輸出 PNG 序列' : '輸出 PNG';
   }
 
@@ -64,7 +82,7 @@
       centerX: Number(document.getElementById('exportCenterX').value) / 100,
       centerY: Number(document.getElementById('exportCenterY').value) / 100,
       antialias: 4,
-      fps: Number(fps.value),
+      fps: effectiveFps(),
       duration: Number(duration.value),
     };
   }
@@ -99,6 +117,8 @@
     } else {
       dialog.showModal();
     }
+    followLoopDuration();
+    syncSequence();
     document.body.classList.add('export-workspace-open');
     syncWorkspaceLayout();
     requestAnimationFrame(syncPreview);
@@ -137,7 +157,16 @@
     syncDimensions();
     syncPreview();
   }));
-  [fps, duration].forEach(input => input.addEventListener('input', syncSequence));
+  [fps, fpsCustom].forEach(input => input.addEventListener('input', syncSequence));
+  duration.addEventListener('input', () => {
+    durationCustomized = true;
+    syncSequence();
+  });
+  // 面板的循環秒數改動時，還沒被客製的輸出秒數跟著走。
+  loopDuration?.addEventListener('input', () => {
+    followLoopDuration();
+    syncSequence();
+  });
   document.querySelectorAll('.exportRange').forEach(label => {
     const input = label.querySelector('input');
     const output = label.querySelector('output');
@@ -202,5 +231,6 @@
   });
 
   syncDimensions();
+  followLoopDuration();
   syncSequence();
 })();
