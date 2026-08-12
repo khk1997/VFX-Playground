@@ -2354,7 +2354,7 @@ function resetRamp() {
 // 模式專屬參數就要回來補一次，而且 row / note / 控制項三者要各補一次，漏掉一個
 // 不會報錯、只會安靜地讓某條滑桿在無效的模式下看起來可用。
 //
-// 只標葉節點，不要同時標祖先與子孫：.gated-off 目前是 opacity，巢狀會相乘。
+// 巢狀是允許的：子孫只宣告自己額外的條件，祖先的條件由 applyGates 自動疊上。
 const GATES = {
   split:     () => P.motion === 'cinematic',
   formation: () => P.motion === 'formation',
@@ -2381,15 +2381,19 @@ const setDisabled = (el, disabled) => { el.disabled = el.gateOff || disabled; };
 
 function applyGates() {
   const panel = document.getElementById('panel');
-  panel.querySelectorAll('input, select, button').forEach(el => { el.gateOff = false; });
+  // querySelectorAll 是文件順序，所以處理到某個元素時它的祖先已經標好了 ——
+  // 巢狀的閘門因此只需要宣告「自己額外的條件」，不必把祖先的條件再抄一遍。
   panel.querySelectorAll('[data-gate]').forEach(el => {
-    const open = gateOpen(el.dataset.gate);
+    const open = gateOpen(el.dataset.gate) && !el.parentElement?.closest('.gated-off');
     el.classList.toggle('gated-off', !open);
-    el.querySelectorAll('input, select, button').forEach(control => { control.gateOff = !open; });
-    // 閘門本身就標在控制項上的情形（例如隱藏的檔案輸入框）。
-    if (el.matches('input, select, button')) el.gateOff = !open;
   });
-  panel.querySelectorAll('input, select, button').forEach(el => { el.disabled = el.gateOff; });
+  // 收起來的東西一律連同停用：display:none 的控制項雖然點不到，但仍可能被
+  // 程式或鍵盤觸及，狀態必須跟外觀一致。closest 包含元素自己，所以閘門直接
+  // 標在控制項上（例如隱藏的檔案輸入框）也涵蓋得到。
+  panel.querySelectorAll('input, select, button').forEach(el => {
+    el.gateOff = !!el.closest('.gated-off');
+    el.disabled = el.gateOff;
+  });
 }
 
 function updateUIState() {

@@ -108,11 +108,15 @@
   .effectBlock--ramp { --effect-accent: #79d6bd; margin-top: 10px; }
   .effectBlock--shape { --effect-accent: #7fa0e6; }
   .effectBlock--drop { --effect-accent: #5dbded; }
-  /* 面板閘門：目前的模式／形狀來源用不到這條參數。條件宣告在 HTML 的
-     data-gate 上，這裡只負責呈現（見 bubble.js 的 GATES）。同一條路徑上只會有
-     一層 .gated-off，巢狀相乘會過暗。 */
-  .gated-off {
-    opacity: .4;
+  /* 面板閘門：目前的模式／形狀來源用不到這條參數，直接收起來 —— 反灰保留
+     的四十幾行在切到任一模式時都只是佔版面。條件宣告在 HTML 的 data-gate 上，
+     這裡只負責呈現（見 bubble.js 的 GATES）。
+     控制項本身仍在 DOM 裡，值也照樣被 preset-io 讀寫，只是不顯示。 */
+  /* 選擇器要壓過 .row 的 display:flex —— 兩者特異性相同時後者勝出，而 .row 的
+     規則排在這之後，只寫 .gated-off 會讓所有 .row 型的閘門完全失效（只有 note、
+     effectSubhead、區塊這些沒有 display 規則的元素會收起來）。 */
+  #panel .gated-off {
+    display: none;
   }
   .effectBlock.is-disabled {
     opacity: .38;
