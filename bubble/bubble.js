@@ -2939,7 +2939,10 @@ async function runExport(settings) {
       const digits = Math.max(4, String(frames).length);
       for (let index = 0; index < frames; index++) {
         if (job.cancelled) throw new DOMException('輸出已取消', 'AbortError');
-        const time = index / frames * P.loopDuration;
+        // Sample the requested export duration; when it follows the panel this
+        // remains one complete loop, while a custom value controls the output
+        // playback length as advertised by the export UI.
+        const time = index / frames * settings.duration;
         const png = await renderExportFrame({ ...settings, width, height, renderWidth, renderHeight }, time, target);
         entries.push({
           name: `prism-drops_${String(index + 1).padStart(digits, '0')}.png`,
