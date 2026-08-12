@@ -176,12 +176,15 @@ uniform int       uColorMode;   // 0 光譜, 1 自訂漸層
 uniform sampler2D uRampTex;      // 自訂漸層查找表（CPU 端依色標生成）
 
 uniform int   uBgMode;      // 0 純色, 1 HDRI
+uniform int   uMaterialStyle; // 0 厚玻璃, 1 液態薄膜
 uniform int   uTransparentBackground;
 uniform vec3  uBgColor;
+uniform float uBrightBgAssist;
 uniform float uEnvRefraction;
 uniform float uReflect;
 uniform float uTransmission;
 uniform float uMaterialExposure;
+uniform float uMembraneDepth;
 uniform float uRoughness;
 uniform float uIOR;
 uniform int   uReflectionSampleCount;
@@ -815,9 +818,14 @@ void main(){
   vec3 p = ro + rd * t;
   vec3 N = calcNormal(p);
   FilmMaterial material = thinFilm(p, N, -rd);
+  float membraneMode = float(uMaterialStyle);
   // 暗底逐項還原 commit 版；亮底使用透射顯色，中間依背景明度平滑混合。
   float bgLum = dot(bg.rgb, vec3(0.2126, 0.7152, 0.0722));
   float brightBg = smoothstep(0.45, 0.90, bgLum);
+  // 灰底維持原本美術模型；只有純色畫布接近白色時才啟用保色補償。
+  // 開關只控制合成方式，不覆寫任何材質或色散參數。
+  float whiteBackdrop = uBrightBgAssist * (1.0 - float(uBgMode))
+    * smoothstep(0.82, 0.97, bgLum);
   vec3 darkComposite = mix(bg.rgb, material.darkColor, material.darkAlpha);
 
   // 亮底：追蹤水滴內部到背面，取得實際光程、背面 Fresnel 與折射方向。
@@ -830,6 +838,10 @@ void main(){
   vec3 dispersionNormal = N;
   float localPrism = material.edgeFactor * 0.18;
   vec3 realDispersionDelta = vec3(0.0);
+  vec3 exitPoint = p;
+  vec3 exitNormal = -N;
+  float pathLength = 0.0;
+  bool hasExitSurface = false;
   bool needsEnvironmentTransmission =
     uBgMode == 0 && uHasEnv == 1
       && (uEnvRefraction > 0.001
@@ -838,10 +850,8 @@ void main(){
     vec3 insideDir = refract(rd, N, 1.0 / uIOR);
     if (dot(insideDir, insideDir) > 0.0001) {
       transmissionDir = normalize(insideDir);
-      vec3 exitPoint;
-      vec3 exitNormal;
-      float pathLength;
       if (traceExitSurface(p, normalize(insideDir), exitPoint, exitNormal, pathLength)) {
+        hasExitSurface = true;
         insideDir = normalize(insideDir);
         float exitFacing = clamp(dot(exitNormal, insideDir), 0.0, 1.0);
         float f0 = pow((uIOR - 1.0) / (uIOR + 1.0), 2.0);
@@ -901,7 +911,7 @@ void main(){
           backInterf - vec3(dot(backInterf, vec3(0.2126, 0.7152, 0.0722))),
           vec3(-0.65),
           vec3(0.65)
-        );
+        ) * uFilmEnabled;
       }
     }
   }
@@ -911,6 +921,19 @@ void main(){
       && (uEnvRefraction > 0.001
         || (realDispersionStrength > 0.001 && uRealDispersionSeparation > 0.001))) {
     vec3 envRefraction = sampleEnvironmentBackdrop(transmissionDir);
+    // 白底只借用 HDRI 的明暗結構，不把攝影棚的米黃色牆面染進玻璃。
+    // envRefraction 滑桿仍控制混合量，因此 0 的語意完全不變。
+    float envRefractionLum = dot(
+      envRefraction,
+      vec3(0.2126, 0.7152, 0.0722)
+    );
+    vec3 cleanBrightRefraction = vec3(envRefractionLum)
+      * vec3(0.975, 0.995, 1.035);
+    envRefraction = mix(
+      envRefraction,
+      cleanBrightRefraction,
+      whiteBackdrop * 0.94
+    );
     if (realDispersionStrength > 0.001 && uRealDispersionSeparation > 0.001) {
       // 參考 Prism Tunnel 的 thin-glass 方法：不是把同一方向做任意 RGB
       // 位移，而是用三個波長各自的 uIOR 做三次 Snell 折射，再抽取 R/G/B。
@@ -984,6 +1007,20 @@ void main(){
   );
   vec3 brightBase = refractedBg * material.transmission * coolTransmission
     * volumeAbsorption * (1.0 - backFres * 0.72);
+  // 參考白棚拍攝的透明液體：厚處保留極淡冷色，而不是讓白背景與
+  // 暖色 HDRI 相乘成灰米色。僅由亮底保色開關控制，不借用其他滑桿。
+  float brightBodyDepth = whiteBackdrop * clamp(
+    (1.0 - volumeAbsorption.r) * 4.2
+      + material.edgeFactor * 0.10
+      + backRim * 0.08,
+    0.0,
+    0.24
+  );
+  brightBase = mix(
+    brightBase,
+    brightBase * vec3(0.82, 0.93, 1.0),
+    brightBodyDepth
+  );
   vec3 surfaceLight = clamp(
     material.baseSurface + material.filmSurface * 0.08 + vec3(backFres * 0.10),
     0.0,
@@ -1015,7 +1052,169 @@ void main(){
     darkComposite = 1.0
       - (1.0 - darkComposite) * (1.0 - darkRefraction * darkRefractionWeight);
   }
-  vec3 finalColor = mix(darkComposite, brightComposite, brightBg);
+  vec3 glassComposite = mix(darkComposite, brightComposite, brightBg);
+
+  // 液態薄膜不是把厚玻璃調淡，而是以同一對前／背表面重新合成：中央主要
+  // 透過背景，反射集中在輪廓；前後法線不再互相平行的位置形成膜褶與焦散核心。
+  float membraneFold = 0.0;
+  float membraneBoundary = 0.0;
+  float membraneReflectionWeight = 0.0;
+  float membraneFilmWeight = 0.0;
+  float membraneThicknessGrade = 0.0;
+  float membraneFoldGrade = 0.0;
+  float membraneBlueCardGrade = 0.0;
+  float membraneWhiteCardGrade = 0.0;
+  vec3 membraneComposite = glassComposite;
+  if (uMaterialStyle == 1) {
+    float pairedNormal = hasExitSurface
+      ? clamp(dot(N, -exitNormal), 0.0, 1.0)
+      : 1.0;
+    membraneFold = hasExitSurface
+      ? smoothstep(0.035, 0.48, 1.0 - pairedNormal)
+      : 0.0;
+    membraneBoundary = clamp(
+      material.edgeFactor * (0.72 + 0.24 * uFresnel)
+        + backRim * 0.34
+        + membraneFold * 0.72,
+      0.0,
+      1.0
+    );
+
+    vec3 transparentMembrane = mix(bg.rgb, refractedBg, 0.16);
+    vec3 opaqueMembrane = vec3(0.48, 0.62, 0.78)
+      * mix(0.72, 1.08, clamp(uMaterialExposure / 2.5, 0.0, 1.0));
+    membraneComposite = mix(
+      opaqueMembrane,
+      transparentMembrane,
+      clamp(uTransmission, 0.0, 1.0)
+    );
+
+    // 極淡青藍體積只負責把透明膜從白紙上分離；厚度與膜褶增加時才變明顯。
+    float membraneVeil = clamp(
+      uTransmission * (
+        0.018
+          + min(pathLength / max(uBounds.w * 2.0, 0.001), 1.0) * 0.035
+          + membraneBoundary * 0.075
+          + membraneFold * 0.11
+      ),
+      0.0,
+      0.22
+    );
+    membraneComposite = mix(
+      membraneComposite,
+      membraneComposite * vec3(0.72, 0.90, 1.0),
+      membraneVeil
+    );
+
+    // HDRI 在薄膜模式只形成明暗反射卡，不把暖色攝影棚塗滿中央。
+    vec3 membraneEnv = sampleReflection(reflect(rd, N), uRoughness);
+    float membraneEnvLum = dot(
+      membraneEnv,
+      vec3(0.2126, 0.7152, 0.0722)
+    );
+    vec3 membraneEnvChroma = clamp(
+      membraneEnv - vec3(membraneEnvLum),
+      vec3(-0.35),
+      vec3(0.35)
+    );
+    vec3 membraneReflectionTone = clamp(
+      vec3(0.58, 0.72, 0.90)
+        + vec3(membraneEnvLum) * 0.22
+        + membraneEnvChroma * 0.28,
+      0.0,
+      1.0
+    );
+    membraneReflectionWeight = clamp(
+      uReflect * uMaterialExposure
+        * (0.012 + membraneBoundary * 0.19 + membraneFold * 0.12)
+        * mix(1.0, 0.48, uRoughness),
+      0.0,
+      0.46
+    );
+    membraneComposite = mix(
+      membraneComposite,
+      membraneReflectionTone,
+      membraneReflectionWeight
+    );
+
+    // 低頻厚度塑形：光程長的區域只壓低少量亮度，保留白底透明感；
+    // 方向項讓明暗不再完全對稱，曲面才讀得出朝向。
+    float membranePathRatio = clamp(
+      pathLength / max(uBounds.w * 2.0, 0.001),
+      0.0,
+      1.0
+    );
+    float membraneFacingShade = 0.5 + 0.5 * dot(
+      N,
+      normalize(vec3(-0.58, 0.34, 0.74))
+    );
+    membraneThicknessGrade = uMembraneDepth
+      * smoothstep(0.10, 0.82, membranePathRatio)
+      * mix(0.14, 0.052, membraneFacingShade)
+      * (1.0 - material.edgeFactor * 0.34);
+
+    // 前後表面不平行處是膜褶：除了彩色焦散，也需要一層柔和遮蔽才能
+    // 讀出凹陷。它與光譜開關無關，因此關閉彩色後仍保留幾何立體感。
+    membraneFoldGrade = uMembraneDepth
+      * membraneFold
+      * (0.11 + membraneBoundary * 0.19);
+
+    // 兩張虛擬攝影棚反射卡：左上白卡拉出柔亮面，右下藍卡提供低頻暗面。
+    // 反射強度、材質曝光與粗糙度仍分別控制能量、曝光與卡片柔散程度。
+    vec3 membraneReflectDir = reflect(rd, N);
+    vec3 membraneLocal = (p - uBounds.xyz) / max(uBounds.w, 0.001);
+    float cardExponent = mix(7.0, 1.8, uRoughness);
+    float whiteCard = pow(
+      max(dot(membraneReflectDir, normalize(vec3(-0.52, 0.62, 0.59))), 0.0),
+      cardExponent
+    );
+    float blueCard = pow(
+      max(dot(membraneReflectDir, normalize(vec3(0.72, -0.18, 0.67))), 0.0),
+      mix(5.2, 1.45, uRoughness)
+    );
+    float blueCardPlacement = smoothstep(-0.08, 0.72, membraneLocal.x)
+      * (1.0 - smoothstep(0.28, 0.90, membraneLocal.y));
+    float whiteCardPlacement = smoothstep(-0.12, 0.78, -membraneLocal.x)
+      * smoothstep(-0.32, 0.72, membraneLocal.y);
+    blueCard = max(blueCard, blueCardPlacement * 0.72);
+    whiteCard = max(whiteCard, whiteCardPlacement * 0.58);
+    float cardEnergy = clamp(
+      uMembraneDepth * uReflect * uMaterialExposure
+        * (0.028 + membraneBoundary * 0.085 + membraneFold * 0.065),
+      0.0,
+      0.32
+    );
+    membraneBlueCardGrade = blueCard * cardEnergy;
+    membraneWhiteCardGrade = whiteCard * cardEnergy * 0.72;
+
+    // 「薄膜效果」仍是獨立開關；關閉時這一層必須嚴格歸零。
+    vec3 membraneFilmTone = clamp(
+      vec3(0.82, 0.92, 1.0)
+        + material.filmChroma * 1.15
+        + backFilmChroma * 0.72,
+      0.0,
+      1.0
+    );
+    membraneFilmWeight = clamp(
+      material.filmAmount
+        * (0.24 + membraneBoundary * 0.76)
+        * sqrt(max(uMaterialExposure, 0.0)),
+      0.0,
+      0.42
+    );
+    membraneComposite = mix(
+      membraneComposite,
+      membraneFilmTone,
+      membraneFilmWeight
+    );
+  }
+
+  vec3 finalColor = mix(glassComposite, membraneComposite, membraneMode);
+  // 厚玻璃的亮底補償仍由原開關管理；液態薄膜本身就是透射模型，不依賴該開關。
+  float brightColorSupport = max(
+    whiteBackdrop,
+    membraneMode * brightBg
+  );
 
   // 色散沿用薄膜的 thickness → OPD mapping：厚度噪聲、花紋尺度、
   // 花紋流動、重力與入射角都和薄膜一致；唯一不同的是固定使用獨立
@@ -1052,7 +1251,38 @@ void main(){
       -prismLight * darkPrismGain * mix(1.0, 1.18, darkBackdrop)
     );
     // screen 合成使焦散維持透明發光感，而不是實體顏料。
-    finalColor = 1.0 - (1.0 - finalColor) * (1.0 - prismLight);
+    vec3 prismScreen = 1.0
+      - (1.0 - finalColor) * (1.0 - prismLight);
+    // 白色已沒有 screen 的加色空間；亮底改成彩色透射（選擇性吸收），
+    // 強度仍由 prismAmount 單調控制，0 時與舊合成完全一致。
+    vec3 prismTransmission = mix(
+      vec3(0.76, 0.90, 1.0),
+      prismSpectrum,
+      0.62
+    );
+    // 平方根是感知式響應：低強度仍能在白底看見，高強度則逐漸壓縮，
+    // 保持 0 → 無效果且全程單調，不會讓 50% 直接變成不透明彩色貼圖。
+    float whitePrismLocality = clamp(
+      material.edgeFactor * 0.76
+        + localPrism * 0.62
+        + backRim * 0.34
+        + membraneFold * membraneMode * 0.52,
+      0.0,
+      1.0
+    );
+    float prismTransmissionAmount = brightColorSupport * clamp(
+      sqrt(max(prismAmount, 0.0))
+        * (0.42 + 0.08 * uDispersionSeparation)
+        * mix(0.18, 1.0, whitePrismLocality)
+        * mix(1.0, 1.36, membraneMode),
+      0.0,
+      0.30
+    );
+    finalColor = mix(
+      prismScreen,
+      prismTransmission,
+      prismTransmissionAmount
+    );
   }
 
   // 獨立虛擬光源驅動的光譜焦散。HDRI 不參與圖樣或顏色，只能選擇
@@ -1147,6 +1377,12 @@ void main(){
       1.8
     );
     fresnelMask = mix(1.0, fresnelMask, uSpectralCausticFresnelMask);
+    // 薄膜模式下，前後表面不平行的膜褶也是合理的焦散來源；仍受同一個
+    // Fresnel 遮罩滑桿控制，滑桿為 0 時維持「完全不限制」的原語意。
+    fresnelMask = max(
+      fresnelMask,
+      membraneMode * membraneFold * uSpectralCausticFresnelMask * 0.86
+    );
     vec3 causticNoiseFlow = loopNoiseOffset(uSpectralCausticFlow);
     float causticNoise = fbmFast(
       p * uSpectralCausticNoiseScale + causticNoiseFlow
@@ -1179,7 +1415,29 @@ void main(){
     vec3 causticLight = 1.0 - exp(
       -causticSpectrum * causticEnergy * 3.2
     );
-    finalColor = 1.0 - (1.0 - finalColor) * (1.0 - causticLight);
+    vec3 causticScreen = 1.0
+      - (1.0 - finalColor) * (1.0 - causticLight);
+    float causticPeak = max(
+      causticLight.r,
+      max(causticLight.g, causticLight.b)
+    );
+    vec3 causticTransmission = mix(
+      vec3(0.76, 0.91, 1.0),
+      causticSpectrum,
+      0.68
+    );
+    float causticTransmissionAmount = brightColorSupport
+      * clamp(
+        causticPeak * mix(0.52, 0.78, membraneMode)
+          + membraneMode * membraneFold * causticPeak * 0.18,
+        0.0,
+        0.62
+      );
+    finalColor = mix(
+      causticScreen,
+      causticTransmission,
+      causticTransmissionAmount
+    );
   }
 
   // 真實色散在純色／黑色畫布上只加入已去除無色 HDRI 的稜鏡光。
@@ -1192,16 +1450,71 @@ void main(){
     vec3 spectralLight = 1.0 - exp(
       -realDispersionDelta * contrastGate * darkRealGain
     );
-    finalColor = 1.0 - (1.0 - finalColor) * (1.0 - spectralLight);
+    vec3 realDispersionScreen = 1.0
+      - (1.0 - finalColor) * (1.0 - spectralLight);
+    float spectralPeak = max(
+      spectralLight.r,
+      max(spectralLight.g, spectralLight.b)
+    );
+    vec3 normalizedSpectrum = spectralLight / max(spectralPeak, 0.001);
+    vec3 realDispersionTransmission = mix(
+      vec3(0.78, 0.91, 1.0),
+      normalizedSpectrum,
+      0.68
+    );
+    finalColor = mix(
+      realDispersionScreen,
+      realDispersionTransmission,
+      brightColorSupport * clamp(
+        spectralPeak * mix(0.46, 0.62, membraneMode),
+        0.0,
+        0.56
+      )
+    );
+  }
+
+  // 立體明暗必須在所有色散與焦散之後套用，否則亮底的 transmission
+  // 合成會把低頻厚薄關係洗回接近白色。這四個權重都含 uMembraneDepth，
+  // 因此滑桿為 0 時與原本液態薄膜輸出完全一致。
+  if (uMaterialStyle == 1 && uMembraneDepth > 0.001) {
+    float membraneShadeGrade = clamp(
+      membraneThicknessGrade + membraneFoldGrade,
+      0.0,
+      0.34
+    );
+    finalColor = mix(
+      finalColor,
+      finalColor * vec3(0.52, 0.72, 0.90),
+      membraneShadeGrade
+    );
+    finalColor = mix(
+      finalColor,
+      vec3(0.58, 0.78, 1.0),
+      clamp(membraneBlueCardGrade, 0.0, 0.28)
+    );
+    finalColor = mix(
+      finalColor,
+      vec3(1.0),
+      clamp(membraneWhiteCardGrade, 0.0, 0.16)
+    );
   }
   float outputAlpha = 1.0;
   if (uTransparentBackground == 1) {
     float surfaceLuma = dot(material.baseSurface + material.filmSurface, vec3(0.3333));
-    outputAlpha = clamp(
+    float glassAlpha = clamp(
       0.12 + material.darkAlpha * 0.52 + material.edgeFactor * 0.30 + surfaceLuma * 0.24,
       0.08,
       1.0
     );
+    float membraneAlpha = clamp(
+      (1.0 - uTransmission) * 0.78
+        + membraneBoundary * 0.34
+        + membraneReflectionWeight * 0.28
+        + membraneFilmWeight * 0.24,
+      0.04,
+      1.0
+    );
+    outputAlpha = mix(glassAlpha, membraneAlpha, membraneMode);
     // finalColor 是在黑色光場上建立的 premultiplied-like 能量；PNG 的 RGBA
     // 則需要 straight alpha。若直接寫出，瀏覽器降採樣與後續合成會再乘一次
     // alpha，透明邊緣就會出現黑邊。輸出前反預乘，超採樣時仍由 Canvas

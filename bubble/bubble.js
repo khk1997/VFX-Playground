@@ -79,6 +79,9 @@ const DEFAULTS = {              // 數值滑桿
   reflect: 1.6,
   transmission: 1.0,
   materialExposure: 1,
+  // 液態薄膜專用的低頻塑形：0 回到純透明膜，1 完整加入厚度暗部、膜褶遮蔽
+  // 與非對稱反射卡。厚玻璃模式不讀取這個值。
+  membraneDepth: 0.65,
   // 水的折射率約 1.33，玻璃約 1.5；預設維持原本水滴的手感，改高會讓邊緣
   // 反射（Fresnel）變強、折射彎曲角度變陡，看起來更像玻璃而不是水珠。
   ior: 1.33,
@@ -173,6 +176,7 @@ const SHAPE_MOTIONS = new Set(['formation', 'weave', 'shatter']);
 const usesShapeField = motion => SHAPE_MOTIONS.has(motion);
 const SELECT_DEFAULTS = {
   bgMode: 'color',
+  materialStyle: 'glass',
   colorMode: 'spectral',
   motion: 'cinematic',
   shapeSource: 'svg',
@@ -186,6 +190,7 @@ const LEGACY_SELECT_VALUES = {
 };
 const TOGGLE_DEFAULTS = {
   edgeDropsEnabled: true,
+  brightBgAssist: true,
   filmEnabled: false,
   dispersionEnabled: true,
   realDispersionEnabled: false,
@@ -227,6 +232,7 @@ const RAMP_DEFAULT = {
 // select 字串 → int uniform
 const SELECTS = {
   bgMode:    { uniform: 'uBgMode',    map: { color: 0, hdri: 1 } },
+  materialStyle: { uniform: 'uMaterialStyle', map: { glass: 0, membrane: 1 } },
   colorMode: { uniform: 'uColorMode', map: { spectral: 0, ramp: 1 } },
   motion:    { uniform: 'uMotion',    map: { cinematic: 0, formation: 1, weave: 3, shatter: 4 } },
   shapeSource: { uniform: 'uShapeType', map: { svg: 1, gltf: 2 } },
@@ -245,6 +251,7 @@ const SPECTRAL_CAUSTIC_DEFAULTS = [
 // 布林 uniform，而是把 uEdgeDropCount 歸零，這樣關閉液滴時仍保留邊緣圓角
 // （圓角半徑由獨立的 uShapeEdgeBevel 控制，見 svgShapeDistance 的 smin 半徑）。
 const TOGGLES = {
+  brightBgAssist: 'uBrightBgAssist',
   filmEnabled: 'uFilmEnabled',
   dispersionEnabled: 'uDispersionEnabled',
   realDispersionEnabled: 'uRealDispersionEnabled',
@@ -310,6 +317,7 @@ const fmt = {
   reflect: v => 'x' + v.toFixed(2),
   transmission: v => v.toFixed(2),
   materialExposure: v => 'x' + v.toFixed(2),
+  membraneDepth: v => Math.round(v * 100) + '%',
   ior: v => v.toFixed(2),
   hdriYaw: v => v.toFixed(0) + '°',
   hdriPitch: v => v.toFixed(0) + '°',
@@ -371,7 +379,7 @@ function refreshShatterTimelineReadouts() {
   if (total) total.textContent = `四段合計 ${P.loopDuration.toFixed(1)}s（＝循環秒數）`;
 }
 
-import { VERT, FRAG } from './shaders.js?v=svg-shape-29';
+import { VERT, FRAG } from './shaders.js?v=membrane-depth-2';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -1881,12 +1889,15 @@ function initGL() {
     uColorMode:  { value: SELECTS.colorMode.map[P.colorMode] },
     uRampTex:    { value: makeRampTexture() },
     uBgMode:     { value: SELECTS.bgMode.map[P.bgMode] },
+    uMaterialStyle: { value: SELECTS.materialStyle.map[P.materialStyle] },
     uTransparentBackground: { value: 0 },
     uBgColor:    { value: new THREE.Color(P.bgColor) },
+    uBrightBgAssist: { value: P.brightBgAssist ? 1 : 0 },
     uEnvRefraction: { value: P.envRefraction },
     uReflect:    { value: P.reflect },
     uTransmission: { value: P.transmission },
     uMaterialExposure: { value: P.materialExposure },
+    uMembraneDepth: { value: P.membraneDepth },
     uRoughness:  { value: P.roughness },
     uIOR:        { value: P.ior },
     uReflectionSampleCount: { value: mobileRenderQuery.matches ? 4 : 8 },
@@ -2179,7 +2190,10 @@ function bindControls() {
     const update = () => {
       P[key] = el.value;
       if (uniforms) uniforms[uName].value.set(el.value);
-      if (key === 'bgColor') document.body.style.background = (P.bgMode === 'hdri') ? '#000' : el.value;
+      if (key === 'bgColor') {
+        document.body.style.background = (P.bgMode === 'hdri') ? '#000' : el.value;
+        updateUIState();
+      }
     };
     el.value = P[key];
     if (!el._bound) { el.addEventListener('input', update); el._bound = true; }
@@ -2271,8 +2285,29 @@ function updateUIState() {
   });
   const colorBackground = P.bgMode === 'color';
   const bgc = document.getElementById('bgColor');
+  const materialStyle = document.getElementById('materialStyle');
+  const membraneOption = materialStyle.querySelector('option[value="membrane"]');
+  const brightBgAssist = document.getElementById('brightBgAssist');
   bgc.disabled = !colorBackground;
   bgc.closest('.row').style.opacity = colorBackground ? 1 : 0.4;
+  // 液態薄膜的合成是專為純白畫布設計。背景一旦離開 #fff，立即收斂回
+  // 厚玻璃，避免下拉顯示一個實際不成立、shader 又無法合理解讀的組合。
+  const pureWhiteBackground = colorBackground
+    && P.bgColor.toLowerCase() === '#ffffff';
+  membraneOption.disabled = !pureWhiteBackground;
+  if (!pureWhiteBackground && P.materialStyle === 'membrane') {
+    P.materialStyle = 'glass';
+    materialStyle.value = 'glass';
+    if (uniforms) uniforms.uMaterialStyle.value = SELECTS.materialStyle.map.glass;
+  }
+  const membraneMaterial = P.materialStyle === 'membrane';
+  const membraneDepth = document.getElementById('membraneDepth');
+  membraneDepth.disabled = !membraneMaterial;
+  document.getElementById('membraneDepthRow').style.opacity = membraneMaterial ? 1 : 0.4;
+  // 液態薄膜本身就是前後表面透射模型，不讀取厚玻璃專用的亮底補償。
+  const brightAssistUsable = colorBackground && !membraneMaterial;
+  brightBgAssist.disabled = !brightAssistUsable;
+  brightBgAssist.closest('.row').style.opacity = brightAssistUsable ? 1 : 0.4;
   document.body.style.background = colorBackground ? P.bgColor : '#000';
   // hasShape：三個依賴距離場的模式（形狀匯聚／穿梭環繞／崩解噴濺）共用的
   // 「需要匯入/顯示形狀」閘門，管的是形狀來源、模型品質、外形細節這些跟
@@ -3159,7 +3194,7 @@ if (!PREVIEW && window.PresetIO) {
     // 模式類控件必須先套用：切換動態模式會連帶覆寫水滴數量，
     // 配色數量會決定色標列的顯示，順序顛倒會讓後套的值被蓋掉。
     applyFirst: [
-      'motion', 'bgMode', 'colorMode', 'shapeSource', 'shapeQuality',
+      'motion', 'bgMode', 'bgColor', 'materialStyle', 'colorMode', 'shapeSource', 'shapeQuality',
       'filmEnabled', 'dispersionEnabled', 'realDispersionEnabled',
       'spectralCausticEnabled', 'rampCount',
     ],
@@ -3172,6 +3207,53 @@ if (!PREVIEW && window.PresetIO) {
       updateUIState();
     },
   }).restore();
+}
+
+// 桌面版六格快速暫存：空格點一下儲存，已儲存的格子點一下載入。
+if (!PREVIEW) {
+  const quickSlots = document.getElementById('quickSlots');
+  const quickStatus = document.getElementById('quickSlotsStatus');
+  const preset = window.PresetIO?.of('prism-drops');
+  const storageKey = 'vfx:prism-drops:quick-slots';
+  let savedSlots = [];
+  try { savedSlots = JSON.parse(localStorage.getItem(storageKey) || '[]'); } catch (_) { savedSlots = []; }
+
+  if (quickSlots && preset) {
+    const buttons = [...quickSlots.querySelectorAll('[data-slot]')];
+    const announce = message => {
+      quickStatus.textContent = message;
+      clearTimeout(announce.timer);
+      announce.timer = setTimeout(() => { quickStatus.textContent = ''; }, 1800);
+    };
+    const syncSlots = () => buttons.forEach((button, index) => {
+      const saved = Boolean(savedSlots[index]);
+      button.classList.toggle('is-saved', saved);
+      button.title = saved ? `載入暫存 ${index + 1}（右鍵清除）` : `儲存目前參數到 ${index + 1}`;
+    });
+    const persist = () => {
+      try { localStorage.setItem(storageKey, JSON.stringify(savedSlots)); } catch (_) { announce('瀏覽器無法保存暫存'); }
+    };
+    buttons.forEach((button, index) => {
+      button.addEventListener('click', () => {
+        if (savedSlots[index]) {
+          try {
+            preset.apply(savedSlots[index]);
+            announce(`已載入暫存 ${index + 1}`);
+          } catch (_) { savedSlots[index] = null; persist(); syncSlots(); announce('暫存資料已失效'); }
+        } else {
+          savedSlots[index] = preset.serialize(`快速暫存 ${index + 1}`);
+          persist(); syncSlots(); announce(`已儲存暫存 ${index + 1}`);
+        }
+      });
+      button.addEventListener('contextmenu', event => {
+        event.preventDefault();
+        if (!savedSlots[index]) return;
+        savedSlots[index] = null;
+        persist(); syncSlots(); announce(`已清除暫存 ${index + 1}`);
+      });
+    });
+    syncSlots();
+  }
 }
 
 syncLoop();

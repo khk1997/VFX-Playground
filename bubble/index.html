@@ -6,7 +6,7 @@
 <title>Liquid Glass Drops VFX</title>
 <script>if (new URLSearchParams(location.search).has('preview')) document.documentElement.classList.add('preview-mode');</script>
 <style>html.preview-mode #homeBtn,html.preview-mode #toggleBtn,html.preview-mode #exportBtn,html.preview-mode #exportDialog,html.preview-mode #playCtl,html.preview-mode #panel{display:none!important}</style>
-<link rel="stylesheet" href="./bubble.css?v=svg-shape-1">
+<link rel="stylesheet" href="./bubble.css?v=quick-slots-2">
 <link rel="stylesheet" href="../switch2-theme.css?v=mobile-sheet-22">
 <script src="../preview-performance.js"></script>
 <script src="../mobile-control-sheet.js?v=mobile-sheet-22"></script>
@@ -14,6 +14,18 @@
 </head>
 <body data-vfx-module="bubble" data-mobile-ui="compact">
 <canvas id="stage"></canvas>
+<div id="quickSlots" class="quickSlots" aria-label="快速參數暫存">
+  <span class="quickSlotsLabel">快速暫存</span>
+  <div class="quickSlotsGrid">
+    <button type="button" data-slot="0" aria-label="快速暫存 1">1</button>
+    <button type="button" data-slot="1" aria-label="快速暫存 2">2</button>
+    <button type="button" data-slot="2" aria-label="快速暫存 3">3</button>
+    <button type="button" data-slot="3" aria-label="快速暫存 4">4</button>
+    <button type="button" data-slot="4" aria-label="快速暫存 5">5</button>
+    <button type="button" data-slot="5" aria-label="快速暫存 6">6</button>
+  </div>
+  <output id="quickSlotsStatus" aria-live="polite"></output>
+</div>
 <div id="exportStageGuide" aria-hidden="true">
   <span id="exportStageSize">2048 × 2048</span>
   <i></i>
@@ -33,8 +45,10 @@
     <div class="row"><label>HDRI 垂直</label><input type="range" id="hdriPitch" min="-90" max="90" step="1" value="0"><span class="val" id="hdriPitch_v"></span></div>
     <div class="row"><label>HDRI 模糊</label><input type="range" id="hdriBlur" min="0" max="1" step="0.01" value="0.11"><span class="val" id="hdriBlur_v"></span></div>
     <div class="row"><label>環境折射</label><input type="range" id="envRefraction" min="0" max="1" step="0.01" value="0.03"><span class="val" id="envRefraction_v"></span></div>
+    <div class="row toggleRow"><label>亮底保色</label><input type="checkbox" id="brightBgAssist" checked><span class="switchTrack" aria-hidden="true"></span><span class="val" id="brightBgAssist_v">開啟</span></div>
     <div class="row"><button id="hdriBtn">更換 HDRI…</button></div>
     <div id="hdriState" class="note">預設 HDRI：photo_studio2_london_hall_1k.hdr</div>
+    <div class="note">亮底保色只在純色背景接近白色時介入：保留 HDRI 折射明暗、去除暖色偏色，並讓彩色焦散改以透射顯色。</div>
     <input type="file" id="hdriInput" accept=".hdr,image/*" hidden>
   </div>
 
@@ -49,13 +63,15 @@
 
   <div class="group">
     <h3>材質反射 Material</h3>
+    <div class="row"><label>材質類型</label><select id="materialStyle"><option value="glass">厚玻璃</option><option value="membrane">液態薄膜（白底）</option></select><span class="val"></span></div>
+    <div class="row" id="membraneDepthRow"><label>膜體立體感</label><input type="range" id="membraneDepth" min="0" max="1" step="0.01" value="0.65"><span class="val" id="membraneDepth_v"></span></div>
     <div class="row"><label>反射強度</label><input type="range" id="reflect" min="0" max="2" step="0.02" value="1.6"><span class="val" id="reflect_v"></span></div>
     <div class="row"><label>透射率</label><input type="range" id="transmission" min="0" max="1" step="0.01" value="0.96"><span class="val" id="transmission_v"></span></div>
     <div class="row"><label>材質曝光</label><input type="range" id="materialExposure" min="0.25" max="2.5" step="0.05" value="1"><span class="val" id="materialExposure_v"></span></div>
     <div class="row"><label>粗糙度</label><input type="range" id="roughness" min="0" max="1" step="0.01" value="0.2"><span class="val" id="roughness_v"></span></div>
     <div class="row"><label>邊緣光</label><input type="range" id="fresnel" min="0" max="3" step="0.05" value="0.8"><span class="val" id="fresnel_v"></span></div>
     <div class="row"><label>折射率</label><input type="range" id="ior" min="1.0" max="1.8" step="0.01" value="1.33"><span class="val" id="ior_v"></span></div>
-    <div class="note">水約 1.33、玻璃約 1.5；調高會讓邊緣反射變強、折射彎曲角度變陡，偏向玻璃質感。</div>
+    <div class="note" id="materialStyleNote">厚玻璃保留實心體積與 HDRI 反射；液態薄膜僅適用純白背景，使用前後表面干涉，中央更透明，彩色集中在輪廓與曲面折疊處。</div>
   </div>
 
   <div class="group" id="thinFilmGroup">
@@ -348,6 +364,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=svg-shape-30"></script>
+<script type="module" src="./bubble.js?v=membrane-depth-2"></script>
 </body>
 </html>
