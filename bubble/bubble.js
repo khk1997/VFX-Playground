@@ -2347,7 +2347,53 @@ function resetRamp() {
 }
 
 // 依模式反灰不適用的控制項
+// 面板閘門。哪條參數在哪些情況下有效，宣告在 HTML 的 data-gate 上（空白分隔＝
+// AND，前綴 ! ＝反相），這裡只負責把宣告翻成 disabled 與 .gated-off。
+//
+// 之所以不是把條件寫在 JS 裡逐個 getElementById：那份清單有四十幾條，每加一個
+// 模式專屬參數就要回來補一次，而且 row / note / 控制項三者要各補一次，漏掉一個
+// 不會報錯、只會安靜地讓某條滑桿在無效的模式下看起來可用。
+//
+// 只標葉節點，不要同時標祖先與子孫：.gated-off 目前是 opacity，巢狀會相乘。
+const GATES = {
+  split:     () => P.motion === 'cinematic',
+  formation: () => P.motion === 'formation',
+  weave:     () => P.motion === 'weave',
+  shatter:   () => P.motion === 'shatter',
+  shape:     () => usesShapeField(P.motion),
+  svg:       () => P.shapeSource === 'svg',
+  glb:       () => P.shapeSource !== 'svg',
+};
+
+function gateOpen(spec) {
+  return spec.trim().split(/\s+/).every(token => {
+    const negated = token.startsWith('!');
+    const gate = GATES[negated ? token.slice(1) : token];
+    // 未知的條件名一律放行：打錯字的後果是「該藏的沒藏」，而不是把控制項鎖死。
+    if (!gate) return true;
+    return gate() !== negated;
+  });
+}
+
+// 閘門先跑，功能開關後跑。後者用 setDisabled 疊加，才不會把閘門關掉的控制項
+// 重新打開（`el.disabled = !enabled` 這種寫法會直接覆蓋掉前一段的結論）。
+const setDisabled = (el, disabled) => { el.disabled = el.gateOff || disabled; };
+
+function applyGates() {
+  const panel = document.getElementById('panel');
+  panel.querySelectorAll('input, select, button').forEach(el => { el.gateOff = false; });
+  panel.querySelectorAll('[data-gate]').forEach(el => {
+    const open = gateOpen(el.dataset.gate);
+    el.classList.toggle('gated-off', !open);
+    el.querySelectorAll('input, select, button').forEach(control => { control.gateOff = !open; });
+    // 閘門本身就標在控制項上的情形（例如隱藏的檔案輸入框）。
+    if (el.matches('input, select, button')) el.gateOff = !open;
+  });
+  panel.querySelectorAll('input, select, button').forEach(el => { el.disabled = el.gateOff; });
+}
+
 function updateUIState() {
+  applyGates();
   const setFeatureState = (id, enabled) => {
     const group = document.getElementById(id);
     if (!group) return;
@@ -2359,10 +2405,10 @@ function updateUIState() {
       '.row:not(.toggleRow):not(.keepEnabled) input,'
       + ' .row:not(.toggleRow):not(.keepEnabled) select,'
       + ' .row:not(.toggleRow):not(.keepEnabled) button')
-      .forEach(el => { el.disabled = !enabled; });
+      .forEach(el => { setDisabled(el, !enabled); });
     group.querySelectorAll('.effectBlock input, .effectBlock select, .effectBlock button')
       .forEach(el => {
-        if (!el.closest('.toggleRow')) el.disabled = !enabled;
+        if (!el.closest('.toggleRow')) setDisabled(el, !enabled);
       });
   };
   setFeatureState('thinFilmGroup', P.filmEnabled);
@@ -2374,7 +2420,7 @@ function updateUIState() {
   const rampDisabled = spectral || !P.filmEnabled;
   rampGroup.classList.toggle('is-disabled', rampDisabled);
   rampGroup.querySelectorAll('input').forEach(el => {
-    el.disabled = rampDisabled;
+    setDisabled(el, rampDisabled);
   });
   const colorBackground = P.bgMode === 'color';
   const bgc = document.getElementById('bgColor');
@@ -2404,106 +2450,29 @@ function updateUIState() {
   brightBgAssist.disabled = !brightAssistUsable;
   brightBgAssist.closest('.row').style.opacity = brightAssistUsable ? 1 : 0.4;
   document.body.style.background = colorBackground ? P.bgColor : '#000';
-  // hasShape：三個依賴距離場的模式（形狀匯聚／穿梭環繞／崩解噴濺）共用的
-  // 「需要匯入/顯示形狀」閘門，管的是形狀來源、模型品質、外形細節這些跟
-  // 「有沒有形狀」相關的控制項。hasTimeline 縮小到只剩「形狀匯聚」本身，
-  // 因為只有它真的走匯聚→停留→散開那套時間軸；穿梭環繞恆為完整顯示、
-  // 崩解噴濺自己有一條四段時間軸，都不需要那條。
-  const hasShape = usesShapeField(P.motion);
-  const hasTimeline = P.motion === 'formation';
-  const weaving = P.motion === 'weave';
-  const shattering = P.motion === 'shatter';
-  // 定格呼吸只在定格那段有意義；軌跡多樣性只影響匯聚前的自由飛行段。兩者都
-  // 跟匯集時間／完成停留一樣綁在 hasTimeline 上。
-  document.getElementById('holdBreath').disabled = !hasTimeline;
-  document.getElementById('holdBreathRow').style.opacity = hasTimeline ? 1 : 0.4;
-  document.getElementById('formationVariety').disabled = !hasTimeline;
-  ['formationVarietyRow', 'formationVarietyNote']
-    .forEach(id => { document.getElementById(id).style.opacity = hasTimeline ? 1 : 0.4; });
-  // 穿梭環繞專屬的控制項——大小差異上下限、飄浮幅度／速度——在其他動態
-  // 模式下完全沒有效果（weaveDropPosition 只在 P.motion === 'weave' 時才會
-  // 被呼叫到），統一反灰。
-  ['weaveSizeMin', 'weaveSizeMax', 'weaveDriftAmount', 'weaveDriftSpeed'].forEach(id => {
-    document.getElementById(id).disabled = !weaving;
-  });
-  ['weaveSizeMinRow', 'weaveSizeMaxRow', 'weaveSizeNote', 'weaveDriftAmountRow', 'weaveDriftSpeedRow']
-    .forEach(id => { document.getElementById(id).style.opacity = weaving ? 1 : 0.4; });
-  // 崩解噴濺的專屬控制項同理：它的參數只有 shatterTimeline 會讀，而那整段
-  // 鎖在 P.motion === 'shatter' 分支裡，其他模式下調了完全沒有效果。
-  ['shatterRest', 'shatterChargeTime', 'shatterCharge', 'shatterFlight', 'shatterReform',
-   'shatterRange', 'shatterDecel', 'shatterSpeedVary', 'shatterGravity',
-   'shatterFade', 'shatterVariety',
-   'shatterSeed', 'shatterCut'].forEach(id => {
-    document.getElementById(id).disabled = !shattering;
-    document.getElementById(id + 'Row').style.opacity = shattering ? 1 : 0.4;
-  });
-  document.getElementById('shatterNote').style.opacity = shattering ? 1 : 0.4;
-  const formationGroup = document.getElementById('formationGroup');
-  // 「循環秒數」搬進時間軸區塊只是視覺上跟匯集/停留放在一起，它本身是分裂模式
-  // 也在用的共用參數，不能被「只有需要形狀場才啟用」這條規則反灰或鎖住。用逐個
-  // 子項套用取代原本直接對整個 formationGroup 設 opacity ——inline opacity 會
-  // 對子樹整體生效，子項再怎麼把自己設回 1 也蓋不掉祖先的半透明。
-  formationGroup.querySelectorAll(':scope > .row, :scope > .effectSubhead, :scope > .note, :scope > .effectTitle')
-    .forEach(el => {
-      if (el.id === 'loopDurationRow') { el.style.opacity = 1; return; }
-      el.style.opacity = hasShape ? 1 : 0.38;
-    });
-  formationGroup.querySelectorAll('input, select, button').forEach(el => {
-    if (el.id === 'loopDuration') { el.disabled = false; return; }
-    el.disabled = !hasShape;
-  });
-  formationGroup.querySelectorAll('.timelineRow').forEach(row => {
-    row.style.opacity = !hasShape ? 0.38 : hasTimeline ? 1 : 0.4;
-    row.querySelectorAll('input').forEach(el => { el.disabled = !hasShape || !hasTimeline; });
-  });
-  // 輪廓細節滴（micro 填色滴）只在形狀匯聚的「逐漸長成」過程有意義；
-  // 穿梭環繞的形狀從第一幀就完整顯示，沒有可以填的東西。
-  const microCountRow = document.getElementById('microCountRow');
-  microCountRow.style.opacity = !hasShape ? 0.38 : weaving ? 0.4 : 1;
-  microCountRow.querySelectorAll('input').forEach(el => { el.disabled = !hasShape || weaving; });
-  // 輪廓液滴有兩層閘門：外層是模式（只有 SVG 擠出且需要形狀場的模式用得到），
-  // 內層是自己的主開關。主開關關閉時只停掉會移動的液滴，「邊緣水滴」因為同時
-  // 決定擠出邊緣的圓角，標了 .keepEnabled 而保持可用 —— 這樣才做得出
-  // 「圓角擠出但沒有液滴」。
+  // 輪廓液滴的模式閘門（形狀場 + SVG 擠出）走 data-gate；這裡只剩它自己的主
+  // 開關。主開關關閉時只停掉會移動的液滴，「邊緣水滴」因為同時決定擠出邊緣的
+  // 圓角，標了 .keepEnabled 而保持可用 —— 這樣才做得出「圓角擠出但沒有液滴」。
   const edgeDropGroup = document.getElementById('edgeDropGroup');
-  const edgeDropUsable = hasShape && P.shapeSource === 'svg';
-  edgeDropGroup.style.opacity = edgeDropUsable ? 1 : 0.38;
   edgeDropGroup.classList.add('featureGroup');
-  edgeDropGroup.classList.toggle('is-disabled', edgeDropUsable && !P.edgeDropsEnabled);
+  edgeDropGroup.classList.toggle(
+    'is-disabled',
+    !edgeDropGroup.classList.contains('gated-off') && !P.edgeDropsEnabled,
+  );
   edgeDropGroup.querySelectorAll('input').forEach(el => {
     const row = el.closest('.row');
     const survivesToggle = !!row && (row.classList.contains('keepEnabled')
       || row.classList.contains('toggleRow'));
-    el.disabled = !edgeDropUsable || (!P.edgeDropsEnabled && !survivesToggle);
+    setDisabled(el, !P.edgeDropsEnabled && !survivesToggle);
   });
   const isSvg = P.shapeSource === 'svg';
   const shapeBtn = document.getElementById('shapeBtn');
   const shapeInput = document.getElementById('shapeInput');
   shapeBtn.textContent = isSvg ? '選擇 SVG…' : '選擇 GLB / GLTF…';
   shapeInput.accept = isSvg ? '.svg,image/svg+xml' : '.glb,.gltf,model/gltf-binary,model/gltf+json';
-  const qualityRow = document.getElementById('shapeQualityRow');
-  const qualitySelect = document.getElementById('shapeQuality');
-  qualitySelect.disabled = !hasShape || isSvg;
-  qualityRow.style.opacity = isSvg ? 0.4 : 1;
-  const depthControl = document.getElementById('shapeDepth');
-  depthControl.disabled = !hasShape || !isSvg;
-  depthControl.closest('.row').style.opacity = isSvg ? 1 : 0.4;
-  // 邊緣圓角只圓化 SVG 擠出正面與側壁的交界（svgShapeDistance 專用），GLB 走
-  // volumeShapeDistance 完全不會讀這個 uniform，調它在 GLB 來源下沒有任何效果。
-  const bevelControl = document.getElementById('shapeEdgeBevel');
-  bevelControl.disabled = !hasShape || !isSvg;
-  bevelControl.closest('.row').style.opacity = isSvg ? 1 : 0.4;
+  // 模型品質（GLB 專用）、形狀厚度與邊緣圓角（都只作用於 SVG 擠出的
+  // svgShapeDistance，GLB 走 volumeShapeDistance 根本不讀）全部走 data-gate。
 
-  // 分裂 Split 以外的兩個模式都不會觸發毛細回彈或衛星滴串（updateDropUniforms
-  // 裡整段邏輯鎖在 P.motion === 'cinematic'），這六個滑桿在形狀匯聚
-  // 下完全沒有視覺效果。動態張力（flowSpeed）同理——它只餵給分裂模式的群體
-  // 漂移位移，形狀匯聚的位置完全由 formationDropPosition 決定。
-  const splitOnly = P.motion === 'cinematic';
-  document.getElementById('flowSpeedRow').style.opacity = splitOnly ? 1 : 0.4;
-  document.getElementById('flowSpeed').disabled = !splitOnly;
-  const capillaryGroup = document.getElementById('capillaryGroup');
-  capillaryGroup.style.opacity = splitOnly ? 1 : 0.4;
-  capillaryGroup.querySelectorAll('input').forEach(el => { el.disabled = !splitOnly; });
 }
 
 document.getElementById('resetBtn').addEventListener('click', () => {

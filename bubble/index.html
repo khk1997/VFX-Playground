@@ -6,7 +6,7 @@
 <title>Liquid Glass Drops VFX</title>
 <script>if (new URLSearchParams(location.search).has('preview')) document.documentElement.classList.add('preview-mode');</script>
 <style>html.preview-mode #homeBtn,html.preview-mode #toggleBtn,html.preview-mode #exportBtn,html.preview-mode #exportDialog,html.preview-mode #playCtl,html.preview-mode #panel{display:none!important}</style>
-<link rel="stylesheet" href="./bubble.css?v=spectral-swatches-1">
+<link rel="stylesheet" href="./bubble.css?v=panel-gates-1">
 <link rel="stylesheet" href="../switch2-theme.css?v=mobile-sheet-22">
 <script src="../preview-performance.js"></script>
 <script src="../mobile-control-sheet.js?v=mobile-sheet-22"></script>
@@ -171,7 +171,7 @@
     <div class="row"><label>表面起伏</label><input type="range" id="wobble" min="0" max="0.4" step="0.005" value="0.305"><span class="val" id="wobble_v"></span></div>
     <div class="row"><label>起伏尺度</label><input type="range" id="wobbleScale" min="0.3" max="6" step="0.1" value="0.7"><span class="val" id="wobbleScale_v"></span></div>
     <div class="row"><label>起伏動畫</label><input type="range" id="wobbleSpeed" min="0" max="2" step="0.01" value="0.65"><span class="val" id="wobbleSpeed_v"></span></div>
-    <div id="capillaryGroup">
+    <div data-gate="split" id="capillaryGroup">
       <div class="effectSubhead">分離彈性 Capillary Wave</div>
       <div class="note">毛細回彈與衛星滴串只在分裂 Split 模式的斷裂瞬間發生，形狀匯聚不會用到。</div>
       <div class="row"><label>分離回彈</label><input type="range" id="elasticStrength" min="0" max="0.2" step="0.005" value="0.024"><span class="val" id="elasticStrength_v"></span></div>
@@ -194,59 +194,59 @@
            被瀏覽器丟成空字串；bindControls 會立刻把它導向「形狀匯聚」（LEGACY_SELECT_VALUES）。 -->
       <option value="pulse" hidden>脈動呼吸 Pulse（已移除）</option>
     </select><span class="val"></span></div>
-    <div class="row" id="holdBreathRow"><label>定格呼吸</label><input type="range" id="holdBreath" min="0" max="0.2" step="0.005" value="0.05"><span class="val" id="holdBreath_v"></span></div>
-    <div class="row" id="formationVarietyRow"><label>軌跡多樣性</label><input type="range" id="formationVariety" min="0" max="1" step="0.01" value="0.35"><span class="val" id="formationVariety_v"></span></div>
-    <div id="formationVarietyNote" class="note">匯聚前水滴四散飛行時的軌跡差異：0 是全體同方向、同一個軌道平面；調高會讓部分水滴反向繞行、軌道平面各自傾斜。</div>
-    <div class="row" id="weaveSizeMinRow"><label>大小差異下限</label><input type="range" id="weaveSizeMin" min="0.1" max="2" step="0.01" value="0.1"><span class="val" id="weaveSizeMin_v"></span></div>
-    <div class="row" id="weaveSizeMaxRow"><label>大小差異上限</label><input type="range" id="weaveSizeMax" min="0.1" max="2" step="0.01" value="0.25"><span class="val" id="weaveSizeMax_v"></span></div>
-    <div id="weaveSizeNote" class="note">會乘在上方「水滴形態」的「水滴大小」基準值上，決定同一批水滴彼此的大小差異。</div>
-    <div class="row" id="weaveDriftAmountRow"><label>飄浮幅度</label><input type="range" id="weaveDriftAmount" min="0" max="2" step="0.01" value="1"><span class="val" id="weaveDriftAmount_v"></span></div>
-    <div class="row" id="weaveDriftSpeedRow"><label>飄浮速度</label><input type="range" id="weaveDriftSpeed" min="1" max="5" step="1" value="1"><span class="val" id="weaveDriftSpeed_v"></span></div>
-    <div class="row" id="shatterRestRow"><label>靜止時間</label><input type="range" id="shatterRest" min="0" max="10" step="0.1" value="1.1"><span class="val" id="shatterRest_v"></span></div>
-    <div class="row" id="shatterChargeTimeRow"><label>蓄力時間</label><input type="range" id="shatterChargeTime" min="0" max="10" step="0.1" value="0.5"><span class="val" id="shatterChargeTime_v"></span></div>
-    <div class="row" id="shatterFlightRow"><label>飛散時間</label><input type="range" id="shatterFlight" min="0.2" max="10" step="0.1" value="0.4"><span class="val" id="shatterFlight_v"></span></div>
-    <div class="row" id="shatterReformRow"><label>重組時間</label><input type="range" id="shatterReform" min="0.2" max="10" step="0.1" value="2"><span class="val" id="shatterReform_v"></span></div>
-    <div id="shatterTotal" class="note"></div>
-    <div class="row" id="shatterChargeRow"><label>蓄力幅度</label><input type="range" id="shatterCharge" min="0" max="0.12" step="0.005" value="0.005"><span class="val" id="shatterCharge_v"></span></div>
-    <div class="row" id="shatterRangeRow"><label>擴散範圍</label><input type="range" id="shatterRange" min="0.2" max="3" step="0.01" value="0.3"><span class="val" id="shatterRange_v"></span></div>
-    <div class="row" id="shatterDecelRow"><label>噴發減速</label><input type="range" id="shatterDecel" min="0" max="1" step="0.01" value="1"><span class="val" id="shatterDecel_v"></span></div>
-    <div class="row" id="shatterSpeedVaryRow"><label>力道差異</label><input type="range" id="shatterSpeedVary" min="0" max="0.9" step="0.01" value="0.9"><span class="val" id="shatterSpeedVary_v"></span></div>
-    <div class="row" id="shatterGravityRow"><label>噴散重力</label><input type="range" id="shatterGravity" min="0" max="2" step="0.01" value="0"><span class="val" id="shatterGravity_v"></span></div>
-    <div class="row" id="shatterFadeRow"><label>碎片消散</label><input type="range" id="shatterFade" min="0" max="1" step="0.01" value="1"><span class="val" id="shatterFade_v"></span></div>
-    <div class="row" id="shatterVarietyRow"><label>碎片大小差異</label><input type="range" id="shatterVariety" min="0" max="0.9" step="0.01" value="0.3"><span class="val" id="shatterVariety_v"></span></div>
-    <div class="row" id="shatterSeedRow"><label>噴散種子</label><input type="range" id="shatterSeed" min="0" max="30" step="1" value="0"><span class="val" id="shatterSeed_v"></span></div>
-    <div class="row" id="shatterCutRow"><label>崩解切法</label><input type="range" id="shatterCut" min="0" max="30" step="1" value="0"><span class="val" id="shatterCut_v"></span></div>
-    <div id="shatterNote" class="note">時間軸依序是「靜止 → 蓄力 → 飛散 → 重組」，四個滑桿是相對長度，會自動正規化填滿整個循環，所以任何組合都合法、右側秒數就是它實際佔的時間。重組是循環接縫的必要段落，收得太短會看到形狀突然出現。「蓄力幅度」是炸開前被內壓撐大的程度。噴散運動拆成三軸：「擴散範圍」是碎片最後散到多遠、「噴發減速」是運動曲線前傾的程度（0＝等速，調高就是一瞬間衝出去再慢下來）、「力道差異」是每顆碎片散開遠近的參差；三者互不干擾，調減速不會改變最終散開的大小。碎片大小由它所在位置的造型厚度決定（厚的地方剝下大塊、細的地方是小屑），「水滴大小」在這個模式是整體乘數、「碎片大小差異」控制彼此的參差程度。「噴散種子」換碎片往哪飛、飛多快；「崩解切法」換的是形狀被切成哪幾塊（碎片從哪裡剝離），需要重算錨點，所以放開滑桿後才會套用。</div>
-    <div class="row" id="flowSpeedRow"><label>動態張力</label><input type="range" id="flowSpeed" min="0" max="1.5" step="0.01" value="0.47"><span class="val" id="flowSpeed_v"></span></div>
+    <div data-gate="formation" class="row" id="holdBreathRow"><label>定格呼吸</label><input type="range" id="holdBreath" min="0" max="0.2" step="0.005" value="0.05"><span class="val" id="holdBreath_v"></span></div>
+    <div data-gate="formation" class="row" id="formationVarietyRow"><label>軌跡多樣性</label><input type="range" id="formationVariety" min="0" max="1" step="0.01" value="0.35"><span class="val" id="formationVariety_v"></span></div>
+    <div data-gate="formation" id="formationVarietyNote" class="note">匯聚前水滴四散飛行時的軌跡差異：0 是全體同方向、同一個軌道平面；調高會讓部分水滴反向繞行、軌道平面各自傾斜。</div>
+    <div data-gate="weave" class="row" id="weaveSizeMinRow"><label>大小差異下限</label><input type="range" id="weaveSizeMin" min="0.1" max="2" step="0.01" value="0.1"><span class="val" id="weaveSizeMin_v"></span></div>
+    <div data-gate="weave" class="row" id="weaveSizeMaxRow"><label>大小差異上限</label><input type="range" id="weaveSizeMax" min="0.1" max="2" step="0.01" value="0.25"><span class="val" id="weaveSizeMax_v"></span></div>
+    <div data-gate="weave" id="weaveSizeNote" class="note">會乘在上方「水滴形態」的「水滴大小」基準值上，決定同一批水滴彼此的大小差異。</div>
+    <div data-gate="weave" class="row" id="weaveDriftAmountRow"><label>飄浮幅度</label><input type="range" id="weaveDriftAmount" min="0" max="2" step="0.01" value="1"><span class="val" id="weaveDriftAmount_v"></span></div>
+    <div data-gate="weave" class="row" id="weaveDriftSpeedRow"><label>飄浮速度</label><input type="range" id="weaveDriftSpeed" min="1" max="5" step="1" value="1"><span class="val" id="weaveDriftSpeed_v"></span></div>
+    <div data-gate="shatter" class="row" id="shatterRestRow"><label>靜止時間</label><input type="range" id="shatterRest" min="0" max="10" step="0.1" value="1.1"><span class="val" id="shatterRest_v"></span></div>
+    <div data-gate="shatter" class="row" id="shatterChargeTimeRow"><label>蓄力時間</label><input type="range" id="shatterChargeTime" min="0" max="10" step="0.1" value="0.5"><span class="val" id="shatterChargeTime_v"></span></div>
+    <div data-gate="shatter" class="row" id="shatterFlightRow"><label>飛散時間</label><input type="range" id="shatterFlight" min="0.2" max="10" step="0.1" value="0.4"><span class="val" id="shatterFlight_v"></span></div>
+    <div data-gate="shatter" class="row" id="shatterReformRow"><label>重組時間</label><input type="range" id="shatterReform" min="0.2" max="10" step="0.1" value="2"><span class="val" id="shatterReform_v"></span></div>
+    <div data-gate="shatter" id="shatterTotal" class="note"></div>
+    <div data-gate="shatter" class="row" id="shatterChargeRow"><label>蓄力幅度</label><input type="range" id="shatterCharge" min="0" max="0.12" step="0.005" value="0.005"><span class="val" id="shatterCharge_v"></span></div>
+    <div data-gate="shatter" class="row" id="shatterRangeRow"><label>擴散範圍</label><input type="range" id="shatterRange" min="0.2" max="3" step="0.01" value="0.3"><span class="val" id="shatterRange_v"></span></div>
+    <div data-gate="shatter" class="row" id="shatterDecelRow"><label>噴發減速</label><input type="range" id="shatterDecel" min="0" max="1" step="0.01" value="1"><span class="val" id="shatterDecel_v"></span></div>
+    <div data-gate="shatter" class="row" id="shatterSpeedVaryRow"><label>力道差異</label><input type="range" id="shatterSpeedVary" min="0" max="0.9" step="0.01" value="0.9"><span class="val" id="shatterSpeedVary_v"></span></div>
+    <div data-gate="shatter" class="row" id="shatterGravityRow"><label>噴散重力</label><input type="range" id="shatterGravity" min="0" max="2" step="0.01" value="0"><span class="val" id="shatterGravity_v"></span></div>
+    <div data-gate="shatter" class="row" id="shatterFadeRow"><label>碎片消散</label><input type="range" id="shatterFade" min="0" max="1" step="0.01" value="1"><span class="val" id="shatterFade_v"></span></div>
+    <div data-gate="shatter" class="row" id="shatterVarietyRow"><label>碎片大小差異</label><input type="range" id="shatterVariety" min="0" max="0.9" step="0.01" value="0.3"><span class="val" id="shatterVariety_v"></span></div>
+    <div data-gate="shatter" class="row" id="shatterSeedRow"><label>噴散種子</label><input type="range" id="shatterSeed" min="0" max="30" step="1" value="0"><span class="val" id="shatterSeed_v"></span></div>
+    <div data-gate="shatter" class="row" id="shatterCutRow"><label>崩解切法</label><input type="range" id="shatterCut" min="0" max="30" step="1" value="0"><span class="val" id="shatterCut_v"></span></div>
+    <div data-gate="shatter" id="shatterNote" class="note">時間軸依序是「靜止 → 蓄力 → 飛散 → 重組」，四個滑桿是相對長度，會自動正規化填滿整個循環，所以任何組合都合法、右側秒數就是它實際佔的時間。重組是循環接縫的必要段落，收得太短會看到形狀突然出現。「蓄力幅度」是炸開前被內壓撐大的程度。噴散運動拆成三軸：「擴散範圍」是碎片最後散到多遠、「噴發減速」是運動曲線前傾的程度（0＝等速，調高就是一瞬間衝出去再慢下來）、「力道差異」是每顆碎片散開遠近的參差；三者互不干擾，調減速不會改變最終散開的大小。碎片大小由它所在位置的造型厚度決定（厚的地方剝下大塊、細的地方是小屑），「水滴大小」在這個模式是整體乘數、「碎片大小差異」控制彼此的參差程度。「噴散種子」換碎片往哪飛、飛多快；「崩解切法」換的是形狀被切成哪幾塊（碎片從哪裡剝離），需要重算錨點，所以放開滑桿後才會套用。</div>
+    <div data-gate="split" class="row" id="flowSpeedRow"><label>動態張力</label><input type="range" id="flowSpeed" min="0" max="1.5" step="0.01" value="0.47"><span class="val" id="flowSpeed_v"></span></div>
   </div>
 
   <div class="group">
     <h3>形狀匯聚 Shape Formation</h3>
     <div class="effectBlock effectBlock--shape" id="formationGroup">
       <div class="effectTitle"><span>FORM</span> 擠出外形</div>
-      <div class="row"><label>形狀來源</label><select id="shapeSource"><option value="svg">SVG 擠出</option><option value="gltf">GLB / GLTF</option></select><span class="val"></span></div>
-      <div class="row" id="shapeQualityRow"><label>模型品質</label><select id="shapeQuality">
+      <div data-gate="shape" class="row"><label>形狀來源</label><select id="shapeSource"><option value="svg">SVG 擠出</option><option value="gltf">GLB / GLTF</option></select><span class="val"></span></div>
+      <div data-gate="shape glb" class="row" id="shapeQualityRow"><label>模型品質</label><select id="shapeQuality">
         <option value="performance">效能 48³</option>
         <option value="balanced">平衡 80³</option>
         <option value="high">高品質 128³</option>
       </select><span class="val"></span></div>
-      <div class="row"><button class="fileBtn" id="shapeBtn">選擇 SVG…</button></div>
-      <div id="shapeState" class="note">切到「形狀匯聚 / 穿梭環繞 / 崩解噴濺」會先套用內建預設造型，可再自行匯入取代</div>
-      <input type="file" id="shapeInput" accept=".svg,image/svg+xml" hidden>
-      <div class="effectSubhead">時間軸</div>
+      <div data-gate="shape" class="row"><button class="fileBtn" id="shapeBtn">選擇 SVG…</button></div>
+      <div data-gate="shape" id="shapeState" class="note">切到「形狀匯聚 / 穿梭環繞 / 崩解噴濺」會先套用內建預設造型，可再自行匯入取代</div>
+      <input data-gate="shape" type="file" id="shapeInput" accept=".svg,image/svg+xml" hidden>
+      <div data-gate="shape" class="effectSubhead">時間軸</div>
       <div class="row" id="loopDurationRow"><label>循環秒數</label><input type="range" id="loopDuration" min="4" max="30" step="0.5" value="12"><span class="val" id="loopDuration_v"></span></div>
-      <div class="row timelineRow"><label>匯集時間</label><input type="range" id="gatherDuration" min="0.15" max="0.75" step="0.01" value="0.25"><span class="val" id="gatherDuration_v"></span></div>
-      <div class="row timelineRow"><label>完成停留</label><input type="range" id="shapeHold" min="0.05" max="0.45" step="0.01" value="0.45"><span class="val" id="shapeHold_v"></span></div>
-      <div id="timelineSummary" class="note timelineRow"></div>
-      <div class="effectSubhead">外形細節</div>
-      <div class="row" id="microCountRow"><label>輪廓細節滴</label><input type="range" id="microCount" min="8" max="20" step="1" value="14"><span class="val" id="microCount_v"></span></div>
-      <div class="row"><label>形狀厚度</label><input type="range" id="shapeDepth" min="0.05" max="0.8" step="0.01" value="0.1"><span class="val" id="shapeDepth_v"></span></div>
-      <div class="row"><label>邊緣圓角</label><input type="range" id="shapeEdgeBevel" min="0" max="0.15" step="0.001" value="0.025"><span class="val" id="shapeEdgeBevel_v"></span></div>
-      <div class="row"><label>邊緣液化</label><input type="range" id="shapeSoftness" min="0" max="0.25" step="0.005" value="0"><span class="val" id="shapeSoftness_v"></span></div>
-      <div class="note">模型品質會在下一次匯入 GLB 時生效；提高品質主要增加匯入時間與記憶體，每幀 SDF 取樣次數不變。</div>
+      <div data-gate="formation" class="row timelineRow"><label>匯集時間</label><input type="range" id="gatherDuration" min="0.15" max="0.75" step="0.01" value="0.25"><span class="val" id="gatherDuration_v"></span></div>
+      <div data-gate="formation" class="row timelineRow"><label>完成停留</label><input type="range" id="shapeHold" min="0.05" max="0.45" step="0.01" value="0.45"><span class="val" id="shapeHold_v"></span></div>
+      <div data-gate="formation" id="timelineSummary" class="note timelineRow"></div>
+      <div data-gate="shape" class="effectSubhead">外形細節</div>
+      <div data-gate="shape !weave" class="row" id="microCountRow"><label>輪廓細節滴</label><input type="range" id="microCount" min="8" max="20" step="1" value="14"><span class="val" id="microCount_v"></span></div>
+      <div data-gate="shape svg" class="row"><label>形狀厚度</label><input type="range" id="shapeDepth" min="0.05" max="0.8" step="0.01" value="0.1"><span class="val" id="shapeDepth_v"></span></div>
+      <div data-gate="shape svg" class="row"><label>邊緣圓角</label><input type="range" id="shapeEdgeBevel" min="0" max="0.15" step="0.001" value="0.025"><span class="val" id="shapeEdgeBevel_v"></span></div>
+      <div data-gate="shape" class="row"><label>邊緣液化</label><input type="range" id="shapeSoftness" min="0" max="0.25" step="0.005" value="0"><span class="val" id="shapeSoftness_v"></span></div>
+      <div data-gate="shape glb" class="note">模型品質會在下一次匯入 GLB 時生效；提高品質主要增加匯入時間與記憶體，每幀 SDF 取樣次數不變。</div>
     </div>
 
-    <div class="effectBlock effectBlock--drop" id="edgeDropGroup">
+    <div data-gate="shape svg" class="effectBlock effectBlock--drop" id="edgeDropGroup">
       <div class="effectTitle"><span>DROP</span> 輪廓液滴</div>
       <div class="row toggleRow"><label>輪廓液滴</label><input type="checkbox" id="edgeDropsEnabled"><span class="switchTrack" aria-hidden="true"></span><span class="val" id="edgeDropsEnabled_v">關閉</span></div>
       <div class="row keepEnabled"><label>邊緣水滴</label><input type="range" id="shapeLiquid" min="0" max="1" step="0.01" value="0.1"><span class="val" id="shapeLiquid_v"></span></div>
@@ -364,6 +364,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=shatter-timing-2"></script>
+<script type="module" src="./bubble.js?v=panel-gates-1"></script>
 </body>
 </html>
