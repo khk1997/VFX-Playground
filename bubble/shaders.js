@@ -103,6 +103,10 @@ uniform int   uShapeType;      // 0 無, 1 SVG 擠出, 2 GLB/GLTF 體積
 uniform float uShapeProgress;
 uniform float uFidelityAbsorb;
 uniform float uShapeSwell;
+// 形狀整體縮放（1 = 原尺寸）。成形定格期間的「呼吸」走這裡：距離場的等距膨脹
+// 會把輪廓加粗、細節連在一起，縮放才是整顆造型一起脹縮。均勻縮放對 SDF 是精確
+// 的 d(p) = s·d(p/s)，所以 raymarch 的步長仍然安全。
+uniform float uShapeScale;
 uniform float uContactLead;
 uniform float uShapeDepth;
 uniform float uShapeSoftness;
@@ -520,9 +524,10 @@ float mapScene(vec3 p, bool smoothShape){
   if (uShapeProgress > 0.0001) {
     // uShapeTex 在 GLB 模式儲存的是匯入時烘焙的高密度 Metaball 場，
     // 不是原模型距離場。以等距侵蝕讓每個細節球核逐步長大，避免 alpha 淡入。
-    float detailD = uShapeType == 1
-      ? svgShapeDistance(p, smoothShape)
-      : volumeShapeDistance(p);
+    vec3 shapeP = p / uShapeScale;
+    float detailD = (uShapeType == 1
+      ? svgShapeDistance(shapeP, smoothShape)
+      : volumeShapeDistance(shapeP)) * uShapeScale;
     float growth = smoothstep(0.0, 1.0, uShapeProgress);
     // 已抵達水滴附近先成形，遠處隨全域進度稍晚跟上；這是幾何侵蝕，
     // 不是透明淡入，因此水滴與模型輪廓之間始終有實際液橋。

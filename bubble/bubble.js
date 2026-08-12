@@ -112,8 +112,12 @@ const DEFAULTS = {              // 數值滑桿
   shapeLiquidSpeed: 1,
   shapeHold: 0.45,
   microCount: 14,
-  // 脈動呼吸：匯聚程度在 [1-pulseDepth, 1] 之間來回，0 等於完全靜止的成形狀態。
-  pulseDepth: 0.4,
+  // 定格呼吸：成形停留那段期間整顆造型的縮放幅度（0.05 = 最大脹到 105%）。
+  // 0 = 維持舊版完全凍結的定格。
+  holdBreath: 0.05,
+  // 匯聚前自由飛行段的軌跡多樣性：0 = 全體同方向、同軌道平面（舊行為），
+  // 1 = 約半數反向繞行、軌道平面散佈到 ±90°。
+  formationVariety: 0.35,
   // 穿梭環繞：每顆水滴的大小在這個範圍內隨機決定（乘在「水滴大小」滑桿上），
   // 上下限拉開才會看起來「好幾顆大小不一」，而不是差不多大的一團。
   weaveSizeMin: 0.1,
@@ -154,14 +158,18 @@ const DEFAULTS = {              // 數值滑桿
   shatterChargeTime: 1.8,
 };
 
-// 「形狀匯聚」與「脈動呼吸」共用同一套 SDF 匯聚管線（錨點、細節滴、負滴、
-// 體積交接），差別只在 formationAmount 的時間軸：前者匯聚→停留→散開，
-// 後者恆為成形狀態、只讓匯聚程度呼吸。凡是「需要形狀距離場」的判斷都走這裡。
-const FORMATION_MOTIONS = new Set(['formation', 'pulse']);
-const isFormationMotion = motion => FORMATION_MOTIONS.has(motion);
+// 走完整 SDF 匯聚管線（錨點、細節滴、負滴、體積交接）＋ 匯聚→停留→散開時間軸
+// 的模式。目前只有「形狀匯聚」，但保留這個述詞是因為十幾處判斷讀的是「要不要跑
+// 匯聚管線」而不是「是不是某個特定模式」，語意不同，日後加模式時也接得上。
+//
+// 舊的「脈動呼吸」曾是這裡的第二個成員：它共用整條管線，只把 formationAmount 換成
+// 一條餘弦。但那條餘弦壓低的是「匯聚程度」，谷底等於把水滴又吐回去 —— 也就是形狀
+// 匯聚 gather/release 兩段在做的事，只是沒有中間的定格。它沒有自己的敘事，等於一個
+// 修飾器冒充模式，所以移除，把「呼吸」併進形狀匯聚的定格段（見 holdBreathSwell）。
+const isFormationMotion = motion => motion === 'formation';
 // 「需要距離場」比「走匯聚→散開時間軸」範圍更廣：穿梭環繞與崩解噴濺也要
 // 匯入/顯示同一顆形狀，只是不吸收水滴、也不走 gather/hold/release 那套編排。
-const SHAPE_MOTIONS = new Set(['formation', 'pulse', 'weave', 'shatter']);
+const SHAPE_MOTIONS = new Set(['formation', 'weave', 'shatter']);
 const usesShapeField = motion => SHAPE_MOTIONS.has(motion);
 const SELECT_DEFAULTS = {
   bgMode: 'color',
@@ -169,6 +177,12 @@ const SELECT_DEFAULTS = {
   motion: 'cinematic',
   shapeSource: 'svg',
   shapeQuality: 'balanced',
+};
+// 已移除的下拉選項 → 現存選項。用來讓舊的參數組合檔仍然打得開。選項本身必須還
+// 留在 <select> 裡（標成 hidden），否則瀏覽器會在寫入當下就把 value 丟成空字串，
+// 這裡根本讀不到原值。
+const LEGACY_SELECT_VALUES = {
+  motion: { pulse: 'formation' },
 };
 const TOGGLE_DEFAULTS = {
   edgeDropsEnabled: true,
@@ -186,11 +200,10 @@ if (mobileRenderQuery.matches && !PREVIEW) P.cameraDistance = MOBILE_CAMERA_DIST
 const motionCounts = {
   cinematic: 2,
   formation: FORMATION_DEFAULT_COUNT,
-  pulse: FORMATION_DEFAULT_COUNT,
   weave: WEAVE_DEFAULT_COUNT,
   shatter: SHATTER_DEFAULT_COUNT,
 };
-// 水滴大小的預設值依模式不同：分裂維持原本較大的滴徑，形狀匯聚／脈動呼吸這兩個
+// 水滴大小的預設值依模式不同：分裂維持原本較大的滴徑，形狀匯聚這個
 // 依賴外部形狀的模式改用較小的滴徑，讓吸附進外形時的顆粒感更細。切換模式時的
 // 記憶方式與 motionCounts 相同——使用者在某個模式下調過的值會被保留，只有預設
 // 的初始值不同。穿梭環繞的水滴不吸附進形狀，維持跟形狀匯聚一樣的顆粒感即可。
@@ -198,7 +211,6 @@ const FORMATION_DEFAULT_RADIUS = 0.25;
 const motionRadius = {
   cinematic: DEFAULTS.radius,
   formation: FORMATION_DEFAULT_RADIUS,
-  pulse: FORMATION_DEFAULT_RADIUS,
   weave: FORMATION_DEFAULT_RADIUS,
   // 崩解噴濺的「水滴大小」是碎片的整體乘數，滑桿最小值 0.25 剛好＝×1 原尺寸。
   shatter: SHATTER_RADIUS_BASE,
@@ -216,7 +228,7 @@ const RAMP_DEFAULT = {
 const SELECTS = {
   bgMode:    { uniform: 'uBgMode',    map: { color: 0, hdri: 1 } },
   colorMode: { uniform: 'uColorMode', map: { spectral: 0, ramp: 1 } },
-  motion:    { uniform: 'uMotion',    map: { cinematic: 0, formation: 1, pulse: 2, weave: 3, shatter: 4 } },
+  motion:    { uniform: 'uMotion',    map: { cinematic: 0, formation: 1, weave: 3, shatter: 4 } },
   shapeSource: { uniform: 'uShapeType', map: { svg: 1, gltf: 2 } },
   // 僅控制下一次 GLB 烘焙尺寸，沒有對應 shader uniform。
   shapeQuality: { uniform: '', map: { performance: 48, balanced: 80, high: 128 } },
@@ -326,7 +338,8 @@ const fmt = {
   shapeLiquidSpeed: v => v === 0 ? '停止' : 'x' + v.toFixed(0),
   shapeHold: v => (v * P.loopDuration).toFixed(1) + 's',
   microCount: v => v.toFixed(0),
-  pulseDepth: v => Math.round(v * 100) + '%',
+  holdBreath: v => v === 0 ? '凍結' : '±' + Math.round(v * 100) + '%',
+  formationVariety: v => v === 0 ? '整齊同向' : Math.round(v * 100) + '%',
   weaveSizeMin: v => 'x' + v.toFixed(2),
   weaveSizeMax: v => 'x' + v.toFixed(2),
   weaveDriftAmount: v => 'x' + v.toFixed(2),
@@ -421,7 +434,7 @@ function rebuildWeaveAnchorSets() {
 }
 
 // 崩解切法專用的錨點組。不能直接把種子套進 formationAnchors／microFormationAnchors，
-// 那兩組是形狀匯聚／脈動呼吸／穿梭環繞共用的，動了會連帶改掉那三個模式的外觀。
+// 那兩組是形狀匯聚／穿梭環繞／崩解噴濺共用的，動了會連帶改掉那三個模式的外觀。
 // 這裡另外算一份，只有崩解噴濺會讀。
 //
 // 重算是 O(候選點 × 錨點數) 的貪婪取樣，不便宜，所以用 key 快取：切法種子沒變
@@ -709,16 +722,28 @@ function smoothstepCPU(value, edge0, edge1) {
   return x * x * (3 - 2 * x);
 }
 
-// 脈動呼吸的匯聚包絡：恆為成形狀態，只沿餘弦在 [1-pulseDepth, 1] 之間呼吸。
-// 用 cos(2π·phase) 而不是 smoothstep 出入場，是因為它在 phase=0/1 的值與一階
-// 導數都相同 —— 循環接縫沒有位置跳變，也沒有速度跳變（慣性形變會讀速度）。
-function pulseAmount(phase) {
-  const wave = 0.5 * (1 - Math.cos(phase * Math.PI * 2));
-  return 1 - P.pulseDepth * wave;
+// 定格呼吸：成形停留那段期間（gatherEnd → holdEnd）整顆造型的縮放呼吸，回傳
+// 縮放增量（0 = 原尺寸）。
+//
+// 兩個「不是」：
+//   不走距離場的等距膨脹（uShapeSwell，崩解噴濺蓄力用的那條）—— 等距偏移是把
+//   輪廓整圈加粗，細筆畫之間還會互相靠攏黏起來，看起來是造型變胖而不是呼吸。
+//   不走 formationAmount —— 那個值被十幾處 smoothstep 讀成「匯聚程度」，壓低它
+//   等於把水滴又吐回去，正是舊「脈動呼吸」模式跟形狀匯聚看起來重疊的原因。
+//
+// 用 (1-cos) 的整數個週期，值與一階導數在 hold 兩端都是 0：呼吸不會滲進 gather /
+// release，定格的頭尾也沒有速度跳變（慣性形變會讀速度）。
+const HOLD_BREATH_CYCLES = 2;
+function holdBreathScale(phase) {
+  if (P.motion !== 'formation' || P.holdBreath <= 0) return 0;
+  const gatherEnd = Math.max(0.15, P.gatherDuration);
+  const holdEnd = Math.min(0.94, gatherEnd + P.shapeHold);
+  if (holdEnd <= gatherEnd || phase <= gatherEnd || phase >= holdEnd) return 0;
+  const u = (phase - gatherEnd) / (holdEnd - gatherEnd);
+  return P.holdBreath * 0.5 * (1 - Math.cos(u * HOLD_BREATH_CYCLES * Math.PI * 2));
 }
 
 function formationAmount(phase) {
-  if (P.motion === 'pulse') return pulseAmount(phase);
   const gatherEnd = Math.max(0.15, P.gatherDuration);
   const holdEnd = Math.min(0.94, gatherEnd + P.shapeHold);
   const gather = smoothstepCPU(phase, 0.04, gatherEnd);
@@ -727,10 +752,6 @@ function formationAmount(phase) {
 }
 
 function formationFidelityAmount(phase) {
-  // 脈動模式沒有匯集／散開兩段，體積交接直接跟著呼吸包絡走：吸飽時完全變成
-  // 模型 SDF，吐氣時把體積交還給可見水滴。門檻起點壓在 0.55，pulseDepth 只要
-  // 超過 ~0.45 就會在每個循環露出水滴，再往下則是純粹的模型微幅呼吸。
-  if (P.motion === 'pulse') return smoothstepCPU(formationAmount(phase), 0.55, 0.995);
   const gatherEnd = Math.max(0.15, P.gatherDuration);
   const holdEnd = Math.min(0.94, gatherEnd + P.shapeHold);
   // 直接使用循環 phase，而非已 smoothstep 過的 formationAmount 再平滑一次。
@@ -915,17 +936,39 @@ function formationReleaseAmount(phase) {
 
 // 每顆水滴的自由段只使用整數諧波，因此 phase=0/1 的位置與速度完全相同。
 // 匯集與散開共用同一個 formationAmount，故兩段是同一路徑的正反向。
+// 匯聚前的自由飛行軌道。原本每顆水滴共用同一組 sin/cos 相位，只有起始角不同，
+// 於是整群一律同方向繞行、又都在同一個軌道平面上，看起來像一塊剛體在轉。
+// formationVariety 讓每顆各自決定旋轉方向與軌道平面傾角。
+//
+// 方向只取 ±1、諧波仍然只用整數倍，所以 phase=0/1 的位置與速度依舊完全相同 ——
+// 循環接縫不會跳（跟 weaveDropPosition 是同一條限制）。
+const freeOrbitVec = new THREE.Vector3();
+function freeOrbitPosition(a, anchor, orbit, h2, h3, tune, out) {
+  const variety = Math.max(0, Math.min(1, P.formationVariety));
+  // h3 < variety/2 的那些反向繞行：variety=0 時沒有任何一顆反向，=1 時約半數。
+  const spin = a * (h3 < variety * 0.5 ? -1 : 1);
+  const radial = 1 + (h2 - 0.5) * variety * 0.6;
+  const x = (Math.cos(spin + anchor) * orbit
+    + Math.cos(spin * 2 + anchor * tune.x2) * orbit * tune.ax2) * radial;
+  const y = (Math.sin(spin + anchor) * orbit * tune.y1
+    + Math.sin(spin * 3 + anchor * tune.y3) * orbit * tune.ay3) * radial;
+  const z = Math.sin(spin * 2 + anchor * tune.z2) * orbit * tune.az2 * radial;
+  // 繞 X 軸把整條軌道傾斜；y/z 一起轉，軌道本身的形狀不變，只是換了個平面。
+  const tilt = (h3 - 0.5) * variety * Math.PI;
+  const ct = Math.cos(tilt), st = Math.sin(tilt);
+  return out.set(x, y * ct - z * st, y * st + z * ct);
+}
+const MAIN_ORBIT_TUNE = { x2: 1.7, ax2: 0.12, y1: 0.62, y3: 0.8, ay3: 0.08, z2: 1.3, az2: 0.48 };
+const MICRO_ORBIT_TUNE = { x2: 1.3, ax2: 0.16, y1: 0.72, y3: 0.7, ay3: 0.10, z2: 1.9, az2: 0.52 };
+
 function formationDropPosition(i, phase, count, out) {
   const tau = Math.PI * 2;
   const a = phase * tau;
-  const { h1, h2 } = dropSeeds[i];
+  const { h1, h2, h3 } = dropSeeds[i];
   const anchor = i * tau / count + h1 * 1.4;
   const orbit = P.spread * (1.25 + h2 * 0.65);
-  const freeX = Math.cos(a + anchor) * orbit
-    + Math.cos(a * 2 + anchor * 1.7) * orbit * 0.12;
-  const freeY = Math.sin(a + anchor) * orbit * 0.62
-    + Math.sin(a * 3 + anchor * 0.8) * orbit * 0.08;
-  const freeZ = Math.sin(a * 2 + anchor * 1.3) * orbit * 0.48;
+  const free = freeOrbitPosition(a, anchor, orbit, h2, h3, MAIN_ORBIT_TUNE, freeOrbitVec);
+  const freeX = free.x, freeY = free.y, freeZ = free.z;
   const target = formationAnchors.length
     ? formationAnchors[i % formationAnchors.length]
     : null;
@@ -1009,11 +1052,8 @@ function updateMicroDrops(phase, fidelityAbsorb = 0) {
     }
     const anchor = i * Math.PI * 2 / activeCount + h1 * 0.8;
     const orbit = P.spread * (1.15 + h2 * 0.75);
-    const freeX = Math.cos(a + anchor) * orbit
-      + Math.cos(a * 2 + anchor * 1.3) * orbit * 0.16;
-    const freeY = Math.sin(a + anchor) * orbit * 0.72
-      + Math.sin(a * 3 + anchor * 0.7) * orbit * 0.10;
-    const freeZ = Math.sin(a * 2 + anchor * 1.9) * orbit * 0.52;
+    const free = freeOrbitPosition(a, anchor, orbit, h2, h3, MICRO_ORBIT_TUNE, freeOrbitVec);
+    const freeX = free.x, freeY = free.y, freeZ = free.z;
     // 錯開抵達時間，讓形狀像被液滴逐區域填滿，而不是所有粒子同步縮放。
     const arriveStart = 0.04 + h3 * 0.30;
     const arriveEnd = 0.62 + h3 * 0.20;
@@ -1130,9 +1170,7 @@ function updateDropUniforms(t) {
     ? formationFidelityAmount(phase)
     : 0;
   const holdEnd = Math.min(0.94, Math.max(0.15, P.gatherDuration) + P.shapeHold);
-  // 脈動模式永遠處於「成形」半段，沒有散開的回程，因此不走 release 分支 ——
-  // 匯集時間／完成停留這兩個滑桿在這個模式下不參與運算。
-  const releasingShape = P.motion !== 'pulse' && phase > holdEnd;
+  const releasingShape = phase > holdEnd;
   const releaseTransfer = releasingShape ? formationReleaseAmount(phase) : 0;
   // 高密度細節場由可見主滴進入模型區域後才開始長出；它本身是預烘焙
   // Metaball union，而非原始 GLB SDF。
@@ -1355,6 +1393,7 @@ function updateDropUniforms(t) {
     uniforms.uShapeProgress.value = formationShapeProgress;
     uniforms.uFidelityAbsorb.value = fidelityAbsorb;
     uniforms.uShapeSwell.value = shatter ? shatter.swell : 0;
+    uniforms.uShapeScale.value = 1 + holdBreathScale(phase);
     uniforms.uContactLead.value = shatter ? 0 : 1;
     // 半徑已連續收至零後才停止 shader 迴圈；切換當下幾何場完全相同。
     const fidelityComplete = fidelityAbsorb > 0.9999;
@@ -1862,6 +1901,7 @@ function initGL() {
     uFidelityAbsorb: { value: 0 },
     // 崩解噴濺的蓄力膨脹量（等距擴張形狀距離場）；其他模式恆為 0。
     uShapeSwell: { value: 0 },
+    uShapeScale: { value: 1 },
     // contactLead（形狀在已抵達水滴附近先成形）是形狀匯聚專用的邏輯。崩解噴濺
     // 是它的反向過程，同一條規則會變成「形狀黏著碎片不肯消失、碎片之間先溶掉」，
     // 在輪廓上結出一顆顆瘤。用這個 0/1 開關在崩解模式關掉它。
@@ -2073,6 +2113,12 @@ function bindControls() {
     const el = document.getElementById(key);
     const { uniform, map } = SELECTS[key];
     const update = () => {
+      // 舊的參數組合可能還存著已移除的選項。寫進 <select> 後 value 會變成空
+      // 字串，往下就是 map[''] === undefined 汙染 uniform，所以在這裡收斂：
+      // 有對應的舊選項就導過去（脈動呼吸的參數組合仍會帶著形狀），否則回預設。
+      const legacy = LEGACY_SELECT_VALUES[key]?.[el.value];
+      if (legacy) el.value = legacy;
+      else if (!(el.value in map)) el.value = SELECT_DEFAULTS[key];
       const previousMotion = P.motion;
       const previousValue = P[key];
       P[key] = el.value;
@@ -2228,19 +2274,22 @@ function updateUIState() {
   bgc.disabled = !colorBackground;
   bgc.closest('.row').style.opacity = colorBackground ? 1 : 0.4;
   document.body.style.background = colorBackground ? P.bgColor : '#000';
-  // hasShape：三個依賴距離場的模式（形狀匯聚／脈動呼吸／穿梭環繞）共用的
+  // hasShape：三個依賴距離場的模式（形狀匯聚／穿梭環繞／崩解噴濺）共用的
   // 「需要匯入/顯示形狀」閘門，管的是形狀來源、模型品質、外形細節這些跟
   // 「有沒有形狀」相關的控制項。hasTimeline 縮小到只剩「形狀匯聚」本身，
-  // 因為只有它真的走匯聚→停留→散開那套時間軸；脈動呼吸恆為成形、穿梭環繞
-  // 恆為完整顯示，都不需要那條時間軸。
+  // 因為只有它真的走匯聚→停留→散開那套時間軸；穿梭環繞恆為完整顯示、
+  // 崩解噴濺自己有一條四段時間軸，都不需要那條。
   const hasShape = usesShapeField(P.motion);
   const hasTimeline = P.motion === 'formation';
-  const pulsing = P.motion === 'pulse';
   const weaving = P.motion === 'weave';
   const shattering = P.motion === 'shatter';
-  const pulseDepthEl = document.getElementById('pulseDepth');
-  pulseDepthEl.disabled = !pulsing;
-  document.getElementById('pulseDepthRow').style.opacity = pulsing ? 1 : 0.4;
+  // 定格呼吸只在定格那段有意義；軌跡多樣性只影響匯聚前的自由飛行段。兩者都
+  // 跟匯集時間／完成停留一樣綁在 hasTimeline 上。
+  document.getElementById('holdBreath').disabled = !hasTimeline;
+  document.getElementById('holdBreathRow').style.opacity = hasTimeline ? 1 : 0.4;
+  document.getElementById('formationVariety').disabled = !hasTimeline;
+  ['formationVarietyRow', 'formationVarietyNote']
+    .forEach(id => { document.getElementById(id).style.opacity = hasTimeline ? 1 : 0.4; });
   // 穿梭環繞專屬的控制項——大小差異上下限、飄浮幅度／速度——在其他動態
   // 模式下完全沒有效果（weaveDropPosition 只在 P.motion === 'weave' 時才會
   // 被呼叫到），統一反灰。
@@ -2277,7 +2326,7 @@ function updateUIState() {
     row.style.opacity = !hasShape ? 0.38 : hasTimeline ? 1 : 0.4;
     row.querySelectorAll('input').forEach(el => { el.disabled = !hasShape || !hasTimeline; });
   });
-  // 輪廓細節滴（micro 填色滴）只在形狀匯聚／脈動呼吸的「逐漸長成」過程有意義；
+  // 輪廓細節滴（micro 填色滴）只在形狀匯聚的「逐漸長成」過程有意義；
   // 穿梭環繞的形狀從第一幀就完整顯示，沒有可以填的東西。
   const microCountRow = document.getElementById('microCountRow');
   microCountRow.style.opacity = !hasShape ? 0.38 : weaving ? 0.4 : 1;
@@ -2316,9 +2365,9 @@ function updateUIState() {
   bevelControl.closest('.row').style.opacity = isSvg ? 1 : 0.4;
 
   // 分裂 Split 以外的兩個模式都不會觸發毛細回彈或衛星滴串（updateDropUniforms
-  // 裡整段邏輯鎖在 P.motion === 'cinematic'），這六個滑桿在形狀匯聚／脈動呼吸
+  // 裡整段邏輯鎖在 P.motion === 'cinematic'），這六個滑桿在形狀匯聚
   // 下完全沒有視覺效果。動態張力（flowSpeed）同理——它只餵給分裂模式的群體
-  // 漂移位移，形狀匯聚／脈動呼吸的位置完全由 formationDropPosition 決定。
+  // 漂移位移，形狀匯聚的位置完全由 formationDropPosition 決定。
   const splitOnly = P.motion === 'cinematic';
   document.getElementById('flowSpeedRow').style.opacity = splitOnly ? 1 : 0.4;
   document.getElementById('flowSpeed').disabled = !splitOnly;
@@ -2332,12 +2381,10 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   if (mobileRenderQuery.matches && !PREVIEW) P.cameraDistance = MOBILE_CAMERA_DISTANCE_DEFAULT;
   motionCounts.cinematic = DEFAULTS.count;
   motionCounts.formation = FORMATION_DEFAULT_COUNT;
-  motionCounts.pulse = FORMATION_DEFAULT_COUNT;
   motionCounts.weave = WEAVE_DEFAULT_COUNT;
   motionCounts.shatter = SHATTER_DEFAULT_COUNT;
   motionRadius.cinematic = DEFAULTS.radius;
   motionRadius.formation = FORMATION_DEFAULT_RADIUS;
-  motionRadius.pulse = FORMATION_DEFAULT_RADIUS;
   motionRadius.weave = FORMATION_DEFAULT_RADIUS;
   motionRadius.shatter = SHATTER_RADIUS_BASE;
   resetSpectralCausticColors();
@@ -2525,7 +2572,7 @@ async function importShapeFile(file, kind, { rebuilding = false } = {}) {
     if (old) old.dispose();
     shapeFieldSource = kind;
     // 只有在還停在不需要形狀場的模式時才強制跳過去；已經在「形狀匯聚」
-    // 「脈動呼吸」「穿梭環繞」任何一個都保持原模式，不要互相搶。
+    // 「穿梭環繞」「崩解噴濺」任何一個都保持原模式，不要互相搶。
     if (!usesShapeField(P.motion)) {
       const motionEl = document.getElementById('motion');
       motionEl.value = 'formation';
@@ -2767,9 +2814,8 @@ function applyExportCamera(time, width, height, fov, scale, settings = null) {
 
   const frameGatherEnd = Math.max(0.15, P.gatherDuration);
   const frameHoldEnd = Math.min(0.94, frameGatherEnd + P.shapeHold);
-  // 脈動模式沒有 hold 之後的散開段，取景一律走成形分支，鏡頭只隨呼吸微幅推拉。
   const formationFocus = isFormationMotion(P.motion) && shapeField
-    ? (P.motion !== 'pulse' && phase01 > frameHoldEnd)
+    ? (phase01 > frameHoldEnd)
       ? formationFidelityAmount(phase01)
       : smoothstepCPU(formationAmount(phase01), 0.42, 0.92)
     : 0;
@@ -3044,9 +3090,8 @@ function frame(now) {
   // 若維持同一鏡距，外圍小滴剛收回時主體會顯得突然縮小。
   const frameGatherEnd = Math.max(0.15, P.gatherDuration);
   const frameHoldEnd = Math.min(0.94, frameGatherEnd + P.shapeHold);
-  // 脈動模式沒有 hold 之後的散開段，取景一律走成形分支，鏡頭只隨呼吸微幅推拉。
   const formationFocus = isFormationMotion(P.motion) && shapeField
-    ? (P.motion !== 'pulse' && phase01 > frameHoldEnd)
+    ? (phase01 > frameHoldEnd)
       ? formationFidelityAmount(phase01)
       : smoothstepCPU(formationAmount(phase01), 0.42, 0.92)
     : 0;
