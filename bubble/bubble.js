@@ -1,9 +1,9 @@
 'use strict';
 import * as THREE from 'three';
-import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-28';
+import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-29';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
-} from './default-shapes.js?v=svg-shape-28';
+} from './default-shapes.js?v=svg-shape-29';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -358,7 +358,7 @@ function refreshShatterTimelineReadouts() {
   if (total) total.textContent = `四段合計 ${P.loopDuration.toFixed(1)}s（＝循環秒數）`;
 }
 
-import { VERT, FRAG } from './shaders.js?v=svg-shape-28';
+import { VERT, FRAG } from './shaders.js?v=svg-shape-29';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -756,9 +756,15 @@ function formationFidelityAmount(phase) {
 // 空窗。（現況之所以看不出來，是因為 contactLead 讓形狀黏在碎片上硬撐，也就是
 // 那些疙瘩——等於用一個瑕疵蓋掉另一個。）
 // 讓碎片先長滿、形狀才開始退，任何一刻至少有一邊是滿的，剪影就不會塌下去。
-const SHATTER_BURST_IN = 0.022;
-const SHATTER_BURST_OUT_START = 0.014;
-const SHATTER_BURST_OUT_END = 0.06;
+//
+// 兩者都以「碎片實際位移」為時鐘，而不是 phase。先前 burst/shapeOut 走固定的
+// 絕對 phase 視窗（0.022 / 0.06），碎片位移卻是相對飛散進度 —— 兩個時鐘會隨
+// 減速與飛散時間走鐘，調出「碎片都噴出去了、造型還留在原地慢慢淡」的狀態。
+// 減速愈大差距愈誇張：減速 100% 時碎片在那 0.06 內已經跑掉六成距離。
+// 改用位移當時鐘之後，這層關係與減速、飛散時間、擴散範圍全部無關 —— 造型永遠
+// 在碎片離開 15% 行程前退乾淨，也不再需要「飛散段太短要縮視窗」那組夾制。
+const SHATTER_BURST_TRAVEL = 0.05;
+const SHATTER_OUT_TRAVEL = 0.15;
 
 // 四段時長 → 循環上的絕對位置。四個滑桿是「相對權重」而不是循環佔比：先加總再
 // 正規化，所以任何組合都填滿整個循環、永遠不會互相擠爆。
@@ -794,14 +800,10 @@ function shatterTimeline(phase) {
   const seg = shatterSegments();
   const at = seg.rest + seg.charge;
   const reformStart = at + seg.flight;
-  // 交接視窗是固定的絕對長度，飛散段被調得很短時要一起縮，否則形狀還沒退完
-  // 重組就開始了，兩段會互相打架。
-  const outEnd = Math.min(SHATTER_BURST_OUT_END, seg.flight * 0.8);
-  const outStart = Math.min(SHATTER_BURST_OUT_START, outEnd * 0.25);
-  const inEnd = Math.min(SHATTER_BURST_IN, outEnd * 0.45);
-  const burst = smoothstepCPU(phase, at, at + inEnd);
-  const shapeOut = smoothstepCPU(phase, at + outStart, at + outEnd);
   const flight = Math.max(0, Math.min(1, (phase - at) / Math.max(0.02, reformStart - at)));
+  const travel = shatterTravel(flight);
+  const burst = smoothstepCPU(travel, 0, SHATTER_BURST_TRAVEL);
+  const shapeOut = smoothstepCPU(travel, SHATTER_BURST_TRAVEL, SHATTER_OUT_TRAVEL);
   const reform = smoothstepCPU(phase, reformStart, 0.998);
   // 蓄力：從靜止段結束一路漲到炸開那一刻，再隨形狀退場釋放。
   // 兩端的連續性：phase=0 時 charge=0（smoothstep 起點導數為 0，靜止段為 0 也
@@ -811,7 +813,7 @@ function shatterTimeline(phase) {
   // 0/0＝NaN 並一路汙染 uShapeSwell。沒有蓄力時間本來就等於沒有蓄力，直接給 0。
   const charge = seg.charge > 1e-6 ? smoothstepCPU(phase, seg.rest, at) : 0;
   const swell = P.shatterCharge * charge * (1 - shapeOut);
-  return { burst, shapeOut, flight, reform, swell };
+  return { burst, shapeOut, flight, travel, reform, swell };
 }
 
 // 噴散亂數種子。碎片的初速快慢與噴散方向的擾動都由這三個雜湊值決定，換一個
@@ -865,7 +867,7 @@ function shatterOffset(anchor, seed, timeline, out) {
   const vy = (dy + (seed.h3 - 0.5) * jitter) * reach;
   const vz = (dz + (seed.h1 - 0.5) * jitter) * reach * 0.8;
   const f = timeline.flight;
-  const travel = shatterTravel(f);
+  const travel = timeline.travel;
   // 重力照舊用 f² 而不是 travel²：空氣阻力讓橫向衝勢慢下來，但下墜是另一回事，
   // 仍然隨時間平方累積。減速調大時碎片會先衝出去、停住、然後繼續往下掉。
   const fall = P.shatterGravity * f * f * 0.9;
