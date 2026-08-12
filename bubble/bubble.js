@@ -1,9 +1,9 @@
 'use strict';
 import * as THREE from 'three';
-import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-27';
+import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-28';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
-} from './default-shapes.js?v=svg-shape-27';
+} from './default-shapes.js?v=svg-shape-28';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -129,8 +129,12 @@ const DEFAULTS = {              // 數值滑桿
   // 等同舊版「第 0.28 處炸開、尾端 0.3 重組」的節奏。
   shatterRest: 1.0,
   shatterFlight: 4.2,
-  shatterForce: 1,
-  shatterGravity: 0.6,
+  // 噴散運動拆成三軸（見 shatterTravel／shatterOffset）：散多遠、曲線多前傾、
+  // 每顆差多少。減速預設 0.5 —— 真實的爆炸碎片會被空氣阻力拖慢，0 是舊版的等速。
+  shatterRange: 1,
+  shatterDecel: 0.5,
+  shatterSpeedVary: 0.45,
+  shatterGravity: 0,
   // 碎片在飛散途中縮小的比例（0 = 保持原大小飛到底）。
   shatterFade: 1,
   // 收尾：把碎片收回錨點、形狀重新長回來。這一段必須存在，phase=0/1 兩端才
@@ -327,8 +331,10 @@ const fmt = {
   weaveSizeMax: v => 'x' + v.toFixed(2),
   weaveDriftAmount: v => 'x' + v.toFixed(2),
   weaveDriftSpeed: v => 'x' + v.toFixed(0),
-  shatterForce: v => 'x' + v.toFixed(2),
-  shatterGravity: v => 'x' + v.toFixed(2),
+  shatterRange: v => 'x' + v.toFixed(2),
+  shatterDecel: v => v === 0 ? '等速' : Math.round(v * 100) + '%',
+  shatterSpeedVary: v => '±' + Math.round(v * 100) + '%',
+  shatterGravity: v => v === 0 ? '關閉' : 'x' + v.toFixed(2),
   shatterFade: v => Math.round(v * 100) + '%',
   shatterRest: () => shatterSegmentSeconds('rest'),
   shatterFlight: () => shatterSegmentSeconds('flight'),
@@ -352,7 +358,7 @@ function refreshShatterTimelineReadouts() {
   if (total) total.textContent = `四段合計 ${P.loopDuration.toFixed(1)}s（＝循環秒數）`;
 }
 
-import { VERT, FRAG } from './shaders.js?v=svg-shape-27';
+import { VERT, FRAG } from './shaders.js?v=svg-shape-28';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -821,6 +827,24 @@ function shatterSeed(k1, k2, k3) {
   return { h1: hash11CPU(k1 + s), h2: hash11CPU(k2 + s), h3: hash11CPU(k3 + s) };
 }
 
+// 碎片的位移曲線。舊版是等速直線（位移 ∝ flight），只有一個「噴散力道」同時
+// 決定初速與最終距離 —— 兩件事綁死，而且完全沒有真實碎片該有的減速。拆成三個
+// 彼此獨立的軸：
+//   擴散範圍 shatterRange —— f=1 時散到多遠，與曲線形狀無關
+//   噴發減速 shatterDecel —— 運動曲線的前傾程度。0＝等速，愈大愈接近「一瞬間
+//                            衝出去再慢下來」
+//   力道差異 shatterSpeedVary —— 每顆碎片快慢／遠近的參差
+//
+// shape(f) = 1 - (1-f)^k 恆通過 (0,0) 與 (1,1)，所以調減速只改過程、不改最終
+// 散開的大小，兩個滑桿不會互相干擾 —— 這正是舊版做不到的地方。
+//
+// 附帶一個連貫性上的好處：k>1 時 shape'(1)=0，碎片會自己減速到停，剛好接上重組
+// 期把位移收回的動作；舊版是等速飛到底再被 keep 硬生生拉回來。
+function shatterTravel(f) {
+  const k = 1 + Math.max(0, P.shatterDecel) * 5;
+  return 1 - Math.pow(1 - Math.max(0, Math.min(1, f)), k);
+}
+
 // 碎片的彈道位移：從造型中心往外炸開（每顆錨點自己的方向），加上往下累積的
 // 重力。重組期把位移整個收回 0，所以最後一定回得到錨點上。
 function shatterOffset(anchor, seed, timeline, out) {
@@ -832,19 +856,24 @@ function shatterOffset(anchor, seed, timeline, out) {
   } else {
     dx /= length; dy /= length; dz /= length;
   }
-  // 每顆碎片的初速略有差異，且噴散方向帶一點亂數擾動，避免整批像同心圓膨脹。
-  const speed = P.shatterForce * (0.55 + seed.h1 * 0.9);
+  // 每顆碎片散開的遠近略有差異，且噴散方向帶一點亂數擾動，避免整批像同心圓膨脹。
+  // 差異 0.45 時是 0.55~1.45 倍，與舊版寫死的 (0.55 + h1 * 0.9) 完全等價。
+  const vary = 1 + (seed.h1 - 0.5) * 2 * P.shatterSpeedVary;
+  const reach = P.shatterRange * Math.max(0.05, vary);
   const jitter = 0.35;
-  const vx = (dx + (seed.h2 - 0.5) * jitter) * speed;
-  const vy = (dy + (seed.h3 - 0.5) * jitter) * speed;
-  const vz = (dz + (seed.h1 - 0.5) * jitter) * speed * 0.8;
+  const vx = (dx + (seed.h2 - 0.5) * jitter) * reach;
+  const vy = (dy + (seed.h3 - 0.5) * jitter) * reach;
+  const vz = (dz + (seed.h1 - 0.5) * jitter) * reach * 0.8;
   const f = timeline.flight;
+  const travel = shatterTravel(f);
+  // 重力照舊用 f² 而不是 travel²：空氣阻力讓橫向衝勢慢下來，但下墜是另一回事，
+  // 仍然隨時間平方累積。減速調大時碎片會先衝出去、停住、然後繼續往下掉。
   const fall = P.shatterGravity * f * f * 0.9;
   const keep = 1 - timeline.reform;
   return out.set(
-    anchor.x + vx * f * keep,
-    anchor.y + (vy * f - fall) * keep,
-    anchor.z + vz * f * keep,
+    anchor.x + vx * travel * keep,
+    anchor.y + (vy * travel - fall) * keep,
+    anchor.z + vz * travel * keep,
   );
 }
 
@@ -2221,7 +2250,8 @@ function updateUIState() {
   // 崩解噴濺的專屬控制項同理：它的參數只有 shatterTimeline 會讀，而那整段
   // 鎖在 P.motion === 'shatter' 分支裡，其他模式下調了完全沒有效果。
   ['shatterRest', 'shatterChargeTime', 'shatterCharge', 'shatterFlight', 'shatterReform',
-   'shatterForce', 'shatterGravity', 'shatterFade', 'shatterVariety',
+   'shatterRange', 'shatterDecel', 'shatterSpeedVary', 'shatterGravity',
+   'shatterFade', 'shatterVariety',
    'shatterSeed', 'shatterCut'].forEach(id => {
     document.getElementById(id).disabled = !shattering;
     document.getElementById(id + 'Row').style.opacity = shattering ? 1 : 0.4;
