@@ -178,6 +178,9 @@ uniform sampler2D uRampTex;      // 自訂漸層查找表（CPU 端依色標生�
 uniform int   uBgMode;      // 0 純色, 1 HDRI
 uniform int   uMaterialStyle; // 0 厚玻璃, 1 液態薄膜
 uniform int   uTransparentBackground;
+// 1 = 液態薄膜的去背輸出：顏色照白底算完，再對白底反乘出 straight alpha
+//（見 mainImage 末段）
+uniform float uMembraneOverWhite;
 uniform vec3  uBgColor;
 uniform float uBrightBgAssist;
 uniform float uEnvRefraction;
@@ -1518,11 +1521,37 @@ void main(){
       1.0
     );
     outputAlpha = mix(glassAlpha, membraneAlpha, membraneMode);
-    // finalColor 是在黑色光場上建立的 premultiplied-like 能量；PNG 的 RGBA
-    // 則需要 straight alpha。若直接寫出，瀏覽器降採樣與後續合成會再乘一次
-    // alpha，透明邊緣就會出現黑邊。輸出前反預乘，超採樣時仍由 Canvas
-    // 以正確的 premultiplied coverage 做縮圖。
-    finalColor = clamp(finalColor / max(outputAlpha, 0.001), 0.0, 1.0);
+    if (uMembraneOverWhite > 0.5) {
+      // 液態薄膜的去背輸出。膜身「就是背景」（見 transparentMembrane 那行），
+      // 而且亮底顯色路徑是由背景亮度開的閘 —— 把背景抽成黑色等於連材質模型
+      // 一起換掉，成品會整片變淡。所以顏色仍以白底算完，再對白底做反乘：
+      //
+      //   finalColor 此刻 = 疊在白底上的樣子 = rgb·a + white·(1-a)
+      //   反解 rgb = (finalColor - white·(1-a)) / a
+      //
+      // a 取「表現得出這個顏色所需的最低不透明度」，也就是 1 - min(通道)：這樣
+      // 至少有一個通道推到 0，在能重現白底外觀的前提下盡可能透明，背景才透得
+      // 過來。這個 a 也是唯一能讓反乘結果全部落在 [0,1] 的下限 —— 再往上抬
+      // （例如用 membraneAlpha 撐住鏡面）會讓暗通道算成負值被夾掉，白底重現
+      // 就開始失真。
+      //
+      // 疊回白色版面與畫面完全一致；疊在其他顏色上，背景會依 (1-a) 透出來，
+      // 疊上水滴自己的反射與色散 —— 那層顏色仍是白底下算出來的，因為薄膜的
+      // 顯色在物理上本來就依附背後那片白。
+      float representable = 1.0 - min(min(finalColor.r, finalColor.g), finalColor.b);
+      outputAlpha = clamp(representable, 0.02, 1.0);
+      finalColor = clamp(
+        (finalColor - uBgColor * (1.0 - outputAlpha)) / max(outputAlpha, 0.004),
+        0.0,
+        1.0
+      );
+    } else {
+      // finalColor 是在黑色光場上建立的 premultiplied-like 能量；PNG 的 RGBA
+      // 則需要 straight alpha。若直接寫出，瀏覽器降採樣與後續合成會再乘一次
+      // alpha，透明邊緣就會出現黑邊。輸出前反預乘，超採樣時仍由 Canvas
+      // 以正確的 premultiplied coverage 做縮圖。
+      finalColor = clamp(finalColor / max(outputAlpha, 0.001), 0.0, 1.0);
+    }
   }
   gl_FragColor = vec4(finalColor, outputAlpha);
 }

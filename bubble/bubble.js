@@ -1989,6 +1989,7 @@ function initGL() {
     uFidelityAbsorb: { value: 0 },
     // 崩解噴濺的蓄力膨脹量（等距擴張形狀距離場）；其他模式恆為 0。
     uShapeSwell: { value: 0 },
+    uMembraneOverWhite: { value: 0 },
     uShapeScale: { value: 1 },
     // contactLead（形狀在已抵達水滴附近先成形）是形狀匯聚專用的邏輯。崩解噴濺
     // 是它的反向過程，同一條規則會變成「形狀黏著碎片不肯消失、碎片之間先溶掉」，
@@ -3050,6 +3051,7 @@ async function runExport(settings) {
     maxSteps: uniforms.uMaxSteps.value,
     bgMode: uniforms.uBgMode.value,
     transparent: uniforms.uTransparentBackground.value,
+    membraneOverWhite: uniforms.uMembraneOverWhite.value,
     bgColor: uniforms.uBgColor.value.clone(),
   };
   const target = new THREE.WebGLRenderTarget(renderWidth, renderHeight, {
@@ -3059,9 +3061,17 @@ async function runExport(settings) {
     stencilBuffer: false,
   });
   target.texture.generateMipmaps = false;
-  uniforms.uTransparentBackground.value = settings.background === 'transparent' ? 1 : 0;
+  const transparentExport = settings.background === 'transparent';
+  // 液態薄膜的膜身是「透過白底看到的顏色」，而且亮底顯色路徑是由背景亮度開的
+  // 閘 —— 把背景抽成黑的等於連材質模型一起換掉，成品會整片變淡、跟畫面對不上。
+  // 改成保留白底把顏色算完，再由 shader 對白底反乘出 straight alpha
+  //（uMembraneOverWhite 分支），背景照樣透得過來。厚玻璃維持原本的「黑場 +
+  // 反預乘」，它的顏色本來就不依附背景。
+  const membraneOverWhite = transparentExport && P.materialStyle === 'membrane';
+  uniforms.uTransparentBackground.value = transparentExport ? 1 : 0;
+  uniforms.uMembraneOverWhite.value = membraneOverWhite ? 1 : 0;
   uniforms.uBgMode.value = settings.background === 'scene' ? SELECTS.bgMode.map[P.bgMode] : 0;
-  if (settings.background === 'transparent') uniforms.uBgColor.value.set(0x000000);
+  if (transparentExport && !membraneOverWhite) uniforms.uBgColor.value.set(0x000000);
 
   try {
     previousDropT = null;
@@ -3110,6 +3120,7 @@ async function runExport(settings) {
     uniforms.uMaxSteps.value = saved.maxSteps;
     uniforms.uBgMode.value = saved.bgMode;
     uniforms.uTransparentBackground.value = saved.transparent;
+    uniforms.uMembraneOverWhite.value = saved.membraneOverWhite;
     uniforms.uBgColor.value.copy(saved.bgColor);
     previousDropT = null;
     simT = saved.time;

@@ -327,7 +327,7 @@
             <option value="color">純色背景</option>
           </select>
         </label>
-        <p class="exportHelp">透明模式仍保留 HDRI 對水滴的反射與折射。</p>
+        <p class="exportHelp">透明模式仍保留 HDRI 對水滴的反射與折射。液態薄膜的膜身顏色來自白底透射，因此它的透明輸出是對白底反乘出來的：疊回白色版面與畫面完全一致，疊在其他顏色上背景仍會透出來，但水滴自身的顏色維持白底時的樣子。</p>
       </section>
 
       <section class="exportSection">
@@ -370,6 +370,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=membrane-dispersion-1"></script>
+<script type="module" src="./bubble.js?v=membrane-over-white-1"></script>
 </body>
 </html>
