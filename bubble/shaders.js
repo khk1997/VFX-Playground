@@ -860,6 +860,7 @@ void main(){
   bool needsEnvironmentTransmission =
     uBgMode == 0 && uHasEnv == 1
       && (uEnvRefraction > 0.001
+        || universalGlass
         || (realDispersionStrength > 0.001 && uRealDispersionSeparation > 0.001));
   if (brightBg > 0.001 || needsEnvironmentTransmission || universalGlass) {
     vec3 insideDir = refract(rd, N, 1.0 / uIOR);
@@ -1058,9 +1059,18 @@ void main(){
   );
   // 暗色純色背景也保留 HDRI 內部結構，但只在水滴中央以低權重 screen 合成；
   // 邊緣仍交給原有黑膜、Fresnel 與薄膜彩色輪廓，避免整顆變成明亮環境貼圖。
+  // 通用玻璃的內部自身能量不能完全依賴「環境折射」滑桿：那顆滑桿只負責
+  // 背景/環境貼圖折射進畫面的可見度，不是內部唯一的補光來源。滑桿為 0 時
+  // 改用同一張 HDRI 的環境光量（與 refractedBg 平滑接軌），避免水滴內部
+  // 在滑桿關閉時整顆塌成全黑。
+  vec3 interiorFillLight = refractedBg;
+  if (universalGlass && uBgMode == 0 && uHasEnv == 1) {
+    vec3 ambientFill = sampleEnvironmentBackdrop(transmissionDir);
+    interiorFillLight = mix(ambientFill, refractedBg, uEnvRefraction);
+  }
   if (needsEnvironmentTransmission) {
     vec3 darkRefraction = 1.0 - exp(
-      -max(refractedBg, vec3(0.0)) * uMaterialExposure * 0.82
+      -max(interiorFillLight, vec3(0.0)) * uMaterialExposure * 0.82
     );
     float centerMask = 1.0 - material.edgeFactor * 0.68;
     float darkRefractionWeight = (1.0 - brightBg) * centerMask * 0.34;
