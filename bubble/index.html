@@ -44,10 +44,10 @@
     <div class="row"><label>HDRI 水平</label><input type="range" id="hdriYaw" min="-180" max="180" step="1" value="0"><span class="val" id="hdriYaw_v"></span></div>
     <div class="row"><label>HDRI 垂直</label><input type="range" id="hdriPitch" min="-90" max="90" step="1" value="0"><span class="val" id="hdriPitch_v"></span></div>
     <div class="row"><label>HDRI 模糊</label><input type="range" id="hdriBlur" min="0" max="1" step="0.01" value="0.11"><span class="val" id="hdriBlur_v"></span></div>
-    <div class="row"><label>環境折射</label><input type="range" id="envRefraction" min="0" max="1" step="0.01" value="0.03"><span class="val" id="envRefraction_v"></span></div>
+    <div class="row"><label>環境折射</label><input type="range" id="envRefraction" min="0" max="1" step="0.01" value="0"><span class="val" id="envRefraction_v"></span></div>
     <div class="row toggleRow"><label>亮底保色</label><input type="checkbox" id="brightBgAssist" checked><span class="switchTrack" aria-hidden="true"></span><span class="val" id="brightBgAssist_v">開啟</span></div>
     <div class="row"><button id="hdriBtn">更換 HDRI…</button></div>
-    <div id="hdriState" class="note">厚玻璃預設 HDRI：photo_studio2_london_hall_1k.hdr</div>
+    <div id="hdriState" class="note">通用玻璃預設 HDRI：photo_studio2_london_hall_1k.hdr</div>
     <div class="note">亮底保色只在純色背景接近白色時介入：保留 HDRI 折射明暗、去除暖色偏色，並讓彩色焦散改以透射顯色。</div>
     <input type="file" id="hdriInput" accept=".hdr,image/*" hidden>
   </div>
@@ -63,15 +63,21 @@
 
   <div class="group">
     <h3>材質反射 Material</h3>
-    <div class="row"><label>材質類型</label><select id="materialStyle"><option value="glass">厚玻璃</option><option value="membrane">液態薄膜（白底）</option></select><span class="val"></span></div>
+    <div class="row"><label>材質類型</label><select id="materialStyle"><option value="universal" selected>通用玻璃</option><option value="membrane">液態薄膜（白底）</option><option value="glass" hidden>厚玻璃（已移除，改用通用玻璃）</option></select><span class="val"></span></div>
     <div class="row" id="membraneDepthRow"><label>膜體立體感</label><input type="range" id="membraneDepth" min="0" max="1" step="0.01" value="0.65"><span class="val" id="membraneDepth_v"></span></div>
+    <div class="row" id="membraneBaseColorRow"><label>薄膜底色</label><input type="color" id="membraneBaseColor" value="#7a9ec7"><span class="val"></span></div>
+    <div class="row" id="membraneVeilColorRow"><label>薄膜面紗色調</label><input type="color" id="membraneVeilColor" value="#b8e6ff"><span class="val"></span></div>
+    <div class="row" id="membraneReflectionColorRow"><label>棚燈反射色</label><input type="color" id="membraneReflectionColor" value="#94b8e6"><span class="val"></span></div>
+    <div class="row" id="membraneCardColorRow"><label>藍卡反射色</label><input type="color" id="membraneCardColor" value="#94c7ff"><span class="val"></span></div>
+    <div class="row" id="membraneShadeColorRow"><label>立體暗部色</label><input type="color" id="membraneShadeColor" value="#85b8e6"><span class="val"></span></div>
+    <div class="note" id="membraneColorsNote">只作用於液態薄膜，各自對應合成裡原本寫死的一個顏色常數：選什麼顏色，畫面上那一處就直接是那個顏色。預設值都是原本的藍紫色常數，維持改動前的外觀。</div>
     <div class="row"><label>反射強度</label><input type="range" id="reflect" min="0" max="2" step="0.02" value="1.6"><span class="val" id="reflect_v"></span></div>
     <div class="row"><label>透射率</label><input type="range" id="transmission" min="0" max="1" step="0.01" value="0.96"><span class="val" id="transmission_v"></span></div>
     <div class="row"><label>材質曝光</label><input type="range" id="materialExposure" min="0.25" max="2.5" step="0.05" value="1"><span class="val" id="materialExposure_v"></span></div>
     <div class="row"><label>粗糙度</label><input type="range" id="roughness" min="0" max="1" step="0.01" value="0.2"><span class="val" id="roughness_v"></span></div>
     <div class="row"><label>邊緣光</label><input type="range" id="fresnel" min="0" max="3" step="0.05" value="0.8"><span class="val" id="fresnel_v"></span></div>
     <div class="row"><label>折射率</label><input type="range" id="ior" min="1.0" max="1.8" step="0.01" value="1.33"><span class="val" id="ior_v"></span></div>
-    <div class="note" id="materialStyleNote">厚玻璃與液態薄膜各自記住材質及 HDRI 參數；液態薄膜僅適用純白背景，中央更透明，彩色集中在輪廓與曲面折疊處。</div>
+    <div class="note" id="materialStyleNote">通用玻璃與液態薄膜各自記住材質及 HDRI 參數；液態薄膜僅適用純白背景（#ffffff），中央更透明，彩色集中在輪廓與曲面折疊處——它的顯色（亮底透射、白卡/藍卡反射卡、去背用的白底反乘）都是針對白底寫死的美術模型，離開白底就切回通用玻璃。</div>
   </div>
 
   <div class="group" id="thinFilmGroup">
@@ -116,12 +122,18 @@
       <div class="row"><label>焦散銳利</label><input type="range" id="causticSharpness" min="0" max="1" step="0.01" value="0.65"><span class="val" id="causticSharpness_v"></span></div>
     </div>
 
-    <div class="effectBlock effectBlock--physical" id="physicalDispersionGroup">
-      <div class="effectTitle"><span>IOR</span> 環境物理色散</div>
-      <div class="row toggleRow"><label>真實色散</label><input type="checkbox" id="realDispersionEnabled"><span class="switchTrack" aria-hidden="true"></span><span class="val" id="realDispersionEnabled_v">關閉</span></div>
-      <div class="row"><label>真實強度</label><input type="range" id="realDispersion" min="0" max="1" step="0.01" value="1"><span class="val" id="realDispersion_v"></span></div>
-      <div class="row"><label>波長分離</label><input type="range" id="realDispersionSeparation" min="0" max="1.5" step="0.01" value="0.6"><span class="val" id="realDispersionSeparation_v"></span></div>
-      <div class="note">以 HDRI 明暗邊界驅動三組 IOR 折射，不與藝術配色共用。</div>
+    <div class="effectBlock effectBlock--physical" id="rayDispersionGroup">
+      <div class="effectTitle"><span>RAY</span> 造型光線色散</div>
+      <div class="row toggleRow"><label>光線色散</label><input type="checkbox" id="rayDispersionEnabled"><span class="switchTrack" aria-hidden="true"></span><span class="val" id="rayDispersionEnabled_v">關閉</span></div>
+      <div class="row"><label>光譜展寬</label><input type="range" id="rayDispersion" min="0" max="12" step="0.01" value="6"><span class="val" id="rayDispersion_v"></span></div>
+      <div class="row"><label>阿貝數</label><input type="range" id="rayDispersionAbbe" min="15" max="90" step="1" value="25"><span class="val" id="rayDispersionAbbe_v"></span></div>
+      <div class="effectSubhead">光譜光源</div>
+      <div class="row"><label>光源亮度</label><input type="range" id="rayDispersionLightIntensity" min="0" max="4" step="0.01" value="4"><span class="val" id="rayDispersionLightIntensity_v"></span></div>
+      <div class="row"><label>光源尺寸</label><input type="range" id="rayDispersionLightSize" min="0" max="1" step="0.01" value="0.32"><span class="val" id="rayDispersionLightSize_v"></span></div>
+      <div class="row"><label>彩帶對比</label><input type="range" id="rayDispersionFocus" min="0" max="1" step="0.01" value="0.55"><span class="val" id="rayDispersionFocus_v"></span></div>
+      <div class="row"><label>光源水平</label><input type="range" id="rayDispersionAzimuth" min="-180" max="180" step="1" value="0"><span class="val" id="rayDispersionAzimuth_v"></span></div>
+      <div class="row"><label>光源高度</label><input type="range" id="rayDispersionElevation" min="-80" max="80" step="1" value="0"><span class="val" id="rayDispersionElevation_v"></span></div>
+      <div class="note">五個波長各自穿過目前的 SDF 造型，再與同一個白色光源對準；展寬 1× 是目前阿貝數的物理尺度，提高可補償圓角造型缺少尖銳棱面的分光。彩帶對比同時控制白光源與 HDRI 分光結果：0% 接近中性色，100% 色彩分界鮮明；不改變光帶位置與寬度。HDRI 只提供周圍反射，不再決定光帶形狀。</div>
     </div>
 
     <div class="effectBlock effectBlock--caustic" id="spectralCausticGroup">
@@ -137,7 +149,7 @@
         <label><input type="color" id="spectralCausticCol5" value="#3ba6f9" aria-label="焦散色標 6"></label>
         <label><input type="color" id="spectralCausticCol6" value="#52e6fc" aria-label="焦散色標 7"></label>
       </div>
-      <div class="row"><label>焦散強度</label><input type="range" id="spectralCausticIntensity" min="0" max="1.5" step="0.01" value="1.5"><span class="val" id="spectralCausticIntensity_v"></span></div>
+      <div class="row"><label>焦散強度</label><input type="range" id="spectralCausticIntensity" min="0" max="6" step="0.01" value="3"><span class="val" id="spectralCausticIntensity_v"></span></div>
       <div class="row"><label>聚焦程度</label><input type="range" id="spectralCausticFocus" min="0" max="1" step="0.01" value="0.31"><span class="val" id="spectralCausticFocus_v"></span></div>
       <div class="row"><label>光譜分離</label><input type="range" id="spectralCausticSeparation" min="0" max="1" step="0.01" value="0.24"><span class="val" id="spectralCausticSeparation_v"></span></div>
       <div class="effectSubhead">光帶形狀</div>
@@ -370,6 +382,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=membrane-over-white-1"></script>
+<script type="module" src="./bubble.js?v=universal-dbg31"></script>
 </body>
 </html>

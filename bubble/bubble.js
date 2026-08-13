@@ -42,9 +42,14 @@ const DEFAULTS = {              // 數值滑桿
   dispersionSeparation: 1.5,
   causticScale: 1.0,
   causticSharpness: 0.65,
-  realDispersion: 1,
-  realDispersionSeparation: 0.6,
-  spectralCausticIntensity: 1.5,
+  rayDispersion: 6,
+  rayDispersionAbbe: 25,
+  rayDispersionLightIntensity: 4,
+  rayDispersionLightSize: 0.32,
+  rayDispersionFocus: 0.55,
+  rayDispersionAzimuth: 0,
+  rayDispersionElevation: 0,
+  spectralCausticIntensity: 3,
   spectralCausticFocus: 0.12,
   spectralCausticWidth: 0.42,
   spectralCausticLightSize: 0.33,
@@ -82,7 +87,7 @@ const DEFAULTS = {              // 數值滑桿
   transmission: 1.0,
   materialExposure: 1,
   // 液態薄膜專用的低頻塑形：0 回到純透明膜，1 完整加入厚度暗部、膜褶遮蔽
-  // 與非對稱反射卡。厚玻璃模式不讀取這個值。
+  // 與非對稱反射卡。通用玻璃模式不讀取這個值。
   membraneDepth: 0.65,
   // 水的折射率約 1.33，玻璃約 1.5；預設維持原本水滴的手感，改高會讓邊緣
   // 反射（Fresnel）變強、折射彎曲角度變陡，看起來更像玻璃而不是水珠。
@@ -90,7 +95,7 @@ const DEFAULTS = {              // 數值滑桿
   hdriYaw: -45,
   hdriPitch: 20,
   hdriBlur: 0.21,
-  envRefraction: 0.21,
+  envRefraction: 0,
   cameraDistance: 5.5,
   cameraRotationX: 9.7,
   cameraRotationY: 29.8,
@@ -178,7 +183,7 @@ const SHAPE_MOTIONS = new Set(['formation', 'weave', 'shatter']);
 const usesShapeField = motion => SHAPE_MOTIONS.has(motion);
 const SELECT_DEFAULTS = {
   bgMode: 'color',
-  materialStyle: 'glass',
+  materialStyle: 'universal',
   colorMode: 'spectral',
   motion: 'cinematic',
   shapeSource: 'svg',
@@ -189,29 +194,38 @@ const SELECT_DEFAULTS = {
 // 這裡根本讀不到原值。
 const LEGACY_SELECT_VALUES = {
   motion: { pulse: 'formation' },
+  materialStyle: { glass: 'universal' },
 };
 const TOGGLE_DEFAULTS = {
   edgeDropsEnabled: false,
   brightBgAssist: true,
   filmEnabled: false,
   dispersionEnabled: true,
-  realDispersionEnabled: false,
+  rayDispersionEnabled: false,
   spectralCausticEnabled: true,
 };
 const COLOR_DEFAULTS  = {
   bgColor: '#000000',
+  // 液態薄膜原本各自寫死一個偏藍紫色常數的 5 處，現在各自開一個選色器直接
+  // 取代常數，選色器選什麼顏色，畫面上那一處就是那個顏色。預設值都是原本
+  // 那個常數本身，維持改動前的外觀。
+  membraneBaseColor: '#7a9ec7',
+  membraneVeilColor: '#b8e6ff',
+  membraneReflectionColor: '#94b8e6',
+  membraneCardColor: '#94c7ff',
+  membraneShadeColor: '#85b8e6',
 };
 const P = { ...DEFAULTS, ...SELECT_DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS };
 
-// 材質切換不是同一組滑桿換 shader 分支：厚玻璃與液態薄膜各自保留一份
+// 材質切換不是同一組滑桿換 shader 分支：通用玻璃與液態薄膜各自保留一份
 // HDRI／材質狀態。離開時記住使用者微調，回來時恢復；第一次進入薄膜則使用
 // 白底參考圖的校準值。鏡頭、動畫與配色不在這裡，切材質時不應改變構圖或動作。
 const MATERIAL_PROFILE_KEYS = [
   'hdriYaw', 'hdriPitch', 'hdriBlur', 'envRefraction',
   'membraneDepth', 'reflect', 'transmission', 'materialExposure',
   'roughness', 'fresnel', 'ior',
-  // 薄膜式藝術色散：白底薄膜的顯色幾乎全靠它，跟厚玻璃要的分佈差很多
-  // （厚玻璃靠折射堆疊出顏色，薄膜是整片透光、顏色要自己長出來），
+  // 薄膜式藝術色散：白底薄膜的顯色幾乎全靠它，跟通用玻璃要的分佈差很多
+  // （通用玻璃靠折射堆疊出顏色，薄膜是整片透光、顏色要自己長出來），
   // 所以兩種材質也各記一份。
   'dispersion', 'dispersionSeparation', 'artThickness', 'artThickVar',
   'artNoiseScale', 'artPatternSpeed', 'artGravity',
@@ -221,7 +235,7 @@ const pickMaterialProfile = source => Object.fromEntries(
   MATERIAL_PROFILE_KEYS.map(key => [key, source[key]])
 );
 const MATERIAL_PROFILE_DEFAULTS = {
-  glass: pickMaterialProfile(P),
+  universal: pickMaterialProfile(P),
   membrane: {
     hdriYaw: -45,
     hdriPitch: 20,
@@ -234,7 +248,7 @@ const MATERIAL_PROFILE_DEFAULTS = {
     roughness: 0.17,
     fresnel: 1.05,
     ior: 1.6,
-    dispersion: 0.39,
+    dispersion: 0.05,
     dispersionSeparation: 1.5,
     artThickness: 295,
     artThickVar: 130,
@@ -246,19 +260,19 @@ const MATERIAL_PROFILE_DEFAULTS = {
   },
 };
 const MATERIAL_ENVIRONMENT_DEFAULTS = {
-  glass: { url: GLASS_HDRI_URL, label: GLASS_HDRI_LABEL, isHDR: true, file: null },
   membrane: { url: MEMBRANE_HDRI_URL, label: MEMBRANE_HDRI_LABEL, isHDR: true, file: null },
+  universal: { url: GLASS_HDRI_URL, label: GLASS_HDRI_LABEL, isHDR: true, file: null },
 };
 let materialProfiles = {};
 let materialEnvironments = {};
 function resetMaterialProfiles() {
   materialProfiles = {
-    glass: { ...MATERIAL_PROFILE_DEFAULTS.glass },
     membrane: { ...MATERIAL_PROFILE_DEFAULTS.membrane },
+    universal: { ...MATERIAL_PROFILE_DEFAULTS.universal },
   };
   materialEnvironments = {
-    glass: { ...MATERIAL_ENVIRONMENT_DEFAULTS.glass },
     membrane: { ...MATERIAL_ENVIRONMENT_DEFAULTS.membrane },
+    universal: { ...MATERIAL_ENVIRONMENT_DEFAULTS.universal },
   };
 }
 resetMaterialProfiles();
@@ -303,7 +317,7 @@ const RAMP_DEFAULT = {
 // select 字串 → int uniform
 const SELECTS = {
   bgMode:    { uniform: 'uBgMode',    map: { color: 0, hdri: 1 } },
-  materialStyle: { uniform: 'uMaterialStyle', map: { glass: 0, membrane: 1 } },
+  materialStyle: { uniform: 'uMaterialStyle', map: { membrane: 1, universal: 2 } },
   colorMode: { uniform: 'uColorMode', map: { spectral: 0, ramp: 1 } },
   motion:    { uniform: 'uMotion',    map: { cinematic: 0, formation: 1, weave: 3, shatter: 4 } },
   shapeSource: { uniform: 'uShapeType', map: { svg: 1, gltf: 2 } },
@@ -312,6 +326,11 @@ const SELECTS = {
 };
 const COLORS = {
   bgColor: 'uBgColor',
+  membraneBaseColor: 'uMembraneBaseColor',
+  membraneVeilColor: 'uMembraneVeilColor',
+  membraneReflectionColor: 'uMembraneReflectionColor',
+  membraneCardColor: 'uMembraneCardColor',
+  membraneShadeColor: 'uMembraneShadeColor',
 };
 // shader 的光譜座標由紫端（0）走向紅端（1）。七個色標固定等距，
 // 讓每種彩虹顏色都能單獨編輯，同時保持色帶之間連續混色。
@@ -325,7 +344,7 @@ const TOGGLES = {
   brightBgAssist: 'uBrightBgAssist',
   filmEnabled: 'uFilmEnabled',
   dispersionEnabled: 'uDispersionEnabled',
-  realDispersionEnabled: 'uRealDispersionEnabled',
+  rayDispersionEnabled: 'uRayDispersionEnabled',
   spectralCausticEnabled: 'uSpectralCausticEnabled',
   edgeDropsEnabled: () => applyEdgeDropDistribution(),
 };
@@ -361,8 +380,13 @@ const fmt = {
   dispersionSeparation: v => 'x' + v.toFixed(2),
   causticScale: v => 'x' + v.toFixed(2),
   causticSharpness: v => Math.round(v * 100) + '%',
-  realDispersion: v => Math.round(v * 100) + '%',
-  realDispersionSeparation: v => 'x' + v.toFixed(2),
+  rayDispersion: v => 'x' + v.toFixed(2),
+  rayDispersionAbbe: v => v.toFixed(0),
+  rayDispersionLightIntensity: v => 'x' + v.toFixed(2),
+  rayDispersionLightSize: v => Math.round(v * 100) + '%',
+  rayDispersionFocus: v => Math.round(v * 100) + '%',
+  rayDispersionAzimuth: v => v.toFixed(0) + '°',
+  rayDispersionElevation: v => v.toFixed(0) + '°',
   spectralCausticIntensity: v => Math.round(v * 100) + '%',
   spectralCausticFocus: v => Math.round(v * 100) + '%',
   spectralCausticWidth: v => 'x' + v.toFixed(2),
@@ -450,7 +474,7 @@ function refreshShatterTimelineReadouts() {
   if (total) total.textContent = `四段合計 ${P.loopDuration.toFixed(1)}s（＝循環秒數）`;
 }
 
-import { VERT, FRAG } from './shaders.js?v=split-continuity-1';
+import { VERT, FRAG } from './shaders.js?v=universal-30';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -1929,8 +1953,13 @@ function initGL() {
     uDispersionSeparation: { value: P.dispersionSeparation },
     uCausticScale: { value: P.causticScale },
     uCausticSharpness: { value: P.causticSharpness },
-    uRealDispersion: { value: P.realDispersion },
-    uRealDispersionSeparation: { value: P.realDispersionSeparation },
+    uRayDispersion: { value: P.rayDispersion },
+    uRayDispersionAbbe: { value: P.rayDispersionAbbe },
+    uRayDispersionLightIntensity: { value: P.rayDispersionLightIntensity },
+    uRayDispersionLightSize: { value: P.rayDispersionLightSize },
+    uRayDispersionFocus: { value: P.rayDispersionFocus },
+    uRayDispersionAzimuth: { value: P.rayDispersionAzimuth },
+    uRayDispersionElevation: { value: P.rayDispersionElevation },
     uSpectralCausticIntensity: { value: P.spectralCausticIntensity },
     uSpectralCausticFocus: { value: P.spectralCausticFocus },
     uSpectralCausticWidth: { value: P.spectralCausticWidth },
@@ -1954,7 +1983,7 @@ function initGL() {
     uArtPatternSpeed: { value: P.artPatternSpeed },
     uArtGravity: { value: P.artGravity },
     uDispersionEnabled: { value: P.dispersionEnabled ? 1 : 0 },
-    uRealDispersionEnabled: { value: P.realDispersionEnabled ? 1 : 0 },
+    uRayDispersionEnabled: { value: P.rayDispersionEnabled ? 1 : 0 },
     uSpectralCausticEnabled: { value: P.spectralCausticEnabled ? 1 : 0 },
     uFilmEnabled: { value: P.filmEnabled ? 1 : 0 },
     uFilmBlur:   { value: P.filmBlur },
@@ -1969,6 +1998,11 @@ function initGL() {
     uMaterialStyle: { value: SELECTS.materialStyle.map[P.materialStyle] },
     uTransparentBackground: { value: 0 },
     uBgColor:    { value: new THREE.Color(P.bgColor) },
+    uMembraneBaseColor: { value: new THREE.Color(P.membraneBaseColor) },
+    uMembraneVeilColor: { value: new THREE.Color(P.membraneVeilColor) },
+    uMembraneReflectionColor: { value: new THREE.Color(P.membraneReflectionColor) },
+    uMembraneCardColor: { value: new THREE.Color(P.membraneCardColor) },
+    uMembraneShadeColor: { value: new THREE.Color(P.membraneShadeColor) },
     uBrightBgAssist: { value: P.brightBgAssist ? 1 : 0 },
     uEnvRefraction: { value: P.envRefraction },
     uReflect:    { value: P.reflect },
@@ -2109,7 +2143,7 @@ function bindPointer() {
     const dx = e.clientX - lastX, dy = e.clientY - lastY;
     lastX = e.clientX; lastY = e.clientY;
     rot.y = Math.max(-Math.PI, Math.min(Math.PI, rot.y + dx * 0.006));
-    rot.x = Math.max(-Math.PI * 0.5, Math.min(Math.PI * 0.5, rot.x + dy * 0.006));
+    rot.x = Math.max(-1.2, Math.min(1.2, rot.x + dy * 0.006));
     const rotationX = document.getElementById('cameraRotationX');
     const rotationY = document.getElementById('cameraRotationY');
     if (rotationX) { rotationX.value = (rot.x * 180 / Math.PI).toFixed(1); rotationX.dispatchEvent(new Event('input', { bubbles: true })); }
@@ -2216,6 +2250,7 @@ function bindControls() {
           refreshShatterTimelineReadouts();
         }
       }
+      requestPausedRender();
     };
     el.value = P[key];
     if (!el._bound) { el.addEventListener('input', update); el._bound = true; }
@@ -2261,6 +2296,7 @@ function bindControls() {
       if ((key === 'motion' || key === 'shapeSource') && previousValue !== P[key]) {
         ensureShapeForCurrentSource();
       }
+      requestPausedRender();
     };
     el.value = P[key];
     if (!el._bound) { el.addEventListener('change', update); el._bound = true; }
@@ -2276,6 +2312,7 @@ function bindControls() {
       if (valEl) valEl.textContent = P[key] ? '開啟' : '關閉';
       applyToggle(key);
       updateUIState();
+      requestPausedRender();
     };
     el.checked = P[key];
     // 原生 checkbox 為視覺隱藏狀態；將文字標籤正式連到 input，
@@ -2303,6 +2340,7 @@ function bindControls() {
         document.body.style.background = (P.bgMode === 'hdri') ? '#000' : el.value;
         updateUIState();
       }
+      requestPausedRender();
     };
     el.value = P[key];
     if (!el._bound) { el.addEventListener('input', update); el._bound = true; }
@@ -2317,7 +2355,10 @@ function bindSpectralCausticColors() {
   for (let i = 0; i < SPECTRAL_CAUSTIC_DEFAULTS.length; i++) {
     const el = document.getElementById('spectralCausticCol' + i);
     if (!el._bound) {
-      el.addEventListener('input', buildSpectralCausticLUT);
+      el.addEventListener('input', () => {
+        buildSpectralCausticLUT();
+        requestPausedRender();
+      });
       el._bound = true;
     }
   }
@@ -2348,7 +2389,11 @@ function bindRamp() {
     const col = document.getElementById('stopCol' + i);
     const pos = document.getElementById('stopPos' + i);
     const pv = document.getElementById('stopPos' + i + '_v');
-    const upd = () => { if (pv) pv.textContent = parseFloat(pos.value).toFixed(2); buildRampLUT(); };
+  const upd = () => {
+    if (pv) pv.textContent = parseFloat(pos.value).toFixed(2);
+    buildRampLUT();
+    requestPausedRender();
+  };
     if (!col._bound) { col.addEventListener('input', upd); col._bound = true; }
     if (!pos._bound) { pos.addEventListener('input', upd); pos._bound = true; }
     upd();
@@ -2433,7 +2478,7 @@ function updateUIState() {
   };
   setFeatureState('thinFilmGroup', P.filmEnabled);
   setFeatureState('artDispersionGroup', P.dispersionEnabled);
-  setFeatureState('physicalDispersionGroup', P.realDispersionEnabled);
+  setFeatureState('rayDispersionGroup', P.rayDispersionEnabled);
   setFeatureState('spectralCausticGroup', P.spectralCausticEnabled);
   const spectral = P.colorMode === 'spectral';
   const rampGroup = document.getElementById('rampGroup');
@@ -2449,23 +2494,30 @@ function updateUIState() {
   const brightBgAssist = document.getElementById('brightBgAssist');
   bgc.disabled = !colorBackground;
   bgc.closest('.row').style.opacity = colorBackground ? 1 : 0.4;
-  // 液態薄膜的合成是專為純白畫布設計。背景一旦離開 #fff，立即收斂回
-  // 厚玻璃，避免下拉顯示一個實際不成立、shader 又無法合理解讀的組合。
+  // 液態薄膜的合成是專為純白畫布設計（見 shaders.js 對應段落的白底假設）。
+  // 背景一旦離開 #fff，立即收斂回通用玻璃，避免下拉顯示一個實際不成立、
+  // shader 又無法合理解讀的組合。之前拿掉這個限制想讓薄膜通用背景，但薄膜
+  // 的顯色路徑（亮底 transmission、白卡/藍卡反射、去背用的白底反乘）都是
+  // 針對白底寫死的美術模型，不是簡單的背景取樣，所以重新鎖回純白。
   const pureWhiteBackground = colorBackground
     && P.bgColor.toLowerCase() === '#ffffff';
   membraneOption.disabled = !pureWhiteBackground;
   if (!pureWhiteBackground && P.materialStyle === 'membrane') {
     const previousStyle = P.materialStyle;
-    P.materialStyle = 'glass';
-    materialStyle.value = 'glass';
-    switchMaterialProfile(previousStyle, 'glass');
-    if (uniforms) uniforms.uMaterialStyle.value = SELECTS.materialStyle.map.glass;
+    P.materialStyle = 'universal';
+    materialStyle.value = 'universal';
+    switchMaterialProfile(previousStyle, 'universal');
+    if (uniforms) uniforms.uMaterialStyle.value = SELECTS.materialStyle.map.universal;
   }
   const membraneMaterial = P.materialStyle === 'membrane';
   const membraneDepth = document.getElementById('membraneDepth');
   membraneDepth.disabled = !membraneMaterial;
   document.getElementById('membraneDepthRow').style.opacity = membraneMaterial ? 1 : 0.4;
-  // 液態薄膜本身就是前後表面透射模型，不讀取厚玻璃專用的亮底補償。
+  for (const key of ['membraneBaseColor', 'membraneVeilColor', 'membraneReflectionColor', 'membraneCardColor', 'membraneShadeColor']) {
+    document.getElementById(key).disabled = !membraneMaterial;
+    document.getElementById(key + 'Row').style.opacity = membraneMaterial ? 1 : 0.4;
+  }
+  // 液態薄膜本身就是前後表面透射模型，不讀取通用玻璃專用的亮底補償。
   const brightAssistUsable = colorBackground && !membraneMaterial;
   brightBgAssist.disabled = !brightAssistUsable;
   brightBgAssist.closest('.row').style.opacity = brightAssistUsable ? 1 : 0.4;
@@ -2514,7 +2566,7 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   resetSpectralCausticColors();
   resetRamp();
   bindControls();
-  if (inited) loadMaterialEnvironment('glass');
+  if (inited) loadMaterialEnvironment('universal');
 });
 
 // 離開效果頁後，下一次從首頁進入應從乾淨的預設狀態開始；
@@ -2605,7 +2657,7 @@ function loadEnvironment(url, label, isHDR, revokeURL = false) {
 function loadMaterialEnvironment(style = P.materialStyle) {
   const environment = materialEnvironments[style]
     || MATERIAL_ENVIRONMENT_DEFAULTS[style]
-    || MATERIAL_ENVIRONMENT_DEFAULTS.glass;
+    || MATERIAL_ENVIRONMENT_DEFAULTS.universal;
   if (environment.file) {
     const url = URL.createObjectURL(environment.file);
     loadEnvironment(url, environment.label, environment.isHDR, true);
@@ -2768,8 +2820,44 @@ let exportJob = null;
 let exportPreviewSettings = null;
 let exportPreviewContext = null;
 let rafId = 0, last = 0;
+let pausedRenderRaf = 0;
 const pauseBtn = document.getElementById('playCtl');
 function isPaused() { return userPaused || extPaused || shapeConverting || exportJob || document.hidden; }
+function requestPausedRender() {
+  if ((!userPaused && !extPaused) || shapeConverting || exportJob || document.hidden || pausedRenderRaf) return;
+  pausedRenderRaf = requestAnimationFrame(() => {
+    pausedRenderRaf = 0;
+    if (isPaused() && !shapeConverting && !exportJob && !document.hidden) {
+      if (!inited) initGL();
+      updatePausedCameraRotation();
+      refreshRenderQuality();
+      uniforms.uResolution.value.set(
+        Math.max(1, canvas.clientWidth || document.documentElement.clientWidth),
+        Math.max(1, canvas.clientHeight || document.documentElement.clientHeight),
+      );
+      uniforms.uMaxSteps.value = resolveMaxSteps();
+      renderer.render(scene, camera);
+      updateExportCameraPreview();
+    }
+  });
+}
+
+function updatePausedCameraRotation() {
+  if (!uniforms) return;
+  rot.x = Math.max(-1.2, Math.min(1.2, rot.x));
+  const phase01 = simT / Math.max(0.001, P.loopDuration);
+  const loopAngle = phase01 * Math.PI * 2;
+  const autoYaw = (Math.sin(loopAngle) * 0.85 + Math.sin(loopAngle * 2 + 0.6) * 0.15) * P.spin * 0.6;
+  const autoPitch = Math.sin(loopAngle + 1.1) * P.spin * 0.14;
+  const mobile = document.documentElement.clientWidth <= 760
+    && document.documentElement.clientWidth / Math.max(1, document.documentElement.clientHeight) < 0.8;
+  rotM4.makeRotationY(rot.y + autoYaw + (mobile ? -0.42 : 0));
+  tmpX.makeRotationX(rot.x + autoPitch);
+  rotM4.multiply(tmpX);
+  tmpZ.makeRotationZ(-0.03);
+  rotM4.multiply(tmpZ);
+  uniforms.uRot.value.setFromMatrix4(rotM4);
+}
 function syncLoop() {
   if (isPaused()) {
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
@@ -3065,7 +3153,7 @@ async function runExport(settings) {
   // 液態薄膜的膜身是「透過白底看到的顏色」，而且亮底顯色路徑是由背景亮度開的
   // 閘 —— 把背景抽成黑的等於連材質模型一起換掉，成品會整片變淡、跟畫面對不上。
   // 改成保留白底把顏色算完，再由 shader 對白底反乘出 straight alpha
-  //（uMembraneOverWhite 分支），背景照樣透得過來。厚玻璃維持原本的「黑場 +
+  //（uMembraneOverWhite 分支），背景照樣透得過來。通用玻璃維持原本的「黑場 +
   // 反預乘」，它的顏色本來就不依附背景。
   const membraneOverWhite = transparentExport && P.materialStyle === 'membrane';
   uniforms.uTransparentBackground.value = transparentExport ? 1 : 0;
@@ -3307,7 +3395,7 @@ if (!PREVIEW && window.PresetIO) {
     // 配色數量會決定色標列的顯示，順序顛倒會讓後套的值被蓋掉。
     applyFirst: [
       'motion', 'bgMode', 'bgColor', 'materialStyle', 'colorMode', 'shapeSource', 'shapeQuality',
-      'filmEnabled', 'dispersionEnabled', 'realDispersionEnabled',
+      'filmEnabled', 'dispersionEnabled', 'rayDispersionEnabled',
       'spectralCausticEnabled', 'rampCount',
     ],
     assetNote: 'HDRI 與 SVG / GLB 素材無法存進參數檔，請自行載入',
