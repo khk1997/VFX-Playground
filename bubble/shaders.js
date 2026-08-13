@@ -1059,14 +1059,16 @@ void main(){
   );
   // 暗色純色背景也保留 HDRI 內部結構，但只在水滴中央以低權重 screen 合成；
   // 邊緣仍交給原有黑膜、Fresnel 與薄膜彩色輪廓，避免整顆變成明亮環境貼圖。
-  // 通用玻璃的內部自身能量不能完全依賴「環境折射」滑桿：那顆滑桿只負責
-  // 背景/環境貼圖折射進畫面的可見度，不是內部唯一的補光來源。滑桿為 0 時
-  // 改用同一張 HDRI 的環境光量（與 refractedBg 平滑接軌），避免水滴內部
-  // 在滑桿關閉時整顆塌成全黑。
+  // 通用玻璃的內部自身能量不能依賴「環境折射」滑桿，也不能依賴畫布背景色：
+  // refractedBg 在純色畫布上是 mix(bgColor, envSample, uEnvRefraction)，兩層
+  // mix 疊在一起會讓畫布背景色以 k(1-k) 的權重滲進「自身能量」（k 為滑桿值，
+  // 0.5 時滲入比例高達 25%）。去背輸出時背景會被強制改成黑色，這個殘留的
+  // bg 依賴會讓輸出結果跟畫面上看到的不一致。改成固定取同一張 HDRI 的環境
+  // 光量，完全不讀 refractedBg／uEnvRefraction，內部自身能量才能真正跟畫布
+  // 背景與滑桿脫鉤；沒有 HDRI 時沒有其他光源可用，才退回 refractedBg。
   vec3 interiorFillLight = refractedBg;
   if (universalGlass && uBgMode == 0 && uHasEnv == 1) {
-    vec3 ambientFill = sampleEnvironmentBackdrop(transmissionDir);
-    interiorFillLight = mix(ambientFill, refractedBg, uEnvRefraction);
+    interiorFillLight = sampleEnvironmentBackdrop(transmissionDir);
   }
   if (needsEnvironmentTransmission) {
     vec3 darkRefraction = 1.0 - exp(
@@ -1530,6 +1532,11 @@ void main(){
   // 的分支。
   float universalCovered = 0.0;
   vec3 universalTransmitted = vec3(0.0);
+  // 去背輸出要反解回「自身能量」，必須留一份還沒被 over 合成的 clamp 動過
+  // 的版本：加上透射光後夾到 [0,1] 是給不透明畫面用的，亮部很容易在那裡就
+  // 先被截頂，再拿截頂後的值去反減、反除只會把能量憑空削掉，去背結果就會
+  // 比畫面上看到的暗、也比較不飽和。
+  vec3 universalOwnEnergy = finalColor;
   if (universalGlass) {
     universalTransmitted = refractedBg * material.transmission * volumeAbsorption
       * (1.0 - backFres * 0.72);
@@ -1561,11 +1568,11 @@ void main(){
     );
     outputAlpha = mix(glassAlpha, membraneAlpha, membraneMode);
     if (universalGlass) {
-      // 通用玻璃天生就是 over 合成，去背不需要任何特殊處理：把剛才疊上的透射
-      // 光扣掉，剩下的就是自身能量，alpha 用同一個覆蓋率。
-      finalColor = clamp(finalColor - universalTransmitted * (1.0 - universalCovered), 0.0, 1.0);
+      // 通用玻璃天生就是 over 合成，去背不需要任何特殊處理：直接拿還沒被
+      // over 合成夾過的自身能量除以覆蓋率反解出 straight color，不從已經
+      // 截頂的畫面反減，亮部才不會在去背後失真變暗。
       outputAlpha = clamp(universalCovered, 0.02, 1.0);
-      finalColor = clamp(finalColor / outputAlpha, 0.0, 1.0);
+      finalColor = clamp(universalOwnEnergy / outputAlpha, 0.0, 1.0);
     } else if (uMembraneOverWhite > 0.5) {
       // 液態薄膜的去背輸出。膜身「就是背景」（見 transparentMembrane 那行），
       // 而且亮底顯色路徑是由背景亮度開的閘 —— 把背景抽成黑色等於連材質模型
