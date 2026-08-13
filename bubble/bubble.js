@@ -158,6 +158,11 @@ const DEFAULTS = {              // 數值滑桿
   // 底部取樣範圍：形狀高度的多少比例算「底部」，滴落點就從那一段裡挑。
   meltBand: 0.22,
   meltSeed: 0,
+  // 水滴的形狀（見 melt.js 的 meltDeform）。懸掛時被重力拉長、上方收出一個頸；
+  // 脫離後頸縮回，水滴在表面張力下彈動著收斂回接近球形。
+  meltStretch: 0.3,
+  meltNeck: 0.45,
+  meltWobble: 0.5,
   // 崩解噴濺的時間軸拆成四段時長（見 shatterSegments）：靜止 → 蓄力 → 飛散 →
   // 重組。四個值是相對權重，正規化後填滿整個循環，所以任何組合都合法、不會出現
   // 「滑桿有數字但實際被夾住」的情形。崩解模式預設循環為 4 秒，四段權重
@@ -456,6 +461,9 @@ const fmt = {
   meltJitter: v => v === 0 ? '關閉' : v.toFixed(3),
   meltBand: v => Math.round(v * 100) + '%',
   meltSeed: v => '#' + v.toFixed(0),
+  meltStretch: v => v === 0 ? '正圓球' : '+' + Math.round(v * 100) + '%',
+  meltNeck: v => v === 0 ? '無頸' : Math.round(v * 100) + '%',
+  meltWobble: v => v === 0 ? '不彈動' : Math.round(v * 100) + '%',
   shatterRange: v => 'x' + v.toFixed(2),
   shatterDecel: v => v === 0 ? '等速' : Math.round(v * 100) + '%',
   shatterSpeedVary: v => '±' + Math.round(v * 100) + '%',
@@ -864,6 +872,10 @@ const { meltDrop } = createMeltMotion(P, { bottomAnchors: () => meltBottomAnchor
 // 微滴的自由軌道在 updateMicroDrops 直接呼叫 freeOrbitPosition，需要自己的暫存向量。
 const freeOrbitVec = new THREE.Vector3();
 
+// 融化每顆水滴這一幀的形狀（拉長／頸／彈動）。主滴迴圈算出來，下面的形變迴圈
+// 讀取——那個迴圈拿不到位置迴圈的區域變數，所以在這裡接一手。
+const meltDeformNow = Array.from({ length: MAX_DROPS }, () => null);
+
 const formationPosNow = new THREE.Vector3();
 const formationPosBefore = new THREE.Vector3();
 const formationPosAfter = new THREE.Vector3();
@@ -922,11 +934,14 @@ function updateMicroDrops(phase, fidelityAbsorb = 0) {
       microDropData[o + 2] = formationPosNow.z;
       // 微滴是主滴的縮小版，撐體積的是主滴，這裡只負責補密度。
       microDropData[o + 3] = state ? state.radius * 0.62 : 0;
-      // 墜落中的水滴是獨立球體，不保留貼在造型上被拉長的橢球形變。
-      microShapeData[o] = 1;
-      microShapeData[o + 1] = 0;
+      // 微滴的 SDF（microDropletDistance）只吃主軸與拉長，沒有尖端與彈動那兩個
+      // 通道，所以這裡只套得上垂直拉長；而且它把 stretch 夾在 [1, 1.65]，墜落期
+      // 的壓扁（<1）會被夾成 1，等於微滴只在懸掛時被拉長。以微滴的尺寸來說看不
+      // 出差別，不值得為它擴一組 uniform。
+      microShapeData[o] = 0;
+      microShapeData[o + 1] = 1;
       microShapeData[o + 2] = 0;
-      microShapeData[o + 3] = 1;
+      microShapeData[o + 3] = state ? state.deform.stretch : 1;
       continue;
     }
     const anchor = i * Math.PI * 2 / activeCount + h1 * 0.8;
@@ -1158,6 +1173,7 @@ function updateDropUniforms(t) {
         y = formationPosNow.y;
         z = formationPosNow.z;
       }
+      meltDeformNow[i] = meltState ? meltState.deform : null;
     } else if (isFormationMotion(P.motion)) {
       const formation = amount;
       formationDropPosition(i, phase, layoutCount, formationPosNow);
@@ -1352,7 +1368,21 @@ function updateDropUniforms(t) {
       speed * 0.055 * P.inertiaDeform * sizeResponse / tensionResistance);
     let flatten = 0, shapeOscillation = 0, tip = 0, blendWeight = 1;
 
-    if (P.motion === 'cinematic' && count >= 2 && (i === pairA || i === pairB)) {
+    if (melting) {
+      // 主軸固定朝上，不用量到的速度。理由有兩個：懸掛期水滴幾乎不動，speed 趨近
+      // 0 時上面那段會退化成 (1,0,0)，變成把水滴橫向拉長；而水滴重生的那一幀位置
+      // 會從半空瞬移回錨點，量到的速度是個假尖峰。
+      //
+      // 朝上（而不是朝著墜落方向）是因為 shader 的尖端長在 +軸端，而真實懸掛水滴
+      // 的頸在上方、連著造型那一側。
+      ax = 0; ay = 1; az = 0;
+      const deform = meltDeformNow[i];
+      if (deform) {
+        stretch = deform.stretch;
+        tip = deform.tip;
+        shapeOscillation = deform.wobble;
+      }
+    } else if (P.motion === 'cinematic' && count >= 2 && (i === pairA || i === pairB)) {
       const other = dropData[i === pairA ? pairB : pairA];
       const dx = other.x - d.x, dy = other.y - d.y, dz = other.z - d.z;
       const invDistance = 1 / Math.max(0.0001, Math.hypot(dx, dy, dz));

@@ -108,11 +108,76 @@ function meltTimeline(i, phase, seedBase) {
   const u = fract(phase * cycles + h2);
   const hang = Math.max(0.05, Math.min(0.9, P.meltHang));
   const grow = smoothstepCPU(u, 0, hang);
+  // 懸掛階段自己的進度（0→1 到脫離為止）。形變要靠它，grow 已經被 smoothstep
+  // 壓過，兩端斜率為 0，拿來當「越來越被拉長」的時鐘會在快脫離時反而變慢。
+  const hangProgress = Math.min(1, u / hang);
   const fall = u <= hang ? 0 : (u - hang) / Math.max(1e-4, 1 - hang);
   // 縮小從墜落途中某一點開始，一定要在 fall=1（也就是 u→1）之前收乾淨，
   // 否則水滴會帶著半徑跳回起點。
   const shrink = smoothstepCPU(fall, Math.min(0.95, P.meltShrink), 1);
-  return { u, grow, fall, shrink, h1, h2, h3 };
+  return { u, grow, hangProgress, fall, shrink, h1, h2, h3 };
+}
+
+// 空氣阻力把墜落中的水滴壓扁的程度（沿垂直軸縮短，橫向由 shader 以 1/√s 補回
+// 來，所以體積守恆）。做成常數而不是滑桿：它是很微妙的一層，調大就假了。
+const MELT_DRAG_OBLATE = 0.1;
+// 脫離後大約盪這麼多下才收斂。實際頻率還會再乘上滴徑項。
+//
+// 這個值不能照物理放大。毛細震盪的真實頻率 ∝√(σ/ρR³)，小水滴每秒抖好幾十下，
+// 一個循環下來遠超過 60fps 的取樣率，畫面只會得到鋸齒狀的閃爍而不是彈動。所以
+// 滴徑項夾在一個窄範圍裡：保留「小滴抖得比大滴快」這個看得出來的差別，總圈數
+// 則壓在一次墜落約 1.5～3 圈，乘上最多 8 次滴落也才 24 圈／循環，遠低於奈奎斯特。
+const MELT_WOBBLE_CYCLES = 2;
+const MELT_WOBBLE_SIZE_MIN = 0.75;
+const MELT_WOBBLE_SIZE_MAX = 1.5;
+// 彈動與尖端在 shader 裡是乘在 longScale 上的（×(1 + 0.16·wobble + 0.12·tip)），
+// 而 longScale 的設計上限是 1.65。基礎伸縮先夾在這個範圍，乘完才不會超出去。
+const MELT_STRETCH_MIN = 0.75;
+const MELT_STRETCH_MAX = 1.35;
+// 彈動幅度的內部縮放，同樣是為了守住上面那個乘積上限。
+const MELT_WOBBLE_GAIN = 0.6;
+
+// 水滴的形狀，不是正圓球。
+//
+// 真實的滴水跟卡通畫法相反：
+//   懸掛時才是淚滴形——重力把水滴往下拉長，上方收出一個細頸（尖端朝上，也就是
+//   往造型的方向），越接近脫離越明顯。
+//   墜落時反而回到接近球形——尺度這麼小，表面張力遠遠壓過重力，水滴會在
+//   prolate↔oblate 之間阻尼震盪著收斂回球，同時被空氣阻力壓得略扁。
+//   卡通那種「墜落中拖著尖尾的淚滴」現實中並不存在。
+//
+// 回傳的三個量對應 shader 的三個通道（見 shaders.js 的 dropletDistance）：
+//   stretch → uDropShape.w，沿主軸的伸縮，橫向以 1/√s 補償所以體積守恆
+//   tip     → uDropPhysics.z，在 +軸端長出突起，主軸朝上時就是那個頸
+//   wobble  → uDropPhysics.y，調變伸縮，做出 prolate↔oblate 的彈動
+function meltDeform(t, radius) {
+  // 懸掛：平方讓拉長集中在快脫離的那一段，而不是一形成就先拉長。
+  const pendant = t.hangProgress * t.hangProgress;
+
+  // 脫離後頸迅速縮回；exp 在 fall=0 時為 1，正好接上懸掛末端的值，不會跳。
+  const tip = t.fall > 0
+    ? P.meltNeck * Math.exp(-6.5 * t.fall)
+    : P.meltNeck * pendant;
+
+  // 表面張力驅動的收斂震盪。頻率隨滴徑提高（小滴抖得快，∝√(σ/R³)），與電影
+  // 模式的 jellyFreq 同一套；阻尼由表面張力決定，張力越高收得越快。
+  const sizeFactor = Math.max(MELT_WOBBLE_SIZE_MIN, Math.min(MELT_WOBBLE_SIZE_MAX,
+    Math.sqrt(0.54 / Math.max(0.05, radius))));
+  const freq = MELT_WOBBLE_CYCLES * sizeFactor;
+  const decay = 2.6 + P.surfaceTension * 3;
+  const wobble = t.fall > 0
+    ? P.meltWobble * MELT_WOBBLE_GAIN
+      * Math.exp(-decay * t.fall) * Math.sin(2 * Math.PI * freq * t.fall)
+    : 0;
+
+  // 伸縮。懸掛時被拉長；脫離後那份拉長迅速鬆開（exp(0)=1 所以接得上），
+  // 同時空氣阻力隨速度平方把它壓扁。
+  const raw = t.fall > 0
+    ? 1 + P.meltStretch * Math.exp(-5 * t.fall) - MELT_DRAG_OBLATE * t.fall * t.fall
+    : 1 + P.meltStretch * pendant;
+  const stretch = Math.max(MELT_STRETCH_MIN, Math.min(MELT_STRETCH_MAX, raw));
+
+  return { stretch, tip, wobble };
 }
 
 // 水滴位置：形成時略微下垂，脫離後隨時間平方加速墜落。
@@ -144,8 +209,9 @@ function meltDrop(i, phase, seedBase, out) {
   const t = meltTimeline(i, phase, seed);
   const anchor = anchors[i % anchors.length];
   meltPosition(anchor, t, out);
-  return { radius: meltRadius(t), fall: t.fall, grow: t.grow };
+  const radius = meltRadius(t);
+  return { radius, fall: t.fall, grow: t.grow, deform: meltDeform(t, radius) };
 }
 
-  return { meltDrop, meltTimeline, meltRadius };
+  return { meltDrop, meltTimeline, meltRadius, meltDeform };
 }
