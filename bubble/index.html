@@ -65,8 +65,12 @@
     <h3>材質反射 Material</h3>
     <div class="row"><label>材質類型</label><select id="materialStyle"><option value="universal" selected>通用玻璃</option><option value="membrane">液態薄膜（白底）</option><option value="glass" hidden>厚玻璃（已移除，改用通用玻璃）</option></select><span class="val"></span></div>
     <div class="row" id="membraneDepthRow"><label>膜體立體感</label><input type="range" id="membraneDepth" min="0" max="1" step="0.01" value="0.65"><span class="val" id="membraneDepth_v"></span></div>
-    <div class="row" id="membraneTintRow"><label>薄膜染色</label><input type="color" id="membraneTint" value="#94b8e6"><span class="val"></span></div>
-    <div class="note" id="membraneTintNote">只作用於液態薄膜：不透明底色、面紗色調、虛擬棚燈反射、藍卡反射與立體明暗暗部原本各自寫死一個藍紫色，這裡選什麼顏色，畫面上那幾處就直接是那個顏色；預設值＝原本那個藍紫色，維持改動前的外觀，選白色就會變成無色。</div>
+    <div class="row" id="membraneBaseColorRow"><label>薄膜底色</label><input type="color" id="membraneBaseColor" value="#7a9ec7"><span class="val"></span></div>
+    <div class="row" id="membraneVeilColorRow"><label>薄膜面紗色調</label><input type="color" id="membraneVeilColor" value="#b8e6ff"><span class="val"></span></div>
+    <div class="row" id="membraneReflectionColorRow"><label>棚燈反射色</label><input type="color" id="membraneReflectionColor" value="#94b8e6"><span class="val"></span></div>
+    <div class="row" id="membraneCardColorRow"><label>藍卡反射色</label><input type="color" id="membraneCardColor" value="#94c7ff"><span class="val"></span></div>
+    <div class="row" id="membraneShadeColorRow"><label>立體暗部色</label><input type="color" id="membraneShadeColor" value="#85b8e6"><span class="val"></span></div>
+    <div class="note" id="membraneColorsNote">只作用於液態薄膜，各自對應合成裡原本寫死的一個顏色常數：選什麼顏色，畫面上那一處就直接是那個顏色。預設值都是原本的藍紫色常數，維持改動前的外觀。</div>
     <div class="row"><label>反射強度</label><input type="range" id="reflect" min="0" max="2" step="0.02" value="1.6"><span class="val" id="reflect_v"></span></div>
     <div class="row"><label>透射率</label><input type="range" id="transmission" min="0" max="1" step="0.01" value="0.96"><span class="val" id="transmission_v"></span></div>
     <div class="row"><label>材質曝光</label><input type="range" id="materialExposure" min="0.25" max="2.5" step="0.05" value="1"><span class="val" id="materialExposure_v"></span></div>

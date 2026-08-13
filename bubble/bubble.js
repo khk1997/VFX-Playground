@@ -201,11 +201,14 @@ const TOGGLE_DEFAULTS = {
 };
 const COLOR_DEFAULTS  = {
   bgColor: '#000000',
-  // 液態薄膜的不透明底色、面紗色調、虛擬棚燈反射、藍卡反射、立體明暗暗部，
-  // 原本各自寫死一個偏藍紫色的常數；現在直接讀這個顏色取代那些常數，選色器
-  // 選什麼顏色，畫面上那幾處就是那個顏色。預設值是原本那個藍紫色常數本身，
-  // 維持改動前的外觀。
-  membraneTint: '#94b8e6',
+  // 液態薄膜原本各自寫死一個偏藍紫色常數的 5 處，現在各自開一個選色器直接
+  // 取代常數，選色器選什麼顏色，畫面上那一處就是那個顏色。預設值都是原本
+  // 那個常數本身，維持改動前的外觀。
+  membraneBaseColor: '#7a9ec7',
+  membraneVeilColor: '#b8e6ff',
+  membraneReflectionColor: '#94b8e6',
+  membraneCardColor: '#94c7ff',
+  membraneShadeColor: '#85b8e6',
 };
 const P = { ...DEFAULTS, ...SELECT_DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS };
 
@@ -318,7 +321,11 @@ const SELECTS = {
 };
 const COLORS = {
   bgColor: 'uBgColor',
-  membraneTint: 'uMembraneTint',
+  membraneBaseColor: 'uMembraneBaseColor',
+  membraneVeilColor: 'uMembraneVeilColor',
+  membraneReflectionColor: 'uMembraneReflectionColor',
+  membraneCardColor: 'uMembraneCardColor',
+  membraneShadeColor: 'uMembraneShadeColor',
 };
 // shader 的光譜座標由紫端（0）走向紅端（1）。七個色標固定等距，
 // 讓每種彩虹顏色都能單獨編輯，同時保持色帶之間連續混色。
@@ -1976,7 +1983,11 @@ function initGL() {
     uMaterialStyle: { value: SELECTS.materialStyle.map[P.materialStyle] },
     uTransparentBackground: { value: 0 },
     uBgColor:    { value: new THREE.Color(P.bgColor) },
-    uMembraneTint: { value: new THREE.Color(P.membraneTint) },
+    uMembraneBaseColor: { value: new THREE.Color(P.membraneBaseColor) },
+    uMembraneVeilColor: { value: new THREE.Color(P.membraneVeilColor) },
+    uMembraneReflectionColor: { value: new THREE.Color(P.membraneReflectionColor) },
+    uMembraneCardColor: { value: new THREE.Color(P.membraneCardColor) },
+    uMembraneShadeColor: { value: new THREE.Color(P.membraneShadeColor) },
     uBrightBgAssist: { value: P.brightBgAssist ? 1 : 0 },
     uEnvRefraction: { value: P.envRefraction },
     uReflect:    { value: P.reflect },
@@ -2476,9 +2487,10 @@ function updateUIState() {
   const membraneDepth = document.getElementById('membraneDepth');
   membraneDepth.disabled = !membraneMaterial;
   document.getElementById('membraneDepthRow').style.opacity = membraneMaterial ? 1 : 0.4;
-  const membraneTint = document.getElementById('membraneTint');
-  membraneTint.disabled = !membraneMaterial;
-  document.getElementById('membraneTintRow').style.opacity = membraneMaterial ? 1 : 0.4;
+  for (const key of ['membraneBaseColor', 'membraneVeilColor', 'membraneReflectionColor', 'membraneCardColor', 'membraneShadeColor']) {
+    document.getElementById(key).disabled = !membraneMaterial;
+    document.getElementById(key + 'Row').style.opacity = membraneMaterial ? 1 : 0.4;
+  }
   // 液態薄膜本身就是前後表面透射模型，不讀取通用玻璃專用的亮底補償。
   const brightAssistUsable = colorBackground && !membraneMaterial;
   brightBgAssist.disabled = !brightAssistUsable;

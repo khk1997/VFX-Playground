@@ -188,11 +188,14 @@ uniform float uReflect;
 uniform float uTransmission;
 uniform float uMaterialExposure;
 uniform float uMembraneDepth;
-// 液態薄膜的不透明底色／面紗色調／棚燈反射／藍卡反射／立體明暗暗部，原本
-// 各自寫死一個藍紫色常數；現在直接讀這顆 uniform 取代那些常數（不是乘上
-// 去的濾鏡），畫面看到的顏色就是選色器裡選的那個顏色。預設值等於原本那個
-// 藍紫色常數，維持改動前的外觀。
-uniform vec3  uMembraneTint;
+// 液態薄膜原本各自寫死一個藍紫色常數的 5 處，各自開一顆 uniform 直接取代
+// 常數（不是乘上去的濾鏡），畫面看到的顏色就是對應選色器選的那個顏色。
+// 預設值等於原本那個常數本身，維持改動前的外觀。
+uniform vec3  uMembraneBaseColor;       // 不透明底色（transmission 低時的膜身）
+uniform vec3  uMembraneVeilColor;       // 面紗色調（把膜從白紙分離的淡青藍體積感）
+uniform vec3  uMembraneReflectionColor; // 虛擬棚燈反射
+uniform vec3  uMembraneCardColor;       // 左上藍卡反射
+uniform vec3  uMembraneShadeColor;      // 立體明暗暗部
 uniform float uRoughness;
 uniform float uIOR;
 uniform int   uReflectionSampleCount;
@@ -1113,7 +1116,7 @@ void main(){
     );
 
     vec3 transparentMembrane = mix(bg.rgb, refractedBg, 0.16);
-    vec3 opaqueMembrane = uMembraneTint
+    vec3 opaqueMembrane = uMembraneBaseColor
       * mix(0.72, 1.08, clamp(uMaterialExposure / 2.5, 0.0, 1.0));
     membraneComposite = mix(
       opaqueMembrane,
@@ -1134,7 +1137,7 @@ void main(){
     );
     membraneComposite = mix(
       membraneComposite,
-      membraneComposite * uMembraneTint,
+      membraneComposite * uMembraneVeilColor,
       membraneVeil
     );
 
@@ -1150,7 +1153,7 @@ void main(){
       vec3(0.35)
     );
     vec3 membraneReflectionTone = clamp(
-      uMembraneTint
+      uMembraneReflectionColor
         + vec3(membraneEnvLum) * 0.22
         + membraneEnvChroma * 0.28,
       0.0,
@@ -1516,12 +1519,12 @@ void main(){
     );
     finalColor = mix(
       finalColor,
-      finalColor * uMembraneTint,
+      finalColor * uMembraneShadeColor,
       membraneShadeGrade
     );
     finalColor = mix(
       finalColor,
-      uMembraneTint,
+      uMembraneCardColor,
       clamp(membraneBlueCardGrade, 0.0, 0.28)
     );
     finalColor = mix(
