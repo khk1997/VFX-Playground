@@ -130,10 +130,10 @@
       <div class="effectSubhead">光譜光源</div>
       <div class="row"><label>光源亮度</label><input type="range" id="rayDispersionLightIntensity" min="0" max="4" step="0.01" value="4"><span class="val" id="rayDispersionLightIntensity_v"></span></div>
       <div class="row"><label>光源尺寸</label><input type="range" id="rayDispersionLightSize" min="0" max="1" step="0.01" value="0.32"><span class="val" id="rayDispersionLightSize_v"></span></div>
-      <div class="row"><label>聚焦銳利</label><input type="range" id="rayDispersionFocus" min="0" max="1" step="0.01" value="0.55"><span class="val" id="rayDispersionFocus_v"></span></div>
+      <div class="row"><label>彩帶對比</label><input type="range" id="rayDispersionFocus" min="0" max="1" step="0.01" value="0.55"><span class="val" id="rayDispersionFocus_v"></span></div>
       <div class="row"><label>光源水平</label><input type="range" id="rayDispersionAzimuth" min="-180" max="180" step="1" value="0"><span class="val" id="rayDispersionAzimuth_v"></span></div>
       <div class="row"><label>光源高度</label><input type="range" id="rayDispersionElevation" min="-80" max="80" step="1" value="0"><span class="val" id="rayDispersionElevation_v"></span></div>
-      <div class="note">五個波長各自穿過目前的 SDF 造型，再與同一個白色光源對準；展寬 1× 是目前阿貝數的物理尺度，提高可補償圓角造型缺少尖銳棱面的分光。HDRI 只提供周圍反射，不再決定光帶形狀。</div>
+      <div class="note">五個波長各自穿過目前的 SDF 造型，再與同一個白色光源對準；展寬 1× 是目前阿貝數的物理尺度，提高可補償圓角造型缺少尖銳棱面的分光。彩帶對比同時控制白光源與 HDRI 分光結果：0% 接近中性色，100% 色彩分界鮮明；不改變光帶位置與寬度。HDRI 只提供周圍反射，不再決定光帶形狀。</div>
     </div>
 
     <div class="effectBlock effectBlock--caustic" id="spectralCausticGroup">
@@ -149,7 +149,7 @@
         <label><input type="color" id="spectralCausticCol5" value="#3ba6f9" aria-label="焦散色標 6"></label>
         <label><input type="color" id="spectralCausticCol6" value="#52e6fc" aria-label="焦散色標 7"></label>
       </div>
-      <div class="row"><label>焦散強度</label><input type="range" id="spectralCausticIntensity" min="0" max="1.5" step="0.01" value="1.5"><span class="val" id="spectralCausticIntensity_v"></span></div>
+      <div class="row"><label>焦散強度</label><input type="range" id="spectralCausticIntensity" min="0" max="6" step="0.01" value="3"><span class="val" id="spectralCausticIntensity_v"></span></div>
       <div class="row"><label>聚焦程度</label><input type="range" id="spectralCausticFocus" min="0" max="1" step="0.01" value="0.31"><span class="val" id="spectralCausticFocus_v"></span></div>
       <div class="row"><label>光譜分離</label><input type="range" id="spectralCausticSeparation" min="0" max="1" step="0.01" value="0.24"><span class="val" id="spectralCausticSeparation_v"></span></div>
       <div class="effectSubhead">光帶形狀</div>
@@ -382,6 +382,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=universal-dbg15"></script>
+<script type="module" src="./bubble.js?v=universal-dbg31"></script>
 </body>
 </html>

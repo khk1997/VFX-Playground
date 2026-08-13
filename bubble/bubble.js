@@ -49,7 +49,7 @@ const DEFAULTS = {              // 數值滑桿
   rayDispersionFocus: 0.55,
   rayDispersionAzimuth: 0,
   rayDispersionElevation: 0,
-  spectralCausticIntensity: 1.5,
+  spectralCausticIntensity: 3,
   spectralCausticFocus: 0.12,
   spectralCausticWidth: 0.42,
   spectralCausticLightSize: 0.33,
@@ -474,7 +474,7 @@ function refreshShatterTimelineReadouts() {
   if (total) total.textContent = `四段合計 ${P.loopDuration.toFixed(1)}s（＝循環秒數）`;
 }
 
-import { VERT, FRAG } from './shaders.js?v=universal-14';
+import { VERT, FRAG } from './shaders.js?v=universal-30';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;

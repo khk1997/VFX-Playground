@@ -741,9 +741,23 @@ float rayDispersionSourceLobe(vec3 outgoingDir){
   float halfAngle = radians(mix(2.0, 80.0, uRayDispersionLightSize));
   float alignment = dot(normalize(outgoingDir), rayDispersionLightDirection());
   float outer = cos(halfAngle);
-  float inner = cos(halfAngle * mix(0.18, 0.72, 1.0 - uRayDispersionFocus));
-  float lobe = smoothstep(outer, inner, alignment);
-  return pow(max(lobe, 0.0), mix(1.0, 3.2, uRayDispersionFocus));
+  // 光源角向形狀固定在已驗證的 55% 基準。彩帶對比不再改變光線命中，
+  // 避免效果只在剛好擦過光源邊界時才看得到。
+  const float FIXED_INNER_RADIUS = 0.423;
+  const float FIXED_LOBE_EXPONENT = 2.21;
+  float inner = cos(halfAngle * FIXED_INNER_RADIUS);
+  return pow(
+    max(smoothstep(outer, inner, alignment), 0.0),
+    FIXED_LOBE_EXPONENT
+  );
+}
+
+// 五波長合成後調整色度，不動亮度。0% 讓彩帶向等亮度中性色混合，
+// 100% 拉開紅／綠／藍差異；對任何造型與光源角度都可見且不移動光帶。
+vec3 shapeRaySpectrumContrast(vec3 spectrum){
+  float luma = dot(spectrum, vec3(0.2126, 0.7152, 0.0722));
+  float chroma = mix(0.05, 2.2, uRayDispersionFocus);
+  return max(vec3(luma) + (spectrum - vec3(luma)) * chroma, vec3(0.0));
 }
 
 vec3 wavelengthSceneEnergy(vec3 outgoingDir, vec3 response){
@@ -1020,6 +1034,7 @@ void main(){
   vec3 rayDispersionResidual = vec3(0.0);
   vec3 rayFocusedSpectrum = vec3(0.0);
   float rayDispersionMix = 0.0;
+  float rayBandMask = 0.0;
   vec3 exitPoint = p;
   vec3 exitNormal = -N;
   float pathLength = 0.0;
@@ -1138,10 +1153,14 @@ void main(){
       spectralNormalization,
       vec3(0.001)
     );
-    rayFocusedSpectrum = focusedSum / max(
+    vec3 rawFocusedSpectrum = focusedSum / max(
       spectralNormalization,
       vec3(0.001)
     );
+    rayFocusedSpectrum = shapeRaySpectrumContrast(rawFocusedSpectrum);
+    // HDRI 背景模式直接使用 scene spectrum，因此同步換入調整後的光源；
+    // residual 再扣除同一份 rayFocusedSpectrum，HDRI 差值本身維持不變。
+    rayDispersedEnvironment += rayFocusedSpectrum - rawFocusedSpectrum;
     // 純色畫布不應顯示 HDRI 影像，但仍可顯示 HDRI 光場被造型
     // 分光後的光譜差。用同一個出射方向重建未色散基準，共同的
     // 攝影棚內容會相消，只留下多波長路徑真正分離的部分。
@@ -1156,9 +1175,38 @@ void main(){
     rayDispersionResidual = rayDispersedEnvironment
       - rayFocusedSpectrum
       - referenceSpectrum;
+    // 純色模式顯示的是 HDRI 五波長相對未色散基準的差值；它也是彩帶
+    // 的主要來源之一，必須和獨立光源使用同一個對比控制。
+    rayDispersionResidual *= mix(0.05, 2.2, uRayDispersionFocus);
     rayDispersionMix = clamp(uRayDispersion, 0.0, 1.0);
+    float residualBandEnergy = max(
+      abs(rayDispersionResidual.r),
+      max(abs(rayDispersionResidual.g), abs(rayDispersionResidual.b))
+    );
+    float focusedBandEnergy = max(
+      rayFocusedSpectrum.r,
+      max(rayFocusedSpectrum.g, rayFocusedSpectrum.b)
+    );
+    rayBandMask = clamp(
+      (residualBandEnergy * 2.8 + focusedBandEnergy * 0.42)
+        * rayDispersionMix
+        + localPrism * rayDispersionMix * 0.28,
+      0.0,
+      1.0
+    );
+    rayBandMask = max(
+      rayBandMask,
+      smoothstep(0.08, 0.45, material.edgeFactor) * rayDispersionMix
+    );
     if (uBgMode == 1) {
-      refractedBg = mix(refractedBg, rayDispersedEnvironment, rayDispersionMix);
+      vec3 contrastedEnvironment = shapeRaySpectrumContrast(
+        rayDispersedEnvironment
+      );
+      refractedBg = mix(
+        refractedBg,
+        contrastedEnvironment,
+        rayDispersionMix
+      );
     }
   }
   // 純色只控制畫布；水滴內部獨立取樣同一張 HDRI。若背面追蹤未命中，
@@ -1451,6 +1499,20 @@ void main(){
       focusedTransmission,
       focusedBrightSupport * clamp(focusedPeak * 0.72, 0.0, 0.68)
     );
+  }
+
+  // 標準玻璃反射與 ray 彩帶最後會落在同一批像素；只改 ray radiance 的
+  // 色度容易被反射蓋住，滑桿雖有計算卻看不出來。用實際光路能量與造型
+  // 折射建立專屬遮罩，對遮罩內的最終色彩做等亮度色度調整：不移動光帶、
+  // 不改明暗，也不污染沒有 ray dispersion 的玻璃區域。
+  if (rayBandMask > 0.001) {
+    float bandLuma = dot(finalColor, vec3(0.2126, 0.7152, 0.0722));
+    float bandChroma = mix(0.0, 3.0, uRayDispersionFocus);
+    vec3 contrastedBand = max(
+      vec3(bandLuma) + (finalColor - vec3(bandLuma)) * bandChroma,
+      vec3(0.0)
+    );
+    finalColor = mix(finalColor, contrastedBand, rayBandMask);
   }
   // 通用玻璃的亮底補償仍由原開關管理；液態薄膜本身就是透射模型，不依賴該開關。
   float brightColorSupport = max(
