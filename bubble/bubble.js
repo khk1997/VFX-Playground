@@ -235,7 +235,7 @@ const MATERIAL_PROFILE_DEFAULTS = {
     roughness: 0.17,
     fresnel: 1.05,
     ior: 1.6,
-    dispersion: 0.39,
+    dispersion: 0.05,
     dispersionSeparation: 1.5,
     artThickness: 295,
     artThickVar: 130,
@@ -2445,9 +2445,26 @@ function updateUIState() {
   });
   const colorBackground = P.bgMode === 'color';
   const bgc = document.getElementById('bgColor');
+  const materialStyle = document.getElementById('materialStyle');
+  const membraneOption = materialStyle.querySelector('option[value="membrane"]');
   const brightBgAssist = document.getElementById('brightBgAssist');
   bgc.disabled = !colorBackground;
   bgc.closest('.row').style.opacity = colorBackground ? 1 : 0.4;
+  // 液態薄膜的合成是專為純白畫布設計（見 shaders.js 對應段落的白底假設）。
+  // 背景一旦離開 #fff，立即收斂回通用玻璃，避免下拉顯示一個實際不成立、
+  // shader 又無法合理解讀的組合。之前拿掉這個限制想讓薄膜通用背景，但薄膜
+  // 的顯色路徑（亮底 transmission、白卡/藍卡反射、去背用的白底反乘）都是
+  // 針對白底寫死的美術模型，不是簡單的背景取樣，所以重新鎖回純白。
+  const pureWhiteBackground = colorBackground
+    && P.bgColor.toLowerCase() === '#ffffff';
+  membraneOption.disabled = !pureWhiteBackground;
+  if (!pureWhiteBackground && P.materialStyle === 'membrane') {
+    const previousStyle = P.materialStyle;
+    P.materialStyle = 'universal';
+    materialStyle.value = 'universal';
+    switchMaterialProfile(previousStyle, 'universal');
+    if (uniforms) uniforms.uMaterialStyle.value = SELECTS.materialStyle.map.universal;
+  }
   const membraneMaterial = P.materialStyle === 'membrane';
   const membraneDepth = document.getElementById('membraneDepth');
   membraneDepth.disabled = !membraneMaterial;

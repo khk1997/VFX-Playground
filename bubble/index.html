@@ -63,7 +63,7 @@
 
   <div class="group">
     <h3>材質反射 Material</h3>
-    <div class="row"><label>材質類型</label><select id="materialStyle"><option value="universal" selected>通用玻璃</option><option value="membrane">液態薄膜</option><option value="glass" hidden>厚玻璃（已移除，改用通用玻璃）</option></select><span class="val"></span></div>
+    <div class="row"><label>材質類型</label><select id="materialStyle"><option value="universal" selected>通用玻璃</option><option value="membrane">液態薄膜（白底）</option><option value="glass" hidden>厚玻璃（已移除，改用通用玻璃）</option></select><span class="val"></span></div>
     <div class="row" id="membraneDepthRow"><label>膜體立體感</label><input type="range" id="membraneDepth" min="0" max="1" step="0.01" value="0.65"><span class="val" id="membraneDepth_v"></span></div>
     <div class="row"><label>反射強度</label><input type="range" id="reflect" min="0" max="2" step="0.02" value="1.6"><span class="val" id="reflect_v"></span></div>
     <div class="row"><label>透射率</label><input type="range" id="transmission" min="0" max="1" step="0.01" value="0.96"><span class="val" id="transmission_v"></span></div>
@@ -71,7 +71,7 @@
     <div class="row"><label>粗糙度</label><input type="range" id="roughness" min="0" max="1" step="0.01" value="0.2"><span class="val" id="roughness_v"></span></div>
     <div class="row"><label>邊緣光</label><input type="range" id="fresnel" min="0" max="3" step="0.05" value="0.8"><span class="val" id="fresnel_v"></span></div>
     <div class="row"><label>折射率</label><input type="range" id="ior" min="1.0" max="1.8" step="0.01" value="1.33"><span class="val" id="ior_v"></span></div>
-    <div class="note" id="materialStyleNote">通用玻璃與液態薄膜各自記住材質及 HDRI 參數；液態薄膜中央更透明，彩色集中在輪廓與曲面折疊處，任何背景色皆可使用。</div>
+    <div class="note" id="materialStyleNote">通用玻璃與液態薄膜各自記住材質及 HDRI 參數；液態薄膜僅適用純白背景（#ffffff），中央更透明，彩色集中在輪廓與曲面折疊處——它的顯色（亮底透射、白卡/藍卡反射卡、去背用的白底反乘）都是針對白底寫死的美術模型，離開白底就切回通用玻璃。</div>
   </div>
 
   <div class="group" id="thinFilmGroup">
