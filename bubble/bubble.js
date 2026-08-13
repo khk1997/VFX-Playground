@@ -4,6 +4,13 @@ import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-s
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
 } from './default-shapes.js?v=svg-shape-29';
+import {
+  MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
+  MOTION_DEFAULT_LOOP_DURATION, usesShapeField, motionGates,
+} from './motions/registry.js?v=svg-shape-29';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-29';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-29';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-29';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -21,14 +28,6 @@ const GLASS_HDRI_LABEL = 'photo_studio2_london_hall_1k.hdr';
 const MEMBRANE_HDRI_URL = new URL('./assets/christmas_photo_studio_04_1k.hdr', import.meta.url).href;
 const MEMBRANE_HDRI_LABEL = 'christmas_photo_studio_04_1k.hdr';
 const MAX_DROPS = 12;
-const FORMATION_DEFAULT_COUNT = 1;
-// 穿梭環繞沒有「逐漸填滿」的微滴群，畫面上的豐富度全靠主水滴撐，
-// 所以預設顆數遠比形狀匯聚（只需要 1 顆種子）多。
-const WEAVE_DEFAULT_COUNT = 6;
-// 崩解噴濺相反：畫面上的碎片愈多愈像噴濺，主水滴與微滴一起當碎片用。
-const SHATTER_DEFAULT_COUNT = 8;
-// 崩解噴濺的碎片大小基準：「水滴大小」滑桿的最小值，在這個模式代表 ×1 原尺寸。
-const SHATTER_RADIUS_BASE = 0.25;
 const MAX_MICRO_DROPS = 20;
 const MAX_EDGE_DROPS = 8;
 const MAX_NEGATIVE_DROPS = 4;
@@ -179,8 +178,7 @@ const DEFAULTS = {              // 數值滑桿
 const isFormationMotion = motion => motion === 'formation';
 // 「需要距離場」比「走匯聚→散開時間軸」範圍更廣：穿梭環繞與崩解噴濺也要
 // 匯入/顯示同一顆形狀，只是不吸收水滴、也不走 gather/hold/release 那套編排。
-const SHAPE_MOTIONS = new Set(['formation', 'weave', 'shatter']);
-const usesShapeField = motion => SHAPE_MOTIONS.has(motion);
+// 判斷式與各模式的預設值現在都由 motions/registry.js 提供。
 const SELECT_DEFAULTS = {
   bgMode: 'color',
   materialStyle: 'universal',
@@ -278,33 +276,11 @@ function resetMaterialProfiles() {
 resetMaterialProfiles();
 const MOBILE_CAMERA_DISTANCE_DEFAULT = 4.3;
 if (mobileRenderQuery.matches && !PREVIEW) P.cameraDistance = MOBILE_CAMERA_DISTANCE_DEFAULT;
-const motionCounts = {
-  cinematic: 2,
-  formation: FORMATION_DEFAULT_COUNT,
-  weave: WEAVE_DEFAULT_COUNT,
-  shatter: SHATTER_DEFAULT_COUNT,
-};
-// 循環秒數與水滴數量／大小一樣按動態模式各自記憶。崩解的四段預設合計 4 秒；
-// 切去其他模式時恢復各自的循環長度，避免為了調整崩解節奏改壞分裂或匯聚。
-const SHATTER_DEFAULT_LOOP_DURATION = 4;
-const motionLoopDuration = {
-  cinematic: DEFAULTS.loopDuration,
-  formation: DEFAULTS.loopDuration,
-  weave: DEFAULTS.loopDuration,
-  shatter: SHATTER_DEFAULT_LOOP_DURATION,
-};
-// 水滴大小的預設值依模式不同：分裂維持原本較大的滴徑，形狀匯聚這個
-// 依賴外部形狀的模式改用較小的滴徑，讓吸附進外形時的顆粒感更細。切換模式時的
-// 記憶方式與 motionCounts 相同——使用者在某個模式下調過的值會被保留，只有預設
-// 的初始值不同。穿梭環繞的水滴不吸附進形狀，維持跟形狀匯聚一樣的顆粒感即可。
-const FORMATION_DEFAULT_RADIUS = 0.25;
-const motionRadius = {
-  cinematic: DEFAULTS.radius,
-  formation: FORMATION_DEFAULT_RADIUS,
-  weave: FORMATION_DEFAULT_RADIUS,
-  // 崩解噴濺的「水滴大小」是碎片的整體乘數，滑桿最小值 0.25 剛好＝×1 原尺寸。
-  shatter: SHATTER_RADIUS_BASE,
-};
+// 水滴數量、大小與循環秒數按動態模式各自記憶：使用者在某個模式下調過的值會被
+// 保留，切回來時恢復，只有初始預設不同（見 motions/registry.js）。
+let motionCounts = { ...MOTION_DEFAULT_COUNTS };
+let motionRadius = { ...MOTION_DEFAULT_RADIUS };
+let motionLoopDuration = { ...MOTION_DEFAULT_LOOP_DURATION };
 
 // 自訂漸層色標（最多 6，可調位置）— reset 用
 const STOP_MAX = 6;
@@ -319,7 +295,7 @@ const SELECTS = {
   bgMode:    { uniform: 'uBgMode',    map: { color: 0, hdri: 1 } },
   materialStyle: { uniform: 'uMaterialStyle', map: { membrane: 1, universal: 2 } },
   colorMode: { uniform: 'uColorMode', map: { spectral: 0, ramp: 1 } },
-  motion:    { uniform: 'uMotion',    map: { cinematic: 0, formation: 1, weave: 3, shatter: 4 } },
+  motion:    { uniform: 'uMotion',    map: MOTION_UNIFORM_MAP },
   shapeSource: { uniform: 'uShapeType', map: { svg: 1, gltf: 2 } },
   // 僅控制下一次 GLB 烘焙尺寸，沒有對應 shader uniform。
   shapeQuality: { uniform: '', map: { performance: 48, balanced: 80, high: 128 } },
@@ -653,8 +629,6 @@ function syncEdgeDropMotion(time) {
   }
 }
 
-const fract = x => x - Math.floor(x);
-const hash11CPU = n => fract(Math.sin(n * 127.1) * 43758.5453123);
 const dropSeeds = Array.from({ length: MAX_DROPS }, (_, i) => ({
   h1: hash11CPU(i + 1),
   h2: hash11CPU(i + 7),
@@ -820,295 +794,26 @@ function cyclicPulse(phase, center, width) {
   return x * x * (3 - 2 * x);
 }
 
-function smoothstepCPU(value, edge0, edge1) {
-  const x = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)));
-  return x * x * (3 - 2 * x);
-}
+// 崩解噴濺的時間軸與彈道數學搬到 motions/shatter.js。這裡只留一次繫結：
+// 那組函式只讀參數、不碰場景狀態，所以把 P 綁進去之後呼叫方式與拆檔前相同。
+const {
+  shatterSegmentSeconds, shatterTimeline, shatterSeed, shatterOffset,
+  shatterShapeAmount, shatterFragmentRadius, shatterRadius,
+} = createShatterMotion(P);
 
-// 定格呼吸：成形停留那段期間（gatherEnd → holdEnd）整顆造型的縮放呼吸，回傳
-// 縮放增量（0 = 原尺寸）。
-//
-// 兩個「不是」：
-//   不走距離場的等距膨脹（uShapeSwell，崩解噴濺蓄力用的那條）—— 等距偏移是把
-//   輪廓整圈加粗，細筆畫之間還會互相靠攏黏起來，看起來是造型變胖而不是呼吸。
-//   不走 formationAmount —— 那個值被十幾處 smoothstep 讀成「匯聚程度」，壓低它
-//   等於把水滴又吐回去，正是舊「脈動呼吸」模式跟形狀匯聚看起來重疊的原因。
-//
-// 用 (1-cos) 的整數個週期，值與一階導數在 hold 兩端都是 0：呼吸不會滲進 gather /
-// release，定格的頭尾也沒有速度跳變（慣性形變會讀速度）。
-const HOLD_BREATH_CYCLES = 2;
-function holdBreathScale(phase) {
-  if (P.motion !== 'formation' || P.holdBreath <= 0) return 0;
-  const gatherEnd = Math.max(0.15, P.gatherDuration);
-  const holdEnd = Math.min(0.94, gatherEnd + P.shapeHold);
-  if (holdEnd <= gatherEnd || phase <= gatherEnd || phase >= holdEnd) return 0;
-  const u = (phase - gatherEnd) / (holdEnd - gatherEnd);
-  return P.holdBreath * 0.5 * (1 - Math.cos(u * HOLD_BREATH_CYCLES * Math.PI * 2));
-}
+// 形狀匯聚的時間軸與自由軌道、穿梭環繞的飄浮位置都搬到 motions/formation.js。
+// 錨點陣列在匯入新形狀時會整個換掉，所以用 getter 傳入而不是傳陣列本身。
+const {
+  holdBreathScale, formationAmount, formationFidelityAmount, formationReleaseAmount,
+  freeOrbitPosition, formationDropPosition, weaveDropPosition,
+} = createFormationMotion(P, {
+  dropSeeds,
+  anchors: () => formationAnchors,
+  weaveAnchors: () => weaveSurfaceAnchors,
+});
 
-function formationAmount(phase) {
-  const gatherEnd = Math.max(0.15, P.gatherDuration);
-  const holdEnd = Math.min(0.94, gatherEnd + P.shapeHold);
-  const gather = smoothstepCPU(phase, 0.04, gatherEnd);
-  const release = smoothstepCPU(phase, holdEnd, 0.98);
-  return gather * (1 - release);
-}
-
-function formationFidelityAmount(phase) {
-  const gatherEnd = Math.max(0.15, P.gatherDuration);
-  const holdEnd = Math.min(0.94, gatherEnd + P.shapeHold);
-  // 直接使用循環 phase，而非已 smoothstep 過的 formationAmount 再平滑一次。
-  // 預設 12 秒循環約有 2.6 秒完成吸收，避免末段在幾幀內由水滴跳成模型。
-  const absorbStart = Math.max(0.08, gatherEnd - 0.22);
-  const gatherAbsorb = smoothstepCPU(phase, absorbStart, gatherEnd);
-  const releaseAbsorb = 1 - smoothstepCPU(phase, holdEnd, 0.98);
-  return gatherAbsorb * releaseAbsorb;
-}
-
-// 崩解噴濺的時間軸。跟其他模式最大的不同是它的「靜止態」不是散開的水滴而是
-// 完整的形狀：phase=0 與 phase=1 兩端都必須是「形狀滿值 + 碎片零半徑」，循環
-// 才接得起來。所以尾端一定要留一段重組期，把碎片收回錨點、形狀重新長回來。
-//   burst    0→1：碎片由零半徑長到滿
-//   shapeOut 0→1：形狀退場。刻意比 burst 晚起步、也拖得更久（見下）
-//   charge   0→1：炸開前的蓄力，形狀被內壓撐大
-//   flight   0→1：碎片的飛行時間，用來算彈道位移
-//   reform   0→1：收尾。用 smoothstep 讓 phase=1 處的速度也是 0，不只位置對上。
-//
-// burst 與 shapeOut 一定要分成兩條並且重疊。它們原本共用一條曲線，但形狀是靠
-// 「距離場侵蝕」退場的，而侵蝕量是固定的 0.38 —— 問號筆畫半厚只有 ~0.09，才削
-// 到四成形狀就整個不見了，碎片那時卻只長到四成大小，中間會出現一段剪影變細的
-// 空窗。（現況之所以看不出來，是因為 contactLead 讓形狀黏在碎片上硬撐，也就是
-// 那些疙瘩——等於用一個瑕疵蓋掉另一個。）
-// 讓碎片先長滿、形狀才開始退，任何一刻至少有一邊是滿的，剪影就不會塌下去。
-//
-// 兩者都以「碎片實際位移」為時鐘，而不是 phase。先前 burst/shapeOut 走固定的
-// 絕對 phase 視窗（0.022 / 0.06），碎片位移卻是相對飛散進度 —— 兩個時鐘會隨
-// 減速與飛散時間走鐘，調出「碎片都噴出去了、造型還留在原地慢慢淡」的狀態。
-// 減速愈大差距愈誇張：減速 100% 時碎片在那 0.06 內已經跑掉六成距離。
-// 改用位移當時鐘之後，這層關係與減速、飛散時間、擴散範圍全部無關 —— 造型永遠
-// 在碎片離開 15% 行程前退乾淨，也不再需要「飛散段太短要縮視窗」那組夾制。
-const SHATTER_BURST_TRAVEL = 0.05;
-const SHATTER_OUT_TRAVEL = 0.15;
-
-// 四段時長 → 循環上的絕對位置。四個滑桿是「相對權重」而不是循環佔比：先加總再
-// 正規化，所以任何組合都填滿整個循環、永遠不會互相擠爆。
-//
-// 舊版是「崩解時機（從頭算的絕對位置）」＋「重組時間（從尾端倒推）」兩個方向相反
-// 的座標，而真正想控制的飛散長度是 reformStart - at 這個殘值 —— 動任何一邊都會
-// 連帶改到它。更糟的是 reformStart = max(at + 0.1, 1 - reform) 這個夾制：崩解時機
-// 拉到 0.7、重組拉到 0.6 時實際重組只有 0.2，滑桿卻仍顯示 7.2s，數字是假的。
-// 改成四段時長之後，每個滑桿各自對應時間軸上的一段，讀數就是它真正的長度。
-//
-// 飛散與重組不能為 0：前者沒有飛散就沒有崩解可言，後者是循環接縫的必要條件
-// （phase=0/1 兩端都必須回到「完整形狀 + 零半徑碎片」）。
-function shatterSegments() {
-  const rest = Math.max(0, P.shatterRest);
-  const charge = Math.max(0, P.shatterChargeTime);
-  const flight = Math.max(0.2, P.shatterFlight);
-  const reform = Math.max(0.2, P.shatterReform);
-  const total = rest + charge + flight + reform;
-  return {
-    rest: rest / total,
-    charge: charge / total,
-    flight: flight / total,
-    reform: reform / total,
-  };
-}
-
-// 面板讀數：每段實際佔幾秒。四段相加恆等於循環秒數。
-function shatterSegmentSeconds(key) {
-  return (shatterSegments()[key] * P.loopDuration).toFixed(1) + 's';
-}
-
-function shatterTimeline(phase) {
-  const seg = shatterSegments();
-  const at = seg.rest + seg.charge;
-  const reformStart = at + seg.flight;
-  const flight = Math.max(0, Math.min(1, (phase - at) / Math.max(0.02, reformStart - at)));
-  const travel = shatterTravel(flight);
-  const burst = smoothstepCPU(travel, 0, SHATTER_BURST_TRAVEL);
-  const shapeOut = smoothstepCPU(travel, SHATTER_BURST_TRAVEL, SHATTER_OUT_TRAVEL);
-  const reform = smoothstepCPU(phase, reformStart, 0.998);
-  // 蓄力：從靜止段結束一路漲到炸開那一刻，再隨形狀退場釋放。
-  // 兩端的連續性：phase=0 時 charge=0（smoothstep 起點導數為 0，靜止段為 0 也
-  // 一樣）；phase→1 時 shapeOut 早已飽和成 1，(1 - shapeOut) 把 swell 壓回 0。
-  // 所以循環接縫兩側的膨脹量與變化率都是 0，不會在 phase 0 突然鼓一下。
-  // 蓄力時間歸零時 seg.rest === at，smoothstepCPU 會在 phase 剛好等於邊界時算出
-  // 0/0＝NaN 並一路汙染 uShapeSwell。沒有蓄力時間本來就等於沒有蓄力，直接給 0。
-  const charge = seg.charge > 1e-6 ? smoothstepCPU(phase, seg.rest, at) : 0;
-  const swell = P.shatterCharge * charge * (1 - shapeOut);
-  return { burst, shapeOut, flight, travel, reform, swell };
-}
-
-// 噴散亂數種子。碎片的初速快慢與噴散方向的擾動都由這三個雜湊值決定，換一個
-// 種子就換一整組飛散路徑。實作只是把雜湊的取樣點整段平移 —— 種子 0 會讓參數
-// 退化回原本的式子（主滴 hash11CPU(i+1)、微滴 hash11CPU(i*2.31+31)…），所以
-// 預設值與加種子之前的畫面完全一致。
-//
-// 注意這個種子不會改變「形狀被切成哪幾塊」：碎片的出發點是匯入形狀算出來的
-// 錨點，由幾何決定而非亂數，換種子只換它們往哪飛、飛多快。
-const SHATTER_SEED_STRIDE = 17.3;
-function shatterSeed(k1, k2, k3) {
-  const s = Math.round(P.shatterSeed) * SHATTER_SEED_STRIDE;
-  return { h1: hash11CPU(k1 + s), h2: hash11CPU(k2 + s), h3: hash11CPU(k3 + s) };
-}
-
-// 碎片的位移曲線。舊版是等速直線（位移 ∝ flight），只有一個「噴散力道」同時
-// 決定初速與最終距離 —— 兩件事綁死，而且完全沒有真實碎片該有的減速。拆成三個
-// 彼此獨立的軸：
-//   擴散範圍 shatterRange —— f=1 時散到多遠，與曲線形狀無關
-//   噴發減速 shatterDecel —— 運動曲線的前傾程度。0＝等速，愈大愈接近「一瞬間
-//                            衝出去再慢下來」
-//   力道差異 shatterSpeedVary —— 每顆碎片快慢／遠近的參差
-//
-// shape(f) = 1 - (1-f)^k 恆通過 (0,0) 與 (1,1)，所以調減速只改過程、不改最終
-// 散開的大小，兩個滑桿不會互相干擾 —— 這正是舊版做不到的地方。
-//
-// 附帶一個連貫性上的好處：k>1 時 shape'(1)=0，碎片會自己減速到停，剛好接上重組
-// 期把位移收回的動作；舊版是等速飛到底再被 keep 硬生生拉回來。
-function shatterTravel(f) {
-  const k = 1 + Math.max(0, P.shatterDecel) * 5;
-  return 1 - Math.pow(1 - Math.max(0, Math.min(1, f)), k);
-}
-
-// 碎片的彈道位移：從造型中心往外炸開（每顆錨點自己的方向），加上往下累積的
-// 重力。重組期把位移整個收回 0，所以最後一定回得到錨點上。
-function shatterOffset(anchor, seed, timeline, out) {
-  let dx = anchor.x, dy = anchor.y, dz = anchor.z;
-  const length = Math.hypot(dx, dy, dz);
-  if (length < 0.001) {
-    // 錨點正好落在中心時沒有向外的方向可用，改用亂數方向，否則它會原地不動。
-    dx = seed.h1 - 0.5; dy = seed.h2 - 0.5; dz = seed.h3 - 0.5;
-  } else {
-    dx /= length; dy /= length; dz /= length;
-  }
-  // 每顆碎片散開的遠近略有差異，且噴散方向帶一點亂數擾動，避免整批像同心圓膨脹。
-  // 差異 0.45 時是 0.55~1.45 倍，與舊版寫死的 (0.55 + h1 * 0.9) 完全等價。
-  const vary = 1 + (seed.h1 - 0.5) * 2 * P.shatterSpeedVary;
-  const reach = P.shatterRange * Math.max(0.05, vary);
-  const jitter = 0.35;
-  const vx = (dx + (seed.h2 - 0.5) * jitter) * reach;
-  const vy = (dy + (seed.h3 - 0.5) * jitter) * reach;
-  const vz = (dz + (seed.h1 - 0.5) * jitter) * reach * 0.8;
-  const f = timeline.flight;
-  const travel = timeline.travel;
-  // 重力照舊用 f² 而不是 travel²：空氣阻力讓橫向衝勢慢下來，但下墜是另一回事，
-  // 仍然隨時間平方累積。減速調大時碎片會先衝出去、停住、然後繼續往下掉。
-  const fall = P.shatterGravity * f * f * 0.9;
-  const keep = 1 - timeline.reform;
-  return out.set(
-    anchor.x + vx * travel * keep,
-    anchor.y + (vy * travel - fall) * keep,
-    anchor.z + vz * travel * keep,
-  );
-}
-
-// 形狀本身的可見度：崩解前滿值，炸開時讓位給碎片，重組期再長回來。兩端都是 1，
-// 所以 phase=0 與 phase=1 的畫面完全相同。
-function shatterShapeAmount(timeline) {
-  // 形狀的重新長出刻意落後碎片的回收一段：兩者同步的話，碎片還飄在遠處時
-  // 造型就已經幾乎補滿，看起來像憑空冒出一個鬼影，而不是被碎片重新填回去。
-  return Math.max(1 - timeline.shapeOut, smoothstepCPU(timeline.reform, 0.4, 1));
-}
-
-// 碎片的基準大小一律由「它代表的那塊造型有多厚」決定，而不是沿用其他模式那個
-// 與形狀無關的全域水滴大小。這是「炸開瞬間主體會變形」的根治：舊版主滴半徑
-// 0.166–0.260、微滴只有 0.089–0.098（實測差 2.65 倍、體積 18.6 倍），主滴在
-// 問號那種細筆畫上等於長出三倍粗的球，形狀還沒退場就先被撐出一個包。
-//
-// 「水滴大小」滑桿在這個模式退化成整體乘數（最小值 0.25 = 原尺寸）；碎片之間
-// 的大小差異改由「碎片大小差異」控制，且是乘在各自的局部厚度上，所以厚的地方
-// 剝下大塊、細的地方是小屑，不會有哪一顆突出到輪廓外。
-function shatterFragmentRadius(anchor, h) {
-  const thickness = anchor.thickness || anchor.radiusHint || 0.1;
-  const variety = 1 + (h - 0.5) * 2 * P.shatterVariety;
-  return thickness * (P.radius / SHATTER_RADIUS_BASE) * Math.max(0.2, variety);
-}
-
-// 碎片半徑：炸開瞬間由 0 長出，飛行途中依「碎片消散」縮小，重組期收回 0。
-function shatterRadius(base, timeline) {
-  return base * timeline.burst * (1 - timeline.flight * P.shatterFade)
-    * (1 - timeline.reform);
-}
-
-function formationReleaseAmount(phase) {
-  const gatherEnd = Math.max(0.15, P.gatherDuration);
-  const holdEnd = Math.min(0.94, gatherEnd + P.shapeHold);
-  return smoothstepCPU(phase, holdEnd, 0.98);
-}
-
-// 每顆水滴的自由段只使用整數諧波，因此 phase=0/1 的位置與速度完全相同。
-// 匯集與散開共用同一個 formationAmount，故兩段是同一路徑的正反向。
-// 匯聚前的自由飛行軌道。原本每顆水滴共用同一組 sin/cos 相位，只有起始角不同，
-// 於是整群一律同方向繞行、又都在同一個軌道平面上，看起來像一塊剛體在轉。
-// formationVariety 讓每顆各自決定旋轉方向與軌道平面傾角。
-//
-// 方向只取 ±1、諧波仍然只用整數倍，所以 phase=0/1 的位置與速度依舊完全相同 ——
-// 循環接縫不會跳（跟 weaveDropPosition 是同一條限制）。
+// 微滴的自由軌道在 updateMicroDrops 直接呼叫 freeOrbitPosition，需要自己的暫存向量。
 const freeOrbitVec = new THREE.Vector3();
-function freeOrbitPosition(a, anchor, orbit, h2, h3, tune, out) {
-  const variety = Math.max(0, Math.min(1, P.formationVariety));
-  // h3 < variety/2 的那些反向繞行：variety=0 時沒有任何一顆反向，=1 時約半數。
-  const spin = a * (h3 < variety * 0.5 ? -1 : 1);
-  const radial = 1 + (h2 - 0.5) * variety * 0.6;
-  const x = (Math.cos(spin + anchor) * orbit
-    + Math.cos(spin * 2 + anchor * tune.x2) * orbit * tune.ax2) * radial;
-  const y = (Math.sin(spin + anchor) * orbit * tune.y1
-    + Math.sin(spin * 3 + anchor * tune.y3) * orbit * tune.ay3) * radial;
-  const z = Math.sin(spin * 2 + anchor * tune.z2) * orbit * tune.az2 * radial;
-  // 繞 X 軸把整條軌道傾斜；y/z 一起轉，軌道本身的形狀不變，只是換了個平面。
-  const tilt = (h3 - 0.5) * variety * Math.PI;
-  const ct = Math.cos(tilt), st = Math.sin(tilt);
-  return out.set(x, y * ct - z * st, y * st + z * ct);
-}
-const MAIN_ORBIT_TUNE = { x2: 1.7, ax2: 0.12, y1: 0.62, y3: 0.8, ay3: 0.08, z2: 1.3, az2: 0.48 };
-const MICRO_ORBIT_TUNE = { x2: 1.3, ax2: 0.16, y1: 0.72, y3: 0.7, ay3: 0.10, z2: 1.9, az2: 0.52 };
-
-function formationDropPosition(i, phase, count, out) {
-  const tau = Math.PI * 2;
-  const a = phase * tau;
-  const { h1, h2, h3 } = dropSeeds[i];
-  const anchor = i * tau / count + h1 * 1.4;
-  const orbit = P.spread * (1.25 + h2 * 0.65);
-  const free = freeOrbitPosition(a, anchor, orbit, h2, h3, MAIN_ORBIT_TUNE, freeOrbitVec);
-  const freeX = free.x, freeY = free.y, freeZ = free.z;
-  const target = formationAnchors.length
-    ? formationAnchors[i % formationAnchors.length]
-    : null;
-  const amount = formationAmount(phase);
-  const eased = amount * amount * (3 - 2 * amount);
-  const tx = target ? target.x : Math.cos(anchor) * 0.7;
-  const ty = target ? target.y : Math.sin(anchor) * 0.7;
-  const tz = target ? target.z : 0;
-  return out.set(
-    freeX + (tx - freeX) * eased,
-    freeY + (ty - freeY) * eased,
-    freeZ + (tz - freeZ) * eased,
-  );
-}
-
-// 穿梭環繞：每顆水滴分到一個表面錨點當「家」，然後用整數諧波的 sin/cos
-// 組合（跟 formationDropPosition 的自由段同一手法）在家的附近小幅飄浮，
-// 不精確衝向任何目標點——參考的泡泡影片裡，泡泡是懸浮在原地輕輕晃動、
-// 大小各異，不是沿明確路徑移動。整數諧波保證 phase=0/1 時位置與速度完全
-// 相同，循環接縫不會跳；h1/h2/h3 錯開每顆水滴的頻率相位，才不會一起同步晃。
-function weaveDropPosition(i, phase, out) {
-  const pool = weaveSurfaceAnchors.length ? weaveSurfaceAnchors : formationAnchors;
-  if (!pool.length) return out.set(0, 0, 0);
-  const { h1, h2, h3 } = dropSeeds[i];
-  const home = pool[Math.floor(h2 * pool.length) % pool.length];
-  // 速度只能用整數倍率：sin(k·phase·2π) 對整數 k 而言在 phase=0/1 仍完全同值，
-  // 换成非整數會在循環接縫留下跳變。
-  const speed = Math.max(1, Math.round(P.weaveDriftSpeed));
-  const a = phase * TAU * speed;
-  const driftScale = (0.14 + h1 * 0.12) * P.weaveDriftAmount;
-  const wx = Math.cos(a + h1 * TAU) * driftScale
-    + Math.cos(a * 2 + h3 * TAU) * driftScale * 0.4;
-  const wy = Math.sin(a * 2 + h2 * TAU) * driftScale * 0.8
-    + Math.sin(a * 3 + h1 * TAU) * driftScale * 0.3;
-  const wz = Math.sin(a + h3 * TAU) * driftScale * 0.6;
-  return out.set(home.x + wx, home.y + wy, home.z + wz);
-}
 
 const formationPosNow = new THREE.Vector3();
 const formationPosBefore = new THREE.Vector3();
@@ -2416,12 +2121,11 @@ function resetRamp() {
 // 不會報錯、只會安靜地讓某條滑桿在無效的模式下看起來可用。
 //
 // 巢狀是允許的：子孫只宣告自己額外的條件，祖先的條件由 applyGates 自動疊上。
+//
+// 每個動態模式自己的 gate 由 registry 產生（新增模式時不必回來補一行），
+// 形狀來源這種與模式無關的條件仍寫在這裡。
 const GATES = {
-  split:     () => P.motion === 'cinematic',
-  formation: () => P.motion === 'formation',
-  weave:     () => P.motion === 'weave',
-  shatter:   () => P.motion === 'shatter',
-  shape:     () => usesShapeField(P.motion),
+  ...motionGates(() => P.motion),
   svg:       () => P.shapeSource === 'svg',
   glb:       () => P.shapeSource !== 'svg',
 };
@@ -2551,18 +2255,9 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   Object.assign(P, DEFAULTS, SELECT_DEFAULTS, TOGGLE_DEFAULTS, COLOR_DEFAULTS);
   resetMaterialProfiles();
   if (mobileRenderQuery.matches && !PREVIEW) P.cameraDistance = MOBILE_CAMERA_DISTANCE_DEFAULT;
-  motionCounts.cinematic = DEFAULTS.count;
-  motionCounts.formation = FORMATION_DEFAULT_COUNT;
-  motionCounts.weave = WEAVE_DEFAULT_COUNT;
-  motionCounts.shatter = SHATTER_DEFAULT_COUNT;
-  motionRadius.cinematic = DEFAULTS.radius;
-  motionRadius.formation = FORMATION_DEFAULT_RADIUS;
-  motionRadius.weave = FORMATION_DEFAULT_RADIUS;
-  motionRadius.shatter = SHATTER_RADIUS_BASE;
-  motionLoopDuration.cinematic = DEFAULTS.loopDuration;
-  motionLoopDuration.formation = DEFAULTS.loopDuration;
-  motionLoopDuration.weave = DEFAULTS.loopDuration;
-  motionLoopDuration.shatter = SHATTER_DEFAULT_LOOP_DURATION;
+  motionCounts = { ...MOTION_DEFAULT_COUNTS };
+  motionRadius = { ...MOTION_DEFAULT_RADIUS };
+  motionLoopDuration = { ...MOTION_DEFAULT_LOOP_DURATION };
   resetSpectralCausticColors();
   resetRamp();
   bindControls();
