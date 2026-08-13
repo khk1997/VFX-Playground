@@ -138,9 +138,6 @@ uniform float uDispersionEnabled;
 uniform float uDispersionSeparation;
 uniform float uCausticScale;
 uniform float uCausticSharpness;
-uniform float uRealDispersion;
-uniform float uRealDispersionSeparation;
-uniform float uRealDispersionEnabled;
 uniform float uSpectralCausticEnabled;
 uniform float uSpectralCausticIntensity;
 uniform float uSpectralCausticFocus;
@@ -586,14 +583,24 @@ vec3 calcNormal(vec3 p){
   // SVG 同理：微分半徑若小於一個 texel，bilinear 在單一 texel 內是線性的，
   // 相鄰像素會取到同一個常數梯度，反射就顯出方格。舊版寫死 0.014，在 160²
   // 時只有 0.75 個 texel，正是上面註解警告的情形；改為隨 texel 縮放。
-  // 微分半徑同時要滿足兩個互相拉扯的下限：不能小於一個 texel（否則取到
-  // 常數梯度，方格反射）、也不能大到跨過 uShapeEdgeBevel 的圓角過渡帶
-  // （否則兩側取樣點各自落在圓角內外，法線隨 p 移動離散跳動，側壁沿擠出
-  // 深度方向就會出現一條條隨角度變化的假輪廓線）。預設格線密度下，固定
-  // 1.5 texel 的舊值遠大於圓角半徑，因此優先貼著圓角半徑，只留一個很低
-  // 的 texel 樓地板避免真的縮到零。
   float svgTexel = 3.0 / max(1.0, uShapeGrid);
-  float svgH = clamp(uShapeEdgeBevel * 0.5, svgTexel * 0.35, svgTexel * 1.5);
+  // SVG 實際烘焙為 512²；舊公式的 1.5 texel 上限會讓 bevel-aware
+  // 值被夾回舊值，cb2ac5d 因此在真實 SVG 路徑上沒有改變 footprint。
+  // 側壁需要跨過約 2 texels 才能平均 SDF 殘留的次像素梯度跳動；
+  // 厚度方向則不能用同樣的大步長，否則會跨過正面／側壁倒角。
+  // 因此 SVG 改用分軸中央差分：XY 平滑輪廓梯度，Z 獨立保留倒角。
+  if (uShapeType == 1 && uShapeProgress > 0.001) {
+    float xyH = min(svgTexel * 2.0, max(svgTexel * 0.75, uShapeEdgeBevel * 0.48));
+    float zH = min(xyH, max(0.0009, uShapeEdgeBevel * 0.22));
+    float dx = mapScene(p + vec3(xyH, 0.0, 0.0), true)
+      - mapScene(p - vec3(xyH, 0.0, 0.0), true);
+    float dy = mapScene(p + vec3(0.0, xyH, 0.0), true)
+      - mapScene(p - vec3(0.0, xyH, 0.0), true);
+    float dz = mapScene(p + vec3(0.0, 0.0, zH), true)
+      - mapScene(p - vec3(0.0, 0.0, zH), true);
+    return normalize(vec3(dx / xyH, dy / xyH, dz / zH));
+  }
+  float svgH = svgTexel * 1.5;
   float shapeH = uShapeType == 2 ? voxelH * 1.70 : svgH;
   float h = mix(0.0009, shapeH, uShapeProgress);
   return normalize(
@@ -810,7 +817,6 @@ void main(){
 
   vec4 bg = backgroundSample(rd);
   float dispersionStrength = uDispersion * uDispersionEnabled;
-  float realDispersionStrength = uRealDispersion * uRealDispersionEnabled;
 
   // 僅追蹤真正穿過物件包圍球的射線；色散發生在透明材質內部，不生成
   // 幾何外側的彩虹描邊或光暈。
@@ -867,16 +873,13 @@ void main(){
   vec3 transmissionDir = rd;
   vec3 dispersionNormal = N;
   float localPrism = material.edgeFactor * 0.18;
-  vec3 realDispersionDelta = vec3(0.0);
   vec3 exitPoint = p;
   vec3 exitNormal = -N;
   float pathLength = 0.0;
   bool hasExitSurface = false;
   bool needsEnvironmentTransmission =
     uBgMode == 0 && uHasEnv == 1
-      && (uEnvRefraction > 0.001
-        || universalGlass
-        || (realDispersionStrength > 0.001 && uRealDispersionSeparation > 0.001));
+      && (uEnvRefraction > 0.001 || universalGlass);
   if (brightBg > 0.001 || needsEnvironmentTransmission || universalGlass) {
     vec3 insideDir = refract(rd, N, 1.0 / uIOR);
     if (dot(insideDir, insideDir) > 0.0001) {
@@ -948,9 +951,7 @@ void main(){
   }
   // 純色只控制畫布；水滴內部獨立取樣同一張 HDRI。若背面追蹤未命中，
   // transmissionDir 會保留前表面的 Snell 折射方向，滑桿仍能穩定產生效果。
-  if (uBgMode == 0 && uHasEnv == 1
-      && (uEnvRefraction > 0.001
-        || (realDispersionStrength > 0.001 && uRealDispersionSeparation > 0.001))) {
+  if (uBgMode == 0 && uHasEnv == 1 && uEnvRefraction > 0.001) {
     vec3 envRefraction = sampleEnvironmentBackdrop(transmissionDir);
     // 白底只借用 HDRI 的明暗結構，不把攝影棚的米黃色牆面染進玻璃。
     // envRefraction 滑桿仍控制混合量，因此 0 的語意完全不變。
@@ -965,69 +966,7 @@ void main(){
       cleanBrightRefraction,
       whiteBackdrop * 0.94
     );
-    if (realDispersionStrength > 0.001 && uRealDispersionSeparation > 0.001) {
-      // 參考 Prism Tunnel 的 thin-glass 方法：不是把同一方向做任意 RGB
-      // 位移，而是用三個波長各自的 uIOR 做三次 Snell 折射，再抽取 R/G/B。
-      // 1.50 / 1.53 / 1.57 的相對間距保留，但以目前材質 uIOR 為中心。
-      float wavelengthScale = realDispersionStrength * uRealDispersionSeparation;
-      float redIor = max(1.01, uIOR - 0.03 * wavelengthScale);
-      float greenIor = uIOR;
-      float blueIor = uIOR + 0.04 * wavelengthScale;
-      vec3 redDir = refract(rd, N, 1.0 / redIor);
-      vec3 greenDir = refract(rd, N, 1.0 / greenIor);
-      vec3 blueDir = refract(rd, N, 1.0 / blueIor);
-      if (dot(redDir, redDir) < 0.0001) redDir = transmissionDir;
-      if (dot(greenDir, greenDir) < 0.0001) greenDir = transmissionDir;
-      if (dot(blueDir, blueDir) < 0.0001) blueDir = transmissionDir;
-      vec3 redSample = sampleEnvironmentBackdrop(redDir);
-      vec3 greenSample = sampleEnvironmentBackdrop(greenDir);
-      vec3 blueSample = sampleEnvironmentBackdrop(blueDir);
-      // HDRI 在此只當作光場，不把它的 RGB 影像畫進玻璃。三個波長
-      // 全部先轉亮度，再以跨波長的一、二階差分提取局部高頻光變化。
-      // 大面積牆面、窗戶等低頻內容會被抵消，只留下折射邊界的能量。
-      vec3 envLumaWeights = vec3(0.2126, 0.7152, 0.0722);
-      float redLight = dot(redSample, envLumaWeights);
-      float greenLight = dot(greenSample, envLumaWeights);
-      float blueLight = dot(blueSample, envLumaWeights);
-      float firstDerivative = redLight - blueLight;
-      float secondDerivative = redLight - 2.0 * greenLight + blueLight;
-      float spectralEnergy =
-        abs(secondDerivative) * 1.25 + abs(firstDerivative) * 0.22;
-
-      // 光譜顏色由波長差的方向決定，不沿用 HDRI 本身的顏色，因此不會
-      // 把攝影棚染進模型。二階差分決定黃綠／紫紅側的局部偏移。
-      float derivativeScale =
-        abs(firstDerivative) + abs(secondDerivative) + 0.0001;
-      float spectralCoordinate = clamp(
-        0.5 + 0.34 * firstDerivative / derivativeScale
-          + 0.16 * secondDerivative / derivativeScale,
-        0.0,
-        1.0
-      );
-      vec3 spectralColor = separateSpectrum(
-        visibleSpectrum(spectralCoordinate)
-      );
-      float prismVisibility = smoothstep(0.10, 0.92, localPrism);
-      prismVisibility = mix(0.08, 1.0, prismVisibility);
-      realDispersionDelta =
-        spectralColor * spectralEnergy * prismVisibility;
-    }
-    // 背景影像是否可見只由「環境折射」控制，與真實色散開關無關。
     refractedBg = mix(refractedBg, envRefraction, uEnvRefraction);
-  } else if (uBgMode == 1 && uHasEnv == 1
-    && realDispersionStrength > 0.001 && uRealDispersionSeparation > 0.001) {
-    // HDRI 畫布同樣使用三個物理 uIOR；此模式保留完整折射影像。
-    float wavelengthScale = realDispersionStrength * uRealDispersionSeparation;
-    vec3 redDir = refract(rd, N, 1.0 / max(1.01, uIOR - 0.03 * wavelengthScale));
-    vec3 greenDir = refract(rd, N, 1.0 / uIOR);
-    vec3 blueDir = refract(rd, N, 1.0 / (uIOR + 0.04 * wavelengthScale));
-    if (dot(redDir, redDir) < 0.0001) redDir = transmissionDir;
-    if (dot(greenDir, greenDir) < 0.0001) greenDir = transmissionDir;
-    if (dot(blueDir, blueDir) < 0.0001) blueDir = transmissionDir;
-    vec3 redSample = sampleEnvironmentBackdrop(redDir);
-    vec3 greenSample = sampleEnvironmentBackdrop(greenDir);
-    vec3 blueSample = sampleEnvironmentBackdrop(blueDir);
-    refractedBg = vec3(redSample.r, greenSample.g, blueSample.b);
   }
 
   // 白底以帶微冷色的透射衰減塑形；反射只填入剩餘亮度空間，避免大片 clipping。
@@ -1479,39 +1418,6 @@ void main(){
       causticScreen,
       causticTransmission,
       causticTransmissionAmount
-    );
-  }
-
-  // 真實色散在純色／黑色畫布上只加入已去除無色 HDRI 的稜鏡光。
-  // screen 合成保留光的能量與亮度，也不會把完整攝影棚背景露出來。
-  if (realDispersionStrength > 0.001 && uRealDispersionSeparation > 0.001) {
-    float deltaMagnitude = length(realDispersionDelta);
-    float contrastGate = smoothstep(0.001, 0.035, deltaMagnitude);
-    float darkRealGain = mix(1.15, 2.8, 1.0 - brightBg)
-      * realDispersionStrength;
-    vec3 spectralLight = 1.0 - exp(
-      -realDispersionDelta * contrastGate * darkRealGain
-    );
-    vec3 realDispersionScreen = 1.0
-      - (1.0 - finalColor) * (1.0 - spectralLight);
-    float spectralPeak = max(
-      spectralLight.r,
-      max(spectralLight.g, spectralLight.b)
-    );
-    vec3 normalizedSpectrum = spectralLight / max(spectralPeak, 0.001);
-    vec3 realDispersionTransmission = mix(
-      vec3(0.78, 0.91, 1.0),
-      normalizedSpectrum,
-      0.68
-    );
-    finalColor = mix(
-      realDispersionScreen,
-      realDispersionTransmission,
-      brightColorSupport * clamp(
-        spectralPeak * mix(0.46, 0.62, membraneMode),
-        0.0,
-        0.56
-      )
     );
   }
 

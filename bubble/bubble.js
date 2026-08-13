@@ -42,8 +42,6 @@ const DEFAULTS = {              // 數值滑桿
   dispersionSeparation: 1.5,
   causticScale: 1.0,
   causticSharpness: 0.65,
-  realDispersion: 1,
-  realDispersionSeparation: 0.6,
   spectralCausticIntensity: 1.5,
   spectralCausticFocus: 0.12,
   spectralCausticWidth: 0.42,
@@ -196,7 +194,6 @@ const TOGGLE_DEFAULTS = {
   brightBgAssist: true,
   filmEnabled: false,
   dispersionEnabled: true,
-  realDispersionEnabled: false,
   spectralCausticEnabled: true,
 };
 const COLOR_DEFAULTS  = {
@@ -339,7 +336,6 @@ const TOGGLES = {
   brightBgAssist: 'uBrightBgAssist',
   filmEnabled: 'uFilmEnabled',
   dispersionEnabled: 'uDispersionEnabled',
-  realDispersionEnabled: 'uRealDispersionEnabled',
   spectralCausticEnabled: 'uSpectralCausticEnabled',
   edgeDropsEnabled: () => applyEdgeDropDistribution(),
 };
@@ -375,8 +371,6 @@ const fmt = {
   dispersionSeparation: v => 'x' + v.toFixed(2),
   causticScale: v => 'x' + v.toFixed(2),
   causticSharpness: v => Math.round(v * 100) + '%',
-  realDispersion: v => Math.round(v * 100) + '%',
-  realDispersionSeparation: v => 'x' + v.toFixed(2),
   spectralCausticIntensity: v => Math.round(v * 100) + '%',
   spectralCausticFocus: v => Math.round(v * 100) + '%',
   spectralCausticWidth: v => 'x' + v.toFixed(2),
@@ -464,7 +458,7 @@ function refreshShatterTimelineReadouts() {
   if (total) total.textContent = `四段合計 ${P.loopDuration.toFixed(1)}s（＝循環秒數）`;
 }
 
-import { VERT, FRAG } from './shaders.js?v=universal-1';
+import { VERT, FRAG } from './shaders.js?v=universal-3';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -1943,8 +1937,6 @@ function initGL() {
     uDispersionSeparation: { value: P.dispersionSeparation },
     uCausticScale: { value: P.causticScale },
     uCausticSharpness: { value: P.causticSharpness },
-    uRealDispersion: { value: P.realDispersion },
-    uRealDispersionSeparation: { value: P.realDispersionSeparation },
     uSpectralCausticIntensity: { value: P.spectralCausticIntensity },
     uSpectralCausticFocus: { value: P.spectralCausticFocus },
     uSpectralCausticWidth: { value: P.spectralCausticWidth },
@@ -1968,7 +1960,6 @@ function initGL() {
     uArtPatternSpeed: { value: P.artPatternSpeed },
     uArtGravity: { value: P.artGravity },
     uDispersionEnabled: { value: P.dispersionEnabled ? 1 : 0 },
-    uRealDispersionEnabled: { value: P.realDispersionEnabled ? 1 : 0 },
     uSpectralCausticEnabled: { value: P.spectralCausticEnabled ? 1 : 0 },
     uFilmEnabled: { value: P.filmEnabled ? 1 : 0 },
     uFilmBlur:   { value: P.filmBlur },
@@ -2452,7 +2443,6 @@ function updateUIState() {
   };
   setFeatureState('thinFilmGroup', P.filmEnabled);
   setFeatureState('artDispersionGroup', P.dispersionEnabled);
-  setFeatureState('physicalDispersionGroup', P.realDispersionEnabled);
   setFeatureState('spectralCausticGroup', P.spectralCausticEnabled);
   const spectral = P.colorMode === 'spectral';
   const rampGroup = document.getElementById('rampGroup');
@@ -3333,7 +3323,7 @@ if (!PREVIEW && window.PresetIO) {
     // 配色數量會決定色標列的顯示，順序顛倒會讓後套的值被蓋掉。
     applyFirst: [
       'motion', 'bgMode', 'bgColor', 'materialStyle', 'colorMode', 'shapeSource', 'shapeQuality',
-      'filmEnabled', 'dispersionEnabled', 'realDispersionEnabled',
+      'filmEnabled', 'dispersionEnabled',
       'spectralCausticEnabled', 'rampCount',
     ],
     assetNote: 'HDRI 與 SVG / GLB 素材無法存進參數檔，請自行載入',

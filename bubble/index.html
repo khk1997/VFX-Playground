@@ -122,14 +122,6 @@
       <div class="row"><label>焦散銳利</label><input type="range" id="causticSharpness" min="0" max="1" step="0.01" value="0.65"><span class="val" id="causticSharpness_v"></span></div>
     </div>
 
-    <div class="effectBlock effectBlock--physical" id="physicalDispersionGroup">
-      <div class="effectTitle"><span>IOR</span> 環境物理色散</div>
-      <div class="row toggleRow"><label>真實色散</label><input type="checkbox" id="realDispersionEnabled"><span class="switchTrack" aria-hidden="true"></span><span class="val" id="realDispersionEnabled_v">關閉</span></div>
-      <div class="row"><label>真實強度</label><input type="range" id="realDispersion" min="0" max="1" step="0.01" value="1"><span class="val" id="realDispersion_v"></span></div>
-      <div class="row"><label>波長分離</label><input type="range" id="realDispersionSeparation" min="0" max="1.5" step="0.01" value="0.6"><span class="val" id="realDispersionSeparation_v"></span></div>
-      <div class="note">以 HDRI 明暗邊界驅動三組 IOR 折射，不與藝術配色共用。</div>
-    </div>
-
     <div class="effectBlock effectBlock--caustic" id="spectralCausticGroup">
       <div class="effectTitle"><span>LIGHT</span> 虛擬光譜焦散</div>
       <div class="row toggleRow"><label>光譜焦散</label><input type="checkbox" id="spectralCausticEnabled" checked><span class="switchTrack" aria-hidden="true"></span><span class="val" id="spectralCausticEnabled_v">開啟</span></div>
@@ -376,6 +368,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=universal-dbg2"></script>
+<script type="module" src="./bubble.js?v=universal-dbg4"></script>
 </body>
 </html>
