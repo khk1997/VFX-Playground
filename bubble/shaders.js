@@ -218,6 +218,12 @@ const int   MAX_MICRO = 20;
 const int   MAX_NEGATIVE = 4;
 const float PI   = 3.14159265359;
 const float TAU  = 6.28318530718;
+const vec3 SPECTRUM_VIOLET = vec3(0.12, 0.0, 1.0);
+const vec3 SPECTRUM_CYAN = vec3(0.0, 0.56, 1.0);
+const vec3 SPECTRUM_GREEN = vec3(0.12, 1.0, 0.18);
+const vec3 SPECTRUM_AMBER = vec3(1.0, 0.72, 0.0);
+const vec3 SPECTRUM_RED = vec3(1.0, 0.0, 0.03);
+const vec3 SPECTRUM_NORMALIZATION = vec3(1.24, 2.56, 2.21);
 
 ${NOISE_GLSL}
 
@@ -1116,13 +1122,12 @@ void main(){
   // 目前 SDF 造型。比 RGB 三點多出青、綠與黃綠過渡，但仍把
   // 額外追蹤控制在四條，避免高解析度時成本失控。
   if (uRayDispersionEnabled > 0.5 && hasExitSurface) {
-    const vec3 violetResponse = vec3(0.12, 0.0, 1.0);
-    const vec3 cyanResponse = vec3(0.0, 0.56, 1.0);
-    const vec3 greenResponse = vec3(0.12, 1.0, 0.18);
-    const vec3 amberResponse = vec3(1.0, 0.72, 0.0);
-    const vec3 redResponse = vec3(1.0, 0.0, 0.03);
-    vec3 spectralNormalization = violetResponse + cyanResponse
-      + greenResponse + amberResponse + redResponse;
+    vec3 violetResponse = SPECTRUM_VIOLET;
+    vec3 cyanResponse = SPECTRUM_CYAN;
+    vec3 greenResponse = SPECTRUM_GREEN;
+    vec3 amberResponse = SPECTRUM_AMBER;
+    vec3 redResponse = SPECTRUM_RED;
+    vec3 spectralNormalization = SPECTRUM_NORMALIZATION;
     vec3 spectralSum = vec3(0.0);
     vec3 focusedSum = vec3(0.0);
     vec3 violetSource;

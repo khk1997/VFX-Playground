@@ -2143,7 +2143,7 @@ function bindPointer() {
     const dx = e.clientX - lastX, dy = e.clientY - lastY;
     lastX = e.clientX; lastY = e.clientY;
     rot.y = Math.max(-Math.PI, Math.min(Math.PI, rot.y + dx * 0.006));
-    rot.x = Math.max(-Math.PI * 0.5, Math.min(Math.PI * 0.5, rot.x + dy * 0.006));
+    rot.x = Math.max(-1.2, Math.min(1.2, rot.x + dy * 0.006));
     const rotationX = document.getElementById('cameraRotationX');
     const rotationY = document.getElementById('cameraRotationY');
     if (rotationX) { rotationX.value = (rot.x * 180 / Math.PI).toFixed(1); rotationX.dispatchEvent(new Event('input', { bubbles: true })); }
@@ -2250,6 +2250,7 @@ function bindControls() {
           refreshShatterTimelineReadouts();
         }
       }
+      requestPausedRender();
     };
     el.value = P[key];
     if (!el._bound) { el.addEventListener('input', update); el._bound = true; }
@@ -2295,6 +2296,7 @@ function bindControls() {
       if ((key === 'motion' || key === 'shapeSource') && previousValue !== P[key]) {
         ensureShapeForCurrentSource();
       }
+      requestPausedRender();
     };
     el.value = P[key];
     if (!el._bound) { el.addEventListener('change', update); el._bound = true; }
@@ -2310,6 +2312,7 @@ function bindControls() {
       if (valEl) valEl.textContent = P[key] ? '開啟' : '關閉';
       applyToggle(key);
       updateUIState();
+      requestPausedRender();
     };
     el.checked = P[key];
     // 原生 checkbox 為視覺隱藏狀態；將文字標籤正式連到 input，
@@ -2337,6 +2340,7 @@ function bindControls() {
         document.body.style.background = (P.bgMode === 'hdri') ? '#000' : el.value;
         updateUIState();
       }
+      requestPausedRender();
     };
     el.value = P[key];
     if (!el._bound) { el.addEventListener('input', update); el._bound = true; }
@@ -2351,7 +2355,10 @@ function bindSpectralCausticColors() {
   for (let i = 0; i < SPECTRAL_CAUSTIC_DEFAULTS.length; i++) {
     const el = document.getElementById('spectralCausticCol' + i);
     if (!el._bound) {
-      el.addEventListener('input', buildSpectralCausticLUT);
+      el.addEventListener('input', () => {
+        buildSpectralCausticLUT();
+        requestPausedRender();
+      });
       el._bound = true;
     }
   }
@@ -2382,7 +2389,11 @@ function bindRamp() {
     const col = document.getElementById('stopCol' + i);
     const pos = document.getElementById('stopPos' + i);
     const pv = document.getElementById('stopPos' + i + '_v');
-    const upd = () => { if (pv) pv.textContent = parseFloat(pos.value).toFixed(2); buildRampLUT(); };
+  const upd = () => {
+    if (pv) pv.textContent = parseFloat(pos.value).toFixed(2);
+    buildRampLUT();
+    requestPausedRender();
+  };
     if (!col._bound) { col.addEventListener('input', upd); col._bound = true; }
     if (!pos._bound) { pos.addEventListener('input', upd); pos._bound = true; }
     upd();
@@ -2809,8 +2820,44 @@ let exportJob = null;
 let exportPreviewSettings = null;
 let exportPreviewContext = null;
 let rafId = 0, last = 0;
+let pausedRenderRaf = 0;
 const pauseBtn = document.getElementById('playCtl');
 function isPaused() { return userPaused || extPaused || shapeConverting || exportJob || document.hidden; }
+function requestPausedRender() {
+  if ((!userPaused && !extPaused) || shapeConverting || exportJob || document.hidden || pausedRenderRaf) return;
+  pausedRenderRaf = requestAnimationFrame(() => {
+    pausedRenderRaf = 0;
+    if (isPaused() && !shapeConverting && !exportJob && !document.hidden) {
+      if (!inited) initGL();
+      updatePausedCameraRotation();
+      refreshRenderQuality();
+      uniforms.uResolution.value.set(
+        Math.max(1, canvas.clientWidth || document.documentElement.clientWidth),
+        Math.max(1, canvas.clientHeight || document.documentElement.clientHeight),
+      );
+      uniforms.uMaxSteps.value = resolveMaxSteps();
+      renderer.render(scene, camera);
+      updateExportCameraPreview();
+    }
+  });
+}
+
+function updatePausedCameraRotation() {
+  if (!uniforms) return;
+  rot.x = Math.max(-1.2, Math.min(1.2, rot.x));
+  const phase01 = simT / Math.max(0.001, P.loopDuration);
+  const loopAngle = phase01 * Math.PI * 2;
+  const autoYaw = (Math.sin(loopAngle) * 0.85 + Math.sin(loopAngle * 2 + 0.6) * 0.15) * P.spin * 0.6;
+  const autoPitch = Math.sin(loopAngle + 1.1) * P.spin * 0.14;
+  const mobile = document.documentElement.clientWidth <= 760
+    && document.documentElement.clientWidth / Math.max(1, document.documentElement.clientHeight) < 0.8;
+  rotM4.makeRotationY(rot.y + autoYaw + (mobile ? -0.42 : 0));
+  tmpX.makeRotationX(rot.x + autoPitch);
+  rotM4.multiply(tmpX);
+  tmpZ.makeRotationZ(-0.03);
+  rotM4.multiply(tmpZ);
+  uniforms.uRot.value.setFromMatrix4(rotM4);
+}
 function syncLoop() {
   if (isPaused()) {
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
