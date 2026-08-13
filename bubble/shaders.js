@@ -586,7 +586,14 @@ vec3 calcNormal(vec3 p){
   // SVG 同理：微分半徑若小於一個 texel，bilinear 在單一 texel 內是線性的，
   // 相鄰像素會取到同一個常數梯度，反射就顯出方格。舊版寫死 0.014，在 160²
   // 時只有 0.75 個 texel，正是上面註解警告的情形；改為隨 texel 縮放。
-  float svgH = 3.0 / max(1.0, uShapeGrid) * 1.5;
+  // 微分半徑同時要滿足兩個互相拉扯的下限：不能小於一個 texel（否則取到
+  // 常數梯度，方格反射）、也不能大到跨過 uShapeEdgeBevel 的圓角過渡帶
+  // （否則兩側取樣點各自落在圓角內外，法線隨 p 移動離散跳動，側壁沿擠出
+  // 深度方向就會出現一條條隨角度變化的假輪廓線）。預設格線密度下，固定
+  // 1.5 texel 的舊值遠大於圓角半徑，因此優先貼著圓角半徑，只留一個很低
+  // 的 texel 樓地板避免真的縮到零。
+  float svgTexel = 3.0 / max(1.0, uShapeGrid);
+  float svgH = clamp(uShapeEdgeBevel * 0.5, svgTexel * 0.35, svgTexel * 1.5);
   float shapeH = uShapeType == 2 ? voxelH * 1.70 : svgH;
   float h = mix(0.0009, shapeH, uShapeProgress);
   return normalize(
