@@ -138,6 +138,14 @@ uniform float uDispersionEnabled;
 uniform float uDispersionSeparation;
 uniform float uCausticScale;
 uniform float uCausticSharpness;
+uniform float uRayDispersion;
+uniform float uRayDispersionAbbe;
+uniform float uRayDispersionEnabled;
+uniform float uRayDispersionLightIntensity;
+uniform float uRayDispersionLightSize;
+uniform float uRayDispersionFocus;
+uniform float uRayDispersionAzimuth;
+uniform float uRayDispersionElevation;
 uniform float uSpectralCausticEnabled;
 uniform float uSpectralCausticIntensity;
 uniform float uSpectralCausticFocus;
@@ -276,12 +284,12 @@ vec3 sampleReflection(vec3 d, float rough){
 vec3 sampleEnvironmentBackdrop(vec3 d){
   if (uHasEnv != 1) return uBgColor;
   d = rotateEnvDir(d);
-  vec2 uvE = vec2(atan(d.z, d.x) / TAU + 0.5, asin(clamp(d.y, -1.0, 1.0)) / PI + 0.5);
-  vec3 sharpEnv = texture2D(uEnvMap, uvE).rgb;
-  if (uHdriBlur <= 0.001) return sharpEnv;
-  vec3 blurredEnv = textureCubeUV(uPmremMap, d, uHdriBlur).rgb;
-  float blurBlend = smoothstep(0.0, 0.08, uHdriBlur);
-  return mix(sharpEnv, blurredEnv, blurBlend);
+  // 1K equirectangular HDRI 直接以 LOD 0 放進高解析度折射時，少量 texel
+  // 會被厚玻璃大幅放大，攝影棚牆面看起來就像一塊塊方格。即使 UI 的模糊
+  // 是 0，也保留一個只相當於射線 footprint 的 PMREM 下限；這是反鋸齒，
+  // 不是美術模糊。滑桿往上時仍直接控制其餘 roughness 範圍。
+  float rayFootprint = max(0.025, uHdriBlur);
+  return textureCubeUV(uPmremMap, d, rayFootprint).rgb;
 }
 vec4 backgroundSample(vec3 rd){
   if (uBgMode == 1 && uHasEnv == 1){
@@ -641,6 +649,141 @@ bool traceExitSurface(
   return found;
 }
 
+// 單一波長的完整厚介質光路：從入射面依 Snell 定律進入，
+// 穿過目前 SDF 造型尋找自己的背面出口，再依該出口法線折射出去。
+// 若第一個出口發生全內反射，允許一次內部彈跳，與主折射路徑一致。
+bool traceWavelength(
+  vec3 entryPoint,
+  vec3 entryNormal,
+  vec3 incidentDir,
+  float ior,
+  out vec3 outgoingDir,
+  out float totalPath
+){
+  vec3 insideDir = refract(incidentDir, entryNormal, 1.0 / ior);
+  outgoingDir = incidentDir;
+  totalPath = 0.0;
+  if (dot(insideDir, insideDir) < 0.0001) return false;
+  insideDir = normalize(insideDir);
+
+  vec3 exitPoint;
+  vec3 exitNormal;
+  float pathLength;
+  if (!traceExitSurface(entryPoint, insideDir, exitPoint, exitNormal, pathLength)) {
+    return false;
+  }
+  totalPath = pathLength;
+  vec3 exitDir = refract(insideDir, -exitNormal, ior);
+  if (dot(exitDir, exitDir) < 0.0001) {
+    vec3 bounceDir = normalize(reflect(insideDir, exitNormal));
+    vec3 secondExitPoint;
+    vec3 secondExitNormal;
+    float secondPath;
+    if (traceExitSurface(
+      exitPoint,
+      bounceDir,
+      secondExitPoint,
+      secondExitNormal,
+      secondPath
+    )) {
+      totalPath += secondPath;
+      exitDir = refract(bounceDir, -secondExitNormal, ior);
+    }
+  }
+  if (dot(exitDir, exitDir) < 0.0001) return false;
+  outgoingDir = normalize(exitDir);
+  return true;
+}
+
+// 由介質在 d-line (587.6nm) 的 IOR 與阿貝數反推兩項 Cauchy 曲線。
+// Vd = (n_d - 1) / (n_F - n_C)，F/C 分別是 486.1nm / 656.3nm。
+// 這比手動偏移 RGB IOR 更一致：任意波長都落在同一條材質色散曲線上。
+float cauchyIor(float wavelengthNm){
+  float lambda = wavelengthNm * 0.001;
+  const float lambdaD = 0.58756;
+  const float lambdaF = 0.48613;
+  const float lambdaC = 0.65627;
+  float spread = max(0.0, uIOR - 1.0) / max(1.0, uRayDispersionAbbe)
+    * max(0.0, uRayDispersion);
+  float invF = 1.0 / (lambdaF * lambdaF);
+  float invC = 1.0 / (lambdaC * lambdaC);
+  float b = spread / max(0.0001, invF - invC);
+  float a = uIOR - b / (lambdaD * lambdaD);
+  return max(1.001, a + b / (lambda * lambda));
+}
+
+// HDRI 只有 RGB，無法還原真正的連續光譜；這裡用每個波長的 RGB
+// 感度基底估計該波長能量，再累加回顯示色。白光會重建為白色，
+// 而不同方向的 HDRI 光場會依造型折射被分成多段色帶。
+vec3 wavelengthEnergy(vec3 environment, vec3 response){
+  float source = dot(environment, response)
+    / max(0.001, response.r + response.g + response.b);
+  return response * source;
+}
+
+vec3 rayDispersionLightDirection(){
+  float azimuth = radians(uRayDispersionAzimuth);
+  float elevation = radians(uRayDispersionElevation);
+  return normalize(vec3(
+    cos(elevation) * sin(azimuth),
+    sin(elevation),
+    cos(elevation) * cos(azimuth)
+  ));
+}
+
+// 小型白色遠光源的角向 radiance。它不把彩虹貼到表面；每個波長必須先
+// 穿過 SDF、從自己的背面出口折射出去，只有出射方向真正對準光源才會亮。
+// 因此轉動模型、改 IOR／阿貝數或換造型時，光帶都會跟著光路移動。
+float rayDispersionSourceLobe(vec3 outgoingDir){
+  // 厚曲面經過前後兩次折射後，出射方向會覆蓋很大的立體角；18° 以下的
+  // 小光點幾乎只剩像素級閃光。這裡把控制器映射到 2°–80° 的棚燈／柔光箱
+  // 尺寸，彩帶形成於光源邊界，各波長因幾何出口不同而自然錯開。
+  float halfAngle = radians(mix(2.0, 80.0, uRayDispersionLightSize));
+  float alignment = dot(normalize(outgoingDir), rayDispersionLightDirection());
+  float outer = cos(halfAngle);
+  float inner = cos(halfAngle * mix(0.18, 0.72, 1.0 - uRayDispersionFocus));
+  float lobe = smoothstep(outer, inner, alignment);
+  return pow(max(lobe, 0.0), mix(1.0, 3.2, uRayDispersionFocus));
+}
+
+vec3 wavelengthSceneEnergy(vec3 outgoingDir, vec3 response){
+  vec3 environmentEnergy = wavelengthEnergy(
+    sampleEnvironmentBackdrop(outgoingDir),
+    response
+  );
+  float sourceEnergy = rayDispersionSourceLobe(outgoingDir)
+    * uRayDispersionLightIntensity;
+  return environmentEnergy + response * sourceEnergy;
+}
+
+vec3 wavelengthSourceEnergy(vec3 outgoingDir, vec3 response){
+  return response * rayDispersionSourceLobe(outgoingDir)
+    * uRayDispersionLightIntensity;
+}
+
+vec3 traceWavelengthEnergy(
+  vec3 entryPoint,
+  vec3 entryNormal,
+  vec3 incidentDir,
+  float wavelengthNm,
+  vec3 response,
+  vec3 fallbackDir,
+  out vec3 focusedSource
+){
+  vec3 outgoingDir;
+  float pathLength;
+  if (!traceWavelength(
+    entryPoint,
+    entryNormal,
+    incidentDir,
+    cauchyIor(wavelengthNm),
+    outgoingDir,
+    pathLength
+  )) outgoingDir = fallbackDir;
+  focusedSource = wavelengthSourceEnergy(outgoingDir, response);
+  return wavelengthSceneEnergy(outgoingDir, response);
+}
+
 struct FilmMaterial {
   vec3 darkColor;
   float darkAlpha;
@@ -873,6 +1016,10 @@ void main(){
   vec3 transmissionDir = rd;
   vec3 dispersionNormal = N;
   float localPrism = material.edgeFactor * 0.18;
+  vec3 rayDispersedEnvironment = vec3(0.0);
+  vec3 rayDispersionResidual = vec3(0.0);
+  vec3 rayFocusedSpectrum = vec3(0.0);
+  float rayDispersionMix = 0.0;
   vec3 exitPoint = p;
   vec3 exitNormal = -N;
   float pathLength = 0.0;
@@ -949,10 +1096,76 @@ void main(){
       }
     }
   }
+  // 五個波長共用同一條 Cauchy 材質曲線，但不共用背面交點。
+  // 587.6nm 的 d-line 直接沿用主折射路徑；其餘四條各自穿過
+  // 目前 SDF 造型。比 RGB 三點多出青、綠與黃綠過渡，但仍把
+  // 額外追蹤控制在四條，避免高解析度時成本失控。
+  if (uRayDispersionEnabled > 0.5 && hasExitSurface) {
+    const vec3 violetResponse = vec3(0.12, 0.0, 1.0);
+    const vec3 cyanResponse = vec3(0.0, 0.56, 1.0);
+    const vec3 greenResponse = vec3(0.12, 1.0, 0.18);
+    const vec3 amberResponse = vec3(1.0, 0.72, 0.0);
+    const vec3 redResponse = vec3(1.0, 0.0, 0.03);
+    vec3 spectralNormalization = violetResponse + cyanResponse
+      + greenResponse + amberResponse + redResponse;
+    vec3 spectralSum = vec3(0.0);
+    vec3 focusedSum = vec3(0.0);
+    vec3 violetSource;
+    vec3 cyanSource;
+    vec3 greenSource;
+    vec3 redSource;
+    spectralSum += traceWavelengthEnergy(
+      p, N, rd, 450.0, violetResponse, transmissionDir, violetSource
+    );
+    spectralSum += traceWavelengthEnergy(
+      p, N, rd, 490.0, cyanResponse, transmissionDir, cyanSource
+    );
+    spectralSum += traceWavelengthEnergy(
+      p, N, rd, 530.0, greenResponse, transmissionDir, greenSource
+    );
+    // uIOR 定義在 587.6nm，所以此波長與主折射 transmissionDir 一致。
+    spectralSum += wavelengthSceneEnergy(transmissionDir, amberResponse);
+    vec3 amberSource = wavelengthSourceEnergy(
+      transmissionDir,
+      amberResponse
+    );
+    spectralSum += traceWavelengthEnergy(
+      p, N, rd, 650.0, redResponse, transmissionDir, redSource
+    );
+    focusedSum = violetSource + cyanSource + greenSource
+      + amberSource + redSource;
+    rayDispersedEnvironment = spectralSum / max(
+      spectralNormalization,
+      vec3(0.001)
+    );
+    rayFocusedSpectrum = focusedSum / max(
+      spectralNormalization,
+      vec3(0.001)
+    );
+    // 純色畫布不應顯示 HDRI 影像，但仍可顯示 HDRI 光場被造型
+    // 分光後的光譜差。用同一個出射方向重建未色散基準，共同的
+    // 攝影棚內容會相消，只留下多波長路徑真正分離的部分。
+    vec3 referenceSample = sampleEnvironmentBackdrop(transmissionDir);
+    vec3 referenceSpectrum = (
+      wavelengthEnergy(referenceSample, violetResponse)
+        + wavelengthEnergy(referenceSample, cyanResponse)
+        + wavelengthEnergy(referenceSample, greenResponse)
+        + wavelengthEnergy(referenceSample, amberResponse)
+        + wavelengthEnergy(referenceSample, redResponse)
+    ) / max(spectralNormalization, vec3(0.001));
+    rayDispersionResidual = rayDispersedEnvironment
+      - rayFocusedSpectrum
+      - referenceSpectrum;
+    rayDispersionMix = clamp(uRayDispersion, 0.0, 1.0);
+    if (uBgMode == 1) {
+      refractedBg = mix(refractedBg, rayDispersedEnvironment, rayDispersionMix);
+    }
+  }
   // 純色只控制畫布；水滴內部獨立取樣同一張 HDRI。若背面追蹤未命中，
   // transmissionDir 會保留前表面的 Snell 折射方向，滑桿仍能穩定產生效果。
   if (uBgMode == 0 && uHasEnv == 1 && uEnvRefraction > 0.001) {
     vec3 envRefraction = sampleEnvironmentBackdrop(transmissionDir);
+    envRefraction = mix(envRefraction, rayDispersedEnvironment, rayDispersionMix);
     // 白底只借用 HDRI 的明暗結構，不把攝影棚的米黃色牆面染進玻璃。
     // envRefraction 滑桿仍控制混合量，因此 0 的語意完全不變。
     float envRefractionLum = dot(
@@ -1023,6 +1236,11 @@ void main(){
   vec3 interiorFillLight = refractedBg;
   if (universalGlass && uBgMode == 0 && uHasEnv == 1) {
     interiorFillLight = sampleEnvironmentBackdrop(transmissionDir);
+    interiorFillLight = mix(
+      interiorFillLight,
+      rayDispersedEnvironment,
+      rayDispersionMix
+    );
   }
   if (needsEnvironmentTransmission) {
     vec3 darkRefraction = 1.0 - exp(
@@ -1191,6 +1409,49 @@ void main(){
   }
 
   vec3 finalColor = mix(glassComposite, membraneComposite, membraneMode);
+  // 在純色背景下，把三波長光路的「差值」當作玻璃自身能量。
+  // 正差以 screen 加光，負差以光譜衰減保留暗邊；若光場完全均勻，
+  // residual 自然為 0，不會凭空生成彩虹。
+  if (uBgMode == 0 && rayDispersionMix > 0.001) {
+    vec3 spectralGain = max(rayDispersionResidual, vec3(0.0));
+    vec3 spectralLoss = max(-rayDispersionResidual, vec3(0.0));
+    vec3 prismLight = 1.0 - exp(
+      -spectralGain * uMaterialExposure * 2.6 * rayDispersionMix
+    );
+    finalColor *= exp(
+      -spectralLoss * uMaterialExposure * 1.8 * rayDispersionMix
+    );
+    finalColor = 1.0 - (1.0 - finalColor) * (1.0 - prismLight);
+
+    // 獨立白光源不是 HDRI 的差值，不能跟未色散環境一起相消。它的五個
+    // 波長都已走過各自的幾何出口，直接以光譜能量合成；黑底用 screen
+    // 發光，白底則用選擇性透射留下彩度。
+    vec3 focusedPrism = 1.0 - exp(
+      -max(rayFocusedSpectrum, vec3(0.0))
+        * uMaterialExposure * 1.65 * rayDispersionMix
+    );
+    float focusedPeak = max(
+      focusedPrism.r,
+      max(focusedPrism.g, focusedPrism.b)
+    );
+    vec3 focusedHue = focusedPrism / max(focusedPeak, 0.001);
+    vec3 focusedScreen = 1.0
+      - (1.0 - finalColor) * (1.0 - focusedPrism);
+    float focusedBrightSupport = max(
+      whiteBackdrop,
+      membraneMode * brightBg
+    );
+    vec3 focusedTransmission = mix(
+      vec3(0.78, 0.90, 1.0),
+      focusedHue,
+      0.82
+    );
+    finalColor = mix(
+      focusedScreen,
+      focusedTransmission,
+      focusedBrightSupport * clamp(focusedPeak * 0.72, 0.0, 0.68)
+    );
+  }
   // 通用玻璃的亮底補償仍由原開關管理；液態薄膜本身就是透射模型，不依賴該開關。
   float brightColorSupport = max(
     whiteBackdrop,
@@ -1461,10 +1722,13 @@ void main(){
   if (universalGlass) {
     universalTransmitted = refractedBg * material.transmission * volumeAbsorption
       * (1.0 - backFres * 0.72);
-    // 覆蓋率取材質不透明度與自身能量兩者的較大值：色散、焦散那些後面才疊上
-    // 來的光同樣會遮住背景，只看 darkAlpha 會讓亮部透出過多背景而變灰。
+    // 覆蓋率取材質不透明度與自身能量兩者的較大值。不能只用
+    // luma：純藍光的亮度權重只有 0.072，飽和色散即使能量很高也會
+    // 被計成幾乎透明，PNG 疊在亮底上就會被背景沖成淡灰色。以最強
+    // RGB 通道當能量下限，才能在 straight-alpha 裡完整容納高彩度光譜。
+    float ownEnergyPeak = max(finalColor.r, max(finalColor.g, finalColor.b));
     universalCovered = clamp(
-      max(material.darkAlpha, dot(finalColor, vec3(0.2126, 0.7152, 0.0722))),
+      max(material.darkAlpha, ownEnergyPeak),
       0.0,
       1.0
     );

@@ -42,6 +42,13 @@ const DEFAULTS = {              // 數值滑桿
   dispersionSeparation: 1.5,
   causticScale: 1.0,
   causticSharpness: 0.65,
+  rayDispersion: 6,
+  rayDispersionAbbe: 25,
+  rayDispersionLightIntensity: 4,
+  rayDispersionLightSize: 0.32,
+  rayDispersionFocus: 0.55,
+  rayDispersionAzimuth: 0,
+  rayDispersionElevation: 0,
   spectralCausticIntensity: 1.5,
   spectralCausticFocus: 0.12,
   spectralCausticWidth: 0.42,
@@ -194,6 +201,7 @@ const TOGGLE_DEFAULTS = {
   brightBgAssist: true,
   filmEnabled: false,
   dispersionEnabled: true,
+  rayDispersionEnabled: false,
   spectralCausticEnabled: true,
 };
 const COLOR_DEFAULTS  = {
@@ -336,6 +344,7 @@ const TOGGLES = {
   brightBgAssist: 'uBrightBgAssist',
   filmEnabled: 'uFilmEnabled',
   dispersionEnabled: 'uDispersionEnabled',
+  rayDispersionEnabled: 'uRayDispersionEnabled',
   spectralCausticEnabled: 'uSpectralCausticEnabled',
   edgeDropsEnabled: () => applyEdgeDropDistribution(),
 };
@@ -371,6 +380,13 @@ const fmt = {
   dispersionSeparation: v => 'x' + v.toFixed(2),
   causticScale: v => 'x' + v.toFixed(2),
   causticSharpness: v => Math.round(v * 100) + '%',
+  rayDispersion: v => 'x' + v.toFixed(2),
+  rayDispersionAbbe: v => v.toFixed(0),
+  rayDispersionLightIntensity: v => 'x' + v.toFixed(2),
+  rayDispersionLightSize: v => Math.round(v * 100) + '%',
+  rayDispersionFocus: v => Math.round(v * 100) + '%',
+  rayDispersionAzimuth: v => v.toFixed(0) + '°',
+  rayDispersionElevation: v => v.toFixed(0) + '°',
   spectralCausticIntensity: v => Math.round(v * 100) + '%',
   spectralCausticFocus: v => Math.round(v * 100) + '%',
   spectralCausticWidth: v => 'x' + v.toFixed(2),
@@ -458,7 +474,7 @@ function refreshShatterTimelineReadouts() {
   if (total) total.textContent = `四段合計 ${P.loopDuration.toFixed(1)}s（＝循環秒數）`;
 }
 
-import { VERT, FRAG } from './shaders.js?v=universal-3';
+import { VERT, FRAG } from './shaders.js?v=universal-14';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -1937,6 +1953,13 @@ function initGL() {
     uDispersionSeparation: { value: P.dispersionSeparation },
     uCausticScale: { value: P.causticScale },
     uCausticSharpness: { value: P.causticSharpness },
+    uRayDispersion: { value: P.rayDispersion },
+    uRayDispersionAbbe: { value: P.rayDispersionAbbe },
+    uRayDispersionLightIntensity: { value: P.rayDispersionLightIntensity },
+    uRayDispersionLightSize: { value: P.rayDispersionLightSize },
+    uRayDispersionFocus: { value: P.rayDispersionFocus },
+    uRayDispersionAzimuth: { value: P.rayDispersionAzimuth },
+    uRayDispersionElevation: { value: P.rayDispersionElevation },
     uSpectralCausticIntensity: { value: P.spectralCausticIntensity },
     uSpectralCausticFocus: { value: P.spectralCausticFocus },
     uSpectralCausticWidth: { value: P.spectralCausticWidth },
@@ -1960,6 +1983,7 @@ function initGL() {
     uArtPatternSpeed: { value: P.artPatternSpeed },
     uArtGravity: { value: P.artGravity },
     uDispersionEnabled: { value: P.dispersionEnabled ? 1 : 0 },
+    uRayDispersionEnabled: { value: P.rayDispersionEnabled ? 1 : 0 },
     uSpectralCausticEnabled: { value: P.spectralCausticEnabled ? 1 : 0 },
     uFilmEnabled: { value: P.filmEnabled ? 1 : 0 },
     uFilmBlur:   { value: P.filmBlur },
@@ -2443,6 +2467,7 @@ function updateUIState() {
   };
   setFeatureState('thinFilmGroup', P.filmEnabled);
   setFeatureState('artDispersionGroup', P.dispersionEnabled);
+  setFeatureState('rayDispersionGroup', P.rayDispersionEnabled);
   setFeatureState('spectralCausticGroup', P.spectralCausticEnabled);
   const spectral = P.colorMode === 'spectral';
   const rampGroup = document.getElementById('rampGroup');
@@ -3323,7 +3348,7 @@ if (!PREVIEW && window.PresetIO) {
     // 配色數量會決定色標列的顯示，順序顛倒會讓後套的值被蓋掉。
     applyFirst: [
       'motion', 'bgMode', 'bgColor', 'materialStyle', 'colorMode', 'shapeSource', 'shapeQuality',
-      'filmEnabled', 'dispersionEnabled',
+      'filmEnabled', 'dispersionEnabled', 'rayDispersionEnabled',
       'spectralCausticEnabled', 'rampCount',
     ],
     assetNote: 'HDRI 與 SVG / GLB 素材無法存進參數檔，請自行載入',
