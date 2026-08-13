@@ -90,7 +90,7 @@ const DEFAULTS = {              // 數值滑桿
   hdriYaw: -45,
   hdriPitch: 20,
   hdriBlur: 0.21,
-  envRefraction: 0.21,
+  envRefraction: 0,
   cameraDistance: 5.5,
   cameraRotationX: 9.7,
   cameraRotationY: 29.8,
