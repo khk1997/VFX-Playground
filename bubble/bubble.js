@@ -1321,7 +1321,11 @@ function updateDropUniforms(t) {
     uniforms.uFidelityAbsorb.value = fidelityAbsorb;
     uniforms.uShapeSwell.value = shatter ? shatter.swell : 0;
     uniforms.uShapeScale.value = 1 + holdBreathScale(phase);
-    uniforms.uContactLead.value = shatter ? 0 : 1;
+    // 融化一併關掉：contactLead 是「形狀在已抵達水滴附近先成形」，前提是形狀還在
+    // 成形中。融化的 uShapeProgress 恆為 1、形狀始終完整，這條規則就只剩副作用——
+    // 它的影響半徑 0.72 遠大於水滴本身，等於幾顆「不侵蝕球」隨著水滴墜落掃過造型，
+    // 半徑外被往內削 0.015、半徑內不削，形狀表面就整片整片地漲縮。
+    uniforms.uContactLead.value = (shatter || melting) ? 0 : 1;
     // 半徑已連續收至零後才停止 shader 迴圈；切換當下幾何場完全相同。
     const fidelityComplete = fidelityAbsorb > 0.9999;
     uniforms.uCount.value = fidelityComplete ? 0 : count;
@@ -1865,7 +1869,8 @@ function initGL() {
     uShapeScale: { value: 1 },
     // contactLead（形狀在已抵達水滴附近先成形）是形狀匯聚專用的邏輯。崩解噴濺
     // 是它的反向過程，同一條規則會變成「形狀黏著碎片不肯消失、碎片之間先溶掉」，
-    // 在輪廓上結出一顆顆瘤。用這個 0/1 開關在崩解模式關掉它。
+    // 在輪廓上結出一顆顆瘤；融化則是形狀從頭到尾完整，沒有「先成形」可言，只剩
+    // 隨水滴掃過的整片漲縮。用這個 0/1 開關在那兩個模式關掉它。
     uContactLead: { value: 1 },
     uShapeDepth: { value: P.shapeDepth },
     uShapeSoftness: { value: P.shapeSoftness },
