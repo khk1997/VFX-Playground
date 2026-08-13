@@ -65,8 +65,8 @@
     <h3>材質反射 Material</h3>
     <div class="row"><label>材質類型</label><select id="materialStyle"><option value="universal" selected>通用玻璃</option><option value="membrane">液態薄膜（白底）</option><option value="glass" hidden>厚玻璃（已移除，改用通用玻璃）</option></select><span class="val"></span></div>
     <div class="row" id="membraneDepthRow"><label>膜體立體感</label><input type="range" id="membraneDepth" min="0" max="1" step="0.01" value="0.65"><span class="val" id="membraneDepth_v"></span></div>
-    <div class="row" id="membraneTintRow"><label>薄膜染色</label><input type="color" id="membraneTint" value="#ffffff"><span class="val"></span></div>
-    <div class="note" id="membraneTintNote">只作用於液態薄膜：不透明底色、面紗色調、虛擬棚燈反射、藍卡反射與立體明暗暗部原本各自寫死一個藍紫色，這裡當濾鏡色乘上去；預設白色＝維持原本外觀，改成其他顏色即可整體換色。</div>
+    <div class="row" id="membraneTintRow"><label>薄膜染色</label><input type="color" id="membraneTint" value="#94b8e6"><span class="val"></span></div>
+    <div class="note" id="membraneTintNote">只作用於液態薄膜：不透明底色、面紗色調、虛擬棚燈反射、藍卡反射與立體明暗暗部原本各自寫死一個藍紫色，這裡選什麼顏色，畫面上那幾處就直接是那個顏色；預設值＝原本那個藍紫色，維持改動前的外觀，選白色就會變成無色。</div>
     <div class="row"><label>反射強度</label><input type="range" id="reflect" min="0" max="2" step="0.02" value="1.6"><span class="val" id="reflect_v"></span></div>
     <div class="row"><label>透射率</label><input type="range" id="transmission" min="0" max="1" step="0.01" value="0.96"><span class="val" id="transmission_v"></span></div>
     <div class="row"><label>材質曝光</label><input type="range" id="materialExposure" min="0.25" max="2.5" step="0.05" value="1"><span class="val" id="materialExposure_v"></span></div>

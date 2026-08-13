@@ -202,9 +202,10 @@ const TOGGLE_DEFAULTS = {
 const COLOR_DEFAULTS  = {
   bgColor: '#000000',
   // 液態薄膜的不透明底色、面紗色調、虛擬棚燈反射、藍卡反射、立體明暗暗部，
-  // 原本各自寫死一個偏藍紫色的常數；這裡當成濾鏡色乘上那些常數，預設白色＝
-  // 完全不改變現有外觀，調成其他顏色即可把整片基礎染色換掉。
-  membraneTint: '#ffffff',
+  // 原本各自寫死一個偏藍紫色的常數；現在直接讀這個顏色取代那些常數，選色器
+  // 選什麼顏色，畫面上那幾處就是那個顏色。預設值是原本那個藍紫色常數本身，
+  // 維持改動前的外觀。
+  membraneTint: '#94b8e6',
 };
 const P = { ...DEFAULTS, ...SELECT_DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS };
 
