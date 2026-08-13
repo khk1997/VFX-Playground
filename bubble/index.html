@@ -202,6 +202,7 @@
       <option value="formation">形狀匯聚 Formation</option>
       <option value="weave">穿梭環繞 Weave</option>
       <option value="shatter">崩解噴濺 Shatter</option>
+      <option value="melt">融化 Melt</option>
       <!-- 已移除的「脈動呼吸」。留一個隱藏選項，舊的參數組合檔寫進來時 value 才不會
            被瀏覽器丟成空字串；bindControls 會立刻把它導向「形狀匯聚」（LEGACY_SELECT_VALUES）。 -->
       <option value="pulse" hidden>脈動呼吸 Pulse（已移除）</option>
@@ -235,6 +236,20 @@
     <div class="row" id="shatterSeedRow"><label>噴散種子</label><input type="range" id="shatterSeed" min="0" max="30" step="1" value="0"><span class="val" id="shatterSeed_v"></span></div>
     <div class="row" id="shatterCutRow"><label>崩解切法</label><input type="range" id="shatterCut" min="0" max="30" step="1" value="0"><span class="val" id="shatterCut_v"></span></div>
     <div id="shatterNote" class="note">時間軸依序是「靜止 → 蓄力 → 飛散 → 重組」，四個滑桿是相對長度，會自動正規化填滿整個循環，所以任何組合都合法、右側秒數就是它實際佔的時間。重組是循環接縫的必要段落，收得太短會看到形狀突然出現。「蓄力幅度」是炸開前被內壓撐大的程度。噴散運動拆成三軸：「擴散範圍」是碎片最後散到多遠、「噴發減速」是運動曲線前傾的程度（0＝等速，調高就是一瞬間衝出去再慢下來）、「力道差異」是每顆碎片散開遠近的參差；三者互不干擾，調減速不會改變最終散開的大小。碎片大小由它所在位置的造型厚度決定（厚的地方剝下大塊、細的地方是小屑），「水滴大小」在這個模式是整體乘數、「碎片大小差異」控制彼此的參差程度。「噴散種子」換碎片往哪飛、飛多快；「崩解切法」換的是形狀被切成哪幾塊（碎片從哪裡剝離），需要重算錨點，所以放開滑桿後才會套用。</div>
+    </div>
+    <div class="modeBlock" data-gate="melt">
+    <div class="row" id="meltRateRow"><label>滴落頻率</label><input type="range" id="meltRate" min="1" max="8" step="1" value="3"><span class="val" id="meltRate_v"></span></div>
+    <div class="row" id="meltRateVaryRow"><label>節奏差異</label><input type="range" id="meltRateVary" min="0" max="1" step="0.01" value="0.6"><span class="val" id="meltRateVary_v"></span></div>
+    <div class="row" id="meltHangRow"><label>形成時間</label><input type="range" id="meltHang" min="0.05" max="0.9" step="0.01" value="0.35"><span class="val" id="meltHang_v"></span></div>
+    <div class="row" id="meltSagRow"><label>懸垂幅度</label><input type="range" id="meltSag" min="0" max="0.3" step="0.005" value="0.05"><span class="val" id="meltSag_v"></span></div>
+    <div class="row" id="meltFallRow"><label>墜落距離</label><input type="range" id="meltFall" min="0.2" max="4" step="0.05" value="1.6"><span class="val" id="meltFall_v"></span></div>
+    <div class="row" id="meltShrinkRow"><label>縮小時機</label><input type="range" id="meltShrink" min="0" max="0.95" step="0.01" value="0.25"><span class="val" id="meltShrink_v"></span></div>
+    <div class="row" id="meltSizeMinRow"><label>大小差異下限</label><input type="range" id="meltSizeMin" min="0.1" max="2" step="0.01" value="0.55"><span class="val" id="meltSizeMin_v"></span></div>
+    <div class="row" id="meltSizeMaxRow"><label>大小差異上限</label><input type="range" id="meltSizeMax" min="0.1" max="2" step="0.01" value="1"><span class="val" id="meltSizeMax_v"></span></div>
+    <div class="row" id="meltJitterRow"><label>墜落擾動</label><input type="range" id="meltJitter" min="0" max="0.2" step="0.005" value="0.04"><span class="val" id="meltJitter_v"></span></div>
+    <div class="row" id="meltBandRow"><label>底部範圍</label><input type="range" id="meltBand" min="0.05" max="0.8" step="0.01" value="0.22"><span class="val" id="meltBand_v"></span></div>
+    <div class="row" id="meltSeedRow"><label>滴落點種子</label><input type="range" id="meltSeed" min="0" max="30" step="1" value="0"><span class="val" id="meltSeed_v"></span></div>
+    <div id="meltNote" class="note">形狀本身完全不動也不會消融，只在底部持續有水滴形成、垂下、墜落、縮小消失，然後同一個位置再長出下一滴，是一段永遠播下去的循環。「滴落頻率」是每顆水滴一個循環滴幾次，「節奏差異」讓各顆在這個基準上下錯開——兩者都只取整數倍，所以看起來此起彼落很隨機，循環接縫卻完全接得上、不會跳。「形成時間」是水滴掛在底部脹大所佔的比例，剩下的都是墜落。「縮小時機」是墜到幾成才開始收；它必須在墜落結束前收乾淨，否則水滴會帶著半徑跳回起點，所以這個值調太高會看到接縫。「底部範圍」是形狀高度的多少比例算底部，滴落點就從那一段裡挑；「滴落點種子」換的是挑中哪幾個位置。</div>
     </div>
     <div data-gate="split" class="row" id="flowSpeedRow"><label>動態張力</label><input type="range" id="flowSpeed" min="0" max="1.5" step="0.01" value="0.47"><span class="val" id="flowSpeed_v"></span></div>
   </div>

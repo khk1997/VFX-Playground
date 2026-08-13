@@ -11,6 +11,7 @@ import {
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-29';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-29';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-29';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-29';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -136,6 +137,27 @@ const DEFAULTS = {              // 數值滑桿
   // 自由段的「只用整數諧波」是同一個限制）。
   weaveDriftAmount: 1,
   weaveDriftSpeed: 1,
+  // 融化（見 motions/melt.js）。滴落間隔要隨機、又要能無縫循環，靠的是「每顆水滴
+  // 一個循環滴整數次」：頻率與相位偏移各自由雜湊決定，看起來雜亂，phase=0/1 卻同值。
+  // 滴落頻率是每個循環的基準滴數，節奏差異讓各顆在這個基準上下錯開。
+  meltRate: 3,
+  meltRateVary: 0.6,
+  // 水滴在底部形成／懸掛佔一次滴落的多少比例，剩下的都是墜落。
+  meltHang: 0.35,
+  // 懸掛時往下垂多少、脫離後墜落多遠。
+  meltSag: 0.05,
+  meltFall: 1.6,
+  // 墜落到幾成才開始縮小。必須在墜落結束前收乾淨，否則水滴會帶著半徑跳回起點
+  // ——「縮小到消失」不只是效果，是循環接縫的必要條件。
+  meltShrink: 0.25,
+  // 每滴大小落在這個範圍（乘在「水滴大小」上）。
+  meltSizeMin: 0.55,
+  meltSizeMax: 1,
+  // 墜落時的水平擾動，避免同一個滴落點的水滴完全重疊成一直線。
+  meltJitter: 0.04,
+  // 底部取樣範圍：形狀高度的多少比例算「底部」，滴落點就從那一段裡挑。
+  meltBand: 0.22,
+  meltSeed: 0,
   // 崩解噴濺的時間軸拆成四段時長（見 shatterSegments）：靜止 → 蓄力 → 飛散 →
   // 重組。四個值是相對權重，正規化後填滿整個循環，所以任何組合都合法、不會出現
   // 「滑桿有數字但實際被夾住」的情形。崩解模式預設循環為 4 秒，四段權重
@@ -423,6 +445,17 @@ const fmt = {
   weaveSizeMax: v => 'x' + v.toFixed(2),
   weaveDriftAmount: v => 'x' + v.toFixed(2),
   weaveDriftSpeed: v => 'x' + v.toFixed(0),
+  meltRate: v => v.toFixed(0) + ' 滴/循環',
+  meltRateVary: v => v === 0 ? '整齊同步' : '±' + Math.round(v * 100) + '%',
+  meltHang: v => Math.round(v * 100) + '%',
+  meltSag: v => v.toFixed(3),
+  meltFall: v => v.toFixed(2),
+  meltShrink: v => Math.round(v * 100) + '%',
+  meltSizeMin: v => 'x' + v.toFixed(2),
+  meltSizeMax: v => 'x' + v.toFixed(2),
+  meltJitter: v => v === 0 ? '關閉' : v.toFixed(3),
+  meltBand: v => Math.round(v * 100) + '%',
+  meltSeed: v => '#' + v.toFixed(0),
   shatterRange: v => 'x' + v.toFixed(2),
   shatterDecel: v => v === 0 ? '等速' : Math.round(v * 100) + '%',
   shatterSpeedVary: v => '±' + Math.round(v * 100) + '%',
@@ -510,6 +543,19 @@ let weaveSurfaceAnchors = [];
 function rebuildWeaveAnchorSets() {
   weaveSurfaceAnchors = formationAnchors.filter(a => a.surface);
   if (!weaveSurfaceAnchors.length) weaveSurfaceAnchors = formationAnchors;
+}
+
+// 融化的滴落點：形狀底部散開的幾個位置（見 motions/melt.js 的 selectBottomAnchors）。
+// 取樣範圍與種子是滑桿，改了要重挑，所以跟崩解切法一樣用 key 快取，不是每幀重算。
+let meltBottomAnchors = [];
+let meltAnchorKey = null;
+function rebuildMeltAnchors() {
+  const key = `${shapeFieldSerial}:${P.meltBand.toFixed(3)}:${Math.round(P.meltSeed)}`;
+  if (key === meltAnchorKey) return;
+  meltAnchorKey = key;
+  meltBottomAnchors = selectBottomAnchors(
+    shapeTargets, MAX_DROPS, P.meltBand, Math.round(P.meltSeed),
+  );
 }
 
 // 崩解切法專用的錨點組。不能直接把種子套進 formationAnchors／microFormationAnchors，
@@ -812,6 +858,9 @@ const {
   weaveAnchors: () => weaveSurfaceAnchors,
 });
 
+// 融化：底部滴落。錨點同樣用 getter，換形狀或調取樣範圍後才拿得到新的那組。
+const { meltDrop } = createMeltMotion(P, { bottomAnchors: () => meltBottomAnchors });
+
 // 微滴的自由軌道在 updateMicroDrops 直接呼叫 freeOrbitPosition，需要自己的暫存向量。
 const freeOrbitVec = new THREE.Vector3();
 
@@ -823,7 +872,10 @@ function updateMicroDrops(phase, fidelityAbsorb = 0) {
   // 崩解噴濺不走匯聚管線，但微滴群正好是最好用的碎片來源（20 顆，是主滴的
   // 近兩倍），所以它也要把微滴開起來，只是位置改由彈道決定。
   const shattering = P.motion === 'shatter';
-  const activeCount = (isFormationMotion(P.motion) || shattering) && shapeField
+  // 融化也要微滴：滴落點就那幾個，只靠 12 顆主滴撐不出「不停在滴」的密度，
+  // 微滴補上去之後同一個位置才會有前後好幾滴同時在不同高度。
+  const melting = P.motion === 'melt';
+  const activeCount = (isFormationMotion(P.motion) || shattering || melting) && shapeField
     ? Math.max(0, Math.min(MAX_MICRO_DROPS, Math.round(P.microCount)))
     : 0;
   const amount = formationAmount(phase);
@@ -832,7 +884,10 @@ function updateMicroDrops(phase, fidelityAbsorb = 0) {
   const a = phase * Math.PI * 2;
   for (let i = 0; i < MAX_MICRO_DROPS; i++) {
     const o = i * 4;
-    if (i >= activeCount || !(shattering ? shatterAnchors : microFormationAnchors).length) {
+    const pool = shattering ? shatterAnchors
+      : melting ? meltBottomAnchors
+      : microFormationAnchors;
+    if (i >= activeCount || !pool.length) {
       microDropData[o + 3] = 0;
       continue;
     }
@@ -852,6 +907,22 @@ function updateMicroDrops(phase, fidelityAbsorb = 0) {
       microDropData[o + 2] = formationPosNow.z;
       microDropData[o + 3] = shatterRadius(shatterFragmentRadius(target, h2), shatter);
       // 碎片是自由飛散的獨立液滴，不該保留「貼在造型上被拉長」的橢球形變。
+      microShapeData[o] = 1;
+      microShapeData[o + 1] = 0;
+      microShapeData[o + 2] = 0;
+      microShapeData[o + 3] = 1;
+      continue;
+    }
+    if (melting) {
+      // 種子基底刻意跟主滴那條（i * 7.13）錯開，同一個滴落點的主滴與微滴才不會
+      // 同步落下、疊成一顆。
+      const state = meltDrop(i, phase, i * 3.41 + 101.7, formationPosNow);
+      microDropData[o] = formationPosNow.x;
+      microDropData[o + 1] = formationPosNow.y;
+      microDropData[o + 2] = formationPosNow.z;
+      // 微滴是主滴的縮小版，撐體積的是主滴，這裡只負責補密度。
+      microDropData[o + 3] = state ? state.radius * 0.62 : 0;
+      // 墜落中的水滴是獨立球體，不保留貼在造型上被拉長的橢球形變。
       microShapeData[o] = 1;
       microShapeData[o + 1] = 0;
       microShapeData[o + 2] = 0;
@@ -892,9 +963,12 @@ function updateMicroDrops(phase, fidelityAbsorb = 0) {
 function updateNegativeDrops(phase, fidelityAbsorb = 0) {
   // 空腔（負滴）是形狀的一部分，不是水滴的一部分。崩解噴濺沒有匯聚包絡可讀，
   // 直接跟著形狀本身的可見度走：炸開後形狀不在，空腔自然也不該留在畫面上。
-  const amount = P.motion === 'shatter'
-    ? shatterShapeAmount(shatterTimeline(phase))
-    : smoothstepCPU(formationAmount(phase), 0.58, 0.96);
+  // 融化的形狀始終完整，空腔自然也要一直在，不隨任何包絡消長。
+  const amount = P.motion === 'melt'
+    ? 1
+    : P.motion === 'shatter'
+      ? shatterShapeAmount(shatterTimeline(phase))
+      : smoothstepCPU(formationAmount(phase), 0.58, 0.96);
   const selected = negativeFormationAnchors;
   for (let i = 0; i < MAX_NEGATIVE_DROPS; i++) {
     const o = i * 4;
@@ -985,9 +1059,13 @@ function updateDropUniforms(t) {
   // 穿梭環繞的形狀是恆定的背景主體，不走匯聚／散開的體積交接，永遠滿值顯示。
   const shatter = P.motion === 'shatter' ? shatterTimeline(phase) : null;
   const shatterPrimary = shatter ? shatterAnchorSets().primary : null;
+  const melting = P.motion === 'melt';
+  if (melting) rebuildMeltAnchors();
   const formationShapeProgress = !shapeField
     ? 0
-    : P.motion === 'weave'
+    // 融化的形狀從頭到尾完整不變：滴下去的是額外長出來的水滴，不是造型被削掉的
+    // 部分。所以跟穿梭環繞一樣永遠滿值，不參與任何體積交接。
+    : P.motion === 'weave' || melting
       ? 1
       : shatter
         ? shatterShapeAmount(shatter)
@@ -1019,7 +1097,8 @@ function updateDropUniforms(t) {
     ? Math.max(0.35, 1 + merge * 0.15 - tension * 0.25 - breakaway * 0.55)
     // 崩解噴濺同樣是「一次出現很多顆」，需要同一套正規化，否則炸開那一瞬間
     // 8 顆滿半徑的碎片會被 smooth-min 黏成一大團而不是各自剝離。
-    : isFormationMotion(P.motion) || P.motion === 'shatter'
+    // 融化也是一次出現很多顆各自獨立的水滴，同樣需要這套正規化。
+    : isFormationMotion(P.motion) || P.motion === 'shatter' || melting
       // smooth-min 連續合併很多顆時會累積膨脹；依數量正規化融合半徑，
       // 讓 12–16 顆仍只在真正接觸處形成液橋，不把整組擴成巨大距離場。
       ? Math.max(0.10, 0.42 / Math.sqrt(layoutCount))
@@ -1035,6 +1114,8 @@ function updateDropUniforms(t) {
     // 崩解噴濺的半徑不走 freeRadius 那條（見 shatterFragmentRadius），改記下
     // 這顆碎片配到的錨點，等下面統一由它的局部厚度算大小。
     let shatterTarget = null;
+    // 融化的半徑同樣自成一套（長出→墜落→縮到 0 的包絡），在這裡先接住。
+    let meltState = null;
 
     if (P.motion === 'cinematic') {
       // 所有水滴共用同一個緩慢旋轉的分離軸；不再各自沿亂數弧線交叉碰撞。
@@ -1068,6 +1149,15 @@ function updateDropUniforms(t) {
         z = formationPosNow.z;
       }
       shatterTarget = target;
+    } else if (melting) {
+      // 主滴與微滴餵不同的種子基底，同一個滴落點才會有大小、時機都不同的水滴
+      // 輪流落下，看起來是連續的水流而不是整齊的節拍器。
+      meltState = meltDrop(i, phase, i * 7.13, formationPosNow);
+      if (meltState) {
+        x = formationPosNow.x;
+        y = formationPosNow.y;
+        z = formationPosNow.z;
+      }
     } else if (isFormationMotion(P.motion)) {
       const formation = amount;
       formationDropPosition(i, phase, layoutCount, formationPosNow);
@@ -1077,7 +1167,9 @@ function updateDropUniforms(t) {
       radiusFactor = 0.82 + formation * 0.18;
     }
     // 大滴受重力與慣性影響較明顯；常量位移不破壞循環接縫。
-    y -= P.gravity * P.spread * 0.045 * Math.pow(radius, 1.35);
+    // 融化不套這個：水滴必須正好從造型底部的滴落點長出來，先被推低一截就會
+    // 憑空浮在造型下方。它自己的墜落已經在 meltPosition 裡算過了。
+    if (!melting) y -= P.gravity * P.spread * 0.045 * Math.pow(radius, 1.35);
     if (isFormationMotion(P.motion)) {
       // anchor 可能落在模型表層；吸收時稍微往模型中心推入，避免半徑縮小後
       // 先失去液橋、在輪廓旁短暫留下孤立小球。
@@ -1092,6 +1184,8 @@ function updateDropUniforms(t) {
         ? shatterFragmentRadius(shatterTarget, h3)
         : 0;
       dropData[i].set(x, y, z, shatterRadius(fragment, shatter));
+    } else if (melting) {
+      dropData[i].set(x, y, z, meltState ? meltState.radius : 0);
     } else if (isFormationMotion(P.motion)) {
       const targetRadius = formationAnchors[i % Math.max(1, formationAnchors.length)]?.radiusHint
         || P.radius * 0.58;
@@ -1160,7 +1254,10 @@ function updateDropUniforms(t) {
   let pairAxisX = 1, pairAxisY = 0, pairAxisZ = 0;
 
   // 非電影模式仍可依實際接觸做黏性融合；電影模式已在上方守恆轉移體積。
-  if (!isFormationMotion(P.motion) && P.motion !== 'cinematic' && count >= 2 && fusionAmount > 0) {
+  // 融化排除在外：每一滴都是各自落下的獨立水滴，靠得近時互相脹大半徑會黏成
+  // 一條斷不開的水柱，正好是這個模式最不該有的樣子。
+  if (!isFormationMotion(P.motion) && P.motion !== 'cinematic' && !melting
+    && count >= 2 && fusionAmount > 0) {
     const da = dropData[pairA], db = dropData[pairB];
     const axisX = db.x - da.x, axisY = db.y - da.y, axisZ = db.z - da.z;
     const axisInv = 1 / Math.max(0.0001, Math.hypot(axisX, axisY, axisZ));
@@ -1191,11 +1288,17 @@ function updateDropUniforms(t) {
   // 崩解噴濺同理，而且更嚴格：碎片一旦離開母體就該是各自獨立、邊緣清楚的液滴，
   // 不是一團彼此牽絲的黏液。但炸開的瞬間它們還在造型上，那一刻保留正常黏性才
   // 看得出「從表面剝離」，所以依飛行進度連續收緊，而不是一開始就切到最小。
+  // 融化取中間值：這個 uniform 是整幀共用的，而畫面上同時有「還黏在造型底部
+  // 正在形成」與「已經墜到半空」兩種水滴。收太緊，正在形成的那顆會變成貼在表面
+  // 的一顆獨立球，失去液體被拉出來的樣子；放太鬆，落下的幾滴會彼此牽絲黏成
+  // 一條水柱。0.4 是兩者都還能看的折衷，再細調交給「黏度」滑桿。
   const mergeScale = P.motion === 'weave'
     ? 0.15
-    : shatter
-      ? 1 + (0.15 - 1) * shatter.flight
-      : 1;
+    : melting
+      ? 0.4
+      : shatter
+        ? 1 + (0.15 - 1) * shatter.flight
+        : 1;
   if (uniforms) uniforms.uViscosity.value = effectiveViscosity * mergeScale;
   if (uniforms) {
     uniforms.uShapeProgress.value = formationShapeProgress;
@@ -2448,6 +2551,8 @@ async function importShapeFile(file, kind, { rebuilding = false } = {}) {
       MAX_NEGATIVE_DROPS,
     );
     rebuildWeaveAnchorSets();
+    // key 帶著 shapeFieldSerial，換形狀後下一幀就會重挑滴落點。
+    meltAnchorKey = null;
     applyEdgeDropDistribution(P.shapeLiquidPosition);
     uniforms.uShapeTex.value = next.texture;
     uniforms.uShapeGrid.value = next.grid;

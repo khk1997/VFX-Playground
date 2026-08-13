@@ -47,6 +47,18 @@ export const MOTIONS = {
     radius: 0.25,
     loopDuration: 12,
   },
+  melt: {
+    label: '融化 Melt',
+    // 2 是已移除的「脈動呼吸」留下的空號，正好補上。
+    uniform: 2,
+    usesShapeField: true,
+    gate: 'melt',
+    // 滴落點散在底部，主滴多一點才看得出「到處都在滴」；另外還有微滴群加量。
+    count: 8,
+    radius: 0.25,
+    // 融化是永遠播下去的循環，沒有敘事段落要交代，循環短一點滴落密度才夠。
+    loopDuration: 6,
+  },
   shatter: {
     label: '崩解噴濺 Shatter',
     uniform: 4,
