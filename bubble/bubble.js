@@ -82,7 +82,7 @@ const DEFAULTS = {              // 數值滑桿
   transmission: 1.0,
   materialExposure: 1,
   // 液態薄膜專用的低頻塑形：0 回到純透明膜，1 完整加入厚度暗部、膜褶遮蔽
-  // 與非對稱反射卡。厚玻璃模式不讀取這個值。
+  // 與非對稱反射卡。通用玻璃模式不讀取這個值。
   membraneDepth: 0.65,
   // 水的折射率約 1.33，玻璃約 1.5；預設維持原本水滴的手感，改高會讓邊緣
   // 反射（Fresnel）變強、折射彎曲角度變陡，看起來更像玻璃而不是水珠。
@@ -178,7 +178,7 @@ const SHAPE_MOTIONS = new Set(['formation', 'weave', 'shatter']);
 const usesShapeField = motion => SHAPE_MOTIONS.has(motion);
 const SELECT_DEFAULTS = {
   bgMode: 'color',
-  materialStyle: 'glass',
+  materialStyle: 'universal',
   colorMode: 'spectral',
   motion: 'cinematic',
   shapeSource: 'svg',
@@ -189,6 +189,7 @@ const SELECT_DEFAULTS = {
 // 這裡根本讀不到原值。
 const LEGACY_SELECT_VALUES = {
   motion: { pulse: 'formation' },
+  materialStyle: { glass: 'universal' },
 };
 const TOGGLE_DEFAULTS = {
   edgeDropsEnabled: false,
@@ -203,15 +204,15 @@ const COLOR_DEFAULTS  = {
 };
 const P = { ...DEFAULTS, ...SELECT_DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS };
 
-// 材質切換不是同一組滑桿換 shader 分支：厚玻璃與液態薄膜各自保留一份
+// 材質切換不是同一組滑桿換 shader 分支：通用玻璃與液態薄膜各自保留一份
 // HDRI／材質狀態。離開時記住使用者微調，回來時恢復；第一次進入薄膜則使用
 // 白底參考圖的校準值。鏡頭、動畫與配色不在這裡，切材質時不應改變構圖或動作。
 const MATERIAL_PROFILE_KEYS = [
   'hdriYaw', 'hdriPitch', 'hdriBlur', 'envRefraction',
   'membraneDepth', 'reflect', 'transmission', 'materialExposure',
   'roughness', 'fresnel', 'ior',
-  // 薄膜式藝術色散：白底薄膜的顯色幾乎全靠它，跟厚玻璃要的分佈差很多
-  // （厚玻璃靠折射堆疊出顏色，薄膜是整片透光、顏色要自己長出來），
+  // 薄膜式藝術色散：白底薄膜的顯色幾乎全靠它，跟通用玻璃要的分佈差很多
+  // （通用玻璃靠折射堆疊出顏色，薄膜是整片透光、顏色要自己長出來），
   // 所以兩種材質也各記一份。
   'dispersion', 'dispersionSeparation', 'artThickness', 'artThickVar',
   'artNoiseScale', 'artPatternSpeed', 'artGravity',
@@ -221,9 +222,6 @@ const pickMaterialProfile = source => Object.fromEntries(
   MATERIAL_PROFILE_KEYS.map(key => [key, source[key]])
 );
 const MATERIAL_PROFILE_DEFAULTS = {
-  glass: pickMaterialProfile(P),
-  // 通用玻璃沿用厚玻璃的材質與 HDRI 校準；它跟厚玻璃的差別在合成方式，
-  // 不在材質參數，所以從同一組值起步比較好比較。
   universal: pickMaterialProfile(P),
   membrane: {
     hdriYaw: -45,
@@ -249,7 +247,6 @@ const MATERIAL_PROFILE_DEFAULTS = {
   },
 };
 const MATERIAL_ENVIRONMENT_DEFAULTS = {
-  glass: { url: GLASS_HDRI_URL, label: GLASS_HDRI_LABEL, isHDR: true, file: null },
   membrane: { url: MEMBRANE_HDRI_URL, label: MEMBRANE_HDRI_LABEL, isHDR: true, file: null },
   universal: { url: GLASS_HDRI_URL, label: GLASS_HDRI_LABEL, isHDR: true, file: null },
 };
@@ -257,12 +254,10 @@ let materialProfiles = {};
 let materialEnvironments = {};
 function resetMaterialProfiles() {
   materialProfiles = {
-    glass: { ...MATERIAL_PROFILE_DEFAULTS.glass },
     membrane: { ...MATERIAL_PROFILE_DEFAULTS.membrane },
     universal: { ...MATERIAL_PROFILE_DEFAULTS.universal },
   };
   materialEnvironments = {
-    glass: { ...MATERIAL_ENVIRONMENT_DEFAULTS.glass },
     membrane: { ...MATERIAL_ENVIRONMENT_DEFAULTS.membrane },
     universal: { ...MATERIAL_ENVIRONMENT_DEFAULTS.universal },
   };
@@ -309,7 +304,7 @@ const RAMP_DEFAULT = {
 // select 字串 → int uniform
 const SELECTS = {
   bgMode:    { uniform: 'uBgMode',    map: { color: 0, hdri: 1 } },
-  materialStyle: { uniform: 'uMaterialStyle', map: { glass: 0, membrane: 1, universal: 2 } },
+  materialStyle: { uniform: 'uMaterialStyle', map: { membrane: 1, universal: 2 } },
   colorMode: { uniform: 'uColorMode', map: { spectral: 0, ramp: 1 } },
   motion:    { uniform: 'uMotion',    map: { cinematic: 0, formation: 1, weave: 3, shatter: 4 } },
   shapeSource: { uniform: 'uShapeType', map: { svg: 1, gltf: 2 } },
@@ -2450,28 +2445,14 @@ function updateUIState() {
   });
   const colorBackground = P.bgMode === 'color';
   const bgc = document.getElementById('bgColor');
-  const materialStyle = document.getElementById('materialStyle');
-  const membraneOption = materialStyle.querySelector('option[value="membrane"]');
   const brightBgAssist = document.getElementById('brightBgAssist');
   bgc.disabled = !colorBackground;
   bgc.closest('.row').style.opacity = colorBackground ? 1 : 0.4;
-  // 液態薄膜的合成是專為純白畫布設計。背景一旦離開 #fff，立即收斂回
-  // 厚玻璃，避免下拉顯示一個實際不成立、shader 又無法合理解讀的組合。
-  const pureWhiteBackground = colorBackground
-    && P.bgColor.toLowerCase() === '#ffffff';
-  membraneOption.disabled = !pureWhiteBackground;
-  if (!pureWhiteBackground && P.materialStyle === 'membrane') {
-    const previousStyle = P.materialStyle;
-    P.materialStyle = 'glass';
-    materialStyle.value = 'glass';
-    switchMaterialProfile(previousStyle, 'glass');
-    if (uniforms) uniforms.uMaterialStyle.value = SELECTS.materialStyle.map.glass;
-  }
   const membraneMaterial = P.materialStyle === 'membrane';
   const membraneDepth = document.getElementById('membraneDepth');
   membraneDepth.disabled = !membraneMaterial;
   document.getElementById('membraneDepthRow').style.opacity = membraneMaterial ? 1 : 0.4;
-  // 液態薄膜本身就是前後表面透射模型，不讀取厚玻璃專用的亮底補償。
+  // 液態薄膜本身就是前後表面透射模型，不讀取通用玻璃專用的亮底補償。
   const brightAssistUsable = colorBackground && !membraneMaterial;
   brightBgAssist.disabled = !brightAssistUsable;
   brightBgAssist.closest('.row').style.opacity = brightAssistUsable ? 1 : 0.4;
@@ -2520,7 +2501,7 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   resetSpectralCausticColors();
   resetRamp();
   bindControls();
-  if (inited) loadMaterialEnvironment('glass');
+  if (inited) loadMaterialEnvironment('universal');
 });
 
 // 離開效果頁後，下一次從首頁進入應從乾淨的預設狀態開始；
@@ -2611,7 +2592,7 @@ function loadEnvironment(url, label, isHDR, revokeURL = false) {
 function loadMaterialEnvironment(style = P.materialStyle) {
   const environment = materialEnvironments[style]
     || MATERIAL_ENVIRONMENT_DEFAULTS[style]
-    || MATERIAL_ENVIRONMENT_DEFAULTS.glass;
+    || MATERIAL_ENVIRONMENT_DEFAULTS.universal;
   if (environment.file) {
     const url = URL.createObjectURL(environment.file);
     loadEnvironment(url, environment.label, environment.isHDR, true);
@@ -3071,7 +3052,7 @@ async function runExport(settings) {
   // 液態薄膜的膜身是「透過白底看到的顏色」，而且亮底顯色路徑是由背景亮度開的
   // 閘 —— 把背景抽成黑的等於連材質模型一起換掉，成品會整片變淡、跟畫面對不上。
   // 改成保留白底把顏色算完，再由 shader 對白底反乘出 straight alpha
-  //（uMembraneOverWhite 分支），背景照樣透得過來。厚玻璃維持原本的「黑場 +
+  //（uMembraneOverWhite 分支），背景照樣透得過來。通用玻璃維持原本的「黑場 +
   // 反預乘」，它的顏色本來就不依附背景。
   const membraneOverWhite = transparentExport && P.materialStyle === 'membrane';
   uniforms.uTransparentBackground.value = transparentExport ? 1 : 0;

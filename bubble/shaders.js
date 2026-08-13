@@ -176,7 +176,7 @@ uniform int       uColorMode;   // 0 光譜, 1 自訂漸層
 uniform sampler2D uRampTex;      // 自訂漸層查找表（CPU 端依色標生成）
 
 uniform int   uBgMode;      // 0 純色, 1 HDRI
-uniform int   uMaterialStyle; // 0 厚玻璃, 1 液態薄膜
+uniform int   uMaterialStyle; // 0 已移除的舊值（相容用途，視同通用玻璃）, 1 液態薄膜, 2 通用玻璃
 uniform int   uTransparentBackground;
 // 1 = 液態薄膜的去背輸出：顏色照白底算完，再對白底反乘出 straight alpha
 //（見 mainImage 末段）
@@ -1079,7 +1079,7 @@ void main(){
   }
   vec3 glassComposite = mix(darkComposite, brightComposite, brightBg);
 
-  // 液態薄膜不是把厚玻璃調淡，而是以同一對前／背表面重新合成：中央主要
+  // 液態薄膜不是把通用玻璃調淡，而是以同一對前／背表面重新合成：中央主要
   // 透過背景，反射集中在輪廓；前後法線不再互相平行的位置形成膜褶與焦散核心。
   float membraneFold = 0.0;
   float membraneBoundary = 0.0;
@@ -1235,7 +1235,7 @@ void main(){
   }
 
   vec3 finalColor = mix(glassComposite, membraneComposite, membraneMode);
-  // 厚玻璃的亮底補償仍由原開關管理；液態薄膜本身就是透射模型，不依賴該開關。
+  // 通用玻璃的亮底補償仍由原開關管理；液態薄膜本身就是透射模型，不依賴該開關。
   float brightColorSupport = max(
     whiteBackdrop,
     membraneMode * brightBg
