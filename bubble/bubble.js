@@ -222,6 +222,9 @@ const pickMaterialProfile = source => Object.fromEntries(
 );
 const MATERIAL_PROFILE_DEFAULTS = {
   glass: pickMaterialProfile(P),
+  // 通用玻璃沿用厚玻璃的材質與 HDRI 校準；它跟厚玻璃的差別在合成方式，
+  // 不在材質參數，所以從同一組值起步比較好比較。
+  universal: pickMaterialProfile(P),
   membrane: {
     hdriYaw: -45,
     hdriPitch: 20,
@@ -248,6 +251,7 @@ const MATERIAL_PROFILE_DEFAULTS = {
 const MATERIAL_ENVIRONMENT_DEFAULTS = {
   glass: { url: GLASS_HDRI_URL, label: GLASS_HDRI_LABEL, isHDR: true, file: null },
   membrane: { url: MEMBRANE_HDRI_URL, label: MEMBRANE_HDRI_LABEL, isHDR: true, file: null },
+  universal: { url: GLASS_HDRI_URL, label: GLASS_HDRI_LABEL, isHDR: true, file: null },
 };
 let materialProfiles = {};
 let materialEnvironments = {};
@@ -255,10 +259,12 @@ function resetMaterialProfiles() {
   materialProfiles = {
     glass: { ...MATERIAL_PROFILE_DEFAULTS.glass },
     membrane: { ...MATERIAL_PROFILE_DEFAULTS.membrane },
+    universal: { ...MATERIAL_PROFILE_DEFAULTS.universal },
   };
   materialEnvironments = {
     glass: { ...MATERIAL_ENVIRONMENT_DEFAULTS.glass },
     membrane: { ...MATERIAL_ENVIRONMENT_DEFAULTS.membrane },
+    universal: { ...MATERIAL_ENVIRONMENT_DEFAULTS.universal },
   };
 }
 resetMaterialProfiles();
@@ -303,7 +309,7 @@ const RAMP_DEFAULT = {
 // select 字串 → int uniform
 const SELECTS = {
   bgMode:    { uniform: 'uBgMode',    map: { color: 0, hdri: 1 } },
-  materialStyle: { uniform: 'uMaterialStyle', map: { glass: 0, membrane: 1 } },
+  materialStyle: { uniform: 'uMaterialStyle', map: { glass: 0, membrane: 1, universal: 2 } },
   colorMode: { uniform: 'uColorMode', map: { spectral: 0, ramp: 1 } },
   motion:    { uniform: 'uMotion',    map: { cinematic: 0, formation: 1, weave: 3, shatter: 4 } },
   shapeSource: { uniform: 'uShapeType', map: { svg: 1, gltf: 2 } },
@@ -450,7 +456,7 @@ function refreshShatterTimelineReadouts() {
   if (total) total.textContent = `四段合計 ${P.loopDuration.toFixed(1)}s（＝循環秒數）`;
 }
 
-import { VERT, FRAG } from './shaders.js?v=split-continuity-1';
+import { VERT, FRAG } from './shaders.js?v=universal-1';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;

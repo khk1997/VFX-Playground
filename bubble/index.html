@@ -63,7 +63,7 @@
 
   <div class="group">
     <h3>材質反射 Material</h3>
-    <div class="row"><label>材質類型</label><select id="materialStyle"><option value="glass">厚玻璃</option><option value="membrane">液態薄膜（白底）</option></select><span class="val"></span></div>
+    <div class="row"><label>材質類型</label><select id="materialStyle"><option value="glass">厚玻璃</option><option value="membrane">液態薄膜（白底）</option><option value="universal">通用玻璃（黑白通吃）</option></select><span class="val"></span></div>
     <div class="row" id="membraneDepthRow"><label>膜體立體感</label><input type="range" id="membraneDepth" min="0" max="1" step="0.01" value="0.65"><span class="val" id="membraneDepth_v"></span></div>
     <div class="row"><label>反射強度</label><input type="range" id="reflect" min="0" max="2" step="0.02" value="1.6"><span class="val" id="reflect_v"></span></div>
     <div class="row"><label>透射率</label><input type="range" id="transmission" min="0" max="1" step="0.01" value="0.96"><span class="val" id="transmission_v"></span></div>
@@ -370,6 +370,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=membrane-over-white-1"></script>
+<script type="module" src="./bubble.js?v=universal-dbg2"></script>
 </body>
 </html>

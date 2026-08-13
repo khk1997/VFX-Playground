@@ -824,15 +824,24 @@ void main(){
   vec3 p = ro + rd * t;
   vec3 N = calcNormal(p);
   FilmMaterial material = thinFilm(p, N, -rd);
-  float membraneMode = float(uMaterialStyle);
+  float membraneMode = uMaterialStyle == 1 ? 1.0 : 0.0;
+  // 通用玻璃：顏色一律以黑場算出「水滴自身的能量」，最後再 over 疊到實際透射
+  // 過來的背景上。加色合成需要暗畫布才顯色、吸收需要亮畫布才顯色 —— over 兩
+  // 邊都成立，而且 alpha 直接就是去背輸出要的覆蓋率。
+  bool universalGlass = uMaterialStyle == 2;
   // 暗底逐項還原 commit 版；亮底使用透射顯色，中間依背景明度平滑混合。
   float bgLum = dot(bg.rgb, vec3(0.2126, 0.7152, 0.0722));
+  // 通用玻璃把顯色階段的「背景」視為黑場：不是丟掉背景，而是把背景的貢獻
+  // 從顏色生成裡拿掉，改由最後的 over 合成負責 —— 折射進來的光仍然完整保留
+  // 在 refractedBg 裡。
+  if (universalGlass) bgLum = 0.0;
   float brightBg = smoothstep(0.45, 0.90, bgLum);
   // 灰底維持原本美術模型；只有純色畫布接近白色時才啟用保色補償。
   // 開關只控制合成方式，不覆寫任何材質或色散參數。
   float whiteBackdrop = uBrightBgAssist * (1.0 - float(uBgMode))
     * smoothstep(0.82, 0.97, bgLum);
-  vec3 darkComposite = mix(bg.rgb, material.darkColor, material.darkAlpha);
+  vec3 darkComposite = mix(universalGlass ? vec3(0.0) : bg.rgb,
+    material.darkColor, material.darkAlpha);
 
   // 亮底：追蹤水滴內部到背面，取得實際光程、背面 Fresnel 與折射方向。
   vec3 refractedBg = bg.rgb;
@@ -852,7 +861,7 @@ void main(){
     uBgMode == 0 && uHasEnv == 1
       && (uEnvRefraction > 0.001
         || (realDispersionStrength > 0.001 && uRealDispersionSeparation > 0.001));
-  if (brightBg > 0.001 || needsEnvironmentTransmission) {
+  if (brightBg > 0.001 || needsEnvironmentTransmission || universalGlass) {
     vec3 insideDir = refract(rd, N, 1.0 / uIOR);
     if (dot(insideDir, insideDir) > 0.0001) {
       transmissionDir = normalize(insideDir);
@@ -1504,6 +1513,26 @@ void main(){
       clamp(membraneWhiteCardGrade, 0.0, 0.16)
     );
   }
+  // 通用玻璃的 over 合成。finalColor 此刻是「黑場上的水滴自身能量」，也就是
+  // premultiplied 的顏色；covered 是它佔掉的比例，剩下的 (1 - covered) 讓折射
+  // 過來的背景通過。透射本身仍帶波長選擇性（material.transmission 是干涉反射
+  // 率的互補），所以亮底會顯色、暗底則由自身能量顯色，全程沒有任何背景亮度
+  // 的分支。
+  float universalCovered = 0.0;
+  vec3 universalTransmitted = vec3(0.0);
+  if (universalGlass) {
+    universalTransmitted = refractedBg * material.transmission * volumeAbsorption
+      * (1.0 - backFres * 0.72);
+    // 覆蓋率取材質不透明度與自身能量兩者的較大值：色散、焦散那些後面才疊上
+    // 來的光同樣會遮住背景，只看 darkAlpha 會讓亮部透出過多背景而變灰。
+    universalCovered = clamp(
+      max(material.darkAlpha, dot(finalColor, vec3(0.2126, 0.7152, 0.0722))),
+      0.0,
+      1.0
+    );
+    finalColor = clamp(finalColor + universalTransmitted * (1.0 - universalCovered), 0.0, 1.0);
+  }
+
   float outputAlpha = 1.0;
   if (uTransparentBackground == 1) {
     float surfaceLuma = dot(material.baseSurface + material.filmSurface, vec3(0.3333));
@@ -1521,7 +1550,13 @@ void main(){
       1.0
     );
     outputAlpha = mix(glassAlpha, membraneAlpha, membraneMode);
-    if (uMembraneOverWhite > 0.5) {
+    if (universalGlass) {
+      // 通用玻璃天生就是 over 合成，去背不需要任何特殊處理：把剛才疊上的透射
+      // 光扣掉，剩下的就是自身能量，alpha 用同一個覆蓋率。
+      finalColor = clamp(finalColor - universalTransmitted * (1.0 - universalCovered), 0.0, 1.0);
+      outputAlpha = clamp(universalCovered, 0.02, 1.0);
+      finalColor = clamp(finalColor / outputAlpha, 0.0, 1.0);
+    } else if (uMembraneOverWhite > 0.5) {
       // 液態薄膜的去背輸出。膜身「就是背景」（見 transparentMembrane 那行），
       // 而且亮底顯色路徑是由背景亮度開的閘 —— 把背景抽成黑色等於連材質模型
       // 一起換掉，成品會整片變淡。所以顏色仍以白底算完，再對白底做反乘：
