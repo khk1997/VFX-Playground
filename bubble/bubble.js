@@ -2,23 +2,23 @@
 import * as THREE from 'three';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
-} from './shape-field.js?v=svg-shape-51';
+} from './shape-field.js?v=svg-shape-52';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
   MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
   MORPH_TARGET_SVG_NAME, makeMorphTargetSvgFile,
   MORPH_TARGET_SOLID_NAME, buildMorphTargetSolid,
-} from './default-shapes.js?v=svg-shape-51';
+} from './default-shapes.js?v=svg-shape-52';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-51';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-51';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-51';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-51';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-51';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-51';
+} from './motions/registry.js?v=svg-shape-52';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-52';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-52';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-52';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-52';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-52';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -2808,10 +2808,21 @@ function updateUIState() {
 }
 
 document.getElementById('resetBtn').addEventListener('click', () => {
+  // 重設不換動態模式：按重設是想把「現在這個模式」的參數歸零，不是想被丟回
+  // 分裂模式再自己切回來。
+  const motion = P.motion;
   Object.assign(P, DEFAULTS, SELECT_DEFAULTS, TOGGLE_DEFAULTS, COLOR_DEFAULTS);
+  P.motion = motion;
   resetMaterialProfiles();
   if (mobileRenderQuery.matches && !PREVIEW) P.cameraDistance = MOBILE_CAMERA_DISTANCE_DEFAULT;
   motionMemory = buildMotionMemory();
+  // 每個模式各自記憶的那幾項（顆數／滴徑／循環秒數／前後拉伸／擠出外觀）要套用
+  // 「這個模式」的預設，不能停在共用預設上。共用預設是給分裂模式用的數字——
+  // 例如循環 12 秒、顆數 2，留在形狀變形上就完全不對。
+  //
+  // 平常這件事是由模式切換的處理去做的，但這裡刻意不換模式，那條路徑不會觸發，
+  // 所以得自己補。
+  for (const key of MOTION_MEMORY_KEYS) P[key] = motionMemory[key][motion];
   resetSpectralCausticColors();
   resetRamp();
   bindControls();
