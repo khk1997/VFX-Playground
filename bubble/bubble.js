@@ -1,19 +1,19 @@
 'use strict';
 import * as THREE from 'three';
-import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-32';
+import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-34';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
   MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
-} from './default-shapes.js?v=svg-shape-32';
+} from './default-shapes.js?v=svg-shape-34';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-32';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-32';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-32';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-32';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-32';
+} from './motions/registry.js?v=svg-shape-34';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-34';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-34';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-34';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-34';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -147,14 +147,14 @@ const DEFAULTS = {              // 數值滑桿
   // 水滴在底部形成／懸掛佔一次滴落的多少比例，剩下的都是墜落。
   meltHang: 0.35,
   // 懸掛時往下垂多少、脫離後墜落多遠。
-  meltSag: 0.05,
-  meltFall: 1.6,
+  meltSag: 0.03,
+  meltFall: 0.85,
   // 墜落到幾成才開始縮小。必須在墜落結束前收乾淨，否則水滴會帶著半徑跳回起點
   // ——「縮小到消失」不只是效果，是循環接縫的必要條件。
   meltShrink: 0.25,
   // 每滴大小落在這個範圍（乘在「水滴大小」上）。
-  meltSizeMin: 0.55,
-  meltSizeMax: 1,
+  meltSizeMin: 0.1,
+  meltSizeMax: 0.43,
   // 墜落時的水平擾動，避免同一個滴落點的水滴完全重疊成一直線。
   meltJitter: 0.04,
   // 底部取樣範圍：形狀高度的多少比例算「底部」，滴落點就從那一段裡挑。
@@ -163,7 +163,7 @@ const DEFAULTS = {              // 數值滑桿
   // 水滴的形狀（見 melt.js 的 meltDeform）。懸掛時被重力拉長、上方收出一個頸；
   // 脫離後頸縮回，水滴在表面張力下彈動著收斂回接近球形。
   meltStretch: 0.3,
-  meltNeck: 0.45,
+  meltNeck: 0.5,
   meltWobble: 0.5,
   // 崩解噴濺的時間軸拆成四段時長（見 shatterSegments）：靜止 → 蓄力 → 飛散 →
   // 重組。四個值是相對權重，正規化後填滿整個循環，所以任何組合都合法、不會出現

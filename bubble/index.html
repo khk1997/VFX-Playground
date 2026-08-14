@@ -243,16 +243,16 @@
     <div class="row" id="meltRateRow"><label>滴落頻率</label><input type="range" id="meltRate" min="1" max="8" step="1" value="3"><span class="val" id="meltRate_v"></span></div>
     <div class="row" id="meltRateVaryRow"><label>節奏差異</label><input type="range" id="meltRateVary" min="0" max="1" step="0.01" value="0.6"><span class="val" id="meltRateVary_v"></span></div>
     <div class="row" id="meltHangRow"><label>形成時間</label><input type="range" id="meltHang" min="0.05" max="0.9" step="0.01" value="0.35"><span class="val" id="meltHang_v"></span></div>
-    <div class="row" id="meltSagRow"><label>懸垂幅度</label><input type="range" id="meltSag" min="0" max="0.3" step="0.005" value="0.05"><span class="val" id="meltSag_v"></span></div>
-    <div class="row" id="meltFallRow"><label>墜落距離</label><input type="range" id="meltFall" min="0.2" max="4" step="0.05" value="1.6"><span class="val" id="meltFall_v"></span></div>
+    <div class="row" id="meltSagRow"><label>懸垂幅度</label><input type="range" id="meltSag" min="0" max="0.3" step="0.005" value="0.03"><span class="val" id="meltSag_v"></span></div>
+    <div class="row" id="meltFallRow"><label>墜落距離</label><input type="range" id="meltFall" min="0.2" max="4" step="0.05" value="0.85"><span class="val" id="meltFall_v"></span></div>
     <div class="row" id="meltShrinkRow"><label>縮小時機</label><input type="range" id="meltShrink" min="0" max="0.95" step="0.01" value="0.25"><span class="val" id="meltShrink_v"></span></div>
-    <div class="row" id="meltSizeMinRow"><label>大小差異下限</label><input type="range" id="meltSizeMin" min="0.1" max="2" step="0.01" value="0.55"><span class="val" id="meltSizeMin_v"></span></div>
-    <div class="row" id="meltSizeMaxRow"><label>大小差異上限</label><input type="range" id="meltSizeMax" min="0.1" max="2" step="0.01" value="1"><span class="val" id="meltSizeMax_v"></span></div>
+    <div class="row" id="meltSizeMinRow"><label>大小差異下限</label><input type="range" id="meltSizeMin" min="0.1" max="2" step="0.01" value="0.1"><span class="val" id="meltSizeMin_v"></span></div>
+    <div class="row" id="meltSizeMaxRow"><label>大小差異上限</label><input type="range" id="meltSizeMax" min="0.1" max="2" step="0.01" value="0.43"><span class="val" id="meltSizeMax_v"></span></div>
     <div class="row" id="meltJitterRow"><label>墜落擾動</label><input type="range" id="meltJitter" min="0" max="0.2" step="0.005" value="0.04"><span class="val" id="meltJitter_v"></span></div>
     <div class="row" id="meltBandRow"><label>底部範圍</label><input type="range" id="meltBand" min="0.05" max="0.8" step="0.01" value="0.22"><span class="val" id="meltBand_v"></span></div>
     <div class="row" id="meltSeedRow"><label>滴落點種子</label><input type="range" id="meltSeed" min="0" max="30" step="1" value="0"><span class="val" id="meltSeed_v"></span></div>
     <div class="row" id="meltStretchRow"><label>懸垂拉長</label><input type="range" id="meltStretch" min="0" max="0.6" step="0.01" value="0.3"><span class="val" id="meltStretch_v"></span></div>
-    <div class="row" id="meltNeckRow"><label>頸部尖端</label><input type="range" id="meltNeck" min="0" max="1" step="0.01" value="0.45"><span class="val" id="meltNeck_v"></span></div>
+    <div class="row" id="meltNeckRow"><label>頸部尖端</label><input type="range" id="meltNeck" min="0" max="1" step="0.01" value="0.5"><span class="val" id="meltNeck_v"></span></div>
     <div class="row" id="meltWobbleRow"><label>脫離彈動</label><input type="range" id="meltWobble" min="0" max="1" step="0.01" value="0.5"><span class="val" id="meltWobble_v"></span></div>
     <div id="meltShapeNote" class="note">水滴不是正圓球。真實的滴水跟卡通畫法相反：懸掛時才是淚滴形——重力把它往下拉長、上方收出一個細頸（「懸垂拉長」與「頸部尖端」）；墜落時反而回到接近球形，因為這個尺度下表面張力遠遠壓過重力，水滴會在拉長與壓扁之間彈動著收斂回球（「脫離彈動」），同時被空氣阻力壓得略扁。卡通那種「墜落中拖著尖尾的淚滴」現實中並不存在。彈動的頻率隨滴徑提高（小滴抖得快），收斂速度則由上方「水滴形態」的「表面張力」決定。所有形變都是體積守恆的：沿垂直軸拉長多少，橫向就縮多少。</div>
     <div id="meltNote" class="note">形狀本身完全不動也不會消融，只在底部持續有水滴形成、垂下、墜落、縮小消失，然後同一個位置再長出下一滴，是一段永遠播下去的循環。「滴落頻率」是每顆水滴一個循環滴幾次，「節奏差異」讓各顆在這個基準上下錯開——兩者都只取整數倍，所以看起來此起彼落很隨機，循環接縫卻完全接得上、不會跳。「形成時間」是水滴掛在底部脹大所佔的比例，剩下的都是墜落。「縮小時機」是墜到幾成才開始收；它必須在墜落結束前收乾淨，否則水滴會帶著半徑跳回起點，所以這個值調太高會看到接縫。「底部範圍」是形狀高度的多少比例算底部，滴落點就從那一段裡挑；「滴落點種子」換的是挑中哪幾個位置。</div>
@@ -403,6 +403,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=universal-dbg34"></script>
+<script type="module" src="./bubble.js?v=universal-dbg36"></script>
 </body>
 </html>
