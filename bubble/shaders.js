@@ -197,7 +197,6 @@ uniform float uFilmBlur;
 uniform float uSaturation;
 uniform float uFresnel;
 uniform float uGravity;
-uniform float uFlowSpeed;
 uniform float uPatternSpeed;
 
 uniform int       uColorMode;   // 0 光譜, 1 自訂漸層
