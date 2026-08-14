@@ -103,6 +103,29 @@ uniform int   uShapeType;      // 0 無, 1 SVG 擠出, 2 GLB/GLTF 體積
 uniform float uShapeProgress;
 uniform float uFidelityAbsorb;
 uniform float uShapeSwell;
+// 形狀變形：0 = 關閉（其餘模式一律走原本的單一形狀路徑，一格都不變），
+// 1 = 由 r 通道變成 g 通道，2 = 反向。
+uniform float uShapeMorph;
+// xy：波掃方向的單位向量；z：舊形狀的「消失波前」；w：新形狀的「出現波前」。
+// 兩個波前分開，是因為水滴的出發與抵達本來就差一整個錯開量：先出發的那些
+// 已經在飛了，後面的還沒動。舊形狀跟著出發波前被削掉、新形狀跟著抵達波前
+// 長出來，實體與水滴才會咬合成同一道波，而不是三件各走各的事。
+uniform vec4  uShapeCut;
+// 切口本身的軟硬。0 是刀切。
+uniform float uShapeCutBlend;
+// 波前形狀：0 平面掃描、1 從中心放射、2 螺旋。
+uniform float uMorphFront;
+// 螺旋的纏繞強度（uMorphFront == 2 時才有意義）。
+uniform float uMorphSpiral;
+// 消失場的擾動：x 亂流幅度、y 亂流尺度、z 晶格幅度、w 晶格尺度。
+uniform vec4  uMorphBreak;
+// 前緣收頸：x 侵蝕量、y 作用寬度。
+uniform vec2  uMorphNecking;
+// 這一幀哪幾顆形狀真的在場（x 舊形狀、y 新形狀，0/1）。定格時只有一顆，另一
+// 顆已經被波前掃光／還沒開始出現，卻仍然每個 march step 取樣一次距離場——
+// 而距離場取樣正是這支 shader 最貴的地方。整個 uniform 對所有執行緒都一樣，
+// 分支不會發散。定格佔了循環的三成，而那正是使用者盯著形狀看的時候。
+uniform vec2  uMorphActive;
 // 形狀整體縮放（1 = 原尺寸）。成形定格期間的「呼吸」走這裡：距離場的等距膨脹
 // 會把輪廓加粗、細節連在一起，縮放才是整顆造型一起脹縮。均勻縮放對 SDF 是精確
 // 的 d(p) = s·d(p/s)，所以 raymarch 的步長仍然安全。
@@ -351,7 +374,11 @@ float decodeShape(float v){ return (v - 0.5) * 48.0; }
 // 網格橫向放大數十倍）。三次 B-spline 的梯度連續，且能精確重現線性函數 ——
 // 距離場在局部本來就近似線性，所以輪廓不會被磨圓，只有高曲率處略微收斂。
 // 以 4 次雙線性取樣合成 16 taps 的權重（Sigg & Hadwiger 的快速三階濾波）。
-float sampleShapeField(vec2 uv){
+// ch 選的是距離場存在哪個通道。烘焙時 r=g=b 都是同一個值，只有形狀變形模式
+// 例外：它把兩顆形狀打包進同一張貼圖（r 是形狀 A、g 是形狀 B，見 shape-field.js
+// 的 packShapePairTexture），一次取樣就同時拿得到兩顆的距離，不必綁第二張貼圖、
+// 也不必為了第二次取樣把每個 march step 的成本加倍。
+float sampleShapeField(vec2 uv, int ch){
   float n = max(uShapeGrid, 1.0);
   vec2 texSize = vec2(n);
   vec2 coord = uv * texSize - 0.5;
@@ -368,21 +395,28 @@ float sampleShapeField(vec2 uv){
   // 每一對相鄰 texel 用一次雙線性取樣代替，取樣點偏移由該對的權重比決定。
   vec2 uv0 = (base + 0.5 + w1 / s0 - 1.0) / texSize;
   vec2 uv1 = (base + 0.5 + w3 / s1 + 1.0) / texSize;
-  float a = texture2D(uShapeTex, vec2(uv0.x, uv0.y)).r;
-  float b = texture2D(uShapeTex, vec2(uv1.x, uv0.y)).r;
-  float c = texture2D(uShapeTex, vec2(uv0.x, uv1.y)).r;
-  float d = texture2D(uShapeTex, vec2(uv1.x, uv1.y)).r;
+  vec4 ta = texture2D(uShapeTex, vec2(uv0.x, uv0.y));
+  vec4 tb = texture2D(uShapeTex, vec2(uv1.x, uv0.y));
+  vec4 tc = texture2D(uShapeTex, vec2(uv0.x, uv1.y));
+  vec4 td = texture2D(uShapeTex, vec2(uv1.x, uv1.y));
+  float a = ch == 1 ? ta.g : ta.r;
+  float b = ch == 1 ? tb.g : tb.r;
+  float c = ch == 1 ? tc.g : tc.r;
+  float d = ch == 1 ? td.g : td.r;
   return mix(mix(a, b, s1.x), mix(c, d, s1.x), s1.y);
 }
 // smoothShape 只在 calcNormal 求梯度時開啟。ray march 只需要一個保守的距離值，
 // 次 texel 的差異不影響步長，因此在 march 迴圈裡用單次雙線性取樣就夠 ——
 // 每步 4 taps 降回 1 tap，實測省下約 7%，畫面差異低於算繪雜訊。
-float svgShapeDistance(vec3 p, bool smoothShape){
+float svgShapeDistance(vec3 p, bool smoothShape, int ch){
   vec2 uv = p.xy / 3.0 + 0.5;
   vec2 safeUv = clamp(uv, vec2(0.0), vec2(1.0));
   // SVG 距離場直接以世界單位編碼（範圍 ±1.5，覆蓋整個取樣盒），
   // 因此解碼與烘焙解析度無關；不再需要「像素距離 × texel」那層換算。
-  float raw = smoothShape ? sampleShapeField(safeUv) : texture2D(uShapeTex, safeUv).r;
+  vec4 texel = texture2D(uShapeTex, safeUv);
+  float raw = smoothShape
+    ? sampleShapeField(safeUv, ch)
+    : (ch == 1 ? texel.g : texel.r);
   float edge = (raw - 0.5) * 3.0;
   if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
     // 延續貼圖邊界上的真實正距離，再加上離開取樣盒的距離。舊版在盒外
@@ -417,7 +451,9 @@ float svgShapeDistance(vec3 p, bool smoothShape){
   }
   return result - uShapeSoftness;
 }
-float atlasVoxel(vec3 cell){
+// ch 的意義與 sampleShapeField 相同：形狀變形模式把第二顆形狀的體素圖集放在
+// g 通道，其餘情況 r=g=b 都是同一個值。
+float atlasVoxel(vec3 cell, int ch){
   float n = uShapeGrid;
   cell = clamp(cell, vec3(0.0), vec3(n - 1.0));
   float slice = cell.z;
@@ -425,9 +461,10 @@ float atlasVoxel(vec3 cell){
   float row = floor(slice / uShapeAtlas.x);
   vec2 atlasSize = uShapeAtlas * n;
   vec2 uv = (vec2(col, row) * n + cell.xy + 0.5) / atlasSize;
-  return decodeShape(texture2D(uShapeTex, uv).r);
+  vec4 texel = texture2D(uShapeTex, uv);
+  return decodeShape(ch == 1 ? texel.g : texel.r);
 }
-float volumeShapeDistance(vec3 p){
+float volumeShapeDistance(vec3 p, int ch){
   float n = uShapeGrid;
   vec3 gridP = (p / 2.1 + 0.5) * (n - 1.0);
   if (any(lessThan(gridP, vec3(0.0))) || any(greaterThan(gridP, vec3(n - 1.0)))) {
@@ -439,11 +476,11 @@ float volumeShapeDistance(vec3 p){
   vec3 base = floor(gridP);
   vec3 f = fract(gridP);
   float z0 = mix(
-    mix(atlasVoxel(base), atlasVoxel(base + vec3(1,0,0)), f.x),
-    mix(atlasVoxel(base + vec3(0,1,0)), atlasVoxel(base + vec3(1,1,0)), f.x), f.y);
+    mix(atlasVoxel(base, ch), atlasVoxel(base + vec3(1,0,0), ch), f.x),
+    mix(atlasVoxel(base + vec3(0,1,0), ch), atlasVoxel(base + vec3(1,1,0), ch), f.x), f.y);
   float z1 = mix(
-    mix(atlasVoxel(base + vec3(0,0,1)), atlasVoxel(base + vec3(1,0,1)), f.x),
-    mix(atlasVoxel(base + vec3(0,1,1)), atlasVoxel(base + vec3(1,1,1)), f.x), f.y);
+    mix(atlasVoxel(base + vec3(0,0,1), ch), atlasVoxel(base + vec3(1,0,1), ch), f.x),
+    mix(atlasVoxel(base + vec3(0,1,1), ch), atlasVoxel(base + vec3(1,1,1), ch), f.x), f.y);
   float voxelSize = 2.1 / max(1.0, n - 1.0);
   // 低解析度下薄耳、薄翼等部位可能只有一個 voxel，三線性插值後會斷裂。
   // 補不到半個 voxel 的解析度感知 guard；128³ 歸零，不改高品質輪廓。
@@ -473,6 +510,73 @@ float capillaryWave(vec3 p, int i){
   float hemisphereMask = 1.0 - smoothstep(1.65, 2.0, poleDistance);
   float ripple = sin(behindFront * uElasticDensity * PI);
   return ripple * spatialDecay * hemisphereMask * uElasticEvent.x * uElasticStrength;
+}
+
+// 形狀變形的「消失場」。整套切削的核心就是這個純量場：舊形狀留在場值大於
+// 消失波前的那一側、新形狀留在場值小於出現波前的那一側（見 mapScene 裡的
+// uShapeMorph 分支）。所以「換一種消失方式」= 換這條式子，兩道波前的推進、
+// 水滴的出發抵達、循環接縫全都不用動。
+//
+// 三個可疊加的層：
+//   波前形狀   平面掃描／從中心放射／螺旋。只是把「點到平面的投影」換成
+//              半徑或半徑加角度，卻讓同一種消失方式看起來完全不同。
+//   亂流       fBm 擾動場值，波前變成撕裂的有機邊緣。幅度大時整片碎成島嶼。
+//   晶格       Voronoi，但取的是「格子的隨機值」而不是到邊界的距離——同一格
+//              內完全等值，波前掃過時才會整塊整塊剝落，而不是模糊的漸變。
+//              這是碎裂鏡頭的讀感來源，糊掉就只是另一種噪聲了。
+//
+// 每個 march step 只算一次（兩顆形狀共用），所以成本與形狀數無關。
+float voronoiCellValue(vec2 p){
+  vec2 cell = floor(p);
+  vec2 f = fract(p);
+  float best = 1e9;
+  float value = 0.0;
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      vec2 offset = vec2(float(i), float(j));
+      // 格點的抖動與該格的隨機值取自同一個雜湊，換 uMorphBreak.w（格子尺度）
+      // 就整組換一套碎法。
+      float h = hash11(dot(cell + offset, vec2(127.1, 311.7)));
+      vec2 site = offset + vec2(h, fract(h * 43.75)) * 0.85 + 0.075;
+      float dist = dot(f - site, f - site);
+      if (dist < best) { best = dist; value = fract(h * 97.31); }
+    }
+  }
+  return value - 0.5;
+}
+
+float dissolveField(vec3 p){
+  float base;
+  if (uMorphFront < 0.5) {
+    base = dot(p.xy, uShapeCut.xy);
+  } else if (uMorphFront < 1.5) {
+    // 放射：波前是一圈從中心擴張的環。uShapeCut.xy 在這裡用不到。
+    base = length(p.xy);
+  } else {
+    // 螺旋：半徑再加上角度。atan 在 ±π 有接縫，那條接縫就是螺旋的那一臂
+    // ——它是這個波前形狀的一部分，不是瑕疵。
+    base = length(p.xy) + atan(p.y, p.x) * uMorphSpiral;
+  }
+  // 擾動只在波前附近才可能改變結果：離波前夠遠的地方，加不加這個幅度都還是
+  // 同一側，白算。而 raymarch 的絕大多數取樣點都離波前很遠（波前是一條線／
+  // 一個環，實體卻鋪滿整個取樣盒），所以擋掉這些是這裡最大的一筆節省——實測
+  // 亂流從 +3.3ms/幀 降到接近零。
+  //
+  // 不能直接用 if 硬切：帶狀邊界上距離場會跳一個幅度，raymarch 會衝過表面、
+  // 邊緣長出接縫。所以帶內用 smoothstep 把擾動淡出到 0，帶外才完全略過——
+  // 兩者在邊界上都是 0，接得起來。
+  float amp = uMorphBreak.x + uMorphBreak.z;
+  if (amp > 0.0001) {
+    float nearest = min(abs(base - uShapeCut.z), abs(base - uShapeCut.w));
+    float band = 1.0 - smoothstep(amp * 1.2, amp * 2.6, nearest);
+    if (band > 0.001) {
+      if (uMorphBreak.x > 0.0001) base += fbmFast(p * uMorphBreak.y) * uMorphBreak.x * band;
+      if (uMorphBreak.z > 0.0001) {
+        base += voronoiCellValue(p.xy * uMorphBreak.w) * uMorphBreak.z * band;
+      }
+    }
+  }
+  return base;
 }
 
 float mapScene(vec3 p, bool smoothShape){
@@ -553,9 +657,48 @@ float mapScene(vec3 p, bool smoothShape){
     // uShapeTex 在 GLB 模式儲存的是匯入時烘焙的高密度 Metaball 場，
     // 不是原模型距離場。以等距侵蝕讓每個細節球核逐步長大，避免 alpha 淡入。
     vec3 shapeP = p / uShapeScale;
-    float detailD = (uShapeType == 1
-      ? svgShapeDistance(shapeP, smoothShape)
-      : volumeShapeDistance(shapeP)) * uShapeScale;
+    float detailD;
+    if (uShapeMorph > 0.5) {
+      // 兩顆形狀同時在場：舊的被「消失波前」削掉，新的被「出現波前」放出來，
+      // 兩者聯集。單一貼圖的兩個通道，所以這裡沒有多綁任何取樣器。
+      int fromCh = uShapeMorph > 1.5 ? 1 : 0;
+      int toCh = 1 - fromCh;
+      // 兩顆形狀一定是同一種來源（面板的「形狀來源」對兩個匯入槽共用），所以
+      // 這裡只需要看一次 uShapeType，不會出現一顆走 SVG、一顆走體素的情況。
+      float dFrom = uMorphActive.x > 0.5
+        ? (uShapeType == 1
+          ? svgShapeDistance(shapeP, smoothShape, fromCh)
+          : volumeShapeDistance(shapeP, fromCh)) * uShapeScale
+        : 1e6;
+      float dTo = uMorphActive.y > 0.5
+        ? (uShapeType == 1
+          ? svgShapeDistance(shapeP, smoothShape, toCh)
+          : volumeShapeDistance(shapeP, toCh)) * uShapeScale
+        : 1e6;
+      float field = dissolveField(p);
+      // 收頸：波前前方那一小段裡，對距離場加一個正偏移把實體「侵蝕變薄」。
+      // 這不是切削——切削是憑空少一塊，收頸是材料自己先變細、收出一個頸、
+      // 然後才斷開，也就是真正的液體在表面張力下離開表面的樣子。四種消失
+      // 方式共用這一層，因為它給的是材質的身分，不是圖形花樣。
+      float neckFrom = field - uShapeCut.z;
+      float neckTo = uShapeCut.w - field;
+      if (uMorphNecking.x > 0.0001) {
+        float w = max(0.0001, uMorphNecking.y);
+        dFrom += uMorphNecking.x * (1.0 - smoothstep(0.0, w, neckFrom));
+        dTo += uMorphNecking.x * (1.0 - smoothstep(0.0, w, neckTo));
+      }
+      // 半空間的距離場：舊形狀只留在波前之後（field > cut.z），新形狀只留在
+      // 波前之前（field < cut.w）。用 smooth-max（-smin 的對偶）取交集，
+      // uShapeCutBlend 控制切口本身的軟硬。
+      float k = max(0.0001, uShapeCutBlend);
+      float keptFrom = -smin(-dFrom, -(uShapeCut.z - field), k);
+      float keptTo = -smin(-dTo, -(field - uShapeCut.w), k);
+      detailD = smin(keptFrom, keptTo, k);
+    } else {
+      detailD = (uShapeType == 1
+        ? svgShapeDistance(shapeP, smoothShape, 0)
+        : volumeShapeDistance(shapeP, 0)) * uShapeScale;
+    }
     float growth = smoothstep(0.0, 1.0, uShapeProgress);
     // 已抵達水滴附近先成形，遠處隨全域進度稍晚跟上；這是幾何侵蝕，
     // 不是透明淡入，因此水滴與模型輪廓之間始終有實際液橋。

@@ -41,6 +41,27 @@ export const MELT_DEFAULT_SVG_TEXT = `<svg xmlns="http://www.w3.org/2000/svg" vi
   <rect x="46" y="52" width="108" height="108" rx="18" ry="18" fill="#ffffff"/>
 </svg>`;
 
+export const MORPH_TARGET_SVG_NAME = '內建星形';
+
+// 形狀變形的目標形狀 B。挑星形是因為它跟問號（形狀 A）在兩件事上都不一樣：
+// 輪廓分佈是放射狀而不是集中在一側，錨點數量也差得多。配對演算法（見
+// motions/morph.js 的 buildMorphPairs）正是要在這種不對等的情況下才看得出
+// 有沒有做對——兩顆長得差不多的形狀就算用索引取模亂配也看不出破綻。
+//
+// 內圓角半徑取外徑的 42%（80 / 34）：再尖一點，五個角的錨點會稀疏到只剩
+// 一兩顆水滴，角就消失了；再鈍一點就跟圓形沒兩樣，變形前後的差異不夠。
+//
+// 用描邊而不是填色，這一點是實測出來的：填色的星形錨點會鋪滿整個內部，而
+// 錨點的半徑取決於該處造型有多厚，於是正中央就長出一顆蓋住整顆星的巨大水滴，
+// 五個角只剩幾顆小球掛在外面，完全讀不出是星形。這個模式的畫面全部由水滴排
+// 出來（不顯示距離場實體），所以形狀必須是「細的」——問號那個內建形狀正好
+// 也是描邊，同樣的道理。
+export const MORPH_TARGET_SVG_TEXT = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <polygon points="100.0,20.0 120.0,72.5 176.1,75.3 132.3,110.5 147.0,164.7 100.0,134.0 53.0,164.7 67.7,110.5 23.9,75.3 80.0,72.5"
+           fill="none" stroke="#ffffff" stroke-width="20"
+           stroke-linejoin="round" stroke-linecap="round"/>
+</svg>`;
+
 export const DEFAULT_SOLID_NAME = '內建環形';
 
 // Torus 是封閉實體，體素化不會產生非封閉掃描線；中央開孔讓匯聚效果比一顆
@@ -55,6 +76,26 @@ export function buildDefaultSolid() {
 
 export function makeDefaultSvgFile() {
   return new File([DEFAULT_SVG_TEXT], `${DEFAULT_SVG_NAME}.svg`, { type: 'image/svg+xml' });
+}
+
+export const MORPH_TARGET_SOLID_NAME = '內建多面體';
+
+// 形狀變形在 GLB 來源下的目標形狀 B。挑二十面體的理由跟星形一樣是「跟形狀 A
+// 差得夠遠」：內建環形是有孔的細管，這顆是實心的多面體，體積分佈與拓樸都相反，
+// 波前掃過時看得出真的換了一顆東西。
+//
+// 半徑 0.78 對上環形的外徑 0.88，兩者的包圍尺寸接近，波前的掃描範圍才不會被
+// 其中一顆撐得特別大。detail 0 保留平整的三角面——體素化後本來就會被平滑掉
+// 一部分稜角，再細分下去只是變成球。
+export function buildMorphTargetSolid() {
+  return new THREE.Mesh(
+    new THREE.IcosahedronGeometry(0.78, 0),
+    new THREE.MeshBasicMaterial(),
+  );
+}
+
+export function makeMorphTargetSvgFile() {
+  return new File([MORPH_TARGET_SVG_TEXT], `${MORPH_TARGET_SVG_NAME}.svg`, { type: 'image/svg+xml' });
 }
 
 export function makeMeltDemoSvgFile() {

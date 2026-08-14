@@ -657,3 +657,36 @@ export async function objectToField(root, size = 48) {
     oddScanlines,
   };
 }
+
+// 把兩顆 SVG 形狀的距離場疊進同一張貼圖：r 通道是 A、g 通道是 B。
+//
+// 形狀變形模式要在同一幀同時評估兩顆形狀（舊的被削掉、新的長出來）。綁第二張
+// 貼圖當然也行，但那等於每個 march step 多一次取樣，而距離場取樣正是這支
+// shader 最貴的地方。烘焙時 r=g=b 存的是同一個值（見 encodeFloat2D），g 通道
+// 本來就是閒著的，拿來放第二顆形狀不多花任何取樣成本。
+//
+// 兩張貼圖的尺寸必須一致才疊得起來。呼叫端用同一組參數烘焙這兩顆形狀，所以
+// 正常情況一定相同；尺寸不同時回傳 null，呼叫端會退回「只有水滴」的路徑，
+// 而不是畫出一顆錯位的形狀。
+export function packShapePairTexture(texA, texB) {
+  const a = texA?.image?.data;
+  const b = texB?.image?.data;
+  if (!a || !b) return null;
+  const { width, height } = texA.image;
+  if (texB.image.width !== width || texB.image.height !== height) return null;
+  const data = new Float32Array(width * height * 4);
+  for (let i = 0; i < width * height; i++) {
+    const o = i * 4;
+    data[o] = a[o];
+    data[o + 1] = b[o];
+    // b 通道留著跟 r 一致：只有變形模式會讀 g，其餘取樣路徑仍然讀 r。
+    data[o + 2] = a[o];
+    data[o + 3] = 1;
+  }
+  const tex = new THREE.DataTexture(data, width, height, THREE.RGBAFormat, THREE.FloatType);
+  tex.minFilter = tex.magFilter = THREE.LinearFilter;
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.generateMipmaps = false;
+  tex.needsUpdate = true;
+  return tex;
+}

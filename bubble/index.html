@@ -205,6 +205,7 @@
       <option value="weave">穿梭環繞 Weave</option>
       <option value="shatter">崩解噴濺 Shatter</option>
       <option value="melt">融化 Melt</option>
+      <option value="morph">形狀變形 Morph</option>
       <!-- 已移除的「脈動呼吸」。留一個隱藏選項，舊的參數組合檔寫進來時 value 才不會
            被瀏覽器丟成空字串；bindControls 會立刻把它導向「形狀匯聚」（LEGACY_SELECT_VALUES）。 -->
       <option value="pulse" hidden>脈動呼吸 Pulse（已移除）</option>
@@ -257,6 +258,25 @@
     <div id="meltShapeNote" class="note">水滴不是正圓球。真實的滴水跟卡通畫法相反：懸掛時才是淚滴形——重力把它往下拉長、上方收出一個細頸（「懸垂拉長」與「頸部尖端」）；墜落時反而回到接近球形，因為這個尺度下表面張力遠遠壓過重力，水滴會在拉長與壓扁之間彈動著收斂回球（「脫離彈動」），同時被空氣阻力壓得略扁。卡通那種「墜落中拖著尖尾的淚滴」現實中並不存在。彈動的頻率隨滴徑提高（小滴抖得快），收斂速度則由上方「水滴形態」的「表面張力」決定。所有形變都是體積守恆的：沿垂直軸拉長多少，橫向就縮多少。</div>
     <div id="meltNote" class="note">形狀本身完全不動也不會消融，只在底部持續有水滴形成、垂下、墜落、縮小消失，然後同一個位置再長出下一滴，是一段永遠播下去的循環。「滴落頻率」是每顆水滴一個循環滴幾次，「節奏差異」讓各顆在這個基準上下錯開——兩者都只取整數倍，所以看起來此起彼落很隨機，循環接縫卻完全接得上、不會跳。「形成時間」是水滴掛在底部脹大所佔的比例，剩下的都是墜落。「縮小時機」是墜到幾成才開始收；它必須在墜落結束前收乾淨，否則水滴會帶著半徑跳回起點，所以這個值調太高會看到接縫。「底部範圍」是形狀高度的多少比例算底部，滴落點就從那一段裡挑；「滴落點種子」換的是挑中哪幾個位置。</div>
     </div>
+    <div class="modeBlock" data-gate="morph">
+    <div class="row" id="morphHoldRow"><label>定格時間</label><input type="range" id="morphHold" min="0" max="0.4" step="0.01" value="0.15"><span class="val" id="morphHold_v"></span></div>
+    <div class="row" id="morphStaggerRow"><label>波前錯開</label><input type="range" id="morphStagger" min="0" max="0.9" step="0.01" value="0.82"><span class="val" id="morphStagger_v"></span></div>
+    <div class="row" id="morphWaveAngleRow"><label>波掃方向</label><input type="range" id="morphWaveAngle" min="0" max="360" step="5" value="180"><span class="val" id="morphWaveAngle_v"></span></div>
+    <div class="row" id="morphArcRow"><label>弧線高度</label><input type="range" id="morphArc" min="0" max="0.8" step="0.01" value="0.28"><span class="val" id="morphArc_v"></span></div>
+    <div class="row" id="morphSwellRow"><label>飛滴大小</label><input type="range" id="morphSwell" min="0" max="1" step="0.01" value="0.35"><span class="val" id="morphSwell_v"></span></div>
+    <div class="row" id="morphCutBlendRow"><label>切口軟硬</label><input type="range" id="morphCutBlend" min="0" max="0.2" step="0.005" value="0.06"><span class="val" id="morphCutBlend_v"></span></div>
+    <div class="effectSubhead">消失方式 Dissolve</div>
+    <div class="row" id="morphFrontRow"><label>波前形狀</label><input type="range" id="morphFront" min="0" max="2" step="1" value="0"><span class="val" id="morphFront_v"></span></div>
+    <div class="row" id="morphSpiralRow"><label>螺旋纏繞</label><input type="range" id="morphSpiral" min="-1" max="1" step="0.01" value="0.35"><span class="val" id="morphSpiral_v"></span></div>
+    <div class="row" id="morphNeckRow"><label>前緣收頸</label><input type="range" id="morphNeck" min="0" max="0.12" step="0.002" value="0.05"><span class="val" id="morphNeck_v"></span></div>
+    <div class="row" id="morphNeckWidthRow"><label>收頸範圍</label><input type="range" id="morphNeckWidth" min="0.05" max="1.2" step="0.01" value="0.45"><span class="val" id="morphNeckWidth_v"></span></div>
+    <div class="row" id="morphNoiseRow"><label>亂流撕裂</label><input type="range" id="morphNoise" min="0" max="0.6" step="0.005" value="0.15"><span class="val" id="morphNoise_v"></span></div>
+    <div class="row" id="morphNoiseScaleRow"><label>撕裂尺度</label><input type="range" id="morphNoiseScale" min="0.5" max="8" step="0.1" value="2.4"><span class="val" id="morphNoiseScale_v"></span></div>
+    <div class="row" id="morphCellRow"><label>晶格碎裂</label><input type="range" id="morphCell" min="0" max="0.6" step="0.005" value="0"><span class="val" id="morphCell_v"></span></div>
+    <div class="row" id="morphCellScaleRow"><label>碎塊大小</label><input type="range" id="morphCellScale" min="1" max="12" step="0.5" value="4"><span class="val" id="morphCellScale_v"></span></div>
+    <div id="morphDissolveNote" class="note">形狀不是被一刀切掉的：切削的位置由一條「消失場」決定，這幾個滑桿就是往那條場上疊東西，可以任意組合而不是互斥的選單。「波前形狀」換的是波怎麼走——平面掃描、從中心放射（像一圈擴張的環）、螺旋（接縫那一臂就是螺旋本身）。「前緣收頸」是斷開前先把材料侵蝕變薄、收出一個頸再斷，這一項給的是液體的身分而不是圖形花樣，四種波前都適用，建議一直開著。「亂流撕裂」把波前擾成參差的有機邊緣，幅度大時整片碎成島嶼；「晶格碎裂」則是同一格內完全等值，所以是整塊整塊剝落，那種一片一片解體的碎裂感來自這裡——兩者可以疊。水滴的出發時機會跟著擾動量一起變參差。</div>
+    <div id="morphNote" class="note">上方匯入的形狀 A 定格 → 一道波橫掃過去、把它削成水滴流走，新的形狀 B（目前固定是內建星形）在波前之後長出來 → 定格 → 再掃回來。整個過程形狀本體都在畫面上，水滴只存在於「已經離開舊形狀、還沒併進新形狀」的飛行途中，所以定格時看到的是一顆乾淨完整的造型，不是外面黏著一圈球。「定格時間」是單邊定格佔的時間，剩下的對半分給兩趟變形。「波前錯開」是這個模式最關鍵的一項，它決定「畫面上隨時有多少實體」：調高＝波掃得長、每顆水滴只飛一小段、舊形狀退到哪裡新形狀就跟到哪裡，實體幾乎不間斷；調低＝所有水滴同時出發、飛很久才重組，中間會空出一段兩顆形狀都不在、畫面只剩水滴的時間。預設偏高。「波掃方向」是波從哪個方向掃進來（回程固定轉 90°，否則兩趟看起來像同一段動畫正放再倒放）。「弧線高度」讓水滴沿路往外凸起再落下，走直線會像瞬移。「波前軟硬」是 0 時實體被一刀平切，調高會先收薄再斷開，比較像液體。形狀 A 與形狀 B 都在上方「形狀匯聚」那一組匯入，兩個槽共用同一個「形狀來源」。SVG↔SVG 與 GLB↔GLB 都支援；GLB 的兩顆形狀必須用同一個「模型品質」烘焙（換品質會自動重烘兩顆），高品質下記憶體佔用會是單一形狀的三倍左右。萬一兩顆形狀對不起來（來源或解析度不一致），畫面會退回只有水滴而不是畫出一顆錯位的形狀。</div>
+    </div>
     <div data-gate="split" class="row" id="flowSpeedRow"><label>動態張力</label><input type="range" id="flowSpeed" min="0" max="1.5" step="0.01" value="0.47"><span class="val" id="flowSpeed_v"></span></div>
   </div>
 
@@ -283,6 +303,11 @@
       <div data-gate="svg" class="row"><label>邊緣圓角</label><input type="range" id="shapeEdgeBevel" min="0" max="0.15" step="0.001" value="0.025"><span class="val" id="shapeEdgeBevel_v"></span></div>
       <div class="row"><label>邊緣液化</label><input type="range" id="shapeSoftness" min="0" max="0.25" step="0.005" value="0"><span class="val" id="shapeSoftness_v"></span></div>
       <div data-gate="glb" class="note">模型品質會在下一次匯入 GLB 時生效；提高品質主要增加匯入時間與記憶體，每幀 SDF 取樣次數不變。</div>
+      <div data-gate="morph" class="effectSubhead">變形目標（形狀 B）</div>
+      <div data-gate="morph" class="row"><button class="fileBtn" id="morphTargetBtn">選擇變形目標 SVG…</button></div>
+      <div data-gate="morph" class="row"><button class="fileBtn" id="morphTargetResetBtn">還原內建變形目標</button></div>
+      <div data-gate="morph" id="morphTargetState" class="note">上方匯入的是形狀 A（變形前），這裡匯入形狀 B（變形後）。兩個槽共用上方的「形狀來源」，不能一個 SVG、一個 GLB——兩種距離場的編碼方式不同，疊不進同一張貼圖。沒有匯入時使用內建預設（SVG 是星形、GLB 是多面體）。</div>
+      <input type="file" id="morphTargetInput" accept=".svg,image/svg+xml" hidden>
     </div>
 
     <div data-gate="svg" class="effectBlock effectBlock--drop" id="edgeDropGroup">
@@ -403,6 +428,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=universal-dbg38"></script>
+<script type="module" src="./bubble.js?v=universal-dbg49"></script>
 </body>
 </html>

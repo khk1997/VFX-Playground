@@ -1,19 +1,24 @@
 'use strict';
 import * as THREE from 'three';
-import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-36';
+import {
+  svgToField, gltfToField, objectToField, packShapePairTexture,
+} from './shape-field.js?v=svg-shape-45';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
   MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
-} from './default-shapes.js?v=svg-shape-36';
+  MORPH_TARGET_SVG_NAME, makeMorphTargetSvgFile,
+  MORPH_TARGET_SOLID_NAME, buildMorphTargetSolid,
+} from './default-shapes.js?v=svg-shape-45';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-36';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-36';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-36';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-36';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-36';
+} from './motions/registry.js?v=svg-shape-45';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-45';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-45';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-45';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-45';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-45';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -139,6 +144,37 @@ const DEFAULTS = {              // 數值滑桿
   // 自由段的「只用整數諧波」是同一個限制）。
   weaveDriftAmount: 1,
   weaveDriftSpeed: 1,
+  // 形狀變形（見 motions/morph.js）。四段時間軸「定格 A → 變形 → 定格 B → 變形回」，
+  // morphHold 是單邊定格佔循環的比例，剩下的對半分給兩趟變形。
+  morphHold: 0.15,
+  // 波前錯開：每顆水滴的出發時間依它在掃描軸上的位置差開多少。0 = 全體同時
+  // 移動（看起來只是整個形狀抽動一下），調高才會讀成一道波掃過去。這是這個
+  // 模式手感的關鍵參數。
+  morphStagger: 0.82,
+  // 掃描方向（度，XY 平面）。回程固定轉 90°，否則兩趟像同一段動畫正放再倒放。
+  morphWaveAngle: 180,
+  // 路徑往外凸多少。液體離開表面是「隆起 → 拉離」，直線插值看起來像瞬移。
+  morphArc: 0.28,
+  // 飛行途中那些水滴的大小加成。實體變形成立時，水滴的存在包絡本身已經是
+  // 「飛行中才有」，這個值只調它們飛起來有多大。
+  morphSwell: 0.35,
+  // 切口本身的軟硬（送進 shader 的 uShapeCutBlend）。0 是刀切。
+  morphCutBlend: 0.06,
+  // 消失方式（見 shaders.js 的 dissolveField）。這四項都是往同一條消失場上疊，
+  // 所以可以任意組合，不是互斥的選單。
+  //   morphFront   波前形狀：0 平面掃描、1 從中心放射、2 螺旋。
+  //   morphSpiral  螺旋的纏繞強度，只有 morphFront === 2 時有意義。
+  //   morphNoise/morphNoiseScale   亂流：撕裂的有機邊緣，幅度大時碎成島嶼。
+  //   morphCell/morphCellScale     晶格：整塊整塊剝落的碎裂感。
+  //   morphNeck/morphNeckWidth     前緣收頸：斷開前先變薄收頸，液體的身分。
+  morphFront: 0,
+  morphSpiral: 0.35,
+  morphNoise: 0.15,
+  morphNoiseScale: 2.4,
+  morphCell: 0,
+  morphCellScale: 4,
+  morphNeck: 0.05,
+  morphNeckWidth: 0.45,
   // 融化（見 motions/melt.js）。滴落間隔要隨機、又要能無縫循環，靠的是「每顆水滴
   // 一個循環滴整數次」：頻率與相位偏移各自由雜湊決定，看起來雜亂，phase=0/1 卻同值。
   // 滴落頻率是每個循環的基準滴數，節奏差異讓各顆在這個基準上下錯開。
@@ -387,7 +423,9 @@ function applyToggle(key) {
 
 // DEFAULTS 的 key 一律用 'u' + 首字大寫推導 uniform 名稱（uReflect、uRoughness...），
 // 但 IOR 照慣例整個縮寫大寫，'uIor' 對不上 shader 裡宣告的 uIOR，需要例外表。
-const UNIFORM_NAME_OVERRIDES = { ior: 'uIOR' };
+// 形狀變形的波前軟硬屬於「形狀切削」那組 uniform（uShapeCut／uShapeMorph），
+// 命名跟著那組走，而不是跟著滑桿 key 走。
+const UNIFORM_NAME_OVERRIDES = { ior: 'uIOR', morphCutBlend: 'uShapeCutBlend' };
 function uniformNameFor(key) {
   return UNIFORM_NAME_OVERRIDES[key] || ('u' + key.charAt(0).toUpperCase() + key.slice(1));
 }
@@ -477,6 +515,20 @@ const fmt = {
   weaveSizeMax: v => 'x' + v.toFixed(2),
   weaveDriftAmount: v => 'x' + v.toFixed(2),
   weaveDriftSpeed: v => 'x' + v.toFixed(0),
+  morphHold: v => (v * P.loopDuration).toFixed(1) + 's',
+  morphStagger: v => v === 0 ? '全體同時' : Math.round(v * 100) + '%',
+  morphWaveAngle: v => v.toFixed(0) + '°',
+  morphArc: v => v === 0 ? '直線' : v.toFixed(2),
+  morphSwell: v => v === 0 ? '基準' : '+' + Math.round(v * 100) + '%',
+  morphCutBlend: v => v === 0 ? '刀切' : v.toFixed(3),
+  morphFront: v => ['平面掃描', '從中心放射', '螺旋'][Math.round(v)] || '平面掃描',
+  morphSpiral: v => v.toFixed(2),
+  morphNoise: v => v === 0 ? '關閉' : v.toFixed(3),
+  morphNoiseScale: v => 'x' + v.toFixed(1),
+  morphCell: v => v === 0 ? '關閉' : v.toFixed(3),
+  morphCellScale: v => 'x' + v.toFixed(1),
+  morphNeck: v => v === 0 ? '不收頸' : v.toFixed(3),
+  morphNeckWidth: v => v.toFixed(2),
   meltRate: v => v.toFixed(0) + ' 滴/循環',
   meltRateVary: v => v === 0 ? '整齊同步' : '±' + Math.round(v * 100) + '%',
   meltHang: v => Math.round(v * 100) + '%',
@@ -518,7 +570,7 @@ function refreshShatterTimelineReadouts() {
   if (total) total.textContent = `四段合計 ${P.loopDuration.toFixed(1)}s（＝循環秒數）`;
 }
 
-import { VERT, FRAG } from './shaders.js?v=universal-30';
+import { VERT, FRAG } from './shaders.js?v=universal-37';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -591,6 +643,125 @@ function rebuildMeltAnchors() {
   meltBottomAnchors = selectBottomAnchors(
     shapeTargets, MAX_DROPS, P.meltBand, Math.round(P.meltSeed),
   );
+}
+
+// 形狀變形的配對表：每顆水滴在形狀 A 的位置 → 在形狀 B 的位置（見 morph.js 的
+// buildMorphPairs）。主滴與微滴各一份，兩者的錨點密度差很多，共用一份會讓微滴
+// 全部擠在主滴那幾個位置上。
+let morphPairs = [];
+let morphMicroPairs = [];
+let morphPairKey = null;
+
+// 形狀 B（變形目標）自己的一份烘焙結果。它跟形狀 A 走完全獨立的匯入流程，但
+// 來源種類跟著面板的「形狀來源」——兩個槽不允許一個 SVG 一個 GLB，因為兩種
+// 距離場的編碼與查表方式完全不同，疊不進同一張貼圖（見 packShapePairTexture）。
+//
+// 貼圖要留著（不像早期只有水滴的版本烘完就 dispose）：實體變形要拿它的 g 通道。
+let morphTargetPoints = null;
+let morphTargetPending = null;
+// 使用者自己匯入的形狀 B，跟形狀 A 一樣依來源分開記住；沒有就用內建預設
+// （SVG 用星形、GLB 用多面體）。
+const morphTargetFiles = { svg: null, gltf: null };
+
+// 兩顆形狀疊進同一張貼圖（r = 形狀 A、g = 形狀 B）。有這張圖才顯示得出實體
+// 變形，沒有就退回只有水滴的畫面。
+let morphPackedTexture = null;
+let morphPackedKey = null;
+
+// 形狀 B 該是什麼，用一個字串描述完：來源種類、GLB 的體素解析度、使用者檔案。
+// 其中任何一項變了就要重烘——特別是解析度，兩顆形狀的圖集尺寸必須一致才疊得
+// 起來，所以 B 一定要跟著 A 用同一個 grid 烘。
+function morphTargetKey() {
+  const kind = P.shapeSource;
+  const file = morphTargetFiles[kind];
+  const grid = kind === 'gltf' ? (SELECTS.shapeQuality.map[P.shapeQuality] || 80) : 0;
+  return `${kind}:${grid}:${file ? `${file.name}:${file.size}` : 'builtin'}`;
+}
+
+function rebuildMorphPairs() {
+  if (P.motion !== 'morph' || !morphTargetPoints) return;
+  // 兩顆形狀任一邊換了才要重配。配對是 O(A × B) 的最近點搜尋，不能每幀跑。
+  const key = `${shapeFieldSerial}:${morphTargetPoints.key}`;
+  if (key === morphPairKey) return;
+  morphPairKey = key;
+  morphPairs = buildMorphPairs(formationAnchors, morphTargetPoints.primary);
+  morphMicroPairs = buildMorphPairs(microFormationAnchors, morphTargetPoints.micro);
+  rebuildMorphPackedTexture(key);
+}
+
+// 打包只在兩顆形狀「疊得起來」時才成立：同一種來源、同樣的貼圖尺寸，GLB 還要
+// 同樣的 grid 與圖集排列。任一項不符就回傳 null，畫面退回只有水滴——這比畫出
+// 一顆錯位或錯解析度的形狀好。
+function rebuildMorphPackedTexture(key) {
+  if (key === morphPackedKey) return;
+  const b = morphTargetPoints;
+  const sameKind = shapeFieldSource === P.shapeSource && b?.kind === P.shapeSource;
+  const sameGrid = shapeField?.grid === b?.grid
+    && shapeField?.atlas?.x === b?.atlas?.x && shapeField?.atlas?.y === b?.atlas?.y;
+  const next = sameKind && sameGrid && shapeField?.texture && b?.texture
+    ? packShapePairTexture(shapeField.texture, b.texture)
+    : null;
+  morphPackedKey = key;
+  morphPackedTexture?.dispose();
+  morphPackedTexture = next;
+}
+
+// 形狀 B 的烘焙。烘焙是幾百毫秒到幾秒的 CPU 工作，放在幀迴圈裡會頓住，所以走
+// 「發現不對就非同步補上，補完再重配」——這一幀先沿用舊的（或什麼都不畫），
+// 下一幀就換好了。
+//
+// 形狀 A 正在烘的時候不併行開第二份：兩者都是純 CPU 的重活，同時跑只會互相
+// 拖慢，而且 B 要用 A 的 grid 去對齊，A 還沒定案就烘等於白烘。
+function ensureMorphTarget() {
+  if (P.motion !== 'morph' || shapeConverting) return;
+  const key = morphTargetKey();
+  if (morphTargetPoints?.key === key || morphTargetPending === key) return;
+  morphTargetPending = key;
+  const kind = P.shapeSource;
+  const file = morphTargetFiles[kind];
+  const grid = SELECTS.shapeQuality.map[P.shapeQuality] || 80;
+  const label = file
+    ? file.name
+    : (kind === 'svg' ? MORPH_TARGET_SVG_NAME : MORPH_TARGET_SOLID_NAME);
+  setMorphTargetState(kind === 'svg'
+    ? `正在分析變形目標：${label}`
+    : `正在體素化變形目標：${label} → ${grid}³（可能需要幾秒）`);
+  (async () => {
+    try {
+      const field = kind === 'svg'
+        ? await svgToField(file || makeMorphTargetSvgFile(), {
+          supersample: mobileRenderQuery.matches ? 2 : 3,
+        })
+        : file
+          ? await gltfToField(file, grid)
+          : await objectToField(buildMorphTargetSolid(), grid);
+      // 烘的途中使用者又換了設定：這份已經過期，丟掉貼圖直接走，讓下一輪重烘。
+      if (morphTargetPending !== key) { field.texture?.dispose(); return; }
+      morphTargetPoints?.texture?.dispose();
+      morphTargetPoints = {
+        key,
+        kind,
+        texture: field.texture,
+        grid: field.grid,
+        atlas: field.atlas,
+        primary: distributePrimaryAnchors(field.targets),
+        micro: distributeDetailedAnchors(field.targets, MAX_MICRO_DROPS),
+      };
+      morphPairKey = null;
+      morphPackedKey = null;
+      setMorphTargetState(`變形目標已就緒：${label}${file ? '' : '（內建預設，可自行匯入取代）'}`);
+    } catch (error) {
+      console.error(error);
+      setMorphTargetState(`變形目標轉換失敗：${error.message || '檔案格式不支援'}`);
+    } finally {
+      if (morphTargetPending === key) morphTargetPending = null;
+    }
+  })();
+}
+
+function setMorphTargetState(text) {
+  const el = document.getElementById('morphTargetState');
+  if (el) el.textContent = text;
 }
 
 // 崩解切法專用的錨點組。不能直接把種子套進 formationAnchors／microFormationAnchors，
@@ -895,6 +1066,10 @@ const {
 
 // 融化：底部滴落。錨點同樣用 getter，換形狀或調取樣範圍後才拿得到新的那組。
 const { meltDrop } = createMeltMotion(P, { bottomAnchors: () => meltBottomAnchors });
+// 配對表由 bubble.js 這邊持有（它才知道形狀什麼時候換），morph.js 只負責讀。
+const {
+  morphTimeline: morphTimelineOf, morphFronts, morphDropPosition, morphRadiusFactor,
+} = createMorphMotion(P);
 
 // 微滴的自由軌道在 updateMicroDrops 直接呼叫 freeOrbitPosition，需要自己的暫存向量。
 const freeOrbitVec = new THREE.Vector3();
@@ -907,14 +1082,17 @@ const formationPosNow = new THREE.Vector3();
 const formationPosBefore = new THREE.Vector3();
 const formationPosAfter = new THREE.Vector3();
 
-function updateMicroDrops(phase, fidelityAbsorb = 0) {
+function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false) {
   // 崩解噴濺不走匯聚管線，但微滴群正好是最好用的碎片來源（20 顆，是主滴的
   // 近兩倍），所以它也要把微滴開起來，只是位置改由彈道決定。
   const shattering = P.motion === 'shatter';
   // 融化也要微滴：滴落點就那幾個，只靠 12 顆主滴撐不出「不停在滴」的密度，
   // 微滴補上去之後同一個位置才會有前後好幾滴同時在不同高度。
   const melting = P.motion === 'melt';
-  const activeCount = (isFormationMotion(P.motion) || shattering || melting) && shapeField
+  // 形狀變形的微滴不是「細節補強」而是主力之一：整個畫面只有水滴，主滴 12 顆
+  // 撐不出兩顆形狀的輪廓，微滴那 20 顆負責把輪廓填細。
+  const morphing = P.motion === 'morph';
+  const activeCount = (isFormationMotion(P.motion) || shattering || melting || morphing) && shapeField
     ? Math.max(0, Math.min(MAX_MICRO_DROPS, Math.round(P.microCount)))
     : 0;
   const amount = formationAmount(phase);
@@ -925,6 +1103,9 @@ function updateMicroDrops(phase, fidelityAbsorb = 0) {
     const o = i * 4;
     const pool = shattering ? shatterAnchors
       : melting ? meltBottomAnchors
+      // 變形模式的微滴走配對表，不走單一錨點組；配對表還沒建好（形狀 B 還在
+      // 烘）就當成沒有錨點，這一幀不畫。
+      : morphing ? morphMicroPairs
       : microFormationAnchors;
     if (i >= activeCount || !pool.length) {
       microDropData[o + 3] = 0;
@@ -971,6 +1152,27 @@ function updateMicroDrops(phase, fidelityAbsorb = 0) {
       microShapeData[o + 3] = state ? state.deform.stretch : 1;
       continue;
     }
+    if (morphing) {
+      morphDropPosition(morphMicroPairs, i, phase, formationPosNow);
+      microDropData[o] = formationPosNow.x;
+      microDropData[o + 1] = formationPosNow.y;
+      microDropData[o + 2] = formationPosNow.z;
+      // 錨點自帶的 radiusHint 是「這個位置的造型有多厚」，用它輪廓的粗細才會
+      // 跟著形狀走（星形的角細、問號的桿粗）。兩端厚度不同，所以跟著一起插值；
+      // 缺就退回一個依 h2 分散的尺寸。
+      const pair = morphMicroPairs[i % morphMicroPairs.length];
+      const { t, back } = morphTimelineOf(phase);
+      const fallback = P.radius * (0.28 + h2 * 0.16);
+      const fromHint = (back ? pair.b : pair.a).radiusHint || fallback;
+      const toHint = (back ? pair.a : pair.b).radiusHint || fallback;
+      microDropData[o + 3] = (fromHint + (toHint - fromHint) * t) * 0.72
+        * morphRadiusFactor(morphMicroPairs, i, phase, morphSolid);
+      microShapeData[o] = 1;
+      microShapeData[o + 1] = 0;
+      microShapeData[o + 2] = 0;
+      microShapeData[o + 3] = 1;
+      continue;
+    }
     const anchor = i * Math.PI * 2 / activeCount + h1 * 0.8;
     const orbit = P.spread * (1.15 + h2 * 0.75);
     const free = freeOrbitPosition(a, anchor, orbit, h2, h3, MICRO_ORBIT_TUNE, freeOrbitVec);
@@ -1008,9 +1210,13 @@ function updateNegativeDrops(phase, fidelityAbsorb = 0) {
   // 融化的形狀始終完整，空腔自然也要一直在，不隨任何包絡消長。
   const amount = P.motion === 'melt'
     ? 1
-    : P.motion === 'shatter'
-      ? shatterShapeAmount(shatterTimeline(phase))
-      : smoothstepCPU(formationAmount(phase), 0.58, 0.96);
+    // 形狀變形不顯示距離場實體（uShapeProgress 為 0），空腔沒有母體可挖，留著
+    // 只會變成幾顆漂在水滴群裡的隱形挖洞球，把輪廓咬掉幾塊。
+    : P.motion === 'morph'
+      ? 0
+      : P.motion === 'shatter'
+        ? shatterShapeAmount(shatterTimeline(phase))
+        : smoothstepCPU(formationAmount(phase), 0.58, 0.96);
   const selected = negativeFormationAnchors;
   for (let i = 0; i < MAX_NEGATIVE_DROPS; i++) {
     const o = i * 4;
@@ -1102,12 +1308,20 @@ function updateDropUniforms(t) {
   const shatter = P.motion === 'shatter' ? shatterTimeline(phase) : null;
   const shatterPrimary = shatter ? shatterAnchorSets().primary : null;
   const melting = P.motion === 'melt';
+  const morphing = P.motion === 'morph';
   if (melting) rebuildMeltAnchors();
+  if (morphing) { ensureMorphTarget(); rebuildMorphPairs(); }
+  // 實體變形要有雙通道貼圖才成立；沒有就只剩水滴（見 rebuildMorphPackedTexture）。
+  const morphSolid = morphing && !!morphPackedTexture && morphPairs.length > 0;
+  const morphCut = morphSolid ? morphFronts(morphPairs, phase) : null;
+  const morphCutT = morphSolid ? morphTimelineOf(phase).t : 0;
   const formationShapeProgress = !shapeField
     ? 0
     // 融化的形狀從頭到尾完整不變：滴下去的是額外長出來的水滴，不是造型被削掉的
     // 部分。所以跟穿梭環繞一樣永遠滿值，不參與任何體積交接。
-    : P.motion === 'weave' || melting
+    // 形狀變形的實體同樣永遠滿值：它不靠淡入淡出交接，兩顆形狀是被兩道波前
+    // 各自削掉／放出來的（見 shaders.js 的 uShapeCut），整個循環都該全力顯示。
+    : P.motion === 'weave' || melting || morphSolid
       ? 1
       : shatter
         ? shatterShapeAmount(shatter)
@@ -1121,7 +1335,7 @@ function updateDropUniforms(t) {
           : 0;
   // 模型已大致長成後，讓可見水滴在目標體積內連續被 SDF 吸收。
   // 最後輪廓只剩匯入模型場；吸收在模型完成前不啟動，避免「水滴先縮、模型才出現」。
-  const microCount = updateMicroDrops(phase, fidelityAbsorb);
+  const microCount = updateMicroDrops(phase, fidelityAbsorb, morphSolid);
   const negativeCount = updateNegativeDrops(phase, fidelityAbsorb);
 
   const cinema = cinematicTimeline(phase);
@@ -1140,7 +1354,9 @@ function updateDropUniforms(t) {
     // 崩解噴濺同樣是「一次出現很多顆」，需要同一套正規化，否則炸開那一瞬間
     // 8 顆滿半徑的碎片會被 smooth-min 黏成一大團而不是各自剝離。
     // 融化也是一次出現很多顆各自獨立的水滴，同樣需要這套正規化。
-    : isFormationMotion(P.motion) || P.motion === 'shatter' || melting
+    // 形狀變形同樣是「一次出現很多顆」：水滴群就是整個畫面，沒有正規化的話
+    // 排成形狀的那一刻整組會黏成一大團，輪廓完全糊掉。
+    : isFormationMotion(P.motion) || P.motion === 'shatter' || melting || morphing
       // smooth-min 連續合併很多顆時會累積膨脹；依數量正規化融合半徑，
       // 讓 12–16 顆仍只在真正接觸處形成液橋，不把整組擴成巨大距離場。
       ? Math.max(0.10, 0.42 / Math.sqrt(layoutCount))
@@ -1201,6 +1417,12 @@ function updateDropUniforms(t) {
         z = formationPosNow.z;
       }
       meltDeformNow[i] = meltState ? meltState.deform : null;
+    } else if (morphing) {
+      morphDropPosition(morphPairs, i, phase, formationPosNow);
+      x = formationPosNow.x;
+      y = formationPosNow.y;
+      z = formationPosNow.z;
+      radiusFactor = morphRadiusFactor(morphPairs, i, phase, morphSolid);
     } else if (isFormationMotion(P.motion)) {
       const formation = amount;
       formationDropPosition(i, phase, layoutCount, formationPosNow);
@@ -1212,7 +1434,9 @@ function updateDropUniforms(t) {
     // 大滴受重力與慣性影響較明顯；常量位移不破壞循環接縫。
     // 融化不套這個：水滴必須正好從造型底部的滴落點長出來，先被推低一截就會
     // 憑空浮在造型下方。它自己的墜落已經在 meltPosition 裡算過了。
-    if (!melting) y -= P.gravity * P.spread * 0.045 * Math.pow(radius, 1.35);
+    // 形狀變形也排除：這個偏移隨每顆水滴的大小不同，而變形模式的輪廓完全由
+    // 水滴自己排出來，大小不一的下沉量會讓靜止的形狀邊緣參差不齊。
+    if (!melting && !morphing) y -= P.gravity * P.spread * 0.045 * Math.pow(radius, 1.35);
     if (isFormationMotion(P.motion)) {
       // anchor 可能落在模型表層；吸收時稍微往模型中心推入，避免半徑縮小後
       // 先失去液橋、在輪廓旁短暫留下孤立小球。
@@ -1229,6 +1453,16 @@ function updateDropUniforms(t) {
       dropData[i].set(x, y, z, shatterRadius(fragment, shatter));
     } else if (melting) {
       dropData[i].set(x, y, z, meltState ? meltState.radius : 0);
+    } else if (morphing) {
+      // 跟形狀匯聚成形後同一套：半徑由錨點所在位置的造型厚度決定，而不是
+      // 「水滴大小」乘一個亂數。輪廓完全靠水滴排出來的模式，這件事更要緊——
+      // 大小一致的球排出來的是一串珠子，粗細跟著形狀走才看得出是那個形狀。
+      // 兩顆形狀的厚度不同，所以出發端與抵達端的 hint 也要跟著插值。
+      const pair = morphPairs.length ? morphPairs[i % morphPairs.length] : null;
+      const { t, back } = morphTimelineOf(phase);
+      const fromHint = (back ? pair?.b : pair?.a)?.radiusHint || P.radius * 0.58;
+      const toHint = (back ? pair?.a : pair?.b)?.radiusHint || P.radius * 0.58;
+      dropData[i].set(x, y, z, (fromHint + (toHint - fromHint) * t) * radiusFactor);
     } else if (isFormationMotion(P.motion)) {
       const targetRadius = formationAnchors[i % Math.max(1, formationAnchors.length)]?.radiusHint
         || P.radius * 0.58;
@@ -1352,12 +1586,41 @@ function updateDropUniforms(t) {
     // 成形中。融化的 uShapeProgress 恆為 1、形狀始終完整，這條規則就只剩副作用——
     // 它的影響半徑 0.72 遠大於水滴本身，等於幾顆「不侵蝕球」隨著水滴墜落掃過造型，
     // 半徑外被往內削 0.015、半徑內不削，形狀表面就整片整片地漲縮。
-    uniforms.uContactLead.value = (shatter || melting) ? 0 : 1;
+    // 形狀變形也關掉，理由跟融化同一條：實體恆為滿值，contactLead 只剩副作用
+    // ——影響半徑遠大於水滴本身，飛過去的水滴會像幾把刨刀掃過兩顆形狀的表面。
+    uniforms.uContactLead.value = (shatter || melting || morphSolid) ? 0 : 1;
+    if (morphSolid) {
+      uniforms.uShapeTex.value = morphPackedTexture;
+      uniforms.uShapeMorph.value = morphCut.mode;
+      uniforms.uShapeCut.value.set(
+        morphCut.nx, morphCut.ny, morphCut.fromFront, morphCut.toFront,
+      );
+      // 這兩個是打包型 uniform，不走「滑桿 key → u+首字大寫」那條自動對應，
+      // 所以在這裡跟著波前一起送。
+      uniforms.uMorphBreak.value.set(
+        P.morphNoise, P.morphNoiseScale, P.morphCell, P.morphCellScale,
+      );
+      uniforms.uMorphNecking.value.set(P.morphNeck, P.morphNeckWidth);
+      uniforms.uMorphActive.value.set(
+        morphCut.fromActive ? 1 : 0, morphCut.toActive ? 1 : 0,
+      );
+    } else {
+      // 離開變形模式（或還沒備妥雙通道貼圖）就把貼圖交還給形狀本身那張，
+      // 否則其餘模式會繼續讀到打包過的圖。
+      if (shapeField?.texture) uniforms.uShapeTex.value = shapeField.texture;
+      uniforms.uShapeMorph.value = 0;
+    }
     // 半徑已連續收至零後才停止 shader 迴圈；切換當下幾何場完全相同。
     const fidelityComplete = fidelityAbsorb > 0.9999;
-    uniforms.uCount.value = fidelityComplete ? 0 : count;
-    uniforms.uMicroCount.value = fidelityComplete ? 0 : microCount;
-    uniforms.uNegativeCount.value = fidelityComplete ? 0 : negativeCount;
+    // 形狀變形的定格段：所有水滴的存在包絡都是 0（它們此刻就是形狀的一部分），
+    // 半徑全歸零，但 shader 每個 march step 仍會把 32 顆空球跑一遍——實測定格
+    // 因此比整顆形狀常駐的穿梭環繞貴了兩倍多。定格佔循環三成，而且正是使用者
+    // 盯著形狀看的時候，所以這裡明確把數量歸零。
+    const morphIdle = morphSolid && (morphCutT <= 0 || morphCutT >= 1);
+    const dropsHidden = fidelityComplete || morphIdle;
+    uniforms.uCount.value = dropsHidden ? 0 : count;
+    uniforms.uMicroCount.value = dropsHidden ? 0 : microCount;
+    uniforms.uNegativeCount.value = dropsHidden ? 0 : negativeCount;
     // 完成時保留最多 0.02 的薄層，封住體素化在眼窩等薄區域產生的非原始孔洞；
     // 若使用者明確設為 0 仍尊重原值，不強制膨脹模型。
     const finalSurfaceGuard = Math.min(P.shapeSoftness, 0.02);
@@ -1380,10 +1643,18 @@ function updateDropUniforms(t) {
       vy = (d.y - prev.y) / frameDt;
       vz = (d.z - prev.z) / frameDt;
     }
-    if (isFormationMotion(P.motion)) {
+    // 形狀變形跟形狀匯聚同樣用解析速度（前後各取一次位置做中央差分）而不是
+    // 幀間差分：位置只是 phase 的純函式，取樣比追前一幀準，暫停／跳轉也不會
+    // 因為 frameDt 亂掉而讓水滴突然被拉成一條。
+    if (isFormationMotion(P.motion) || morphing) {
       const epsilon = 1 / 2048;
-      formationDropPosition(i, fract(phase - epsilon), layoutCount, formationPosBefore);
-      formationDropPosition(i, fract(phase + epsilon), layoutCount, formationPosAfter);
+      if (morphing) {
+        morphDropPosition(morphPairs, i, fract(phase - epsilon), formationPosBefore);
+        morphDropPosition(morphPairs, i, fract(phase + epsilon), formationPosAfter);
+      } else {
+        formationDropPosition(i, fract(phase - epsilon), layoutCount, formationPosBefore);
+        formationDropPosition(i, fract(phase + epsilon), layoutCount, formationPosAfter);
+      }
       const invDelta = 1 / (epsilon * 2 * Math.max(0.001, P.loopDuration));
       vx = (formationPosAfter.x - formationPosBefore.x) * invDelta;
       vy = (formationPosAfter.y - formationPosBefore.y) * invDelta;
@@ -1892,6 +2163,23 @@ function initGL() {
     uFidelityAbsorb: { value: 0 },
     // 崩解噴濺的蓄力膨脹量（等距擴張形狀距離場）；其他模式恆為 0。
     uShapeSwell: { value: 0 },
+    // 形狀變形的雙形狀切削（見 shaders.js 的 uShapeMorph／uShapeCut）。
+    // 0 是關閉，其餘模式一律維持 0，走原本的單一形狀路徑。
+    uShapeMorph: { value: 0 },
+    uShapeCut: { value: new THREE.Vector4(1, 0, 0, 0) },
+    uShapeCutBlend: { value: 0.06 },
+    // 消失方式。uMorphBreak 與 uMorphNecking 各自把兩個滑桿打包成一個 uniform，
+    // 因為它們一定成對使用（幅度沒開時尺度沒有意義），拆開只是多兩個 uniform。
+    //
+    // 名字刻意不叫 uMorphNeck：滑桿的 uniform 名是「u + key 首字大寫」自動推導
+    // 的，morphNeck 這個滑桿會推導出 uMorphNeck，於是每幀把這顆打包用的
+    // Vector2 直接覆寫成一個數字，下一次 .set() 就炸了。打包型 uniform 的名字
+    // 一律要避開所有滑桿 key 推導得出的名稱。
+    uMorphFront: { value: 0 },
+    uMorphSpiral: { value: 0.35 },
+    uMorphBreak: { value: new THREE.Vector4(0.15, 2.4, 0, 4) },
+    uMorphNecking: { value: new THREE.Vector2(0.05, 0.45) },
+    uMorphActive: { value: new THREE.Vector2(1, 1) },
     uMembraneOverWhite: { value: 0 },
     uShapeScale: { value: 1 },
     // contactLead（形狀在已抵達水滴附近先成形）是形狀匯聚專用的邏輯。崩解噴濺
@@ -2412,8 +2700,17 @@ function updateUIState() {
   const isSvg = P.shapeSource === 'svg';
   const shapeBtn = document.getElementById('shapeBtn');
   const shapeInput = document.getElementById('shapeInput');
+  const fileAccept = isSvg
+    ? '.svg,image/svg+xml'
+    : '.glb,.gltf,model/gltf-binary,model/gltf+json';
   shapeBtn.textContent = isSvg ? '選擇 SVG…' : '選擇 GLB / GLTF…';
-  shapeInput.accept = isSvg ? '.svg,image/svg+xml' : '.glb,.gltf,model/gltf-binary,model/gltf+json';
+  shapeInput.accept = fileAccept;
+  // 形狀 B 的匯入槽跟著同一個來源：兩顆形狀必須同種編碼才疊得進一張貼圖。
+  const morphTargetBtn = document.getElementById('morphTargetBtn');
+  if (morphTargetBtn) {
+    morphTargetBtn.textContent = isSvg ? '選擇變形目標 SVG…' : '選擇變形目標 GLB / GLTF…';
+    document.getElementById('morphTargetInput').accept = fileAccept;
+  }
   // 模型品質（GLB 專用）、形狀厚度與邊緣圓角（都只作用於 SVG 擠出的
   // svgShapeDistance，GLB 走 volumeShapeDistance 根本不讀）全部走 data-gate。
 
@@ -2562,6 +2859,24 @@ const userShapeFiles = { svg: null, gltf: null };
 let builtinSvgVariant = null;
 document.getElementById('shapeBtn').addEventListener('click', () => shapeInput.click());
 
+/* ===== 形狀 B（變形目標）的匯入 ===== */
+const morphTargetInput = document.getElementById('morphTargetInput');
+document.getElementById('morphTargetBtn')
+  .addEventListener('click', () => morphTargetInput.click());
+morphTargetInput.addEventListener('change', e => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  morphTargetFiles[P.shapeSource] = file;
+  // 重烘由 ensureMorphTarget 在下一幀認出 key 變了自己接手，這裡不直接呼叫——
+  // 形狀 A 可能正在烘，那時候開第二份只會互相拖慢（見 ensureMorphTarget）。
+  morphTargetPending = null;
+});
+document.getElementById('morphTargetResetBtn').addEventListener('click', () => {
+  morphTargetFiles[P.shapeSource] = null;
+  morphTargetPending = null;
+});
+
 function scheduleLastGLBRebuild() {
   if (!lastGLBFile || P.shapeSource !== 'gltf') return;
   clearTimeout(shapeRebuildTimer);
@@ -2625,8 +2940,9 @@ async function importShapeFile(file, kind, { rebuilding = false } = {}) {
       MAX_NEGATIVE_DROPS,
     );
     rebuildWeaveAnchorSets();
-    // key 帶著 shapeFieldSerial，換形狀後下一幀就會重挑滴落點。
+    // key 帶著 shapeFieldSerial，換形狀後下一幀就會重挑滴落點／重配變形配對。
     meltAnchorKey = null;
+    morphPairKey = null;
     applyEdgeDropDistribution(P.shapeLiquidPosition);
     uniforms.uShapeTex.value = next.texture;
     uniforms.uShapeGrid.value = next.grid;
