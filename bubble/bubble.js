@@ -570,6 +570,19 @@ function refreshShatterTimelineReadouts() {
   if (total) total.textContent = `四段合計 ${P.loopDuration.toFixed(1)}s（＝循環秒數）`;
 }
 
+// 這幾個滑桿存的是「佔循環的比例」，讀數卻顯示換算後的秒數，所以循環秒數一變
+// 就得重畫，否則會停在用舊循環長度算出來的數字。切換動態模式時循環秒數會跟著
+// 換（每個模式各自記憶），所以這不是罕見情況——morphHold 一開始就漏了列進來，
+// 結果切到形狀變形時定格時間顯示的是用上一個模式的循環秒數算的值。
+const LOOP_SCALED_KEYS = ['gatherDuration', 'shapeHold', 'morphHold'];
+function refreshLoopScaledReadouts() {
+  for (const key of LOOP_SCALED_KEYS) {
+    const valEl = document.getElementById(key + '_v');
+    if (valEl) valEl.textContent = fmt[key](P[key]);
+  }
+  refreshShatterTimelineReadouts();
+}
+
 import { VERT, FRAG } from './shaders.js?v=universal-37';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
@@ -2400,13 +2413,9 @@ function bindControls() {
       if (SHATTER_TIMELINE_KEYS.includes(key)) refreshShatterTimelineReadouts();
       if (key === 'gatherDuration' || key === 'shapeHold' || key === 'loopDuration') {
         updateTimelineSummary();
-        // 循環秒數變了，匯集時間／完成停留的秒數顯示也要跟著換算，
-        // 但不動使用者設定的比例值，所以只重畫文字，不重新觸發 input。
-        if (key === 'loopDuration') {
-          document.getElementById('gatherDuration_v').textContent = fmt.gatherDuration(P.gatherDuration);
-          document.getElementById('shapeHold_v').textContent = fmt.shapeHold(P.shapeHold);
-          refreshShatterTimelineReadouts();
-        }
+        // 循環秒數變了，那些「比例 × 循環秒數」的讀數也要跟著換算，但不動
+        // 使用者設定的比例值，所以只重畫文字，不重新觸發 input。
+        if (key === 'loopDuration') refreshLoopScaledReadouts();
       }
       requestPausedRender();
     };
