@@ -17,7 +17,9 @@
 //                  該模式的預設值。這幾項按模式各自記憶——使用者在某個模式下
 //                  調過的值會保留，切回來時恢復，只有初始預設不同。
 //   svgDemo        使用者還沒自己匯入 SVG 時，這個模式該顯示哪個內建展示形狀
-//                  （見 default-shapes.js）。只有需要形狀的模式才有意義。
+//                  （見 default-shapes.js）。只有需要形狀的模式才有意義。值取的是
+//                  形狀本身的名字（question／ice），不是模式名——同一顆形狀可能
+//                  被多個模式共用，用模式名當值會誤導。
 //   overrides      稀疏表：「擠出外形／輪廓液滴」那組參數（shapeDepth、
 //                  edgeDropsEnabled…）原本是全域共用一份 DEFAULTS，只有某個
 //                  模式需要不一樣的預設時才在這裡列一筆，沒列到的鍵繼續沿用
@@ -26,7 +28,7 @@
 //                  少數模式需要覆寫」，不必為了一個模式的特例把同樣的數字
 //                  在五個模式裡各抄一次。
 export const MOTIONS = {
-  cinematic: {
+  split: {
     label: '分裂 Split',
     uniform: 0,
     usesShapeField: false,
@@ -47,7 +49,7 @@ export const MOTIONS = {
     radius: 0.25,
     loopDuration: 12,
     dolly: true,
-    svgDemo: 'default',
+    svgDemo: 'question',
   },
   weave: {
     label: '穿梭環繞 Weave',
@@ -59,7 +61,7 @@ export const MOTIONS = {
     radius: 0.25,
     loopDuration: 12,
     dolly: true,
-    svgDemo: 'default',
+    svgDemo: 'question',
   },
   melt: {
     label: '融化 Melt',
@@ -78,7 +80,7 @@ export const MOTIONS = {
     dolly: false,
     // 問號的底部只有一個小圓點，滴落點會擠成一團看不出「整個底部在滴」；
     // 冰塊的底邊夠寬，才挑得出好幾個分散的滴落點。
-    svgDemo: 'melt',
+    svgDemo: 'ice',
     // 融化持續滴落、水滴本身就在動，跟形狀匯聚那套「擠出外形＋輪廓液滴」
     // 的共用預設（原本是設計給靜止展示模型用的）不搭：擠出深度、邊緣圓角
     // 都要拉高才看得出冰塊的立體感；輪廓液滴則直接打開、水滴分佈與大小
@@ -107,7 +109,7 @@ export const MOTIONS = {
     dolly: false,
     // 形狀 A。B 目前固定是內建星形（見 default-shapes.js 的 MORPH_TARGET_SVG_TEXT），
     // 還不能由使用者匯入——兩個匯入槽留到下一步。
-    svgDemo: 'default',
+    svgDemo: 'question',
     // 這個模式的形狀從頭到尾都是實體，擠出厚度與邊緣圓角的手感跟「水滴逐漸
     // 長成形狀」那套共用預設不一樣：薄一點、圓角大一點，切口與收頸才不會被
     // 厚實的側壁蓋住。
@@ -129,7 +131,7 @@ export const MOTIONS = {
     // 四段時長預設 1.1 / 0.5 / 0.4 / 2.0 合計正好 4 秒，面板才顯示得出實際秒數。
     loopDuration: 4,
     dolly: true,
-    svgDemo: 'default',
+    svgDemo: 'question',
   },
 };
 

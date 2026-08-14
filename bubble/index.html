@@ -200,14 +200,15 @@
   <div class="group">
     <h3>動態 Motion</h3>
     <div class="row"><label>動態模式</label><select id="motion">
-      <option value="cinematic">分裂 Split</option>
+      <option value="split">分裂 Split</option>
       <option value="formation">形狀匯聚 Formation</option>
       <option value="weave">穿梭環繞 Weave</option>
       <option value="shatter">崩解噴濺 Shatter</option>
       <option value="melt">融化 Melt</option>
       <option value="morph">形狀變形 Morph</option>
-      <!-- 已移除的「脈動呼吸」。留一個隱藏選項，舊的參數組合檔寫進來時 value 才不會
-           被瀏覽器丟成空字串；bindControls 會立刻把它導向「形狀匯聚」（LEGACY_SELECT_VALUES）。 -->
+      <!-- 已改名或已移除的舊值。留成隱藏選項，舊的參數組合檔寫進來時 value 才不會
+           被瀏覽器丟成空字串；bindControls 會立刻把它導向現有選項（LEGACY_SELECT_VALUES）。 -->
+      <option value="cinematic" hidden>分裂（舊值 cinematic）</option>
       <option value="pulse" hidden>脈動呼吸 Pulse（已移除）</option>
     </select><span class="val"></span></div>
     <div class="row" id="loopDurationRow"><label>循環秒數</label><input type="range" id="loopDuration" min="4" max="30" step="0.5" value="12"><span class="val" id="loopDuration_v"></span></div>
@@ -428,6 +429,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=universal-dbg56"></script>
+<script type="module" src="./bubble.js?v=universal-dbg57"></script>
 </body>
 </html>

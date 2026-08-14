@@ -2,23 +2,23 @@
 import * as THREE from 'three';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
-} from './shape-field.js?v=svg-shape-52';
+} from './shape-field.js?v=svg-shape-53';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
   MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
   MORPH_TARGET_SVG_NAME, makeMorphTargetSvgFile,
   MORPH_TARGET_SOLID_NAME, buildMorphTargetSolid,
-} from './default-shapes.js?v=svg-shape-52';
+} from './default-shapes.js?v=svg-shape-53';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-52';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-52';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-52';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-52';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-52';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-52';
+} from './motions/registry.js?v=svg-shape-53';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-53';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-53';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-53';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-53';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-53';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -248,7 +248,7 @@ const SELECT_DEFAULTS = {
   bgMode: 'color',
   materialStyle: 'universal',
   colorMode: 'spectral',
-  motion: 'cinematic',
+  motion: 'split',
   shapeSource: 'svg',
   shapeQuality: 'balanced',
 };
@@ -256,7 +256,10 @@ const SELECT_DEFAULTS = {
 // 留在 <select> 裡（標成 hidden），否則瀏覽器會在寫入當下就把 value 丟成空字串，
 // 這裡根本讀不到原值。
 const LEGACY_SELECT_VALUES = {
-  motion: { pulse: 'formation' },
+  // cinematic 是「分裂」的舊鍵名。這個模式早期叫「電影感」，改名成「分裂」時只
+  // 換了顯示文字與 data-gate（index.html 裡一直是 data-gate="split"），鍵沒跟著
+  // 改，於是程式裡叫 cinematic、面板上寫分裂，看程式時得多繞一層。
+  motion: { cinematic: 'split', pulse: 'formation' },
   materialStyle: { glass: 'universal' },
 };
 const TOGGLE_DEFAULTS = {
@@ -1248,7 +1251,7 @@ function updateNegativeDrops(phase, fidelityAbsorb = 0) {
   return Math.min(selected.length, MAX_NEGATIVE_DROPS);
 }
 
-function cinematicTimeline(phase) {
+function splitTimeline(phase) {
   // 12 秒敘事，節奏配平：停留 → 蓄力 → 拉斷 → 漂浮 → 靠近 → 接觸融合 → 毛細平復 → 停留。
   // 位置與體積分開控制：聚合時 approach 幾乎收滿距離，最後由表面接觸完成融合。
   // 分裂與融合各自擁有一次守恆的毛細事件（recoil / coalesce），維持敘事對稱。
@@ -1351,18 +1354,18 @@ function updateDropUniforms(t) {
   const microCount = updateMicroDrops(phase, fidelityAbsorb, morphSolid);
   const negativeCount = updateNegativeDrops(phase, fidelityAbsorb);
 
-  const cinema = cinematicTimeline(phase);
-  const separation = cinema.volumeSeparation;
+  const splitBeat = splitTimeline(phase);
+  const separation = splitBeat.volumeSeparation;
   const merge = 1 - separation;
-  const tension = cinema.pull * (1 - cinema.detach);
-  const breakaway = cinema.recoil;
+  const tension = splitBeat.pull * (1 - splitBeat.detach);
+  const breakaway = splitBeat.recoil;
   const bounceProgress = Math.max(0, Math.min(1, (phase - 0.19) / 0.17));
   // 只保留一次小幅回彈；不再疊加多週正負振盪。
   const followThrough = breakaway * Math.sin(bounceProgress * Math.PI * 2)
     * Math.exp(-3.2 * bounceProgress);
   // 滑桿值仍是基準黏度；電影模式依事件暫時改變融合半徑。
   // 接觸時增黏，拉伸時開始收頸，斷裂時快速卸除 smooth-min 的連接。
-  let viscosityScale = P.motion === 'cinematic'
+  let viscosityScale = P.motion === 'split'
     ? Math.max(0.35, 1 + merge * 0.15 - tension * 0.25 - breakaway * 0.55)
     // 崩解噴濺同樣是「一次出現很多顆」，需要同一套正規化，否則炸開那一瞬間
     // 8 顆滿半徑的碎片會被 smooth-min 黏成一大團而不是各自剝離。
@@ -1388,18 +1391,18 @@ function updateDropUniforms(t) {
     // 融化的半徑同樣自成一套（長出→墜落→縮到 0 的包絡），在這裡先接住。
     let meltState = null;
 
-    if (P.motion === 'cinematic') {
+    if (P.motion === 'split') {
       // 所有水滴共用同一個緩慢旋轉的分離軸；不再各自沿亂數弧線交叉碰撞。
       const anchor = i * tau / layoutCount + Math.sin(a) * 0.18;
       const radial = P.spread * (1.04 + h2 * 0.06) * energy;
       const recoil = 1 + breakaway * (0.11 + h2 * 0.018)
         + followThrough * (0.035 + h3 * 0.012);
-      const actionScale = cinema.distanceSeparation * recoil;
+      const actionScale = splitBeat.distanceSeparation * recoil;
       x = groupX + Math.cos(anchor) * radial * actionScale;
       y = groupY + Math.sin(anchor) * radial * 0.24 * actionScale;
       z = groupZ + Math.sin(anchor) * radial * 0.52 * actionScale;
       // 形變本身已近似守恆體積，避免再用半徑做一次「呼吸」而產生橫向縮放感。
-      radiusFactor = 1 + cinema.anticipation * 0.01
+      radiusFactor = 1 + splitBeat.anticipation * 0.01
         + breakaway * 0.006 + followThrough * 0.004;
     } else if (P.motion === 'weave') {
       weaveDropPosition(i, phase, formationPosNow);
@@ -1494,7 +1497,7 @@ function updateDropUniforms(t) {
   // 電影模式的合體狀態是真正的一顆母滴：其餘水滴由零半徑連續長出，而不是讓
   // 多顆完整半徑的 SDF 重疊後再突然解鎖。以 q^3 轉移體積，子滴半徑會隨 q
   // 近似線性增長，同時嚴格維持總體積，輪廓便能自然經過鼓包、細頸、斷裂。
-  if (P.motion === 'cinematic' && count > 1) {
+  if (P.motion === 'split' && count > 1) {
     const childVolumeProgress = separation * separation * separation;
     let transferredVolume = 0;
     for (let i = 1; i < count; i++) {
@@ -1510,7 +1513,7 @@ function updateDropUniforms(t) {
   // 電影敘事期間鎖定主配對，避免多滴的最近距離交替造成形變軸跳動。
   // 其他模式仍使用即時最近配對。
   let pairA = 0, pairB = Math.min(1, count - 1), pairDistance = Infinity, surfaceGap = Infinity;
-  if (count >= 2 && P.motion === 'cinematic') {
+  if (count >= 2 && P.motion === 'split') {
     const da = dropData[pairA], db = dropData[pairB];
     pairDistance = Math.hypot(da.x - db.x, da.y - db.y, da.z - db.z);
     surfaceGap = pairDistance - da.w - db.w;
@@ -1546,7 +1549,7 @@ function updateDropUniforms(t) {
   // 非電影模式仍可依實際接觸做黏性融合；電影模式已在上方守恆轉移體積。
   // 融化排除在外：每一滴都是各自落下的獨立水滴，靠得近時互相脹大半徑會黏成
   // 一條斷不開的水柱，正好是這個模式最不該有的樣子。
-  if (!isFormationMotion(P.motion) && P.motion !== 'cinematic' && !melting
+  if (!isFormationMotion(P.motion) && P.motion !== 'split' && !melting
     && count >= 2 && fusionAmount > 0) {
     const da = dropData[pairA], db = dropData[pairB];
     const axisX = db.x - da.x, axisY = db.y - da.y, axisZ = db.z - da.z;
@@ -1565,9 +1568,9 @@ function updateDropUniforms(t) {
   }
 
   // 實際接觸距離修正事件黏性：壓平時增黏，頸部拉伸與快速分離時卸黏。
-  if (P.motion === 'cinematic' && count >= 2) {
+  if (P.motion === 'split' && count >= 2) {
     viscosityScale = Math.max(0.35,
-      1 + cinema.contact * 0.2 - tension * 0.18
+      1 + splitBeat.contact * 0.2 - tension * 0.18
       - breakaway * (0.42 + Math.min(0.1, separationSpeed * 0.035)));
     effectiveViscosity = P.viscosity * viscosityScale;
   }
@@ -1697,7 +1700,7 @@ function updateDropUniforms(t) {
         tip = deform.tip;
         shapeOscillation = deform.wobble;
       }
-    } else if (P.motion === 'cinematic' && count >= 2 && (i === pairA || i === pairB)) {
+    } else if (P.motion === 'split' && count >= 2 && (i === pairA || i === pairB)) {
       const other = dropData[i === pairA ? pairB : pairA];
       const dx = other.x - d.x, dy = other.y - d.y, dz = other.z - d.z;
       const invDistance = 1 / Math.max(0.0001, Math.hypot(dx, dy, dz));
@@ -1707,7 +1710,7 @@ function updateDropUniforms(t) {
       // 完全分離時沿速度方向形變；只有事件或接觸期間才轉向兩滴之間的軸線。
       // 電影模式回彈期把形變軸完全鎖到 contactAxis（法線），確保斷裂尖端嚴格沿法線
       // 回彈、不隨殘餘速度分量抖動；breakaway 為 C1 的 Hann，鎖定權重本身平滑。
-      const breakawayLock = P.motion === 'cinematic' ? breakaway : breakaway * 0.85;
+      const breakawayLock = P.motion === 'split' ? breakaway : breakaway * 0.85;
       const pairInfluence = Math.min(1,
         Math.max(contactAmount, fusionLock, tension, breakawayLock));
       // 分離時速度軸 ≈ −contactAxis（往外飛，背向另一顆）；直接線性混向法線會在中途
@@ -1725,23 +1728,23 @@ function updateDropUniforms(t) {
       const physicalStretch = stretch
         + tension * (0.12 + P.surfaceTension * 0.05)
         + breakaway * 0.055;
-      if (P.motion === 'cinematic') {
+      if (P.motion === 'split') {
         // 電影模式由單一包絡擁有長軸形變；速度只提供少量次級慣性。
         const designedStretch = 1
-          + cinema.splitShape * (0.085 + P.surfaceTension * 0.025)
-          + cinema.contact * (0.025 + P.surfaceTension * 0.012);
+          + splitBeat.splitShape * (0.085 + P.surfaceTension * 0.025)
+          + splitBeat.contact * (0.025 + P.surfaceTension * 0.012);
         stretch = designedStretch + (physicalStretch - 1) * 0.22;
       } else {
         stretch = physicalStretch;
       }
       // 壓平只在聚合接觸／排液期發生，不再於分裂與融合兩側各出現一次。
-      const drainageTransition = contactAmount * (P.motion === 'cinematic'
-        ? cinema.contact
+      const drainageTransition = contactAmount * (P.motion === 'split'
+        ? splitBeat.contact
         : Math.sin(Math.PI * merge));
       flatten = drainageTransition * (0.55 + P.surfaceTension * 0.2);
       // 電影模式用平滑解析包絡驅動尖端回彈，與逐幀量測的 separationSpeed 解耦，
       // 避免量測噪聲讓尖頭幅度抖動；非電影模式仍依實際分離速度觸發。
-      tip = P.motion === 'cinematic'
+      tip = P.motion === 'split'
         ? breakaway * Math.exp(-4.2 * bounceProgress)
         : breakaway * Math.exp(-4.2 * bounceProgress)
           * smoothstepCPU(separationSpeed, 0.02, 0.35);
@@ -1749,7 +1752,7 @@ function updateDropUniforms(t) {
       // transverseScale=1/√longScale 補償橫向 → 體積守恆的 prolate↔oblate 脈動。
       // 振幅用 C1 的事件包絡（breakaway 的 Hann / 融合 settle 的 Hann），兩端斜率為 0，
       // 事件內與循環接縫都無跳變；頻率隨滴徑 √(σ/R³) 提高，小滴抖得快、符合物理。
-      if (P.motion === 'cinematic') {
+      if (P.motion === 'split') {
         const jellyFreq = Math.sqrt(0.54 / Math.max(0.2, d.w));
         const wobbleGain = 0.45 + P.elasticStrength * 4.5;
         // 分裂回彈：斷裂後盪約兩下收斂。
@@ -1775,7 +1778,7 @@ function updateDropUniforms(t) {
     // 維持滿值，極小子滴仍會留下約 k/6 的鼓包，直到半徑守衛下一幀把它整顆
     // 跳過，輪廓便瞬間縮小。只讓子滴的融合權重隨體積交接平滑淡入／淡出；
     // 其他模式固定為 1，崩解模式的零半徑守衛也維持原語意。
-    if (P.motion === 'cinematic' && i > 0) {
+    if (P.motion === 'split' && i > 0) {
       blendWeight = separation;
     }
     dropShapeData[i].set(ax, ay, az, stretch);
@@ -1787,7 +1790,7 @@ function updateDropUniforms(t) {
   }
 
   // 以實際 SDF 頸部是否斷裂觸發毛細波，並把活動配對傳給 shader。
-  if (P.motion === 'cinematic' && count >= 2) {
+  if (P.motion === 'split' && count >= 2) {
     elasticPair.set(pairA, pairB);
     const neckGap = pairDistance - dropData[pairA].w - dropData[pairB].w
       - effectiveViscosity * 0.5;
@@ -3013,10 +3016,10 @@ async function importShapeFile(file, kind, { rebuilding = false } = {}) {
   const builtin = !file;
   // 每個模式各自預設的內建 SVG 展示形狀（見 motions/registry.js 的 svgDemo）。
   // 只在還沒匯入真正檔案時採用；GLB 沒有這個分歧，一律是內建環形。
-  const svgVariant = MOTION_SVG_DEMO[P.motion] || 'default';
+  const svgVariant = MOTION_SVG_DEMO[P.motion] || 'question';
   const label = builtin
     ? (kind === 'svg'
-      ? (svgVariant === 'melt' ? MELT_DEFAULT_SVG_NAME : DEFAULT_SVG_NAME)
+      ? (svgVariant === 'ice' ? MELT_DEFAULT_SVG_NAME : DEFAULT_SVG_NAME)
       : DEFAULT_SOLID_NAME)
     : file.name;
   const glbGridSize = SELECTS.shapeQuality.map[P.shapeQuality] || 80;
@@ -3036,7 +3039,7 @@ async function importShapeFile(file, kind, { rebuilding = false } = {}) {
       // 超取樣的距離場暫時佔用 (size*ss)² 個 float；桌面用 3（1536²，約 38MB
       // 峰值），行動裝置降一級避免配置失敗。
       ? await svgToField(
-        builtin ? (svgVariant === 'melt' ? makeMeltDemoSvgFile() : makeDefaultSvgFile()) : file,
+        builtin ? (svgVariant === 'ice' ? makeMeltDemoSvgFile() : makeDefaultSvgFile()) : file,
         { supersample: mobileRenderQuery.matches ? 2 : 3 },
       )
       : builtin
@@ -3124,7 +3127,7 @@ shapeInput.addEventListener('change', e => {
 function ensureShapeForCurrentSource() {
   if (!usesShapeField(P.motion)) return;
   const usingBuiltinSvg = P.shapeSource === 'svg' && !userShapeFiles.svg;
-  const desiredSvgVariant = MOTION_SVG_DEMO[P.motion] || 'default';
+  const desiredSvgVariant = MOTION_SVG_DEMO[P.motion] || 'question';
   // 烘焙途中要拿「這一份即將產出什麼」來比，不能拿已載入的那一份——見
   // shapeImportingKind 的註解，那正是「切回原來的來源之後畫面卻停在另一個
   // 來源、而且永遠不會恢復」的成因。
