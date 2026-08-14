@@ -2851,6 +2851,19 @@ let shapeRebuildTimer = 0;
 let shapeFieldSource = null;
 // 烘焙途中要求換來源時記在這裡，等當前烘焙結束再補做。
 let shapeEnsurePending = false;
+// 正在烘焙中的那一份「將會」產出什麼來源／哪個內建變體。
+//
+// 這兩個值存在的理由是一個實際踩到的 bug：shapeFieldSource 與 builtinSvgVariant
+// 都只在烘焙成功「之後」才更新，所以烘焙途中它們描述的是上一份。GLB 128³ 要烘
+// 十幾秒，這段期間使用者把來源切回 SVG，ensureShapeForCurrentSource 拿
+// shapeFieldSource（還是 'svg'）跟 P.shapeSource（'svg'）比，得到「沒變，不用
+// 做事」就直接返回 —— 既沒有立刻重烘，也沒有記下待辦。等 GLB 烘完蓋上去之後，
+// 就再也沒有任何東西會把它糾正回 SVG：下拉選單顯示 SVG、畫面是 GLB 的形狀、
+// 狀態文字停在 GLB 那一行，而且不會自己恢復。
+//
+// 所以判斷「目前是什麼」時，烘焙途中要看這一份即將產出的結果，而不是已載入的。
+let shapeImportingKind = null;
+let shapeImportingVariant = null;
 // 使用者自己匯入的檔案，依來源分開記住。有記錄就不再套用內建預設。
 const userShapeFiles = { svg: null, gltf: null };
 // 目前載入的內建 SVG 展示形狀是哪一版（'default' 問號／'melt' 冰塊）。只有在
@@ -2913,6 +2926,8 @@ async function importShapeFile(file, kind, { rebuilding = false } = {}) {
   document.getElementById('shapeBtn').disabled = true;
   document.getElementById('shapeQuality').disabled = true;
   shapeConverting = true;
+  shapeImportingKind = kind;
+  shapeImportingVariant = (builtin && kind === 'svg') ? svgVariant : null;
   syncLoop();
   try {
     const next = kind === 'svg'
@@ -2974,6 +2989,8 @@ async function importShapeFile(file, kind, { rebuilding = false } = {}) {
   } finally {
     if (requestId === shapeImportRequestId) {
       shapeConverting = false;
+      shapeImportingKind = null;
+      shapeImportingVariant = null;
       updateUIState();
       syncLoop();
       if (shapeEnsurePending) {
@@ -3006,8 +3023,14 @@ function ensureShapeForCurrentSource() {
   if (!usesShapeField(P.motion)) return;
   const usingBuiltinSvg = P.shapeSource === 'svg' && !userShapeFiles.svg;
   const desiredSvgVariant = MOTION_SVG_DEMO[P.motion] || 'default';
-  const sourceChanged = shapeFieldSource !== P.shapeSource;
-  const variantChanged = usingBuiltinSvg && builtinSvgVariant !== desiredSvgVariant;
+  // 烘焙途中要拿「這一份即將產出什麼」來比，不能拿已載入的那一份——見
+  // shapeImportingKind 的註解，那正是「切回原來的來源之後畫面卻停在另一個
+  // 來源、而且永遠不會恢復」的成因。
+  const converting = shapeConverting && shapeImportingKind;
+  const currentKind = converting ? shapeImportingKind : shapeFieldSource;
+  const currentVariant = converting ? shapeImportingVariant : builtinSvgVariant;
+  const sourceChanged = currentKind !== P.shapeSource;
+  const variantChanged = usingBuiltinSvg && currentVariant !== desiredSvgVariant;
   if (!sourceChanged && !variantChanged) return;
   // 烘焙中不併行開第二份：兩者都是幾秒的 CPU 工作，同時跑只會互相拖慢。
   // 改成記下待辦，等當前這份收工後在 finally 裡補做，否則在烘焙途中切換來源
