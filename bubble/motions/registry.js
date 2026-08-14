@@ -13,8 +13,8 @@
 //   usesShapeField 要不要匯入／顯示 SVG/GLB 形狀。比「走匯聚時間軸」範圍更廣：
 //                  穿梭環繞與崩解噴濺也要同一顆形狀，只是不吸收水滴。
 //   gate           UI 面板的 data-gate 值，決定哪些參數列在這個模式顯示。
-//   count/radius/loopDuration
-//                  該模式的預設值。這三項按模式各自記憶——使用者在某個模式下
+//   count/radius/loopDuration/dolly
+//                  該模式的預設值。這幾項按模式各自記憶——使用者在某個模式下
 //                  調過的值會保留，切回來時恢復，只有初始預設不同。
 export const MOTIONS = {
   cinematic: {
@@ -25,6 +25,7 @@ export const MOTIONS = {
     count: 2,
     radius: 0.4,
     loopDuration: 12,
+    dolly: true,
   },
   formation: {
     label: '形狀匯聚 Formation',
@@ -36,6 +37,7 @@ export const MOTIONS = {
     // 依賴外部形狀的模式改用較小的滴徑，吸附進外形時顆粒感更細。
     radius: 0.25,
     loopDuration: 12,
+    dolly: true,
   },
   weave: {
     label: '穿梭環繞 Weave',
@@ -46,6 +48,7 @@ export const MOTIONS = {
     count: 6,
     radius: 0.25,
     loopDuration: 12,
+    dolly: true,
   },
   melt: {
     label: '融化 Melt',
@@ -58,6 +61,10 @@ export const MOTIONS = {
     radius: 0.25,
     // 融化是永遠播下去的循環，沒有敘事段落要交代，循環短一點滴落密度才夠。
     loopDuration: 6,
+    // 鏡頭推軌是「分裂 ~0.24、融合 ~0.80」那組敘事節拍，跟融化的持續滴落
+    // 毫無關係；融化的形狀本身也該完全靜止，所以預設關掉。使用者仍可以在
+    // UI 打開——見 bubble.js 的 dolly 計算與 index.html 的「敘事推軌」開關。
+    dolly: false,
   },
   shatter: {
     label: '崩解噴濺 Shatter',
@@ -71,6 +78,7 @@ export const MOTIONS = {
     radius: 0.25,
     // 四段時長預設 1.1 / 0.5 / 0.4 / 2.0 合計正好 4 秒，面板才顯示得出實際秒數。
     loopDuration: 4,
+    dolly: true,
   },
 };
 
@@ -81,6 +89,7 @@ export const MOTION_UNIFORM_MAP = pick('uniform');
 export const MOTION_DEFAULT_COUNTS = pick('count');
 export const MOTION_DEFAULT_RADIUS = pick('radius');
 export const MOTION_DEFAULT_LOOP_DURATION = pick('loopDuration');
+export const MOTION_DEFAULT_DOLLY = pick('dolly');
 
 export const usesShapeField = motion => Boolean(MOTIONS[motion]?.usesShapeField);
 

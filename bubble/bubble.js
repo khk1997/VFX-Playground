@@ -1,17 +1,17 @@
 'use strict';
 import * as THREE from 'three';
-import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-29';
+import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-30';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
-} from './default-shapes.js?v=svg-shape-29';
+} from './default-shapes.js?v=svg-shape-30';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
-  MOTION_DEFAULT_LOOP_DURATION, usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-29';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-29';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-29';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-29';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-29';
+  MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, usesShapeField, motionGates,
+} from './motions/registry.js?v=svg-shape-30';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-30';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-30';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-30';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-30';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -228,6 +228,9 @@ const TOGGLE_DEFAULTS = {
   dispersionEnabled: true,
   rayDispersionEnabled: false,
   spectralCausticEnabled: true,
+  // 敘事推軌（見下方 dolly 計算）。跟 count/radius/loopDuration 一樣按模式
+  // 各自記憶，這裡只是進入畫面時的初始值。
+  dollyEnabled: MOTION_DEFAULT_DOLLY[SELECT_DEFAULTS.motion],
 };
 const COLOR_DEFAULTS  = {
   bgColor: '#000000',
@@ -308,6 +311,8 @@ if (mobileRenderQuery.matches && !PREVIEW) P.cameraDistance = MOBILE_CAMERA_DIST
 let motionCounts = { ...MOTION_DEFAULT_COUNTS };
 let motionRadius = { ...MOTION_DEFAULT_RADIUS };
 let motionLoopDuration = { ...MOTION_DEFAULT_LOOP_DURATION };
+// 敘事推軌（見下方 dolly 計算）是否開啟，同樣按模式各自記憶。
+let motionDollyEnabled = { ...MOTION_DEFAULT_DOLLY };
 
 // 自訂漸層色標（最多 6，可調位置）— reset 用
 const STOP_MAX = 6;
@@ -350,6 +355,9 @@ const TOGGLES = {
   rayDispersionEnabled: 'uRayDispersionEnabled',
   spectralCausticEnabled: 'uSpectralCausticEnabled',
   edgeDropsEnabled: () => applyEdgeDropDistribution(),
+  // 沒有對應 uniform：dolly 是 CPU 端算好直接寫進 uCameraDistance 的純量，
+  // render loop 每幀直接讀 P.dollyEnabled，這裡不用同步任何東西。
+  dollyEnabled: () => {},
 };
 
 function applyToggle(key) {
@@ -2129,6 +2137,10 @@ function bindControls() {
         const loopDurationEl = document.getElementById('loopDuration');
         loopDurationEl.value = motionLoopDuration[P.motion];
         loopDurationEl.dispatchEvent(new Event('input', { bubbles: true }));
+        motionDollyEnabled[previousMotion] = P.dollyEnabled;
+        const dollyEnabledEl = document.getElementById('dollyEnabled');
+        dollyEnabledEl.checked = motionDollyEnabled[P.motion];
+        dollyEnabledEl.dispatchEvent(new Event('change', { bubbles: true }));
         previousDropT = null;
       }
       if (uniforms && uniforms[uniform]) uniforms[uniform].value = map[el.value];
@@ -2152,6 +2164,7 @@ function bindControls() {
     const label = el.closest('.toggleRow')?.querySelector('label');
     const update = () => {
       P[key] = el.checked;
+      if (key === 'dollyEnabled') motionDollyEnabled[P.motion] = P[key];
       if (valEl) valEl.textContent = P[key] ? '開啟' : '關閉';
       applyToggle(key);
       updateUIState();
@@ -2396,6 +2409,7 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   motionCounts = { ...MOTION_DEFAULT_COUNTS };
   motionRadius = { ...MOTION_DEFAULT_RADIUS };
   motionLoopDuration = { ...MOTION_DEFAULT_LOOP_DURATION };
+  motionDollyEnabled = { ...MOTION_DEFAULT_DOLLY };
   resetSpectralCausticColors();
   resetRamp();
   bindControls();
@@ -3129,12 +3143,11 @@ function frame(now) {
   // 穩定英雄鏡：保留極輕的靜態荷蘭角增添張力，但移除擺動以維持畫面穩定。
   const roll = -0.03;
   // 推軌：在動作高潮（分裂 ~0.24、融合 ~0.80）輕微推近，漂浮段拉回，鏡頭隨敘事呼吸。
-  // 這兩個固定相位是「分裂」模式專屬的敘事節拍，寫死套用在所有模式的鏡頭距離上，
-  // 從沒有依模式關掉過。融化的設計前提是形狀完全靜止、只有水滴在動——這段推軌
-  // 一樣會把整個畫面（形狀＋水滴）一起放大縮小，且與融化的滴落節奏毫無關係，
-  // 就是使用者看到的「定格呼吸」：每個循環兩次、與敘事無關的鏡頭推近。
-  const meltHasStaticShape = P.motion === 'melt';
-  const dolly = meltHasStaticShape ? 1 : 1
+  // 這兩個固定相位是「分裂」模式專屬的敘事節拍，套用在所有模式的鏡頭距離上卻沒有
+  // 開關——融化的形狀完全靜止時，這段推軌會把整個畫面一起放大縮小、跟滴落節奏
+  // 毫無關係，看起來像定格呼吸。「敘事推軌」開關讓使用者自己決定要不要這段，
+  // 每個模式各自記憶（見 P.dollyEnabled 與 motionDollyEnabled）。
+  const dolly = !P.dollyEnabled ? 1 : 1
     - 0.05 * Math.exp(-Math.pow((phase01 - 0.80) / 0.10, 2))
     - 0.03 * Math.exp(-Math.pow((phase01 - 0.24) / 0.08, 2));
   // 直向螢幕的水平視野遠窄於桌面；依 aspect 拉遠，避免分裂後的大滴出框。
