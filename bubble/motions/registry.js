@@ -63,7 +63,7 @@ export const MOTIONS = {
     loopDuration: 6,
     // 鏡頭推軌是「分裂 ~0.24、融合 ~0.80」那組敘事節拍，跟融化的持續滴落
     // 毫無關係；融化的形狀本身也該完全靜止，所以預設關掉。使用者仍可以在
-    // UI 打開——見 bubble.js 的 dolly 計算與 index.html 的「敘事推軌」開關。
+    // UI 打開——見 bubble.js 的 dolly 計算與 index.html 的「前後拉伸」開關。
     dolly: false,
   },
   shatter: {

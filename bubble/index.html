@@ -58,6 +58,8 @@
     <div class="row"><label>水平視角</label><input type="range" id="cameraRotationY" min="-180" max="180" step="0.1" value="29.8"><span class="val" id="cameraRotationY_v"></span></div>
     <div class="row"><label>垂直視角</label><input type="range" id="cameraRotationX" min="-90" max="90" step="0.1" value="9.7"><span class="val" id="cameraRotationX_v"></span></div>
     <div class="row"><label>環繞幅度</label><input type="range" id="spin" min="0" max="1" step="0.01" value="0.08"><span class="val" id="spin_v"></span></div>
+    <div class="row toggleRow"><label>前後拉伸</label><input type="checkbox" id="dollyEnabled" checked><span class="switchTrack" aria-hidden="true"></span><span class="val" id="dollyEnabled_v">開啟</span></div>
+    <div id="dollyEnabledNote" class="note">在動作高潮（分裂約 1/4 循環處、融合約 4/5 循環處）鏡頭輕微推近，其餘時間拉回，讓畫面隨敘事有呼吸感。這兩個時機點是「分裂」模式的節奏，跟其他模式的動作不一定對得上——例如融化的形狀本身完全靜止，這段推近拉遠會讓整個畫面規律地放大縮小，反而像沒來由的呼吸感，所以融化模式預設關閉。每個動態模式各自記住這個開關的狀態，切換模式時會恢復。</div>
     <div class="note">可使用滑鼠滾輪或觸控板拉近、拉遠；環繞幅度控制鏡頭隨循環自動環繞的幅度。</div>
   </div>
 
@@ -208,8 +210,6 @@
       <option value="pulse" hidden>脈動呼吸 Pulse（已移除）</option>
     </select><span class="val"></span></div>
     <div class="row" id="loopDurationRow"><label>循環秒數</label><input type="range" id="loopDuration" min="4" max="30" step="0.5" value="12"><span class="val" id="loopDuration_v"></span></div>
-    <div class="row toggleRow"><label>敘事推軌</label><input type="checkbox" id="dollyEnabled" checked><span class="switchTrack" aria-hidden="true"></span><span class="val" id="dollyEnabled_v">開啟</span></div>
-    <div id="dollyEnabledNote" class="note">在動作高潮（分裂約 1/4 循環處、融合約 4/5 循環處）鏡頭輕微推近，其餘時間拉回，讓畫面隨敘事有呼吸感。這兩個時機點是「分裂」模式的節奏，跟其他模式的動作不一定對得上——例如融化的形狀本身完全靜止，這段推軌會讓整個畫面規律地放大縮小，反而像沒來由的呼吸感，所以融化模式預設關閉。每個動態模式各自記住這個開關的狀態，切換模式時會恢復。</div>
     <div class="modeBlock" data-gate="formation">
     <div class="row" id="holdBreathRow"><label>定格呼吸</label><input type="range" id="holdBreath" min="0" max="0.2" step="0.005" value="0.05"><span class="val" id="holdBreath_v"></span></div>
     <div class="row" id="formationVarietyRow"><label>軌跡多樣性</label><input type="range" id="formationVariety" min="0" max="1" step="0.01" value="0.35"><span class="val" id="formationVariety_v"></span></div>
@@ -403,6 +403,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=universal-dbg32"></script>
+<script type="module" src="./bubble.js?v=universal-dbg33"></script>
 </body>
 </html>

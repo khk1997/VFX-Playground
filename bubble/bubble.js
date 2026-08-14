@@ -1,17 +1,17 @@
 'use strict';
 import * as THREE from 'three';
-import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-30';
+import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-31';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
-} from './default-shapes.js?v=svg-shape-30';
+} from './default-shapes.js?v=svg-shape-31';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-30';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-30';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-30';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-30';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-30';
+} from './motions/registry.js?v=svg-shape-31';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-31';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-31';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-31';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-31';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -228,7 +228,7 @@ const TOGGLE_DEFAULTS = {
   dispersionEnabled: true,
   rayDispersionEnabled: false,
   spectralCausticEnabled: true,
-  // 敘事推軌（見下方 dolly 計算）。跟 count/radius/loopDuration 一樣按模式
+  // 前後拉伸（見下方 dolly 計算）。跟 count/radius/loopDuration 一樣按模式
   // 各自記憶，這裡只是進入畫面時的初始值。
   dollyEnabled: MOTION_DEFAULT_DOLLY[SELECT_DEFAULTS.motion],
 };
@@ -311,7 +311,7 @@ if (mobileRenderQuery.matches && !PREVIEW) P.cameraDistance = MOBILE_CAMERA_DIST
 let motionCounts = { ...MOTION_DEFAULT_COUNTS };
 let motionRadius = { ...MOTION_DEFAULT_RADIUS };
 let motionLoopDuration = { ...MOTION_DEFAULT_LOOP_DURATION };
-// 敘事推軌（見下方 dolly 計算）是否開啟，同樣按模式各自記憶。
+// 前後拉伸（見下方 dolly 計算）是否開啟，同樣按模式各自記憶。
 let motionDollyEnabled = { ...MOTION_DEFAULT_DOLLY };
 
 // 自訂漸層色標（最多 6，可調位置）— reset 用
@@ -3145,7 +3145,7 @@ function frame(now) {
   // 推軌：在動作高潮（分裂 ~0.24、融合 ~0.80）輕微推近，漂浮段拉回，鏡頭隨敘事呼吸。
   // 這兩個固定相位是「分裂」模式專屬的敘事節拍，套用在所有模式的鏡頭距離上卻沒有
   // 開關——融化的形狀完全靜止時，這段推軌會把整個畫面一起放大縮小、跟滴落節奏
-  // 毫無關係，看起來像定格呼吸。「敘事推軌」開關讓使用者自己決定要不要這段，
+  // 毫無關係，看起來像定格呼吸。「前後拉伸」開關讓使用者自己決定要不要這段，
   // 每個模式各自記憶（見 P.dollyEnabled 與 motionDollyEnabled）。
   const dolly = !P.dollyEnabled ? 1 : 1
     - 0.05 * Math.exp(-Math.pow((phase01 - 0.80) / 0.10, 2))
