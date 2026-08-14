@@ -62,7 +62,7 @@
     <div id="dollyEnabledNote" class="note">在動作高潮（分裂約 1/4 循環處、融合約 4/5 循環處）鏡頭輕微推近，其餘時間拉回，讓畫面隨敘事有呼吸感。這兩個時機點是「分裂」模式的節奏，跟其他模式的動作不一定對得上——例如融化的形狀本身完全靜止，這段推近拉遠會讓整個畫面規律地放大縮小，反而像沒來由的呼吸感，所以融化模式預設關閉。每個動態模式各自記住這個開關的狀態，切換模式時會恢復。</div>
     <div class="note">可使用滑鼠滾輪或觸控板拉近、拉遠；環繞幅度控制鏡頭隨循環自動環繞的幅度。</div>
     <div class="row toggleRow"><label>省電節流</label><input type="checkbox" id="powerSave" checked><span class="switchTrack" aria-hidden="true"></span><span class="val" id="powerSave_v">開啟</span></div>
-    <div id="powerSaveNote" class="note">停止操作約 4 秒後、或視窗切到背景時，把影格率壓到 30fps；拖曳旋轉、滾輪縮放、或動任何控制項都會立刻恢復。游標只是移過畫面或停在上面不算——那不會改變任何東西，算進去的話滑鼠放著不動就會讓節流永遠不生效。只降更新頻率，不降解析度也不減 raymarch 步數，所以每一張畫面的品質完全不變，只是更新得比較疏。拖曳旋轉中與輸出中不會節流。這個模組在桌面上沒有其他自動降載機制（只有行動裝置才會依實測幀率降解析度），關掉這個開關就是一直維持滿載算繪。</div>
+    <div id="powerSaveNote" class="note">停止操作約 4 秒後、或視窗切到背景時，把影格率壓到 30fps；拖曳旋轉、在畫面上滾輪縮放、或動任何控制項都會立刻恢復。判準只有一條：這個動作會不會改變畫面。所以游標移過畫面、捲動這個參數面板都不算——它們不改變任何東西，算進去的話滑鼠放著不動或讀個面板就會讓節流失效。只降更新頻率，不降解析度也不減 raymarch 步數，所以每一張畫面的品質完全不變，只是更新得比較疏。拖曳旋轉中與輸出中不會節流。這個模組在桌面上沒有其他自動降載機制（只有行動裝置才會依實測幀率降解析度），關掉這個開關就是一直維持滿載算繪。</div>
   </div>
 
   <div class="group">
@@ -430,6 +430,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=universal-dbg53"></script>
+<script type="module" src="./bubble.js?v=universal-dbg54"></script>
 </body>
 </html>

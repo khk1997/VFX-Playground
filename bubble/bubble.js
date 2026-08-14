@@ -2,23 +2,23 @@
 import * as THREE from 'three';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
-} from './shape-field.js?v=svg-shape-49';
+} from './shape-field.js?v=svg-shape-50';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
   MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
   MORPH_TARGET_SVG_NAME, makeMorphTargetSvgFile,
   MORPH_TARGET_SOLID_NAME, buildMorphTargetSolid,
-} from './default-shapes.js?v=svg-shape-49';
+} from './default-shapes.js?v=svg-shape-50';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-49';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-49';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-49';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-49';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-49';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-49';
+} from './motions/registry.js?v=svg-shape-50';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-50';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-50';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-50';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-50';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-50';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -2293,17 +2293,20 @@ let powerSaveThrottled = false;
 function markInteraction() {
   lastInteractionAt = performance.now();
 }
-// 刻意不收 pointermove：游標只是移過畫面或停在上面，什麼都沒有改變，不該算成
-// 互動。收了的話，滑鼠放在視窗上不動、或閱讀時隨手晃一下，就會一直把閒置計時
-// 歸零，節流幾乎永遠不會生效。
+// 判準只有一條：這個動作會不會改變畫面。會，才算互動。
 //
-// 真正會改變畫面的是「拖曳旋轉」「滾輪縮放」「動控制項」，這三件事分別由
-// pointerdown/up、wheel、input/change 蓋到。拖曳過程本身不必額外收 pointermove
-// ——旋轉時會持續對鏡頭的兩個滑桿發 input 事件（見 canvas 的 pointermove 處理），
-// 計時器自然一直是新的；而且拖曳中本來就完全不節流。
-// pointerup/cancel 是為了放開手之後有一段緩衝：慣性旋轉還會滑行一小段，那段
-// 需要維持流暢。
-for (const type of ['pointerdown', 'pointerup', 'pointercancel', 'wheel', 'keydown', 'input', 'change']) {
+// 依這條剔除掉的：
+//   pointermove —— 游標移過或停在畫面上什麼都沒改變。收了的話滑鼠放著不動就會
+//     一直把計時歸零，節流等於沒做。
+//   wheel —— 看起來該收，但掛在 window 上連捲動參數面板都會觸發，而捲面板完全
+//     不改變畫面。畫布上的滾輪縮放不需要它：那個處理本身就會改「鏡頭距離」滑桿
+//     並發出 input（見下方 canvas 的 wheel 處理），已經被 input 蓋到了。
+//   keydown —— 同理，用鍵盤捲面板不該喚醒；真正會改變畫面的按鍵（快捷暫存）
+//     套用參數時一樣會發 input。
+//
+// 留下的：input/change 涵蓋所有控制項；click 涵蓋按鈕（播放暫停、匯入、快捷
+// 暫存），捲動不會產生 click 所以不會誤觸。
+for (const type of ['input', 'change', 'click']) {
   window.addEventListener(type, markInteraction, { passive: true, capture: true });
 }
 window.addEventListener('focus', () => { windowFocused = true; markInteraction(); });
@@ -2381,6 +2384,11 @@ function sampleRenderQuality(now) {
 
 /* ===== 拖曳旋轉 ===== */
 function bindPointer() {
+  // 拖曳旋轉的互動標記只掛在畫布上：拖曳中本來就不節流，這裡真正的目的是讓
+  // 放開手之後有一段緩衝——慣性旋轉還會滑行一小段，那段需要維持流暢。
+  for (const type of ['pointerdown', 'pointerup', 'pointercancel']) {
+    canvas.addEventListener(type, markInteraction, { passive: true });
+  }
   canvas.addEventListener('pointerdown', e => {
     dragging = true; lastX = e.clientX; lastY = e.clientY;
     canvas.setPointerCapture(e.pointerId);
