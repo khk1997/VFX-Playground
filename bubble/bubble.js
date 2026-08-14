@@ -2,23 +2,23 @@
 import * as THREE from 'three';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
-} from './shape-field.js?v=svg-shape-46';
+} from './shape-field.js?v=svg-shape-48';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
   MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
   MORPH_TARGET_SVG_NAME, makeMorphTargetSvgFile,
   MORPH_TARGET_SOLID_NAME, buildMorphTargetSolid,
-} from './default-shapes.js?v=svg-shape-46';
+} from './default-shapes.js?v=svg-shape-48';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-46';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-46';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-46';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-46';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-46';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-46';
+} from './motions/registry.js?v=svg-shape-48';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-48';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-48';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-48';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-48';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-48';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -269,6 +269,9 @@ const TOGGLE_DEFAULTS = {
   // 前後拉伸（見下方 dolly 計算）。跟 count/radius/loopDuration 一樣按模式
   // 各自記憶，這裡只是進入畫面時的初始值。
   dollyEnabled: MOTION_DEFAULT_DOLLY[SELECT_DEFAULTS.motion],
+  // 閒置或視窗失焦時把影格率壓到 30fps。只降更新頻率、不降解析度，所以畫面
+  // 品質不變。預設開啟：桌面沒有任何自動降載，不開就是一直滿載。
+  powerSave: true,
 };
 const COLOR_DEFAULTS  = {
   bgColor: '#000000',
@@ -413,6 +416,9 @@ const TOGGLES = {
   // 沒有對應 uniform：dolly 是 CPU 端算好直接寫進 uCameraDistance 的純量，
   // render loop 每幀直接讀 P.dollyEnabled，這裡不用同步任何東西。
   dollyEnabled: () => {},
+  // 純 CPU 端的節流開關，主迴圈每幀直接讀 P.powerSave（見 shouldSkipFrame），
+  // 沒有對應 uniform 要同步。
+  powerSave: () => {},
 };
 
 function applyToggle(key) {
@@ -2259,6 +2265,60 @@ function resolveMaxSteps() {
   return dragging ? Math.min(qualitySteps, 56) : qualitySteps;
 }
 
+/* ===== 省電節流 =====
+ * 桌面完全沒有自動降載：sampleRenderQuality 開頭就有 `!mobileRenderQuery.matches`
+ * 的早退，所以在桌面上永遠是滿 DPR、滿步數、跟著螢幕更新率一路算下去。機器夠快
+ * 就不會掉幀，於是它會很樂意把整張 GPU 燒滿來維持 60fps —— 這就是「放著跑一陣子
+ * 機器就發燙」的來源，不是哪裡寫得慢。
+ *
+ * 這裡只在「使用者沒有在互動」時降影格率，不動解析度、不動步數，所以每一張畫面
+ * 的品質完全不變，只有更新頻率變低。要降解析度才會影響畫質，那個代價這裡不付。
+ */
+// 30fps：主迴圈把 dt 夾在 0.05 秒，影格間隔一旦超過它，動畫就會開始「變慢」而不
+// 只是「變頓」（因為每幀推進的時間被截掉）。30fps 的間隔是 0.033 秒還在安全範圍，
+// 再往下就得先把那個夾值一起改，所以停在這裡。
+const POWER_SAVE_FPS = 30;
+// 主迴圈的 dt 上限（Math.min(..., 0.05)）換算成毫秒。超過它的影格間隔會被截掉，
+// 動畫就會慢下來，所以節流必須自己避開這條線。
+const DT_CLAMP_MS = 50;
+const POWER_SAVE_INTERVAL = 1000 / POWER_SAVE_FPS;
+// 停手多久算閒置。太短會在「調完一個滑桿、正在看效果」時就降頻，那一刻其實最需要
+// 流暢；4 秒足夠跨過調參數的空檔。
+const IDLE_DELAY_MS = 4000;
+let lastInteractionAt = 0;
+let lastRenderedAt = 0;
+let windowFocused = true;
+let powerSaveThrottled = false;
+
+function markInteraction() {
+  lastInteractionAt = performance.now();
+}
+for (const type of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'input', 'change']) {
+  window.addEventListener(type, markInteraction, { passive: true, capture: true });
+}
+window.addEventListener('focus', () => { windowFocused = true; markInteraction(); });
+window.addEventListener('blur', () => { windowFocused = false; });
+
+// 回傳「這一幀該不該跳過」。拖曳中與輸出中一律不節流：前者是最需要即時回饋的
+// 時候，後者根本不是給人看的（逐幀離線算繪，跳幀會漏影格）。
+// 預覽 iframe 也排除——preview-performance.js 已經用自己那套 fps/DPR 節流接管了
+// requestAnimationFrame，兩套疊在一起只會互相干擾。
+function shouldSkipFrame(now) {
+  powerSaveThrottled = false;
+  if (!P.powerSave || PREVIEW || exportJob || dragging) return false;
+  const idle = now - lastInteractionAt > IDLE_DELAY_MS;
+  if (!idle && windowFocused) return false;
+  powerSaveThrottled = true;
+  const sinceRendered = now - lastRenderedAt;
+  // 絕不讓實際間隔超過主迴圈夾住 dt 的那個上限。60Hz 螢幕上跳一幀是 33ms、沒問題，
+  // 但 30Hz 螢幕上跳一幀就變成 66ms，超過 0.05 秒的夾值之後每幀被截掉的時間會讓
+  // 動畫真的變慢（不只是變頓），循環長度也就對不上了。寧可在低更新率的螢幕上
+  // 不節流，也不能改變動畫速度。
+  if (sinceRendered >= DT_CLAMP_MS - 5) return false;
+  // 減 1ms 的寬容：影格時間不會剛好整除，嚴格比較會固定漏掉一幀變成 20fps。
+  return sinceRendered < POWER_SAVE_INTERVAL - 1;
+}
+
 function refreshRenderQuality() {
   if (!renderer || !uniforms) return;
   const interactionDpr = dragging ? Math.min(qualityDpr, minRenderDpr) : qualityDpr;
@@ -2270,6 +2330,13 @@ function refreshRenderQuality() {
 
 function sampleRenderQuality(now) {
   if (PREVIEW || !mobileRenderQuery.matches) return;
+  // 節流期間不要取樣：這時候的 30fps 是我們自己壓的，不是 GPU 跟不上。混進統計
+  // 會讓行動裝置把解析度與步數一起降下去，變成「省電模式順便掉畫質」。
+  if (powerSaveThrottled) {
+    qualitySampleStarted = now;
+    qualitySampleFrames = 0;
+    return;
+  }
   qualitySampleFrames++;
   const elapsed = now - qualitySampleStarted;
   if (elapsed < 2000) return;
@@ -3509,6 +3576,10 @@ function updateExportCameraPreview() {
 let simT = 0;
 function frame(now) {
   rafId = requestAnimationFrame(frame);
+  // 一定要在更新 last 之前就 return：last 沒動，下一張真正算繪的影格才會拿到
+  // 累積起來的 dt，動畫速度維持不變，只是更新得比較疏。
+  if (shouldSkipFrame(now)) return;
+  lastRenderedAt = now;
   sampleRenderQuality(now);
   const dt = Math.min((now - last) / 1000, 0.05);
   last = now;
