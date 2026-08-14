@@ -2,23 +2,23 @@
 import * as THREE from 'three';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
-} from './shape-field.js?v=svg-shape-50';
+} from './shape-field.js?v=svg-shape-51';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
   MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
   MORPH_TARGET_SVG_NAME, makeMorphTargetSvgFile,
   MORPH_TARGET_SOLID_NAME, buildMorphTargetSolid,
-} from './default-shapes.js?v=svg-shape-50';
+} from './default-shapes.js?v=svg-shape-51';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-50';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-50';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-50';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-50';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-50';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-50';
+} from './motions/registry.js?v=svg-shape-51';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-51';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-51';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-51';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-51';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-51';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -269,9 +269,6 @@ const TOGGLE_DEFAULTS = {
   // 前後拉伸（見下方 dolly 計算）。跟 count/radius/loopDuration 一樣按模式
   // 各自記憶，這裡只是進入畫面時的初始值。
   dollyEnabled: MOTION_DEFAULT_DOLLY[SELECT_DEFAULTS.motion],
-  // 閒置或視窗失焦時把影格率壓到 30fps。只降更新頻率、不降解析度，所以畫面
-  // 品質不變。預設開啟：桌面沒有任何自動降載，不開就是一直滿載。
-  powerSave: true,
 };
 const COLOR_DEFAULTS  = {
   bgColor: '#000000',
@@ -416,9 +413,6 @@ const TOGGLES = {
   // 沒有對應 uniform：dolly 是 CPU 端算好直接寫進 uCameraDistance 的純量，
   // render loop 每幀直接讀 P.dollyEnabled，這裡不用同步任何東西。
   dollyEnabled: () => {},
-  // 純 CPU 端的節流開關，主迴圈每幀直接讀 P.powerSave（見 shouldSkipFrame），
-  // 沒有對應 uniform 要同步。
-  powerSave: () => {},
 };
 
 function applyToggle(key) {
@@ -2273,6 +2267,9 @@ function resolveMaxSteps() {
  *
  * 這裡只在「使用者沒有在互動」時降影格率，不動解析度、不動步數，所以每一張畫面
  * 的品質完全不變，只有更新頻率變低。要降解析度才會影響畫質，那個代價這裡不付。
+ *
+ * 沒有開關：既然畫質不受影響、互動時又完全不介入，就沒有想關掉它的情境，多一個
+ * 開關只是多一個要解釋與維護的東西。
  */
 // 30fps：主迴圈把 dt 夾在 0.05 秒，影格間隔一旦超過它，動畫就會開始「變慢」而不
 // 只是「變頓」（因為每幀推進的時間被截掉）。30fps 的間隔是 0.033 秒還在安全範圍，
@@ -2318,7 +2315,7 @@ window.addEventListener('blur', () => { windowFocused = false; });
 // requestAnimationFrame，兩套疊在一起只會互相干擾。
 function shouldSkipFrame(now) {
   powerSaveThrottled = false;
-  if (!P.powerSave || PREVIEW || exportJob || dragging) return false;
+  if (PREVIEW || exportJob || dragging) return false;
   const idle = now - lastInteractionAt > IDLE_DELAY_MS;
   if (!idle && windowFocused) return false;
   powerSaveThrottled = true;
