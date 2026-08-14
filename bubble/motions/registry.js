@@ -18,6 +18,13 @@
 //                  調過的值會保留，切回來時恢復，只有初始預設不同。
 //   svgDemo        使用者還沒自己匯入 SVG 時，這個模式該顯示哪個內建展示形狀
 //                  （見 default-shapes.js）。只有需要形狀的模式才有意義。
+//   overrides      稀疏表：「擠出外形／輪廓液滴」那組參數（shapeDepth、
+//                  edgeDropsEnabled…）原本是全域共用一份 DEFAULTS，只有某個
+//                  模式需要不一樣的預設時才在這裡列一筆，沒列到的鍵繼續沿用
+//                  共用預設。跟 count/radius/loopDuration/dolly 不同——那三項
+//                  是「每個模式的值天生就不一樣」，這裡是「大多數模式相同，
+//                  少數模式需要覆寫」，不必為了一個模式的特例把同樣的數字
+//                  在五個模式裡各抄一次。
 export const MOTIONS = {
   cinematic: {
     label: '分裂 Split',
@@ -72,6 +79,20 @@ export const MOTIONS = {
     // 問號的底部只有一個小圓點，滴落點會擠成一團看不出「整個底部在滴」；
     // 冰塊的底邊夠寬，才挑得出好幾個分散的滴落點。
     svgDemo: 'melt',
+    // 融化持續滴落、水滴本身就在動，跟形狀匯聚那套「擠出外形＋輪廓液滴」
+    // 的共用預設（原本是設計給靜止展示模型用的）不搭：擠出深度、邊緣圓角
+    // 都要拉高才看得出冰塊的立體感；輪廓液滴則直接打開、水滴分佈與大小
+    // 調整過、流速歸零（融化的水滴已經有自己的滴落動畫，輪廓液滴只負責
+    // 靜態鑲邊，動起來反而互相干擾）。
+    overrides: {
+      shapeDepth: 0.28,
+      shapeEdgeBevel: 0.129,
+      edgeDropsEnabled: true,
+      shapeLiquid: 1,
+      shapeLiquidPosition: 6,
+      shapeLiquidSize: 0.77,
+      shapeLiquidSpeed: 0,
+    },
   },
   shatter: {
     label: '崩解噴濺 Shatter',
@@ -99,6 +120,8 @@ export const MOTION_DEFAULT_RADIUS = pick('radius');
 export const MOTION_DEFAULT_LOOP_DURATION = pick('loopDuration');
 export const MOTION_DEFAULT_DOLLY = pick('dolly');
 export const MOTION_SVG_DEMO = pick('svgDemo');
+export const MOTION_OVERRIDES = pick('overrides');
+export const MOTION_KEYS = Object.keys(MOTIONS);
 
 export const usesShapeField = motion => Boolean(MOTIONS[motion]?.usesShapeField);
 

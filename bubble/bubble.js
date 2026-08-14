@@ -1,19 +1,19 @@
 'use strict';
 import * as THREE from 'three';
-import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-34';
+import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-35';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
   MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
-} from './default-shapes.js?v=svg-shape-34';
+} from './default-shapes.js?v=svg-shape-35';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
-  usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-34';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-34';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-34';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-34';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-34';
+  MOTION_OVERRIDES, MOTION_KEYS, usesShapeField, motionGates,
+} from './motions/registry.js?v=svg-shape-35';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-35';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-35';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-35';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-35';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -308,13 +308,30 @@ function resetMaterialProfiles() {
 resetMaterialProfiles();
 const MOBILE_CAMERA_DISTANCE_DEFAULT = 4.3;
 if (mobileRenderQuery.matches && !PREVIEW) P.cameraDistance = MOBILE_CAMERA_DISTANCE_DEFAULT;
-// 水滴數量、大小與循環秒數按動態模式各自記憶：使用者在某個模式下調過的值會被
-// 保留，切回來時恢復，只有初始預設不同（見 motions/registry.js）。
-let motionCounts = { ...MOTION_DEFAULT_COUNTS };
-let motionRadius = { ...MOTION_DEFAULT_RADIUS };
-let motionLoopDuration = { ...MOTION_DEFAULT_LOOP_DURATION };
-// 前後拉伸（見下方 dolly 計算）是否開啟，同樣按模式各自記憶。
-let motionDollyEnabled = { ...MOTION_DEFAULT_DOLLY };
+// 按動態模式各自記憶的參數：使用者在某個模式下調過的值會被保留，切回來時
+// 恢復。count/radius/loopDuration/dolly 每個模式的初始值天生就不同，直接來自
+// registry.js 各自的一張表；SHAPE_APPEARANCE_KEYS 這幾個原本是全域共用一份
+// DEFAULTS/TOGGLE_DEFAULTS，只有某個模式的 overrides 有列到才不一樣（目前只有
+// 融化），沒列到的模式沿用共用預設，不必五個模式各抄一次同樣的數字。
+const SHAPE_APPEARANCE_KEYS = [
+  'shapeDepth', 'shapeEdgeBevel', 'edgeDropsEnabled',
+  'shapeLiquid', 'shapeLiquidPosition', 'shapeLiquidSize', 'shapeLiquidSpeed',
+];
+function motionDefaultsFor(key) {
+  const base = key in DEFAULTS ? DEFAULTS[key] : TOGGLE_DEFAULTS[key];
+  return Object.fromEntries(MOTION_KEYS.map(m => [m, MOTION_OVERRIDES[m]?.[key] ?? base]));
+}
+function buildMotionMemory() {
+  return {
+    count: { ...MOTION_DEFAULT_COUNTS },
+    radius: { ...MOTION_DEFAULT_RADIUS },
+    loopDuration: { ...MOTION_DEFAULT_LOOP_DURATION },
+    dollyEnabled: { ...MOTION_DEFAULT_DOLLY },
+    ...Object.fromEntries(SHAPE_APPEARANCE_KEYS.map(k => [k, motionDefaultsFor(k)])),
+  };
+}
+let motionMemory = buildMotionMemory();
+const MOTION_MEMORY_KEYS = Object.keys(motionMemory);
 
 // 自訂漸層色標（最多 6，可調位置）— reset 用
 const STOP_MAX = 6;
@@ -2086,9 +2103,9 @@ function bindControls() {
       P[key] = parseFloat(el.value);
       if (key === 'cameraRotationX') rot.x = P[key] * Math.PI / 180;
       if (key === 'cameraRotationY') rot.y = P[key] * Math.PI / 180;
-      if (key === 'count') motionCounts[P.motion] = Math.round(P[key]);
-      if (key === 'radius') motionRadius[P.motion] = P[key];
-      if (key === 'loopDuration') motionLoopDuration[P.motion] = P[key];
+      if (MOTION_MEMORY_KEYS.includes(key)) {
+        motionMemory[key][P.motion] = key === 'count' ? Math.round(P[key]) : P[key];
+      }
       if (key === 'shapeLiquidPosition') applyEdgeDropDistribution(P[key]);
       if (valEl) valEl.textContent = (fmt[key] || (v => +v.toFixed(2)))(P[key]);
       if (uniforms && uniforms[uName]) uniforms[uName].value = (key === 'count') ? Math.round(P[key]) : P[key];
@@ -2127,22 +2144,20 @@ function bindControls() {
         switchMaterialProfile(previousValue, P[key]);
       }
       if (key === 'motion' && previousMotion !== P.motion) {
-        motionCounts[previousMotion] = Math.round(P.count);
-        const countEl = document.getElementById('count');
-        countEl.value = motionCounts[P.motion];
-        countEl.dispatchEvent(new Event('input', { bubbles: true }));
-        motionRadius[previousMotion] = P.radius;
-        const radiusEl = document.getElementById('radius');
-        radiusEl.value = motionRadius[P.motion];
-        radiusEl.dispatchEvent(new Event('input', { bubbles: true }));
-        motionLoopDuration[previousMotion] = P.loopDuration;
-        const loopDurationEl = document.getElementById('loopDuration');
-        loopDurationEl.value = motionLoopDuration[P.motion];
-        loopDurationEl.dispatchEvent(new Event('input', { bubbles: true }));
-        motionDollyEnabled[previousMotion] = P.dollyEnabled;
-        const dollyEnabledEl = document.getElementById('dollyEnabled');
-        dollyEnabledEl.checked = motionDollyEnabled[P.motion];
-        dollyEnabledEl.dispatchEvent(new Event('change', { bubbles: true }));
+        // 每個按模式記憶的參數：先把舊模式剛才的值存回去，再把新模式記得的值
+        // 寫回控制項並觸發它自己的 input/change，讓 uniform、顯示文字、
+        // applyEdgeDropDistribution 之類的副作用照常跑一次，不必在這裡重複。
+        for (const memKey of MOTION_MEMORY_KEYS) {
+          motionMemory[memKey][previousMotion] = P[memKey];
+          const memEl = document.getElementById(memKey);
+          if (memEl.type === 'checkbox') {
+            memEl.checked = motionMemory[memKey][P.motion];
+            memEl.dispatchEvent(new Event('change', { bubbles: true }));
+          } else {
+            memEl.value = motionMemory[memKey][P.motion];
+            memEl.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        }
         previousDropT = null;
       }
       if (uniforms && uniforms[uniform]) uniforms[uniform].value = map[el.value];
@@ -2166,7 +2181,7 @@ function bindControls() {
     const label = el.closest('.toggleRow')?.querySelector('label');
     const update = () => {
       P[key] = el.checked;
-      if (key === 'dollyEnabled') motionDollyEnabled[P.motion] = P[key];
+      if (MOTION_MEMORY_KEYS.includes(key)) motionMemory[key][P.motion] = P[key];
       if (valEl) valEl.textContent = P[key] ? '開啟' : '關閉';
       applyToggle(key);
       updateUIState();
@@ -2408,10 +2423,7 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   Object.assign(P, DEFAULTS, SELECT_DEFAULTS, TOGGLE_DEFAULTS, COLOR_DEFAULTS);
   resetMaterialProfiles();
   if (mobileRenderQuery.matches && !PREVIEW) P.cameraDistance = MOBILE_CAMERA_DISTANCE_DEFAULT;
-  motionCounts = { ...MOTION_DEFAULT_COUNTS };
-  motionRadius = { ...MOTION_DEFAULT_RADIUS };
-  motionLoopDuration = { ...MOTION_DEFAULT_LOOP_DURATION };
-  motionDollyEnabled = { ...MOTION_DEFAULT_DOLLY };
+  motionMemory = buildMotionMemory();
   resetSpectralCausticColors();
   resetRamp();
   bindControls();
@@ -3172,7 +3184,7 @@ function frame(now) {
   // 這兩個固定相位是「分裂」模式專屬的敘事節拍，套用在所有模式的鏡頭距離上卻沒有
   // 開關——融化的形狀完全靜止時，這段推軌會把整個畫面一起放大縮小、跟滴落節奏
   // 毫無關係，看起來像定格呼吸。「前後拉伸」開關讓使用者自己決定要不要這段，
-  // 每個模式各自記憶（見 P.dollyEnabled 與 motionDollyEnabled）。
+  // 每個模式各自記憶（見 P.dollyEnabled 與 motionMemory.dollyEnabled）。
   const dolly = !P.dollyEnabled ? 1 : 1
     - 0.05 * Math.exp(-Math.pow((phase01 - 0.80) / 0.10, 2))
     - 0.03 * Math.exp(-Math.pow((phase01 - 0.24) / 0.08, 2));
