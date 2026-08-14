@@ -1,19 +1,19 @@
 'use strict';
 import * as THREE from 'three';
-import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-35';
+import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-36';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
   MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
-} from './default-shapes.js?v=svg-shape-35';
+} from './default-shapes.js?v=svg-shape-36';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-35';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-35';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-35';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-35';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-35';
+} from './motions/registry.js?v=svg-shape-36';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-36';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-36';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-36';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-36';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -192,7 +192,7 @@ const DEFAULTS = {              // 數值滑桿
   shatterVariety: 0.3,
   // 蓄力：炸開前形狀被內壓撐大的量（距離場的等距膨脹，單位同世界座標），
   // 以及這股力道累積多久。0 = 完全不蓄力，維持原本直接炸開。
-  shatterCharge: 0.005,
+  shatterCharge: 0.025,
   shatterChargeTime: 0.5,
 };
 
