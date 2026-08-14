@@ -2,23 +2,23 @@
 import * as THREE from 'three';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
-} from './shape-field.js?v=svg-shape-45';
+} from './shape-field.js?v=svg-shape-46';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
   MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
   MORPH_TARGET_SVG_NAME, makeMorphTargetSvgFile,
   MORPH_TARGET_SOLID_NAME, buildMorphTargetSolid,
-} from './default-shapes.js?v=svg-shape-45';
+} from './default-shapes.js?v=svg-shape-46';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-45';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-45';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-45';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-45';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-45';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-45';
+} from './motions/registry.js?v=svg-shape-46';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-46';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-46';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-46';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-46';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-46';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -146,20 +146,20 @@ const DEFAULTS = {              // 數值滑桿
   weaveDriftSpeed: 1,
   // 形狀變形（見 motions/morph.js）。四段時間軸「定格 A → 變形 → 定格 B → 變形回」，
   // morphHold 是單邊定格佔循環的比例，剩下的對半分給兩趟變形。
-  morphHold: 0.15,
+  morphHold: 0.28,
   // 波前錯開：每顆水滴的出發時間依它在掃描軸上的位置差開多少。0 = 全體同時
   // 移動（看起來只是整個形狀抽動一下），調高才會讀成一道波掃過去。這是這個
   // 模式手感的關鍵參數。
   morphStagger: 0.82,
   // 掃描方向（度，XY 平面）。回程固定轉 90°，否則兩趟像同一段動畫正放再倒放。
-  morphWaveAngle: 180,
+  morphWaveAngle: 125,
   // 路徑往外凸多少。液體離開表面是「隆起 → 拉離」，直線插值看起來像瞬移。
-  morphArc: 0.28,
+  morphArc: 0.8,
   // 飛行途中那些水滴的大小加成。實體變形成立時，水滴的存在包絡本身已經是
   // 「飛行中才有」，這個值只調它們飛起來有多大。
-  morphSwell: 0.35,
+  morphSwell: 0.5,
   // 切口本身的軟硬（送進 shader 的 uShapeCutBlend）。0 是刀切。
-  morphCutBlend: 0.06,
+  morphCutBlend: 0.08,
   // 消失方式（見 shaders.js 的 dissolveField）。這四項都是往同一條消失場上疊，
   // 所以可以任意組合，不是互斥的選單。
   //   morphFront   波前形狀：0 平面掃描、1 從中心放射、2 螺旋。
@@ -168,13 +168,13 @@ const DEFAULTS = {              // 數值滑桿
   //   morphCell/morphCellScale     晶格：整塊整塊剝落的碎裂感。
   //   morphNeck/morphNeckWidth     前緣收頸：斷開前先變薄收頸，液體的身分。
   morphFront: 0,
-  morphSpiral: 0.35,
-  morphNoise: 0.15,
-  morphNoiseScale: 2.4,
+  morphSpiral: 1,
+  morphNoise: 0.6,
+  morphNoiseScale: 1.5,
   morphCell: 0,
   morphCellScale: 4,
-  morphNeck: 0.05,
-  morphNeckWidth: 0.45,
+  morphNeck: 0.12,
+  morphNeckWidth: 0.55,
   // 融化（見 motions/melt.js）。滴落間隔要隨機、又要能無縫循環，靠的是「每顆水滴
   // 一個循環滴整數次」：頻率與相位偏移各自由雜湊決定，看起來雜亂，phase=0/1 卻同值。
   // 滴落頻率是每個循環的基準滴數，節奏差異讓各顆在這個基準上下錯開。
@@ -2167,7 +2167,7 @@ function initGL() {
     // 0 是關閉，其餘模式一律維持 0，走原本的單一形狀路徑。
     uShapeMorph: { value: 0 },
     uShapeCut: { value: new THREE.Vector4(1, 0, 0, 0) },
-    uShapeCutBlend: { value: 0.06 },
+    uShapeCutBlend: { value: 0.08 },
     // 消失方式。uMorphBreak 與 uMorphNecking 各自把兩個滑桿打包成一個 uniform，
     // 因為它們一定成對使用（幅度沒開時尺度沒有意義），拆開只是多兩個 uniform。
     //
@@ -2176,9 +2176,9 @@ function initGL() {
     // Vector2 直接覆寫成一個數字，下一次 .set() 就炸了。打包型 uniform 的名字
     // 一律要避開所有滑桿 key 推導得出的名稱。
     uMorphFront: { value: 0 },
-    uMorphSpiral: { value: 0.35 },
-    uMorphBreak: { value: new THREE.Vector4(0.15, 2.4, 0, 4) },
-    uMorphNecking: { value: new THREE.Vector2(0.05, 0.45) },
+    uMorphSpiral: { value: 1 },
+    uMorphBreak: { value: new THREE.Vector4(0.6, 1.5, 0, 4) },
+    uMorphNecking: { value: new THREE.Vector2(0.12, 0.55) },
     uMorphActive: { value: new THREE.Vector2(1, 1) },
     uMembraneOverWhite: { value: 0 },
     uShapeScale: { value: 1 },

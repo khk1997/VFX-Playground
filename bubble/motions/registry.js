@@ -99,20 +99,21 @@ export const MOTIONS = {
     uniform: 5,
     usesShapeField: true,
     gate: 'morph',
-    // 水滴群本身就是整個畫面（實體不顯示），顆數要夠才排得出兩顆形狀的輪廓。
-    count: 12,
+    // 實體全程都在畫面上，水滴只是波前那一小撮飛行中的液體，不必多。
+    count: 6,
     radius: 0.25,
-    // 一個循環要跑完「定格 A → 變形 → 定格 B → 變形回」四段，比單程的模式長。
-    loopDuration: 10,
+    loopDuration: 6.5,
     // 變形本身已經是全畫面的運動，鏡頭再推軌只會讓人看不清波掃到哪裡。
     dolly: false,
     // 形狀 A。B 目前固定是內建星形（見 default-shapes.js 的 MORPH_TARGET_SVG_TEXT），
     // 還不能由使用者匯入——兩個匯入槽留到下一步。
     svgDemo: 'default',
-    // 實體整個循環都在畫面上（被波前削掉／放出來），厚度拉高才有份量；共用
-    // 預設的 0.1 是設計給「水滴逐漸長成形狀」用的，在這裡看起來像一張紙片。
+    // 這個模式的形狀從頭到尾都是實體，擠出厚度與邊緣圓角的手感跟「水滴逐漸
+    // 長成形狀」那套共用預設不一樣：薄一點、圓角大一點，切口與收頸才不會被
+    // 厚實的側壁蓋住。
     overrides: {
-      shapeDepth: 0.22,
+      shapeDepth: 0.09,
+      shapeEdgeBevel: 0.086,
     },
   },
   shatter: {
