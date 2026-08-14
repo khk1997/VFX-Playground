@@ -1,17 +1,19 @@
 'use strict';
 import * as THREE from 'three';
-import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-31';
+import { svgToField, gltfToField, objectToField } from './shape-field.js?v=svg-shape-32';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
-} from './default-shapes.js?v=svg-shape-31';
+  MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
+} from './default-shapes.js?v=svg-shape-32';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
-  MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-31';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-31';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-31';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-31';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-31';
+  MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
+  usesShapeField, motionGates,
+} from './motions/registry.js?v=svg-shape-32';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-32';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-32';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-32';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-32';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -2542,6 +2544,10 @@ let shapeFieldSource = null;
 let shapeEnsurePending = false;
 // 使用者自己匯入的檔案，依來源分開記住。有記錄就不再套用內建預設。
 const userShapeFiles = { svg: null, gltf: null };
+// 目前載入的內建 SVG 展示形狀是哪一版（'default' 問號／'melt' 冰塊）。只有在
+// 使用者還沒自己匯入 SVG 時才有意義；匯入真正的檔案後這個值不再更新，
+// ensureShapeForCurrentSource 也不會再拿它跟模式比對。
+let builtinSvgVariant = null;
 document.getElementById('shapeBtn').addEventListener('click', () => shapeInput.click());
 
 function scheduleLastGLBRebuild() {
@@ -2563,8 +2569,13 @@ async function importShapeFile(file, kind, { rebuilding = false } = {}) {
   if (!inited) initGL();
   const requestId = ++shapeImportRequestId;
   const builtin = !file;
+  // 每個模式各自預設的內建 SVG 展示形狀（見 motions/registry.js 的 svgDemo）。
+  // 只在還沒匯入真正檔案時採用；GLB 沒有這個分歧，一律是內建環形。
+  const svgVariant = MOTION_SVG_DEMO[P.motion] || 'default';
   const label = builtin
-    ? (kind === 'svg' ? DEFAULT_SVG_NAME : DEFAULT_SOLID_NAME)
+    ? (kind === 'svg'
+      ? (svgVariant === 'melt' ? MELT_DEFAULT_SVG_NAME : DEFAULT_SVG_NAME)
+      : DEFAULT_SOLID_NAME)
     : file.name;
   const glbGridSize = SELECTS.shapeQuality.map[P.shapeQuality] || 80;
   shapeState.textContent = kind === 'svg'
@@ -2580,8 +2591,10 @@ async function importShapeFile(file, kind, { rebuilding = false } = {}) {
     const next = kind === 'svg'
       // 超取樣的距離場暫時佔用 (size*ss)² 個 float；桌面用 3（1536²，約 38MB
       // 峰值），行動裝置降一級避免配置失敗。
-      ? await svgToField(builtin ? makeDefaultSvgFile() : file,
-        { supersample: mobileRenderQuery.matches ? 2 : 3 })
+      ? await svgToField(
+        builtin ? (svgVariant === 'melt' ? makeMeltDemoSvgFile() : makeDefaultSvgFile()) : file,
+        { supersample: mobileRenderQuery.matches ? 2 : 3 },
+      )
       : builtin
         ? await objectToField(buildDefaultSolid(), glbGridSize)
         : await gltfToField(file, glbGridSize);
@@ -2609,6 +2622,9 @@ async function importShapeFile(file, kind, { rebuilding = false } = {}) {
     uniforms.uShapeType.value = kind === 'svg' ? 1 : 2;
     if (old) old.dispose();
     shapeFieldSource = kind;
+    // 只有 SVG 內建預設需要記；真正匯入的檔案或 GLB 都跟這個分歧無關，
+    // 清成 null 讓 ensureShapeForCurrentSource 不會拿舊版本比對。
+    builtinSvgVariant = (builtin && kind === 'svg') ? svgVariant : null;
     // 只有在還停在不需要形狀場的模式時才強制跳過去；已經在「形狀匯聚」
     // 「穿梭環繞」「崩解噴濺」任何一個都保持原模式，不要互相搶。
     if (!usesShapeField(P.motion)) {
@@ -2651,10 +2667,20 @@ shapeInput.addEventListener('change', e => {
 });
 
 // 切到需要距離場的模式、或換了形狀來源時，確保手上就有對應來源的形狀可用。
-// 沒有使用者匯入的檔案就退回內建預設，讓這三個模式不必先匯入檔案就看得到東西。
+// 沒有使用者匯入的檔案就退回內建預設，讓這幾個模式不必先匯入檔案就看得到東西。
+//
+// 「換了形狀來源」不是唯一要重新烘焙的情況：使用者還沒自己匯入 SVG 時，
+// 不同模式的內建展示形狀也不一樣（見 motions/registry.js 的 svgDemo，例如
+// 融化用底部夠寬的冰塊、其餘模式用問號）。只要還在用內建預設、且目前載入的
+// 版本跟新模式想要的不一致，也要重新烘焙——但使用者一旦自己匯入過 SVG，
+// userShapeFiles.svg 就有值，這個判斷會直接短路，不會蓋掉使用者的檔案。
 function ensureShapeForCurrentSource() {
   if (!usesShapeField(P.motion)) return;
-  if (shapeFieldSource === P.shapeSource) return;
+  const usingBuiltinSvg = P.shapeSource === 'svg' && !userShapeFiles.svg;
+  const desiredSvgVariant = MOTION_SVG_DEMO[P.motion] || 'default';
+  const sourceChanged = shapeFieldSource !== P.shapeSource;
+  const variantChanged = usingBuiltinSvg && builtinSvgVariant !== desiredSvgVariant;
+  if (!sourceChanged && !variantChanged) return;
   // 烘焙中不併行開第二份：兩者都是幾秒的 CPU 工作，同時跑只會互相拖慢。
   // 改成記下待辦，等當前這份收工後在 finally 裡補做，否則在烘焙途中切換來源
   // 會被整個吞掉 —— 畫面停在上一個來源的距離場，且沒有任何東西會再觸發。

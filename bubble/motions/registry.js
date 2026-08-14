@@ -16,6 +16,8 @@
 //   count/radius/loopDuration/dolly
 //                  該模式的預設值。這幾項按模式各自記憶——使用者在某個模式下
 //                  調過的值會保留，切回來時恢復，只有初始預設不同。
+//   svgDemo        使用者還沒自己匯入 SVG 時，這個模式該顯示哪個內建展示形狀
+//                  （見 default-shapes.js）。只有需要形狀的模式才有意義。
 export const MOTIONS = {
   cinematic: {
     label: '分裂 Split',
@@ -38,6 +40,7 @@ export const MOTIONS = {
     radius: 0.25,
     loopDuration: 12,
     dolly: true,
+    svgDemo: 'default',
   },
   weave: {
     label: '穿梭環繞 Weave',
@@ -49,6 +52,7 @@ export const MOTIONS = {
     radius: 0.25,
     loopDuration: 12,
     dolly: true,
+    svgDemo: 'default',
   },
   melt: {
     label: '融化 Melt',
@@ -65,6 +69,9 @@ export const MOTIONS = {
     // 毫無關係；融化的形狀本身也該完全靜止，所以預設關掉。使用者仍可以在
     // UI 打開——見 bubble.js 的 dolly 計算與 index.html 的「前後拉伸」開關。
     dolly: false,
+    // 問號的底部只有一個小圓點，滴落點會擠成一團看不出「整個底部在滴」；
+    // 冰塊的底邊夠寬，才挑得出好幾個分散的滴落點。
+    svgDemo: 'melt',
   },
   shatter: {
     label: '崩解噴濺 Shatter',
@@ -79,6 +86,7 @@ export const MOTIONS = {
     // 四段時長預設 1.1 / 0.5 / 0.4 / 2.0 合計正好 4 秒，面板才顯示得出實際秒數。
     loopDuration: 4,
     dolly: true,
+    svgDemo: 'default',
   },
 };
 
@@ -90,6 +98,7 @@ export const MOTION_DEFAULT_COUNTS = pick('count');
 export const MOTION_DEFAULT_RADIUS = pick('radius');
 export const MOTION_DEFAULT_LOOP_DURATION = pick('loopDuration');
 export const MOTION_DEFAULT_DOLLY = pick('dolly');
+export const MOTION_SVG_DEMO = pick('svgDemo');
 
 export const usesShapeField = motion => Boolean(MOTIONS[motion]?.usesShapeField);
 

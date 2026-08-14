@@ -24,6 +24,17 @@ export const DEFAULT_SVG_TEXT = `<svg xmlns="http://www.w3.org/2000/svg" viewBox
   <circle cx="100" cy="160" r="16" fill="#ffffff"/>
 </svg>`;
 
+export const MELT_DEFAULT_SVG_NAME = '內建冰塊';
+
+// 融化模式專用的展示形狀。問號那組底部只有一個小圓點，selectBottomAnchors
+// 只挑得出幾個擠在一起的滴落點，看不出「整個底部在滴」的效果——冰塊的底邊
+// 是一整條夠寬的直線，滴落點才會沿著底部散開。中央下緣疊一顆小圓，呼應
+// 「已經開始滴」的融化感，做法跟問號那顆獨立圓點同一招。
+export const MELT_DEFAULT_SVG_TEXT = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <rect x="46" y="52" width="108" height="108" rx="20" ry="20" fill="#ffffff"/>
+  <circle cx="100" cy="158" r="10" fill="#ffffff"/>
+</svg>`;
+
 export const DEFAULT_SOLID_NAME = '內建環形';
 
 // Torus 是封閉實體，體素化不會產生非封閉掃描線；中央開孔讓匯聚效果比一顆
@@ -38,4 +49,8 @@ export function buildDefaultSolid() {
 
 export function makeDefaultSvgFile() {
   return new File([DEFAULT_SVG_TEXT], `${DEFAULT_SVG_NAME}.svg`, { type: 'image/svg+xml' });
+}
+
+export function makeMeltDemoSvgFile() {
+  return new File([MELT_DEFAULT_SVG_TEXT], `${MELT_DEFAULT_SVG_NAME}.svg`, { type: 'image/svg+xml' });
 }
