@@ -80,7 +80,56 @@
   #panel h2 { font-size: 14px; letter-spacing: 2px; color: #9fb8ff; margin-bottom: 4px; font-weight: 600; }
   #panel .sub { font-size: 11px; color: #7784a5; margin-bottom: 12px; }
   .group { margin-bottom: 8px; border-top: 1px solid rgba(150,180,255,.12); padding-top: 6px; }
-  .group h3 { font-size: 13px; color: #7fa0e6; letter-spacing: 1.5px; margin-bottom: 8px; text-transform: uppercase; }
+  .group summary { list-style: none; cursor: pointer; display: flex !important; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .group summary::marker { content: ""; }
+  .group summary::-webkit-details-marker { display: none; }
+  .group summary::before {
+    content: "▸"; flex: 0 0 auto; font-size: 10px;
+    color: #7fa0e6; transition: transform .15s ease; transform-origin: 50% 50%;
+  }
+  .group[open] > summary::before { transform: rotate(90deg); }
+  .group summary:hover h3 { color: #a9c2ff; }
+  .group h3 { font-size: 13px; color: #7fa0e6; letter-spacing: 1.5px; text-transform: uppercase; margin: 0; }
+
+  /* 群組內的巢狀子區塊（例如材質反射底下的薄膜外觀／色散）*/
+  .subgroup { margin: 10px 0 0; border-top: 1px solid rgba(150,180,255,.1); padding-top: 8px; }
+  .subgroup summary { list-style: none; cursor: pointer; display: flex !important; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .subgroup summary::marker { content: ""; }
+  .subgroup summary::-webkit-details-marker { display: none; }
+  .subgroup summary::before {
+    content: "▸"; flex: 0 0 auto; font-size: 9px;
+    color: #6f83ad; transition: transform .15s ease; transform-origin: 50% 50%;
+  }
+  .subgroup[open] > summary::before { transform: rotate(90deg); }
+  .subgroup > summary h4 { font-size: 11px; color: #9fb8ff; letter-spacing: 1.2px; text-transform: uppercase; margin: 0; transition: color .15s ease; }
+  .subgroup.is-disabled > summary h4 { color: #5f6f95; }
+
+  /* 標題列內建開關（薄膜外觀／色散底下 ART・RAY・LIGHT 三個效果）：放在
+     summary 或 effectTitle 裡，點擊要停在這裡、不能連帶把外層 details 收合。 */
+  .summaryToggle {
+    position: relative; margin-left: auto; flex: 0 0 auto;
+    display: flex; align-items: center;
+  }
+  .summaryToggle input[type=checkbox] {
+    position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none;
+  }
+  .summaryToggle .switchTrack {
+    position: relative; width: 34px; height: 18px;
+    border: 1px solid rgba(150,180,255,.32); border-radius: 999px;
+    background: rgba(20,26,40,.9); cursor: pointer;
+    transition: background .18s ease, border-color .18s ease, box-shadow .18s ease;
+  }
+  .summaryToggle .switchTrack::after {
+    content: ""; position: absolute; width: 12px; height: 12px; left: 2px; top: 2px;
+    border-radius: 50%; background: #7784a5;
+    transition: transform .18s ease, background .18s ease;
+  }
+  .summaryToggle input:checked + .switchTrack {
+    background: rgba(91,124,255,.28); border-color: #6f91ff;
+    box-shadow: 0 0 12px rgba(91,124,255,.18);
+  }
+  .summaryToggle input:checked + .switchTrack::after { transform: translateX(16px); background: #b9c9ff; }
+  .summaryToggle input:focus-visible + .switchTrack { outline: 2px solid #9fb8ff; outline-offset: 2px; }
   .group .note { font-size: 10px; color: #5f6f95; margin: 2px 0 6px; line-height: 1.4; }
   .effectBlock {
     --effect-accent: #7895d7;
@@ -131,7 +180,7 @@
   /* .keepEnabled 標記「主開關關閉後仍然有效」的控制項：例如輪廓液滴的
      「邊緣水滴」同時控制擠出邊緣的圓角，關掉液滴後仍需可調。 */
   .featureGroup.is-disabled { opacity: 1; filter: none; }
-  .featureGroup.is-disabled > :not(.toggleRow):not(.effectTitle):not(h3):not(.effectBlock):not(.keepEnabled) {
+  .featureGroup.is-disabled > :not(.toggleRow):not(.effectTitle):not(h3):not(summary):not(.effectBlock):not(.keepEnabled) {
     opacity: .38;
     filter: saturate(.35);
   }

@@ -418,10 +418,19 @@ const TOGGLES = {
   dollyEnabled: () => {},
 };
 
+const DISPERSION_TOGGLE_KEYS = ['dispersionEnabled', 'rayDispersionEnabled', 'spectralCausticEnabled'];
+// 色散總開關：純粹是一個總閘，關閉時三個效果一律停用，但不動它們各自的
+// 開關狀態；重新打開總開關後，各效果回到自己原本開/關的樣子。不隨參數組合
+// 存檔，只是面板互動的捷徑，所以是一個獨立於 P 的暫時狀態。
+let dispersionMasterOn = true;
+
 function applyToggle(key) {
   const target = TOGGLES[key];
   if (typeof target === 'function') target();
-  else if (uniforms && uniforms[target]) uniforms[target].value = P[key] ? 1 : 0;
+  else if (uniforms && uniforms[target]) {
+    const effective = DISPERSION_TOGGLE_KEYS.includes(key) ? (P[key] && dispersionMasterOn) : P[key];
+    uniforms[target].value = effective ? 1 : 0;
+  }
 }
 
 // DEFAULTS 的 key 一律用 'u' + 首字大寫推導 uniform 名稱（uReflect、uRoughness...），
@@ -2583,6 +2592,21 @@ function bindControls() {
     if (!el._bound) { el.addEventListener('change', update); el._bound = true; }
     update();
   }
+  // 色散總開關：只是一個總閘，不動 ART／RAY／LIGHT 各自的開關狀態——關閉時
+  // 三個效果一律停用，重新打開後各自回到原本開/關的樣子（見 applyToggle）。
+  const dispersionMaster = document.getElementById('dispersionMaster');
+  const dispersionMasterTrack = dispersionMaster.nextElementSibling;
+  dispersionMaster.checked = dispersionMasterOn;
+  if (dispersionMasterTrack && !dispersionMasterTrack._bound) {
+    dispersionMasterTrack.addEventListener('click', () => {
+      dispersionMasterOn = !dispersionMasterOn;
+      dispersionMaster.checked = dispersionMasterOn;
+      DISPERSION_TOGGLE_KEYS.forEach(k => applyToggle(k));
+      updateUIState();
+      requestPausedRender();
+    });
+    dispersionMasterTrack._bound = true;
+  }
   // 顏色
   for (const key of Object.keys(COLORS)) {
     const el = document.getElementById(key);
@@ -2726,13 +2750,17 @@ function updateUIState() {
       .forEach(el => { setDisabled(el, !enabled); });
     group.querySelectorAll('.effectBlock input, .effectBlock select, .effectBlock button')
       .forEach(el => {
-        if (!el.closest('.toggleRow')) setDisabled(el, !enabled);
+        if (!el.closest('.toggleRow') && !el.closest('.summaryToggle')) setDisabled(el, !enabled);
       });
   };
   setFeatureState('thinFilmGroup', P.filmEnabled);
-  setFeatureState('artDispersionGroup', P.dispersionEnabled);
-  setFeatureState('rayDispersionGroup', P.rayDispersionEnabled);
-  setFeatureState('spectralCausticGroup', P.spectralCausticEnabled);
+  // 色散總開關關閉時，ART／RAY／LIGHT 三個區塊一律顯示成停用，即使它們各自
+  // 的開關還是開著的（見 dispersionMasterOn 的說明）。
+  setFeatureState('artDispersionGroup', P.dispersionEnabled && dispersionMasterOn);
+  setFeatureState('rayDispersionGroup', P.rayDispersionEnabled && dispersionMasterOn);
+  setFeatureState('spectralCausticGroup', P.spectralCausticEnabled && dispersionMasterOn);
+  document.getElementById('dispersionMaster').checked = dispersionMasterOn;
+  document.getElementById('dispersionGroup').classList.toggle('is-disabled', !dispersionMasterOn);
   const spectral = P.colorMode === 'spectral';
   const rampGroup = document.getElementById('rampGroup');
   const rampDisabled = spectral || !P.filmEnabled;
@@ -2765,11 +2793,12 @@ function updateUIState() {
   const membraneMaterial = P.materialStyle === 'membrane';
   const membraneDepth = document.getElementById('membraneDepth');
   membraneDepth.disabled = !membraneMaterial;
-  document.getElementById('membraneDepthRow').style.opacity = membraneMaterial ? 1 : 0.4;
+  document.getElementById('membraneDepthRow').style.display = membraneMaterial ? '' : 'none';
   for (const key of ['membraneBaseColor', 'membraneVeilColor', 'membraneReflectionColor', 'membraneCardColor', 'membraneShadeColor']) {
     document.getElementById(key).disabled = !membraneMaterial;
-    document.getElementById(key + 'Row').style.opacity = membraneMaterial ? 1 : 0.4;
+    document.getElementById(key + 'Row').style.display = membraneMaterial ? '' : 'none';
   }
+  document.getElementById('membraneColorsNote').style.display = membraneMaterial ? '' : 'none';
   // 液態薄膜本身就是前後表面透射模型，不讀取通用玻璃專用的亮底補償。
   const brightAssistUsable = colorBackground && !membraneMaterial;
   brightBgAssist.disabled = !brightAssistUsable;
@@ -3210,6 +3239,18 @@ document.addEventListener('visibilitychange', syncLoop);
 /* ===== 面板開合 ===== */
 const panel = document.getElementById('panel');
 document.getElementById('toggleBtn').addEventListener('click', () => panel.classList.toggle('collapsed'));
+
+// 面板毛玻璃（backdrop-filter）是瀏覽器合成層自己的成本，跟畫布的節流是兩條
+// 獨立路徑——捲動面板時雖然不會喚醒畫布（見 markInteraction 的判準），但每一
+// 幀捲動都要重新取樣背後的模糊範圍，一樣會佔用 GPU。面板底色本身已經接近不
+// 透明（見 switch2-theme.css 的 --sw-shell），捲動時暫時關閉模糊、停手後立刻
+// 復原，視覺上幾乎看不出差異，卻能省掉這段重新合成的成本。
+let panelScrollRestoreTimer = 0;
+panel.addEventListener('scroll', () => {
+  panel.classList.add('is-scrolling');
+  clearTimeout(panelScrollRestoreTimer);
+  panelScrollRestoreTimer = setTimeout(() => panel.classList.remove('is-scrolling'), 160);
+}, { passive: true });
 
 /* ===== 高解析度 PNG / PNG 序列輸出 ===== */
 function exportEvent(name, detail = {}) {

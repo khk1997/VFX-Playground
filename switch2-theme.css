@@ -428,6 +428,14 @@ body.leaving #rail { z-index: 10; }
   -webkit-backdrop-filter: blur(24px) saturate(125%) !important;
 }
 
+/* 捲動面板時暫時關掉毛玻璃：底色（--sw-shell）已經 91% 不透明，關掉模糊
+   幾乎看不出差異，卻能省掉每一幀重新取樣背後畫面的合成成本（見 bubble.js
+   的 is-scrolling 切換）。 */
+#panel.is-scrolling {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
 #panel::before {
   content: "";
   display: block;

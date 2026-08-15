@@ -37,168 +37,8 @@
   <h2>LIQUID GLASS DROPS</h2>
   <div class="sub">Three.js + GLSL 液態玻璃水滴 — Metaball 融合/分裂・拖曳可旋轉</div>
 
-  <div class="group">
-    <h3>背景與 HDRI Background</h3>
-    <div class="row"><label>背景模式</label><select id="bgMode"><option value="color">純色</option><option value="hdri">HDRI</option></select><span class="val"></span></div>
-    <div class="row"><label>背景顏色</label><input type="color" id="bgColor" value="#000000"><span class="val"></span></div>
-    <div class="row"><label>HDRI 水平</label><input type="range" id="hdriYaw" min="-180" max="180" step="1" value="0"><span class="val" id="hdriYaw_v"></span></div>
-    <div class="row"><label>HDRI 垂直</label><input type="range" id="hdriPitch" min="-90" max="90" step="1" value="0"><span class="val" id="hdriPitch_v"></span></div>
-    <div class="row"><label>HDRI 模糊</label><input type="range" id="hdriBlur" min="0" max="1" step="0.01" value="0.11"><span class="val" id="hdriBlur_v"></span></div>
-    <div class="row"><label>環境折射</label><input type="range" id="envRefraction" min="0" max="1" step="0.01" value="0"><span class="val" id="envRefraction_v"></span></div>
-    <div class="row toggleRow"><label>亮底保色</label><input type="checkbox" id="brightBgAssist" checked><span class="switchTrack" aria-hidden="true"></span><span class="val" id="brightBgAssist_v">開啟</span></div>
-    <div class="row"><button id="hdriBtn">更換 HDRI…</button></div>
-    <div id="hdriState" class="note">通用玻璃預設 HDRI：photo_studio2_london_hall_1k.hdr</div>
-    <div class="note">亮底保色只在純色背景接近白色時介入：保留 HDRI 折射明暗、去除暖色偏色，並讓彩色焦散改以透射顯色。</div>
-    <input type="file" id="hdriInput" accept=".hdr,image/*" hidden>
-  </div>
-
-  <div class="group">
-    <h3>鏡頭 Camera</h3>
-    <div class="row"><label>鏡頭距離</label><input type="range" id="cameraDistance" min="2.8" max="10" step="0.05" value="5.5"><span class="val" id="cameraDistance_v"></span></div>
-    <div class="row"><label>水平視角</label><input type="range" id="cameraRotationY" min="-180" max="180" step="0.1" value="29.8"><span class="val" id="cameraRotationY_v"></span></div>
-    <div class="row"><label>垂直視角</label><input type="range" id="cameraRotationX" min="-90" max="90" step="0.1" value="9.7"><span class="val" id="cameraRotationX_v"></span></div>
-    <div class="row"><label>環繞幅度</label><input type="range" id="spin" min="0" max="1" step="0.01" value="0.08"><span class="val" id="spin_v"></span></div>
-    <div class="row toggleRow"><label>前後拉伸</label><input type="checkbox" id="dollyEnabled" checked><span class="switchTrack" aria-hidden="true"></span><span class="val" id="dollyEnabled_v">開啟</span></div>
-    <div id="dollyEnabledNote" class="note">在動作高潮（分裂約 1/4 循環處、融合約 4/5 循環處）鏡頭輕微推近，其餘時間拉回，讓畫面隨敘事有呼吸感。這兩個時機點是「分裂」模式的節奏，跟其他模式的動作不一定對得上——例如融化的形狀本身完全靜止，這段推近拉遠會讓整個畫面規律地放大縮小，反而像沒來由的呼吸感，所以融化模式預設關閉。每個動態模式各自記住這個開關的狀態，切換模式時會恢復。</div>
-    <div class="note">可使用滑鼠滾輪或觸控板拉近、拉遠；環繞幅度控制鏡頭隨循環自動環繞的幅度。</div>
-  </div>
-
-  <div class="group">
-    <h3>材質反射 Material</h3>
-    <div class="row"><label>材質類型</label><select id="materialStyle"><option value="universal" selected>通用玻璃</option><option value="membrane">液態薄膜（白底）</option><option value="glass" hidden>厚玻璃（已移除，改用通用玻璃）</option></select><span class="val"></span></div>
-    <div class="row" id="membraneDepthRow"><label>膜體立體感</label><input type="range" id="membraneDepth" min="0" max="1" step="0.01" value="0.65"><span class="val" id="membraneDepth_v"></span></div>
-    <div class="row" id="membraneBaseColorRow"><label>薄膜底色</label><input type="color" id="membraneBaseColor" value="#7a9ec7"><span class="val"></span></div>
-    <div class="row" id="membraneVeilColorRow"><label>薄膜面紗色調</label><input type="color" id="membraneVeilColor" value="#b8e6ff"><span class="val"></span></div>
-    <div class="row" id="membraneReflectionColorRow"><label>棚燈反射色</label><input type="color" id="membraneReflectionColor" value="#94b8e6"><span class="val"></span></div>
-    <div class="row" id="membraneCardColorRow"><label>藍卡反射色</label><input type="color" id="membraneCardColor" value="#94c7ff"><span class="val"></span></div>
-    <div class="row" id="membraneShadeColorRow"><label>立體暗部色</label><input type="color" id="membraneShadeColor" value="#85b8e6"><span class="val"></span></div>
-    <div class="note" id="membraneColorsNote">只作用於液態薄膜，各自對應合成裡原本寫死的一個顏色常數：選什麼顏色，畫面上那一處就直接是那個顏色。預設值都是原本的藍紫色常數，維持改動前的外觀。</div>
-    <div class="row"><label>反射強度</label><input type="range" id="reflect" min="0" max="2" step="0.02" value="1.6"><span class="val" id="reflect_v"></span></div>
-    <div class="row"><label>透射率</label><input type="range" id="transmission" min="0" max="1" step="0.01" value="0.96"><span class="val" id="transmission_v"></span></div>
-    <div class="row"><label>材質曝光</label><input type="range" id="materialExposure" min="0.25" max="2.5" step="0.05" value="1"><span class="val" id="materialExposure_v"></span></div>
-    <div class="row"><label>粗糙度</label><input type="range" id="roughness" min="0" max="1" step="0.01" value="0.2"><span class="val" id="roughness_v"></span></div>
-    <div class="row"><label>邊緣光</label><input type="range" id="fresnel" min="0" max="3" step="0.05" value="0.8"><span class="val" id="fresnel_v"></span></div>
-    <div class="row"><label>折射率</label><input type="range" id="ior" min="1.0" max="1.8" step="0.01" value="1.33"><span class="val" id="ior_v"></span></div>
-    <div class="note" id="materialStyleNote">通用玻璃與液態薄膜各自記住材質及 HDRI 參數；液態薄膜僅適用純白背景（#ffffff），中央更透明，彩色集中在輪廓與曲面折疊處——它的顯色（亮底透射、白卡/藍卡反射卡、去背用的白底反乘）都是針對白底寫死的美術模型，離開白底就切回通用玻璃。</div>
-  </div>
-
-  <div class="group" id="thinFilmGroup">
-    <h3>薄膜外觀 Thin Film</h3>
-    <div class="row toggleRow"><label>薄膜效果</label><input type="checkbox" id="filmEnabled"><span class="switchTrack" aria-hidden="true"></span><span class="val" id="filmEnabled_v">關閉</span></div>
-    <div class="row"><label>上色模式</label><select id="colorMode"><option value="spectral">光譜（物理）</option><option value="ramp">自訂漸層</option></select><span class="val"></span></div>
-    <div class="row"><label>薄膜厚度</label><input type="range" id="thickness" min="120" max="760" step="5" value="250"><span class="val" id="thickness_v"></span></div>
-    <div class="row"><label>花紋強度</label><input type="range" id="thickVar" min="0" max="400" step="5" value="400"><span class="val" id="thickVar_v"></span></div>
-    <div class="row"><label>花紋尺度</label><input type="range" id="noiseScale" min="0.5" max="6" step="0.1" value="0.8"><span class="val" id="noiseScale_v"></span></div>
-    <div class="row"><label>花紋速度</label><input type="range" id="patternSpeed" min="0" max="2" step="0.01" value="0.07"><span class="val" id="patternSpeed_v"></span></div>
-    <div class="row"><label>薄膜柔化</label><input type="range" id="filmBlur" min="0" max="1" step="0.01" value="1.00"><span class="val" id="filmBlur_v"></span></div>
-    <div class="row"><label>彩度</label><input type="range" id="saturation" min="0" max="2" step="0.02" value="2"><span class="val" id="saturation_v"></span></div>
-    <div class="row"><label>重力黑膜</label><input type="range" id="gravity" min="0" max="1" step="0.01" value="1"><span class="val" id="gravity_v"></span></div>
-    <div class="effectBlock effectBlock--ramp" id="rampGroup">
-      <div class="effectTitle"><span>RAMP</span> 薄膜自訂配色</div>
-      <div class="note">僅作用於薄膜的「自訂漸層」模式；右側滑桿控制每個色標的位置。</div>
-      <div class="row"><label>配色數量</label><input type="range" id="rampCount" min="2" max="6" step="1" value="6"><span class="val" id="rampCount_v"></span></div>
-      <div class="row stopRow" id="stopRow0"><label>色 1</label><input type="color" id="stopCol0" value="#3698d8"><input type="range" id="stopPos0" min="0" max="1" step="0.01" value="0.56"><span class="val" id="stopPos0_v"></span></div>
-      <div class="row stopRow" id="stopRow1"><label>色 2</label><input type="color" id="stopCol1" value="#b794a6"><input type="range" id="stopPos1" min="0" max="1" step="0.01" value="0.20"><span class="val" id="stopPos1_v"></span></div>
-      <div class="row stopRow" id="stopRow2"><label>色 3</label><input type="color" id="stopCol2" value="#d1aa75"><input type="range" id="stopPos2" min="0" max="1" step="0.01" value="0.39"><span class="val" id="stopPos2_v"></span></div>
-      <div class="row stopRow" id="stopRow3"><label>色 4</label><input type="color" id="stopCol3" value="#b2b3b4"><input type="range" id="stopPos3" min="0" max="1" step="0.01" value="0.60"><span class="val" id="stopPos3_v"></span></div>
-      <div class="row stopRow" id="stopRow4"><label>色 5</label><input type="color" id="stopCol4" value="#9e7d98"><input type="range" id="stopPos4" min="0" max="1" step="0.01" value="0.27"><span class="val" id="stopPos4_v"></span></div>
-      <div class="row stopRow" id="stopRow5"><label>色 6</label><input type="color" id="stopCol5" value="#5dbded"><input type="range" id="stopPos5" min="0" max="1" step="0.01" value="0.66"><span class="val" id="stopPos5_v"></span></div>
-    </div>
-  </div>
-
-  <div class="group">
-    <h3>色散 Dispersion</h3>
-    <div class="effectBlock effectBlock--art" id="artDispersionGroup">
-      <div class="effectTitle"><span>ART</span> 薄膜式藝術色散</div>
-      <div class="row toggleRow"><label>藝術色散</label><input type="checkbox" id="dispersionEnabled" checked><span class="switchTrack" aria-hidden="true"></span><span class="val" id="dispersionEnabled_v">開啟</span></div>
-      <div class="row"><label>藝術強度</label><input type="range" id="dispersion" min="0" max="1" step="0.01" value="0.09"><span class="val" id="dispersion_v"></span></div>
-      <div class="row"><label>光譜分離</label><input type="range" id="dispersionSeparation" min="0" max="1.5" step="0.01" value="1.5"><span class="val" id="dispersionSeparation_v"></span></div>
-      <div class="effectSubhead">厚度與流動</div>
-      <div class="row"><label>色散厚度</label><input type="range" id="artThickness" min="120" max="760" step="5" value="165"><span class="val" id="artThickness_v"></span></div>
-      <div class="row"><label>厚度變化</label><input type="range" id="artThickVar" min="0" max="400" step="5" value="95"><span class="val" id="artThickVar_v"></span></div>
-      <div class="row"><label>紋理尺度</label><input type="range" id="artNoiseScale" min="0.5" max="6" step="0.1" value="1"><span class="val" id="artNoiseScale_v"></span></div>
-      <div class="row"><label>流動速度</label><input type="range" id="artPatternSpeed" min="0" max="2" step="0.01" value="0.21"><span class="val" id="artPatternSpeed_v"></span></div>
-      <div class="row"><label>重力影響</label><input type="range" id="artGravity" min="0" max="1" step="0.01" value="1"><span class="val" id="artGravity_v"></span></div>
-      <div class="effectSubhead">光帶塑形</div>
-      <div class="row"><label>焦散尺度</label><input type="range" id="causticScale" min="0.4" max="2.5" step="0.05" value="1"><span class="val" id="causticScale_v"></span></div>
-      <div class="row"><label>焦散銳利</label><input type="range" id="causticSharpness" min="0" max="1" step="0.01" value="0.65"><span class="val" id="causticSharpness_v"></span></div>
-    </div>
-
-    <div class="effectBlock effectBlock--physical" id="rayDispersionGroup">
-      <div class="effectTitle"><span>RAY</span> 造型光線色散</div>
-      <div class="row toggleRow"><label>光線色散</label><input type="checkbox" id="rayDispersionEnabled"><span class="switchTrack" aria-hidden="true"></span><span class="val" id="rayDispersionEnabled_v">關閉</span></div>
-      <div class="row"><label>光譜展寬</label><input type="range" id="rayDispersion" min="0" max="12" step="0.01" value="6"><span class="val" id="rayDispersion_v"></span></div>
-      <div class="row"><label>阿貝數</label><input type="range" id="rayDispersionAbbe" min="15" max="90" step="1" value="25"><span class="val" id="rayDispersionAbbe_v"></span></div>
-      <div class="effectSubhead">光譜光源</div>
-      <div class="row"><label>光源亮度</label><input type="range" id="rayDispersionLightIntensity" min="0" max="4" step="0.01" value="4"><span class="val" id="rayDispersionLightIntensity_v"></span></div>
-      <div class="row"><label>光源尺寸</label><input type="range" id="rayDispersionLightSize" min="0" max="1" step="0.01" value="0.32"><span class="val" id="rayDispersionLightSize_v"></span></div>
-      <div class="row"><label>彩帶對比</label><input type="range" id="rayDispersionFocus" min="0" max="1" step="0.01" value="0.55"><span class="val" id="rayDispersionFocus_v"></span></div>
-      <div class="row"><label>光源水平</label><input type="range" id="rayDispersionAzimuth" min="-180" max="180" step="1" value="0"><span class="val" id="rayDispersionAzimuth_v"></span></div>
-      <div class="row"><label>光源高度</label><input type="range" id="rayDispersionElevation" min="-80" max="80" step="1" value="0"><span class="val" id="rayDispersionElevation_v"></span></div>
-      <div class="note">五個波長各自穿過目前的 SDF 造型，再與同一個白色光源對準；展寬 1× 是目前阿貝數的物理尺度，提高可補償圓角造型缺少尖銳棱面的分光。彩帶對比同時控制白光源與 HDRI 分光結果：0% 接近中性色，100% 色彩分界鮮明；不改變光帶位置與寬度。HDRI 只提供周圍反射，不再決定光帶形狀。</div>
-    </div>
-
-    <div class="effectBlock effectBlock--caustic" id="spectralCausticGroup">
-      <div class="effectTitle"><span>LIGHT</span> 虛擬光譜焦散</div>
-      <div class="row toggleRow"><label>光譜焦散</label><input type="checkbox" id="spectralCausticEnabled" checked><span class="switchTrack" aria-hidden="true"></span><span class="val" id="spectralCausticEnabled_v">開啟</span></div>
-      <div class="effectSubhead spectralOutputTitle">輸出</div>
-      <div class="spectralColorEditor" aria-label="焦散色彩編輯器">
-        <label><input type="color" id="spectralCausticCol0" value="#52e6fc" aria-label="焦散色標 1"></label>
-        <label><input type="color" id="spectralCausticCol1" value="#40b3f9" aria-label="焦散色標 2"></label>
-        <label><input type="color" id="spectralCausticCol2" value="#3aa3e3" aria-label="焦散色標 3"></label>
-        <label><input type="color" id="spectralCausticCol3" value="#3fabf9" aria-label="焦散色標 4"></label>
-        <label><input type="color" id="spectralCausticCol4" value="#4dd8fb" aria-label="焦散色標 5"></label>
-        <label><input type="color" id="spectralCausticCol5" value="#3ba6f9" aria-label="焦散色標 6"></label>
-        <label><input type="color" id="spectralCausticCol6" value="#52e6fc" aria-label="焦散色標 7"></label>
-      </div>
-      <div class="row"><label>焦散強度</label><input type="range" id="spectralCausticIntensity" min="0" max="6" step="0.01" value="3"><span class="val" id="spectralCausticIntensity_v"></span></div>
-      <div class="row"><label>聚焦程度</label><input type="range" id="spectralCausticFocus" min="0" max="1" step="0.01" value="0.31"><span class="val" id="spectralCausticFocus_v"></span></div>
-      <div class="row"><label>光譜分離</label><input type="range" id="spectralCausticSeparation" min="0" max="1" step="0.01" value="0.24"><span class="val" id="spectralCausticSeparation_v"></span></div>
-      <div class="effectSubhead">光帶形狀</div>
-      <div class="row"><label>光帶尺寸</label><input type="range" id="spectralCausticWidth" min="0.25" max="2.5" step="0.01" value="0.42"><span class="val" id="spectralCausticWidth_v"></span></div>
-      <div class="row"><label>光帶密度</label><input type="range" id="spectralCausticDensity" min="0" max="1" step="0.01" value="0.03"><span class="val" id="spectralCausticDensity_v"></span></div>
-      <div class="row"><label>邊界柔化</label><input type="range" id="spectralCausticSoftness" min="0" max="1" step="0.01" value="1"><span class="val" id="spectralCausticSoftness_v"></span></div>
-      <div class="row"><label>曲面扭曲</label><input type="range" id="spectralCausticWarp" min="0" max="1" step="0.01" value="0.57"><span class="val" id="spectralCausticWarp_v"></span></div>
-      <div class="row"><label>內部反射</label><input type="range" id="spectralCausticBounce" min="0" max="1" step="0.01" value="0.19"><span class="val" id="spectralCausticBounce_v"></span></div>
-      <div class="row"><label>流動速度</label><input type="range" id="spectralCausticFlow" min="0" max="1" step="0.01" value="0.18"><span class="val" id="spectralCausticFlow_v"></span></div>
-      <div class="effectSubhead">遮罩</div>
-      <div class="row"><label>Fresnel 遮罩</label><input type="range" id="spectralCausticFresnelMask" min="0" max="1" step="0.01" value="1"><span class="val" id="spectralCausticFresnelMask_v"></span></div>
-      <div class="row"><label>Noise 遮罩</label><input type="range" id="spectralCausticNoiseMask" min="0" max="1" step="0.01" value="1"><span class="val" id="spectralCausticNoiseMask_v"></span></div>
-      <div class="row"><label>Noise 尺度</label><input type="range" id="spectralCausticNoiseScale" min="0.5" max="8" step="0.1" value="2.5"><span class="val" id="spectralCausticNoiseScale_v"></span></div>
-      <div class="effectSubhead">虛擬光源</div>
-      <div class="row"><label>光源尺寸</label><input type="range" id="spectralCausticLightSize" min="0" max="1" step="0.01" value="0.26"><span class="val" id="spectralCausticLightSize_v"></span></div>
-      <div class="row"><label>光源水平</label><input type="range" id="spectralCausticAzimuth" min="-180" max="180" step="1" value="-177"><span class="val" id="spectralCausticAzimuth_v"></span></div>
-      <div class="row"><label>光源高度</label><input type="range" id="spectralCausticElevation" min="-80" max="80" step="1" value="-19"><span class="val" id="spectralCausticElevation_v"></span></div>
-      <div class="row"><label>HDRI 連動</label><input type="range" id="spectralCausticHdri" min="0" max="1" step="0.01" value="0.3"><span class="val" id="spectralCausticHdri_v"></span></div>
-      <div class="note">七個色標可獨立編輯，色標之間會平滑混色。HDRI 僅可調節整體亮度。</div>
-    </div>
-  </div>
-
-  <div class="group">
-    <h3>水滴形態 Droplets</h3>
-    <div class="row"><label>水滴數量</label><input type="range" id="count" min="0" max="12" step="1" value="2"><span class="val" id="count_v"></span></div>
-    <div class="row"><label>水滴大小</label><input type="range" id="radius" min="0.25" max="1.1" step="0.01" value="0.4"><span class="val" id="radius_v"></span></div>
-    <div class="row"><label>黏性融合</label><input type="range" id="viscosity" min="0" max="1.2" step="0.01" value="0.78"><span class="val" id="viscosity_v"></span></div>
-    <div class="row"><label>表面張力</label><input type="range" id="surfaceTension" min="0" max="1.5" step="0.01" value="0.82"><span class="val" id="surfaceTension_v"></span></div>
-    <div class="row"><label>慣性形變</label><input type="range" id="inertiaDeform" min="0" max="1.5" step="0.01" value="0.68"><span class="val" id="inertiaDeform_v"></span></div>
-    <div class="row"><label>漂浮範圍</label><input type="range" id="spread" min="0.6" max="2.4" step="0.05" value="0.75"><span class="val" id="spread_v"></span></div>
-    <div class="row"><label>表面起伏</label><input type="range" id="wobble" min="0" max="0.4" step="0.005" value="0.305"><span class="val" id="wobble_v"></span></div>
-    <div class="row"><label>起伏尺度</label><input type="range" id="wobbleScale" min="0.3" max="6" step="0.1" value="0.7"><span class="val" id="wobbleScale_v"></span></div>
-    <div class="row"><label>起伏動畫</label><input type="range" id="wobbleSpeed" min="0" max="2" step="0.01" value="0.65"><span class="val" id="wobbleSpeed_v"></span></div>
-    <div data-gate="split" id="capillaryGroup">
-      <div class="effectSubhead">分離彈性 Capillary Wave</div>
-      <div class="note">毛細回彈與衛星滴串只在分裂 Split 模式的斷裂瞬間發生，形狀匯聚不會用到。</div>
-      <div class="row"><label>分離回彈</label><input type="range" id="elasticStrength" min="0" max="0.2" step="0.005" value="0.024"><span class="val" id="elasticStrength_v"></span></div>
-      <div class="row"><label>波紋密度</label><input type="range" id="elasticDensity" min="1" max="8" step="0.1" value="3.5"><span class="val" id="elasticDensity_v"></span></div>
-      <div class="row"><label>波紋衰減</label><input type="range" id="elasticDamping" min="0" max="1" step="0.01" value="0.55"><span class="val" id="elasticDamping_v"></span></div>
-      <div class="row"><label>傳播速度</label><input type="range" id="elasticSpeed" min="0.5" max="2" step="0.05" value="1.75"><span class="val" id="elasticSpeed_v"></span></div>
-      <div class="row"><label>衛星滴大小</label><input type="range" id="satelliteSize" min="0" max="1" step="0.01" value="0.22"><span class="val" id="satelliteSize_v"></span></div>
-      <div class="row"><label>衛星滴數量</label><input type="range" id="satelliteCount" min="0" max="3" step="1" value="3"><span class="val" id="satelliteCount_v"></span></div>
-    </div>
-  </div>
-
-  <div class="group">
-    <h3>動態 Motion</h3>
+  <details class="group" open>
+    <summary><h3>動態 Motion</h3></summary>
     <div class="row"><label>動態模式</label><select id="motion">
       <option value="split">分裂 Split</option>
       <option value="formation">形狀匯聚 Formation</option>
@@ -279,10 +119,10 @@
     <div id="morphNote" class="note">上方匯入的形狀 A 定格 → 一道波橫掃過去、把它削成水滴流走，新的形狀 B（目前固定是內建星形）在波前之後長出來 → 定格 → 再掃回來。整個過程形狀本體都在畫面上，水滴只存在於「已經離開舊形狀、還沒併進新形狀」的飛行途中，所以定格時看到的是一顆乾淨完整的造型，不是外面黏著一圈球。「定格時間」是單邊定格佔的時間，剩下的對半分給兩趟變形。「波前錯開」是這個模式最關鍵的一項，它決定「畫面上隨時有多少實體」：調高＝波掃得長、每顆水滴只飛一小段、舊形狀退到哪裡新形狀就跟到哪裡，實體幾乎不間斷；調低＝所有水滴同時出發、飛很久才重組，中間會空出一段兩顆形狀都不在、畫面只剩水滴的時間。預設偏高。「波掃方向」是波從哪個方向掃進來（回程固定轉 90°，否則兩趟看起來像同一段動畫正放再倒放）。「弧線高度」讓水滴沿路往外凸起再落下，走直線會像瞬移。「波前軟硬」是 0 時實體被一刀平切，調高會先收薄再斷開，比較像液體。形狀 A 與形狀 B 都在上方「形狀匯聚」那一組匯入，兩個槽共用同一個「形狀來源」。SVG↔SVG 與 GLB↔GLB 都支援；GLB 的兩顆形狀必須用同一個「模型品質」烘焙（換品質會自動重烘兩顆），高品質下記憶體佔用會是單一形狀的三倍左右。萬一兩顆形狀對不起來（來源或解析度不一致），畫面會退回只有水滴而不是畫出一顆錯位的形狀。</div>
     </div>
     <div data-gate="split" class="row" id="flowSpeedRow"><label>動態張力</label><input type="range" id="flowSpeed" min="0" max="1.5" step="0.01" value="0.47"><span class="val" id="flowSpeed_v"></span></div>
-  </div>
+  </details>
 
-  <div class="group" data-gate="shape">
-    <h3>形狀匯聚 Shape Formation</h3>
+  <details class="group" data-gate="shape" open>
+    <summary><h3>形狀匯聚 Shape Formation</h3></summary>
     <div class="effectBlock effectBlock--shape" id="formationGroup">
       <div class="effectTitle"><span>FORM</span> 擠出外形</div>
       <div class="row"><label>形狀來源</label><select id="shapeSource"><option value="svg">SVG 擠出</option><option value="gltf">GLB / GLTF</option></select><span class="val"></span></div>
@@ -320,12 +160,170 @@
       <div class="row"><label>水滴流速</label><input type="range" id="shapeLiquidSpeed" min="0" max="3" step="1" value="1"><span class="val" id="shapeLiquidSpeed_v"></span></div>
       <div class="note">液滴會沿 SVG 擠出輪廓附近移動；分佈組合固定，可重現同一段動畫。<br>擠出正面與側壁交界的圓角由上方「擠出外形」的「邊緣圓角」獨立控制，與液滴效果無關。</div>
     </div>
-  </div>
+  </details>
 
-  <div class="group">
-    <h3>參數交換 Share</h3>
+  <details class="group" open>
+    <summary><h3>水滴形態 Droplets</h3></summary>
+    <div class="row"><label>水滴數量</label><input type="range" id="count" min="0" max="12" step="1" value="2"><span class="val" id="count_v"></span></div>
+    <div class="row"><label>水滴大小</label><input type="range" id="radius" min="0.25" max="1.1" step="0.01" value="0.4"><span class="val" id="radius_v"></span></div>
+    <div class="row"><label>黏性融合</label><input type="range" id="viscosity" min="0" max="1.2" step="0.01" value="0.78"><span class="val" id="viscosity_v"></span></div>
+    <div class="row"><label>表面張力</label><input type="range" id="surfaceTension" min="0" max="1.5" step="0.01" value="0.82"><span class="val" id="surfaceTension_v"></span></div>
+    <div class="row"><label>慣性形變</label><input type="range" id="inertiaDeform" min="0" max="1.5" step="0.01" value="0.68"><span class="val" id="inertiaDeform_v"></span></div>
+    <div class="row"><label>漂浮範圍</label><input type="range" id="spread" min="0.6" max="2.4" step="0.05" value="0.75"><span class="val" id="spread_v"></span></div>
+    <div class="row"><label>表面起伏</label><input type="range" id="wobble" min="0" max="0.4" step="0.005" value="0.305"><span class="val" id="wobble_v"></span></div>
+    <div class="row"><label>起伏尺度</label><input type="range" id="wobbleScale" min="0.3" max="6" step="0.1" value="0.7"><span class="val" id="wobbleScale_v"></span></div>
+    <div class="row"><label>起伏動畫</label><input type="range" id="wobbleSpeed" min="0" max="2" step="0.01" value="0.65"><span class="val" id="wobbleSpeed_v"></span></div>
+    <div data-gate="split" id="capillaryGroup">
+      <div class="effectSubhead">分離彈性 Capillary Wave</div>
+      <div class="note">毛細回彈與衛星滴串只在分裂 Split 模式的斷裂瞬間發生，形狀匯聚不會用到。</div>
+      <div class="row"><label>分離回彈</label><input type="range" id="elasticStrength" min="0" max="0.2" step="0.005" value="0.024"><span class="val" id="elasticStrength_v"></span></div>
+      <div class="row"><label>波紋密度</label><input type="range" id="elasticDensity" min="1" max="8" step="0.1" value="3.5"><span class="val" id="elasticDensity_v"></span></div>
+      <div class="row"><label>波紋衰減</label><input type="range" id="elasticDamping" min="0" max="1" step="0.01" value="0.55"><span class="val" id="elasticDamping_v"></span></div>
+      <div class="row"><label>傳播速度</label><input type="range" id="elasticSpeed" min="0.5" max="2" step="0.05" value="1.75"><span class="val" id="elasticSpeed_v"></span></div>
+      <div class="row"><label>衛星滴大小</label><input type="range" id="satelliteSize" min="0" max="1" step="0.01" value="0.22"><span class="val" id="satelliteSize_v"></span></div>
+      <div class="row"><label>衛星滴數量</label><input type="range" id="satelliteCount" min="0" max="3" step="1" value="3"><span class="val" id="satelliteCount_v"></span></div>
+    </div>
+  </details>
+
+  <details class="group" open>
+    <summary><h3>材質 Material</h3></summary>
+    <div class="row"><label>材質類型</label><select id="materialStyle"><option value="universal" selected>通用玻璃</option><option value="membrane">液態薄膜（白底）</option><option value="glass" hidden>厚玻璃（已移除，改用通用玻璃）</option></select><span class="val"></span></div>
+    <div class="row" id="membraneDepthRow"><label>膜體立體感</label><input type="range" id="membraneDepth" min="0" max="1" step="0.01" value="0.65"><span class="val" id="membraneDepth_v"></span></div>
+    <div class="row" id="membraneBaseColorRow"><label>薄膜底色</label><input type="color" id="membraneBaseColor" value="#7a9ec7"><span class="val"></span></div>
+    <div class="row" id="membraneVeilColorRow"><label>薄膜面紗色調</label><input type="color" id="membraneVeilColor" value="#b8e6ff"><span class="val"></span></div>
+    <div class="row" id="membraneReflectionColorRow"><label>棚燈反射色</label><input type="color" id="membraneReflectionColor" value="#94b8e6"><span class="val"></span></div>
+    <div class="row" id="membraneCardColorRow"><label>藍卡反射色</label><input type="color" id="membraneCardColor" value="#94c7ff"><span class="val"></span></div>
+    <div class="row" id="membraneShadeColorRow"><label>立體暗部色</label><input type="color" id="membraneShadeColor" value="#85b8e6"><span class="val"></span></div>
+    <div class="note" id="membraneColorsNote">只作用於液態薄膜，各自對應合成裡原本寫死的一個顏色常數：選什麼顏色，畫面上那一處就直接是那個顏色。預設值都是原本的藍紫色常數，維持改動前的外觀。</div>
+    <div class="row"><label>反射強度</label><input type="range" id="reflect" min="0" max="2" step="0.02" value="1.6"><span class="val" id="reflect_v"></span></div>
+    <div class="row"><label>透射率</label><input type="range" id="transmission" min="0" max="1" step="0.01" value="0.96"><span class="val" id="transmission_v"></span></div>
+    <div class="row"><label>材質曝光</label><input type="range" id="materialExposure" min="0.25" max="2.5" step="0.05" value="1"><span class="val" id="materialExposure_v"></span></div>
+    <div class="row"><label>粗糙度</label><input type="range" id="roughness" min="0" max="1" step="0.01" value="0.2"><span class="val" id="roughness_v"></span></div>
+    <div class="row"><label>邊緣光</label><input type="range" id="fresnel" min="0" max="3" step="0.05" value="0.8"><span class="val" id="fresnel_v"></span></div>
+    <div class="row"><label>折射率</label><input type="range" id="ior" min="1.0" max="1.8" step="0.01" value="1.33"><span class="val" id="ior_v"></span></div>
+    <div class="note" id="materialStyleNote">通用玻璃與液態薄膜各自記住材質及 HDRI 參數；液態薄膜僅適用純白背景（#ffffff），中央更透明，彩色集中在輪廓與曲面折疊處——它的顯色（亮底透射、白卡/藍卡反射卡、去背用的白底反乘）都是針對白底寫死的美術模型，離開白底就切回通用玻璃。</div>
+
+    <details class="subgroup" id="dispersionGroup">
+      <summary><h4>色散 Dispersion</h4><span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="dispersionMaster"><span class="switchTrack" aria-hidden="true"></span></span></summary>
+      <div class="effectBlock effectBlock--art" id="artDispersionGroup">
+        <div class="effectTitle"><span>ART</span> 薄膜式藝術色散<span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="dispersionEnabled" checked><span class="switchTrack" aria-hidden="true"></span></span></div>
+        <div class="row"><label>藝術強度</label><input type="range" id="dispersion" min="0" max="1" step="0.01" value="0.09"><span class="val" id="dispersion_v"></span></div>
+        <div class="row"><label>光譜分離</label><input type="range" id="dispersionSeparation" min="0" max="1.5" step="0.01" value="1.5"><span class="val" id="dispersionSeparation_v"></span></div>
+        <div class="effectSubhead">厚度與流動</div>
+        <div class="row"><label>色散厚度</label><input type="range" id="artThickness" min="120" max="760" step="5" value="165"><span class="val" id="artThickness_v"></span></div>
+        <div class="row"><label>厚度變化</label><input type="range" id="artThickVar" min="0" max="400" step="5" value="95"><span class="val" id="artThickVar_v"></span></div>
+        <div class="row"><label>紋理尺度</label><input type="range" id="artNoiseScale" min="0.5" max="6" step="0.1" value="1"><span class="val" id="artNoiseScale_v"></span></div>
+        <div class="row"><label>流動速度</label><input type="range" id="artPatternSpeed" min="0" max="2" step="0.01" value="0.21"><span class="val" id="artPatternSpeed_v"></span></div>
+        <div class="row"><label>重力影響</label><input type="range" id="artGravity" min="0" max="1" step="0.01" value="1"><span class="val" id="artGravity_v"></span></div>
+        <div class="effectSubhead">光帶塑形</div>
+        <div class="row"><label>焦散尺度</label><input type="range" id="causticScale" min="0.4" max="2.5" step="0.05" value="1"><span class="val" id="causticScale_v"></span></div>
+        <div class="row"><label>焦散銳利</label><input type="range" id="causticSharpness" min="0" max="1" step="0.01" value="0.65"><span class="val" id="causticSharpness_v"></span></div>
+      </div>
+
+      <div class="effectBlock effectBlock--physical" id="rayDispersionGroup">
+        <div class="effectTitle"><span>RAY</span> 造型光線色散<span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="rayDispersionEnabled"><span class="switchTrack" aria-hidden="true"></span></span></div>
+        <div class="row"><label>光譜展寬</label><input type="range" id="rayDispersion" min="0" max="12" step="0.01" value="6"><span class="val" id="rayDispersion_v"></span></div>
+        <div class="row"><label>阿貝數</label><input type="range" id="rayDispersionAbbe" min="15" max="90" step="1" value="25"><span class="val" id="rayDispersionAbbe_v"></span></div>
+        <div class="effectSubhead">光譜光源</div>
+        <div class="row"><label>光源亮度</label><input type="range" id="rayDispersionLightIntensity" min="0" max="4" step="0.01" value="4"><span class="val" id="rayDispersionLightIntensity_v"></span></div>
+        <div class="row"><label>光源尺寸</label><input type="range" id="rayDispersionLightSize" min="0" max="1" step="0.01" value="0.32"><span class="val" id="rayDispersionLightSize_v"></span></div>
+        <div class="row"><label>彩帶對比</label><input type="range" id="rayDispersionFocus" min="0" max="1" step="0.01" value="0.55"><span class="val" id="rayDispersionFocus_v"></span></div>
+        <div class="row"><label>光源水平</label><input type="range" id="rayDispersionAzimuth" min="-180" max="180" step="1" value="0"><span class="val" id="rayDispersionAzimuth_v"></span></div>
+        <div class="row"><label>光源高度</label><input type="range" id="rayDispersionElevation" min="-80" max="80" step="1" value="0"><span class="val" id="rayDispersionElevation_v"></span></div>
+        <div class="note">五個波長各自穿過目前的 SDF 造型，再與同一個白色光源對準；展寬 1× 是目前阿貝數的物理尺度，提高可補償圓角造型缺少尖銳棱面的分光。彩帶對比同時控制白光源與 HDRI 分光結果：0% 接近中性色，100% 色彩分界鮮明；不改變光帶位置與寬度。HDRI 只提供周圍反射，不再決定光帶形狀。</div>
+      </div>
+
+      <div class="effectBlock effectBlock--caustic" id="spectralCausticGroup">
+        <div class="effectTitle"><span>LIGHT</span> 虛擬光譜焦散<span class="summaryToggle"><input type="checkbox" id="spectralCausticEnabled" checked><span class="switchTrack" aria-hidden="true"></span></span></div>
+        <div class="effectSubhead spectralOutputTitle">輸出</div>
+        <div class="spectralColorEditor" aria-label="焦散色彩編輯器">
+          <label><input type="color" id="spectralCausticCol0" value="#52e6fc" aria-label="焦散色標 1"></label>
+          <label><input type="color" id="spectralCausticCol1" value="#40b3f9" aria-label="焦散色標 2"></label>
+          <label><input type="color" id="spectralCausticCol2" value="#3aa3e3" aria-label="焦散色標 3"></label>
+          <label><input type="color" id="spectralCausticCol3" value="#3fabf9" aria-label="焦散色標 4"></label>
+          <label><input type="color" id="spectralCausticCol4" value="#4dd8fb" aria-label="焦散色標 5"></label>
+          <label><input type="color" id="spectralCausticCol5" value="#3ba6f9" aria-label="焦散色標 6"></label>
+          <label><input type="color" id="spectralCausticCol6" value="#52e6fc" aria-label="焦散色標 7"></label>
+        </div>
+        <div class="row"><label>焦散強度</label><input type="range" id="spectralCausticIntensity" min="0" max="6" step="0.01" value="3"><span class="val" id="spectralCausticIntensity_v"></span></div>
+        <div class="row"><label>聚焦程度</label><input type="range" id="spectralCausticFocus" min="0" max="1" step="0.01" value="0.31"><span class="val" id="spectralCausticFocus_v"></span></div>
+        <div class="row"><label>光譜分離</label><input type="range" id="spectralCausticSeparation" min="0" max="1" step="0.01" value="0.24"><span class="val" id="spectralCausticSeparation_v"></span></div>
+        <div class="effectSubhead">光帶形狀</div>
+        <div class="row"><label>光帶尺寸</label><input type="range" id="spectralCausticWidth" min="0.25" max="2.5" step="0.01" value="0.42"><span class="val" id="spectralCausticWidth_v"></span></div>
+        <div class="row"><label>光帶密度</label><input type="range" id="spectralCausticDensity" min="0" max="1" step="0.01" value="0.03"><span class="val" id="spectralCausticDensity_v"></span></div>
+        <div class="row"><label>邊界柔化</label><input type="range" id="spectralCausticSoftness" min="0" max="1" step="0.01" value="1"><span class="val" id="spectralCausticSoftness_v"></span></div>
+        <div class="row"><label>曲面扭曲</label><input type="range" id="spectralCausticWarp" min="0" max="1" step="0.01" value="0.57"><span class="val" id="spectralCausticWarp_v"></span></div>
+        <div class="row"><label>內部反射</label><input type="range" id="spectralCausticBounce" min="0" max="1" step="0.01" value="0.19"><span class="val" id="spectralCausticBounce_v"></span></div>
+        <div class="row"><label>流動速度</label><input type="range" id="spectralCausticFlow" min="0" max="1" step="0.01" value="0.18"><span class="val" id="spectralCausticFlow_v"></span></div>
+        <div class="effectSubhead">遮罩</div>
+        <div class="row"><label>Fresnel 遮罩</label><input type="range" id="spectralCausticFresnelMask" min="0" max="1" step="0.01" value="1"><span class="val" id="spectralCausticFresnelMask_v"></span></div>
+        <div class="row"><label>Noise 遮罩</label><input type="range" id="spectralCausticNoiseMask" min="0" max="1" step="0.01" value="1"><span class="val" id="spectralCausticNoiseMask_v"></span></div>
+        <div class="row"><label>Noise 尺度</label><input type="range" id="spectralCausticNoiseScale" min="0.5" max="8" step="0.1" value="2.5"><span class="val" id="spectralCausticNoiseScale_v"></span></div>
+        <div class="effectSubhead">虛擬光源</div>
+        <div class="row"><label>光源尺寸</label><input type="range" id="spectralCausticLightSize" min="0" max="1" step="0.01" value="0.26"><span class="val" id="spectralCausticLightSize_v"></span></div>
+        <div class="row"><label>光源水平</label><input type="range" id="spectralCausticAzimuth" min="-180" max="180" step="1" value="-177"><span class="val" id="spectralCausticAzimuth_v"></span></div>
+        <div class="row"><label>光源高度</label><input type="range" id="spectralCausticElevation" min="-80" max="80" step="1" value="-19"><span class="val" id="spectralCausticElevation_v"></span></div>
+        <div class="row"><label>HDRI 連動</label><input type="range" id="spectralCausticHdri" min="0" max="1" step="0.01" value="0.3"><span class="val" id="spectralCausticHdri_v"></span></div>
+        <div class="note">七個色標可獨立編輯，色標之間會平滑混色。HDRI 僅可調節整體亮度。</div>
+      </div>
+    </details>
+
+
+    <details class="subgroup" id="thinFilmGroup">
+      <summary><h4>薄膜外觀 Thin Film</h4><span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="filmEnabled"><span class="switchTrack" aria-hidden="true"></span></span></summary>
+      <div class="row"><label>上色模式</label><select id="colorMode"><option value="spectral">光譜（物理）</option><option value="ramp">自訂漸層</option></select><span class="val"></span></div>
+      <div class="row"><label>薄膜厚度</label><input type="range" id="thickness" min="120" max="760" step="5" value="250"><span class="val" id="thickness_v"></span></div>
+      <div class="row"><label>花紋強度</label><input type="range" id="thickVar" min="0" max="400" step="5" value="400"><span class="val" id="thickVar_v"></span></div>
+      <div class="row"><label>花紋尺度</label><input type="range" id="noiseScale" min="0.5" max="6" step="0.1" value="0.8"><span class="val" id="noiseScale_v"></span></div>
+      <div class="row"><label>花紋速度</label><input type="range" id="patternSpeed" min="0" max="2" step="0.01" value="0.07"><span class="val" id="patternSpeed_v"></span></div>
+      <div class="row"><label>薄膜柔化</label><input type="range" id="filmBlur" min="0" max="1" step="0.01" value="1.00"><span class="val" id="filmBlur_v"></span></div>
+      <div class="row"><label>彩度</label><input type="range" id="saturation" min="0" max="2" step="0.02" value="2"><span class="val" id="saturation_v"></span></div>
+      <div class="row"><label>重力黑膜</label><input type="range" id="gravity" min="0" max="1" step="0.01" value="1"><span class="val" id="gravity_v"></span></div>
+      <div class="effectBlock effectBlock--ramp" id="rampGroup">
+        <div class="effectTitle"><span>RAMP</span> 薄膜自訂配色</div>
+        <div class="note">僅作用於薄膜的「自訂漸層」模式；右側滑桿控制每個色標的位置。</div>
+        <div class="row"><label>配色數量</label><input type="range" id="rampCount" min="2" max="6" step="1" value="6"><span class="val" id="rampCount_v"></span></div>
+        <div class="row stopRow" id="stopRow0"><label>色 1</label><input type="color" id="stopCol0" value="#3698d8"><input type="range" id="stopPos0" min="0" max="1" step="0.01" value="0.56"><span class="val" id="stopPos0_v"></span></div>
+        <div class="row stopRow" id="stopRow1"><label>色 2</label><input type="color" id="stopCol1" value="#b794a6"><input type="range" id="stopPos1" min="0" max="1" step="0.01" value="0.20"><span class="val" id="stopPos1_v"></span></div>
+        <div class="row stopRow" id="stopRow2"><label>色 3</label><input type="color" id="stopCol2" value="#d1aa75"><input type="range" id="stopPos2" min="0" max="1" step="0.01" value="0.39"><span class="val" id="stopPos2_v"></span></div>
+        <div class="row stopRow" id="stopRow3"><label>色 4</label><input type="color" id="stopCol3" value="#b2b3b4"><input type="range" id="stopPos3" min="0" max="1" step="0.01" value="0.60"><span class="val" id="stopPos3_v"></span></div>
+        <div class="row stopRow" id="stopRow4"><label>色 5</label><input type="color" id="stopCol4" value="#9e7d98"><input type="range" id="stopPos4" min="0" max="1" step="0.01" value="0.27"><span class="val" id="stopPos4_v"></span></div>
+        <div class="row stopRow" id="stopRow5"><label>色 6</label><input type="color" id="stopCol5" value="#5dbded"><input type="range" id="stopPos5" min="0" max="1" step="0.01" value="0.66"><span class="val" id="stopPos5_v"></span></div>
+      </div>
+    </details>
+
+  </details>
+
+  <details class="group">
+    <summary><h3>鏡頭 Camera</h3></summary>
+    <div class="row"><label>鏡頭距離</label><input type="range" id="cameraDistance" min="2.8" max="10" step="0.05" value="5.5"><span class="val" id="cameraDistance_v"></span></div>
+    <div class="row"><label>水平視角</label><input type="range" id="cameraRotationY" min="-180" max="180" step="0.1" value="29.8"><span class="val" id="cameraRotationY_v"></span></div>
+    <div class="row"><label>垂直視角</label><input type="range" id="cameraRotationX" min="-90" max="90" step="0.1" value="9.7"><span class="val" id="cameraRotationX_v"></span></div>
+    <div class="row"><label>環繞幅度</label><input type="range" id="spin" min="0" max="1" step="0.01" value="0.08"><span class="val" id="spin_v"></span></div>
+    <div class="row toggleRow"><label>前後拉伸</label><input type="checkbox" id="dollyEnabled" checked><span class="switchTrack" aria-hidden="true"></span><span class="val" id="dollyEnabled_v">開啟</span></div>
+    <div id="dollyEnabledNote" class="note">在動作高潮（分裂約 1/4 循環處、融合約 4/5 循環處）鏡頭輕微推近，其餘時間拉回，讓畫面隨敘事有呼吸感。這兩個時機點是「分裂」模式的節奏，跟其他模式的動作不一定對得上——例如融化的形狀本身完全靜止，這段推近拉遠會讓整個畫面規律地放大縮小，反而像沒來由的呼吸感，所以融化模式預設關閉。每個動態模式各自記住這個開關的狀態，切換模式時會恢復。</div>
+    <div class="note">可使用滑鼠滾輪或觸控板拉近、拉遠；環繞幅度控制鏡頭隨循環自動環繞的幅度。</div>
+  </details>
+
+  <details class="group">
+    <summary><h3>背景與 HDRI Background</h3></summary>
+    <div class="row"><label>背景模式</label><select id="bgMode"><option value="color">純色</option><option value="hdri">HDRI</option></select><span class="val"></span></div>
+    <div class="row"><label>背景顏色</label><input type="color" id="bgColor" value="#000000"><span class="val"></span></div>
+    <div class="row"><label>HDRI 水平</label><input type="range" id="hdriYaw" min="-180" max="180" step="1" value="0"><span class="val" id="hdriYaw_v"></span></div>
+    <div class="row"><label>HDRI 垂直</label><input type="range" id="hdriPitch" min="-90" max="90" step="1" value="0"><span class="val" id="hdriPitch_v"></span></div>
+    <div class="row"><label>HDRI 模糊</label><input type="range" id="hdriBlur" min="0" max="1" step="0.01" value="0.11"><span class="val" id="hdriBlur_v"></span></div>
+    <div class="row"><label>環境折射</label><input type="range" id="envRefraction" min="0" max="1" step="0.01" value="0"><span class="val" id="envRefraction_v"></span></div>
+    <div class="row toggleRow"><label>亮底保色</label><input type="checkbox" id="brightBgAssist" checked><span class="switchTrack" aria-hidden="true"></span><span class="val" id="brightBgAssist_v">開啟</span></div>
+    <div class="row"><button id="hdriBtn">更換 HDRI…</button></div>
+    <div id="hdriState" class="note">通用玻璃預設 HDRI：photo_studio2_london_hall_1k.hdr</div>
+    <div class="note">亮底保色只在純色背景接近白色時介入：保留 HDRI 折射明暗、去除暖色偏色，並讓彩色焦散改以透射顯色。</div>
+    <input type="file" id="hdriInput" accept=".hdr,image/*" hidden>
+  </details>
+
+  <details class="group">
+    <summary><h3>參數交換 Share</h3></summary>
     <div id="presetIO"></div>
-  </div>
+  </details>
 
   <div class="btns">
     <button id="resetBtn">↺ 重設</button>
