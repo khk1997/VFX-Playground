@@ -42,9 +42,9 @@ const MAX_NEGATIVE_DROPS = 4;
 
 /* ===== 參數 ===== */
 const DEFAULTS = {              // 數值滑桿
-  thickness: 195,
-  thickVar: 40,
-  noiseScale: 1.0,
+  thickness: 250,
+  thickVar: 400,
+  noiseScale: 0.8,
   dispersion: 0.02,
   dispersionSeparation: 1.5,
   causticScale: 1.0,
@@ -77,9 +77,9 @@ const DEFAULTS = {              // 數值滑桿
   artNoiseScale: 1.2,
   artPatternSpeed: 0.27,
   artGravity: 0.52,
-  filmBlur: 0.25,
-  saturation: 1.94,
-  patternSpeed: 0.21,
+  filmBlur: 1.00,
+  saturation: 2,
+  patternSpeed: 0.07,
   count: 2,
   radius: 0.4,
   viscosity: 0.78,
