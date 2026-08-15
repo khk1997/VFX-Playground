@@ -3181,6 +3181,10 @@ let exportPreviewContext = null;
 let rafId = 0, last = 0;
 let pausedRenderRaf = 0;
 const pauseBtn = document.getElementById('playCtl');
+const pauseBtnIcon = document.getElementById('playCtlIcon');
+const pauseBtnLabel = document.getElementById('playCtlLabel');
+const PAUSE_ICON = '<rect x="5" y="4" width="3.2" height="12" rx="1" fill="currentColor"/><rect x="11.8" y="4" width="3.2" height="12" rx="1" fill="currentColor"/>';
+const PLAY_ICON = '<path d="M6 4.2v11.6a.9.9 0 0 0 1.37.76l9.2-5.8a.9.9 0 0 0 0-1.52l-9.2-5.8A.9.9 0 0 0 6 4.2Z" fill="currentColor"/>';
 function isPaused() { return userPaused || extPaused || shapeConverting || exportJob || document.hidden; }
 function requestPausedRender() {
   if ((!userPaused && !extPaused) || shapeConverting || exportJob || document.hidden || pausedRenderRaf) return;
@@ -3227,7 +3231,8 @@ function syncLoop() {
 }
 pauseBtn.addEventListener('click', () => {
   userPaused = !userPaused;
-  pauseBtn.textContent = userPaused ? '▶ 播放' : '⏸ 暫停';
+  pauseBtnIcon.innerHTML = userPaused ? PLAY_ICON : PAUSE_ICON;
+  pauseBtnLabel.textContent = userPaused ? '播放' : '暫停';
   syncLoop();
 });
 window.addEventListener('message', e => {

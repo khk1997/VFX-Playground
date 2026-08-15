@@ -41,11 +41,15 @@
   #panel::-webkit-scrollbar { width: 6px; }
   #panel::-webkit-scrollbar-thumb { background: rgba(150,180,255,.3); border-radius: 3px; }
 
+  .btnIcon { width: 14px; height: 14px; flex: none; display: block; }
+
   #toggleBtn {
     position: fixed; top: 12px; right: 12px; z-index: 11;
     background: rgba(8,10,16,.85); color: #a9c2ff;
     border: 1px solid rgba(150,180,255,.35); border-radius: 8px;
     padding: 6px 12px; cursor: pointer; font-size: 13px;
+    display: inline-flex; align-items: center; gap: 6px; font-family: inherit;
+    line-height: 1;
   }
   #toggleBtn:hover { background: rgba(150,180,255,.15); }
 
@@ -55,6 +59,7 @@
     border: 1px solid rgba(150,180,255,.35); border-radius: 8px;
     padding: 6px 12px; cursor: pointer; font-size: 13px;
     display: inline-flex; align-items: center; gap: 6px; font-family: inherit;
+    line-height: 1;
   }
   #homeBtn:hover { background: rgba(150,180,255,.15); }
 
@@ -64,6 +69,8 @@
     border: 1px solid rgba(150,180,255,.35); border-radius: 999px;
     padding: 8px 20px; cursor: pointer; font-size: 13px;
     box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px; font-family: inherit;
+    line-height: 1;
   }
   #playCtl:hover { background: rgba(150,180,255,.18); }
 
