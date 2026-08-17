@@ -466,14 +466,14 @@ float atlasVoxel(vec3 cell, int ch){
 float volumeShapeDistance(vec3 p, int ch){
   float n = uShapeGrid;
   vec3 gridP = (p / 2.1 + 0.5) * (n - 1.0);
-  if (any(lessThan(gridP, vec3(0.0))) || any(greaterThan(gridP, vec3(n - 1.0)))) {
-    // 同 SVG：SDF atlas 的取樣盒只負責界定資料範圍，本身不是幾何。
-    // 加上一個 voxel 的正距離，避免 bounding box 被誤判成 d=0 表面。
-    return length(max(abs(p) - vec3(1.05), 0.0))
-      + 2.1 / max(1.0, n - 1.0);
-  }
-  vec3 base = floor(gridP);
-  vec3 f = fract(gridP);
+  // 同 SVG（見 svgShapeDistance）：取樣盒外不能直接回傳一個跟形狀無關的方塊
+  // 距離，那樣盒子邊界本身會被誤判成 d=0 的表面，崩解噴濺等會把取樣點推出
+  // 盒外的模式就會炸出一個方框。改成延續盒邊界上真實的三線性距離，再加上
+  // 離開取樣盒的實際距離——atlasVoxel 內部本來就會 clamp cell，邊界值本身
+  // 就是「盒外最近的真實資料」，舊版只是沒有用它。
+  vec3 clampedGridP = clamp(gridP, vec3(0.0), vec3(n - 1.0));
+  vec3 base = floor(clampedGridP);
+  vec3 f = clampedGridP - base;
   float z0 = mix(
     mix(atlasVoxel(base, ch), atlasVoxel(base + vec3(1,0,0), ch), f.x),
     mix(atlasVoxel(base + vec3(0,1,0), ch), atlasVoxel(base + vec3(1,1,0), ch), f.x), f.y);
@@ -485,7 +485,9 @@ float volumeShapeDistance(vec3 p, int ch){
   // 補不到半個 voxel 的解析度感知 guard；128³ 歸零，不改高品質輪廓。
   float lowResolution = clamp((128.0 - n) / 80.0, 0.0, 1.0);
   float topologyGuard = voxelSize * 0.48 * lowResolution;
-  return mix(z0, z1, f.z) * voxelSize - uShapeSoftness - topologyGuard;
+  float edge = mix(z0, z1, f.z) * voxelSize - uShapeSoftness - topologyGuard;
+  vec3 outside = max(gridP - (n - 1.0), vec3(0.0)) + max(-gridP, vec3(0.0));
+  return edge + length(outside) * voxelSize;
 }
 
 // 分離後由接觸極點向外傳播的局部毛細波；只處理主要水滴對 0/1。
