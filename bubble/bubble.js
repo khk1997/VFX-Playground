@@ -19,6 +19,7 @@ import createShatterMotion from './motions/shatter.js?v=svg-shape-53';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-53';
 import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-53';
 import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-53';
+import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-53';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -230,6 +231,19 @@ const DEFAULTS = {              // 數值滑桿
   // 以及這股力道累積多久。0 = 完全不蓄力，維持原本直接炸開。
   shatterCharge: 0.025,
   shatterChargeTime: 0.5,
+  // 造型剛體動態（見 motions/shapeRigid.js）：讓匯入的 SVG/GLB 造型本身也有
+  // 旋轉、呼吸縮放、上下浮動與擠壓拉伸，疊在既有的匯聚/散開時間軸之上。
+  // 圈數決定循環內擺動幾次；ease 是二次諧波疊加比例，做出蓄力回彈的不對稱感。
+  shapeMotionCycles: 1,
+  shapeMotionEase: 0.3,
+  // 三軸各自的旋轉幅度（度）；三軸共用同一條波形，只是振幅不同，疊起來是
+  // 繞一根固定傾斜軸擺動。預設只給 Z 軸，跟加 X/Y 軸之前的畫面完全一致。
+  shapeSpinX: 0,
+  shapeSpinY: 0,
+  shapeSpinZ: 10,
+  shapeBreathe: 0.05,
+  shapeBob: 0.08,
+  shapeSquash: 0.35,
 };
 
 // 走完整 SDF 匯聚管線（錨點、細節滴、負滴、體積交接）＋ 匯聚→停留→散開時間軸
@@ -272,6 +286,9 @@ const TOGGLE_DEFAULTS = {
   // 前後拉伸（見下方 dolly 計算）。跟 count/radius/loopDuration 一樣按模式
   // 各自記憶，這裡只是進入畫面時的初始值。
   dollyEnabled: MOTION_DEFAULT_DOLLY[SELECT_DEFAULTS.motion],
+  // 純粹是「這幀要不要算造型剛體動態」的開關，沒有對應 uniform——關閉時
+  // shapeRigidMotion 直接回傳 null，各處的 applyShapeRigid 就地退化成恆等變換。
+  shapeMotionOn: false,
 };
 const COLOR_DEFAULTS  = {
   bgColor: '#000000',
@@ -416,6 +433,8 @@ const TOGGLES = {
   // 沒有對應 uniform：dolly 是 CPU 端算好直接寫進 uCameraDistance 的純量，
   // render loop 每幀直接讀 P.dollyEnabled，這裡不用同步任何東西。
   dollyEnabled: () => {},
+  // 同理：這顆開關只被 shapeRigidMotion 每幀直接讀，不對應任何 uniform。
+  shapeMotionOn: () => {},
 };
 
 const DISPERSION_TOGGLE_KEYS = ['dispersionEnabled', 'rayDispersionEnabled', 'spectralCausticEnabled'];
@@ -568,6 +587,14 @@ const fmt = {
   shatterVariety: v => '±' + Math.round(v * 100) + '%',
   shatterCharge: v => v === 0 ? '關閉' : '+' + v.toFixed(3),
   shatterChargeTime: () => shatterSegmentSeconds('charge'),
+  shapeMotionCycles: v => Math.round(v) + ' 圈/循環',
+  shapeMotionEase: v => Math.round(v * 100) + '%',
+  shapeSpinX: v => v.toFixed(0) + '°',
+  shapeSpinY: v => v.toFixed(0) + '°',
+  shapeSpinZ: v => v.toFixed(0) + '°',
+  shapeBreathe: v => Math.round(v * 100) + '%',
+  shapeBob: v => v.toFixed(2),
+  shapeSquash: v => Math.round(v * 100) + '%',
 };
 
 // 崩解噴濺的四段時長是正規化的相對權重，所以動任何一段，其他三段實際佔的秒數
@@ -1096,6 +1123,30 @@ const {
   morphTimeline: morphTimelineOf, morphFronts, morphDropPosition, morphRadiusFactor,
 } = createMorphMotion(P);
 
+// 造型本身的剛體動態（見 motions/shapeRigid.js）。每幀在 updateDropUniforms
+// 頂端算一次存進 shapeRigidNow，本模組其餘地方（updateMicroDrops／
+// updateNegativeDrops／主滴迴圈）都直接讀這個共用狀態，不必個別重算。
+const { shapeRigidMotion } = createShapeRigidMotion(P);
+let shapeRigidNow = null;
+const shapeRigidVec = new THREE.Vector3();
+// 旋轉現在是任意軸（XYZ 各自振幅），用歐拉角組出一個 3x3 旋轉矩陣，比逐軸
+// 手算 sin/cos 疊加省事也不容易錯。這三個是每幀重算矩陣用的暫存物件，
+// 不在 shapeRigidMotion 裡建是因為那個模組刻意不依賴 THREE。
+const shapeRigidEuler = new THREE.Euler();
+const shapeRigidMat4 = new THREE.Matrix4();
+const shapeRigidRot = new THREE.Matrix3();
+// 把形狀本地座標（形狀匯聚／穿梭環繞／融化／崩解噴濺／形狀變形的水滴都是拿
+// 這個空間裡的錨點在算位置）套上本幀的剛體動態，變成最終世界座標。造型的
+// SDF 取樣座標也套了同一份變換的反變換（見 shaders.js 的 shapeP），兩者才不
+// 會分家。未啟用時（shapeRigidNow 為 null）就是恆等變換。
+function applyShapeRigid(x, y, z, out) {
+  if (!shapeRigidNow) return out.set(x, y, z);
+  const { rotation, offsetY, scaleX, scaleY, scaleZ } = shapeRigidNow;
+  out.set(x * scaleX, y * scaleY, z * scaleZ).applyMatrix3(rotation);
+  out.y += offsetY;
+  return out;
+}
+
 // 微滴的自由軌道在 updateMicroDrops 直接呼叫 freeOrbitPosition，需要自己的暫存向量。
 const freeOrbitVec = new THREE.Vector3();
 
@@ -1147,6 +1198,7 @@ function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false) {
         shatter,
         formationPosNow,
       );
+      applyShapeRigid(formationPosNow.x, formationPosNow.y, formationPosNow.z, formationPosNow);
       microDropData[o] = formationPosNow.x;
       microDropData[o + 1] = formationPosNow.y;
       microDropData[o + 2] = formationPosNow.z;
@@ -1162,6 +1214,7 @@ function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false) {
       // 種子基底刻意跟主滴那條（i * 7.13）錯開，同一個滴落點的主滴與微滴才不會
       // 同步落下、疊成一顆。
       const state = meltDrop(i, phase, i * 3.41 + 101.7, formationPosNow);
+      applyShapeRigid(formationPosNow.x, formationPosNow.y, formationPosNow.z, formationPosNow);
       microDropData[o] = formationPosNow.x;
       microDropData[o + 1] = formationPosNow.y;
       microDropData[o + 2] = formationPosNow.z;
@@ -1179,6 +1232,7 @@ function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false) {
     }
     if (morphing) {
       morphDropPosition(morphMicroPairs, i, phase, formationPosNow);
+      applyShapeRigid(formationPosNow.x, formationPosNow.y, formationPosNow.z, formationPosNow);
       microDropData[o] = formationPosNow.x;
       microDropData[o + 1] = formationPosNow.y;
       microDropData[o + 2] = formationPosNow.z;
@@ -1209,9 +1263,15 @@ function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false) {
     const eased = local * local * (3 - 2 * local);
     const target = microFormationAnchors[i % microFormationAnchors.length];
     const insetScale = 1 - fidelityAbsorb * 0.20;
-    microDropData[o] = (freeX + (target.x - freeX) * eased) * insetScale;
-    microDropData[o + 1] = (freeY + (target.y - freeY) * eased) * insetScale;
-    microDropData[o + 2] = (freeZ + (target.z - freeZ) * eased) * insetScale;
+    applyShapeRigid(
+      (freeX + (target.x - freeX) * eased) * insetScale,
+      (freeY + (target.y - freeY) * eased) * insetScale,
+      (freeZ + (target.z - freeZ) * eased) * insetScale,
+      shapeRigidVec,
+    );
+    microDropData[o] = shapeRigidVec.x;
+    microDropData[o + 1] = shapeRigidVec.y;
+    microDropData[o + 2] = shapeRigidVec.z;
     const targetRadius = target.radiusHint || P.radius * (0.28 + h2 * 0.16);
     // 自由飛行時仍是清楚可見的小滴；抵達後保留完整體積成為最終造型的一部分。
     // 半徑與位置共用相同 local，因此不會再出現「先縮掉、模型才淡入」。
@@ -1250,9 +1310,10 @@ function updateNegativeDrops(phase, fidelityAbsorb = 0) {
       negativeDropData[o + 3] = 0;
       continue;
     }
-    negativeDropData[o] = target.x;
-    negativeDropData[o + 1] = target.y;
-    negativeDropData[o + 2] = target.z;
+    applyShapeRigid(target.x, target.y, target.z, shapeRigidVec);
+    negativeDropData[o] = shapeRigidVec.x;
+    negativeDropData[o + 1] = shapeRigidVec.y;
+    negativeDropData[o + 2] = shapeRigidVec.z;
     negativeDropData[o + 3] = (target.radiusHint || 0.09) * amount
       * (1 - fidelityAbsorb);
   }
@@ -1319,6 +1380,14 @@ function updateDropUniforms(t) {
   const tau = Math.PI * 2;
   const phase = fract(t / Math.max(0.001, P.loopDuration));
   const a = phase * tau;
+  // 只有走 SDF 的模式才有造型可動；'split' 等不用形狀場的模式維持 null，
+  // applyShapeRigid 在那些模式底下自然是恆等變換。
+  shapeRigidNow = usesShapeField(P.motion) ? shapeRigidMotion(phase) : null;
+  if (shapeRigidNow) {
+    shapeRigidEuler.set(shapeRigidNow.angleX, shapeRigidNow.angleY, shapeRigidNow.angleZ, 'XYZ');
+    shapeRigidRot.setFromMatrix4(shapeRigidMat4.makeRotationFromEuler(shapeRigidEuler));
+    shapeRigidNow.rotation = shapeRigidRot;
+  }
   const energy = 0.55 + P.flowSpeed * 0.9;
   const amount = formationAmount(phase);
   const fidelityAbsorb = isFormationMotion(P.motion) && shapeField
@@ -1470,6 +1539,13 @@ function updateDropUniforms(t) {
       y *= insetScale;
       z *= insetScale;
     }
+    // weave/shatter/melt/morph/formation 這五種都是拿形狀本地空間的錨點算
+    // 位置，造型的剛體動態要在這裡套進去，水滴才會跟著造型一起轉/浮/呼吸，
+    // 而不是各動各的。'split' 等不用形狀場的模式 shapeRigidNow 恆為 null。
+    if (shapeRigidNow) {
+      applyShapeRigid(x, y, z, shapeRigidVec);
+      x = shapeRigidVec.x; y = shapeRigidVec.y; z = shapeRigidVec.z;
+    }
     const freeRadius = P.radius * radius * radiusFactor;
     if (shatter) {
       const fragment = shatterTarget
@@ -1607,6 +1683,14 @@ function updateDropUniforms(t) {
     uniforms.uFidelityAbsorb.value = fidelityAbsorb;
     uniforms.uShapeSwell.value = shatter ? shatter.swell : 0;
     uniforms.uShapeScale.value = 1 + holdBreathScale(phase);
+    if (shapeRigidNow) uniforms.uShapeRigidRot.value.copy(shapeRigidNow.rotation);
+    else uniforms.uShapeRigidRot.value.identity();
+    uniforms.uShapeRigidOffsetY.value = shapeRigidNow ? shapeRigidNow.offsetY : 0;
+    uniforms.uShapeRigidScale.value.set(
+      shapeRigidNow ? shapeRigidNow.scaleX : 1,
+      shapeRigidNow ? shapeRigidNow.scaleY : 1,
+      shapeRigidNow ? shapeRigidNow.scaleZ : 1,
+    );
     // 融化一併關掉：contactLead 是「形狀在已抵達水滴附近先成形」，前提是形狀還在
     // 成形中。融化的 uShapeProgress 恆為 1、形狀始終完整，這條規則就只剩副作用——
     // 它的影響半徑 0.72 遠大於水滴本身，等於幾顆「不侵蝕球」隨著水滴墜落掃過造型，
@@ -2206,6 +2290,10 @@ function initGL() {
     uMorphActive: { value: new THREE.Vector2(1, 1) },
     uMembraneOverWhite: { value: 0 },
     uShapeScale: { value: 1 },
+    // 造型剛體動態（見 motions/shapeRigid.js）。未啟用時維持單位變換。
+    uShapeRigidRot: { value: new THREE.Matrix3() },
+    uShapeRigidOffsetY: { value: 0 },
+    uShapeRigidScale: { value: new THREE.Vector3(1, 1, 1) },
     // contactLead（形狀在已抵達水滴附近先成形）是形狀匯聚專用的邏輯。崩解噴濺
     // 是它的反向過程，同一條規則會變成「形狀黏著碎片不肯消失、碎片之間先溶掉」，
     // 在輪廓上結出一顆顆瘤；融化則是形狀從頭到尾完整，沒有「先成形」可言，只剩

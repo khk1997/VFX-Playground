@@ -119,6 +119,18 @@
     <div id="morphNote" class="note">上方匯入的形狀 A 定格 → 一道波橫掃過去、把它削成水滴流走，新的形狀 B（目前固定是內建星形）在波前之後長出來 → 定格 → 再掃回來。整個過程形狀本體都在畫面上，水滴只存在於「已經離開舊形狀、還沒併進新形狀」的飛行途中，所以定格時看到的是一顆乾淨完整的造型，不是外面黏著一圈球。「定格時間」是單邊定格佔的時間，剩下的對半分給兩趟變形。「波前錯開」是這個模式最關鍵的一項，它決定「畫面上隨時有多少實體」：調高＝波掃得長、每顆水滴只飛一小段、舊形狀退到哪裡新形狀就跟到哪裡，實體幾乎不間斷；調低＝所有水滴同時出發、飛很久才重組，中間會空出一段兩顆形狀都不在、畫面只剩水滴的時間。預設偏高。「波掃方向」是波從哪個方向掃進來（回程固定轉 90°，否則兩趟看起來像同一段動畫正放再倒放）。「弧線高度」讓水滴沿路往外凸起再落下，走直線會像瞬移。「波前軟硬」是 0 時實體被一刀平切，調高會先收薄再斷開，比較像液體。形狀 A 與形狀 B 都在上方「形狀匯聚」那一組匯入，兩個槽共用同一個「形狀來源」。SVG↔SVG 與 GLB↔GLB 都支援；GLB 的兩顆形狀必須用同一個「模型品質」烘焙（換品質會自動重烘兩顆），高品質下記憶體佔用會是單一形狀的三倍左右。萬一兩顆形狀對不起來（來源或解析度不一致），畫面會退回只有水滴而不是畫出一顆錯位的形狀。</div>
     </div>
     <div data-gate="split" class="row" id="flowSpeedRow"><label>動態張力</label><input type="range" id="flowSpeed" min="0" max="1.5" step="0.01" value="0.47"><span class="val" id="flowSpeed_v"></span></div>
+    <details class="subgroup" data-gate="shape" id="shapeMotionGroup">
+      <summary><h4>造型動態 Shape Motion</h4><span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="shapeMotionOn"><span class="switchTrack" aria-hidden="true"></span></span></summary>
+      <div class="row"><label>循環圈數</label><input type="range" id="shapeMotionCycles" min="1" max="4" step="1" value="1"><span class="val" id="shapeMotionCycles_v"></span></div>
+      <div class="row"><label>回彈感</label><input type="range" id="shapeMotionEase" min="0" max="1" step="0.01" value="0.3"><span class="val" id="shapeMotionEase_v"></span></div>
+      <div class="row"><label>旋轉幅度 X</label><input type="range" id="shapeSpinX" min="0" max="45" step="1" value="0"><span class="val" id="shapeSpinX_v"></span></div>
+      <div class="row"><label>旋轉幅度 Y</label><input type="range" id="shapeSpinY" min="0" max="45" step="1" value="0"><span class="val" id="shapeSpinY_v"></span></div>
+      <div class="row"><label>旋轉幅度 Z</label><input type="range" id="shapeSpinZ" min="0" max="45" step="1" value="10"><span class="val" id="shapeSpinZ_v"></span></div>
+      <div class="row"><label>呼吸縮放</label><input type="range" id="shapeBreathe" min="0" max="0.3" step="0.005" value="0.05"><span class="val" id="shapeBreathe_v"></span></div>
+      <div class="row"><label>浮動幅度</label><input type="range" id="shapeBob" min="0" max="0.3" step="0.005" value="0.08"><span class="val" id="shapeBob_v"></span></div>
+      <div class="row"><label>擠壓拉伸</label><input type="range" id="shapeSquash" min="0" max="1" step="0.01" value="0.35"><span class="val" id="shapeSquash_v"></span></div>
+      <div id="shapeMotionNote" class="note">讓造型本身跟著循環旋轉／呼吸縮放／上下浮動，不只是水滴在動；水滴的目標位置也會套上同一份變換，兩者不會分家。「旋轉幅度 X/Y/Z」三軸共用同一條波形、只是振幅不同，疊起來是繞一根固定傾斜軸來回擺動；只給 Z 軸是原本 2D 貼紙常見的畫面翻轉，加 X/Y 可以做出立體翻滾感。旋轉／呼吸／浮動三者相位互相錯開，看起來比較有機。「回彈感」疊加二次諧波，做出蓄力後回彈的不對稱感，0 是單純正弦。「擠壓拉伸」依浮動的瞬時速度把造型沿垂直軸拉長／壓扁，在浮動的最高／最低點（瞬時靜止）退回單純呼吸縮放。「循環圈數」決定一次循環裡擺動幾次，必須是整數才能讓循環頭尾精確接上。</div>
+    </details>
   </details>
 
   <details class="group" data-gate="shape" open>

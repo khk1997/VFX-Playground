@@ -130,6 +130,16 @@ uniform vec2  uMorphActive;
 // 會把輪廓加粗、細節連在一起，縮放才是整顆造型一起脹縮。均勻縮放對 SDF 是精確
 // 的 d(p) = s·d(p/s)，所以 raymarch 的步長仍然安全。
 uniform float uShapeScale;
+// 造型本身的剛體動態（見 motions/shapeRigid.js）：呼吸縮放、任意軸旋轉、上下
+// 浮動、擠壓拉伸疊在 SDF 取樣座標上，讓匯入的 SVG/GLB 造型自己也會動，不只是
+// 水滴在動。CPU 端算的是「本地座標 → 世界座標」的正變換（水滴的目標位置也套
+// 同一份，兩者才不會分家）；這裡取樣 SDF 前要做反變換，把世界座標的 ray march
+// 點換回造型本地座標。旋轉矩陣是正交矩陣，反矩陣就是轉置——GLSL ES 1.00 沒有
+// transpose()，但 vec3 * mat3 本來就定義成 transpose(mat3) * vec3，直接拿同一顆
+// 旋轉矩陣做「向量乘矩陣」即是反旋轉，不必另外傳一份轉置矩陣。
+uniform mat3  uShapeRigidRot;
+uniform float uShapeRigidOffsetY;
+uniform vec3  uShapeRigidScale;
 uniform float uContactLead;
 uniform float uShapeDepth;
 uniform float uShapeSoftness;
@@ -657,7 +667,13 @@ float mapScene(vec3 p, bool smoothShape){
   if (uShapeProgress > 0.0001) {
     // uShapeTex 在 GLB 模式儲存的是匯入時烘焙的高密度 Metaball 場，
     // 不是原模型距離場。以等距侵蝕讓每個細節球核逐步長大，避免 alpha 淡入。
-    vec3 shapeP = p / uShapeScale;
+    // 造型剛體動態的反變換：CPU 端把本地座標依序縮放、旋轉、上下平移變成世界
+    // 座標，這裡要反過來——先減平移、再反旋轉、再反縮放——才能把 ray march
+    // 的世界座標點換回造型原本定義的本地座標。未啟用時旋轉矩陣是單位矩陣、
+    // scale 為單位值，等價於原本的 p / uShapeScale。
+    vec3 rigidP = vec3(p.x, p.y - uShapeRigidOffsetY, p.z);
+    vec3 unrotatedP = rigidP * uShapeRigidRot;
+    vec3 shapeP = (unrotatedP / uShapeRigidScale) / uShapeScale;
     float detailD;
     if (uShapeMorph > 0.5) {
       // 兩顆形狀同時在場：舊的被「消失波前」削掉，新的被「出現波前」放出來，
