@@ -2,24 +2,26 @@
 import * as THREE from 'three';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
-} from './shape-field.js?v=svg-shape-53';
+} from './shape-field.js?v=svg-shape-54';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
   MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
   MORPH_TARGET_SVG_NAME, makeMorphTargetSvgFile,
   MORPH_TARGET_SOLID_NAME, buildMorphTargetSolid,
-} from './default-shapes.js?v=svg-shape-53';
+} from './default-shapes.js?v=svg-shape-54';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-53';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-53';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-53';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-53';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-53';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-53';
-import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-53';
+} from './motions/registry.js?v=svg-shape-54';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-54';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-54';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-54';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-54';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-54';
+import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-54';
+import createRevealMotion from './motions/reveal.js?v=svg-shape-54';
+import createJellyMotion from './motions/jelly.js?v=svg-shape-54';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -176,6 +178,31 @@ const DEFAULTS = {              // 數值滑桿
   morphCellScale: 4,
   morphNeck: 0.12,
   morphNeckWidth: 0.55,
+  // 打字機（見 motions/reveal.js）。三段時間軸「寫入 → 定格 → 抹除」，revealHold
+  // 是定格佔循環的比例，剩下的對半分給寫入與抹除。
+  revealHold: 0.34,
+  // 掃描方向（度，XY 平面）。0 = 由左至右，也就是讀字的方向；抹除固定反向掃。
+  revealWaveAngle: 0,
+  // 波前錯開：每顆水滴的出發時間依它在掃描軸上的位置差開多少。這同時就是波前的
+  // 掃描寬度——調高＝波掃得長、每顆水滴只飛一小段、實體幾乎緊跟著波前長出來；
+  // 調低＝整排水滴同時出發、飛很久才落定，中途畫面上實體會少一大塊。
+  revealStagger: 0.7,
+  // 水滴進場路徑往外凸多少。液體貼上表面是「隆起 → 攤平」，直線插值像瞬移。
+  revealArc: 0.45,
+  // 前緣收頸：實體在波前處先變薄再長出來，給的是液體的身分而不是貼紙的硬邊。
+  revealNeck: 0.1,
+  // 亂流：把波前擾成參差的有機邊緣，水滴的出發時機也跟著參差（見 dropProgress
+  // 的 breakJitter）。0 是一條筆直的切線。
+  revealNoise: 0.18,
+  revealNoiseScale: 1.5,
+  // 果凍（見 motions/jelly.js）。一個循環戳幾下、每下晃幾回、以及晃動的幅度與
+  // 衰減。戳擊次數與回彈次數都必須是整數，循環接縫才精確接得上。
+  jellyPokes: 2,
+  jellyBounces: 3,
+  jellyAmount: 0.22,
+  jellyDamping: 2.4,
+  // 每次戳擊附帶的扭轉／側傾（度）。刻意小，主角是擠壓拉伸。
+  jellyTwist: 7,
   // 融化（見 motions/melt.js）。滴落間隔要隨機、又要能無縫循環，靠的是「每顆水滴
   // 一個循環滴整數次」：頻率與相位偏移各自由雜湊決定，看起來雜亂，phase=0/1 卻同值。
   // 滴落頻率是每個循環的基準滴數，節奏差異讓各顆在這個基準上下錯開。
@@ -601,6 +628,18 @@ const fmt = {
   shapeSquash: v => Math.round(v * 100) + '%',
   shapeAScale: v => 'x' + v.toFixed(2),
   shapeBScale: v => 'x' + v.toFixed(2),
+  revealHold: v => (v * P.loopDuration).toFixed(1) + 's',
+  revealWaveAngle: v => v.toFixed(0) + '°',
+  revealStagger: v => v === 0 ? '全體同時' : Math.round(v * 100) + '%',
+  revealArc: v => v === 0 ? '直線' : v.toFixed(2),
+  revealNeck: v => v === 0 ? '不收頸' : v.toFixed(3),
+  revealNoise: v => v === 0 ? '筆直' : v.toFixed(3),
+  revealNoiseScale: v => 'x' + v.toFixed(1),
+  jellyPokes: v => Math.round(v) + ' 下/循環',
+  jellyBounces: v => Math.round(v) + ' 回',
+  jellyAmount: v => v === 0 ? '關閉' : Math.round(v * 100) + '%',
+  jellyDamping: v => v.toFixed(1),
+  jellyTwist: v => v === 0 ? '不扭轉' : v.toFixed(0) + '°',
 };
 
 // 崩解噴濺的四段時長是正規化的相對權重，所以動任何一段，其他三段實際佔的秒數
@@ -619,7 +658,7 @@ function refreshShatterTimelineReadouts() {
 // 就得重畫，否則會停在用舊循環長度算出來的數字。切換動態模式時循環秒數會跟著
 // 換（每個模式各自記憶），所以這不是罕見情況——morphHold 一開始就漏了列進來，
 // 結果切到形狀變形時定格時間顯示的是用上一個模式的循環秒數算的值。
-const LOOP_SCALED_KEYS = ['gatherDuration', 'shapeHold', 'morphHold'];
+const LOOP_SCALED_KEYS = ['gatherDuration', 'shapeHold', 'morphHold', 'revealHold'];
 function refreshLoopScaledReadouts() {
   for (const key of LOOP_SCALED_KEYS) {
     const valEl = document.getElementById(key + '_v');
@@ -1197,6 +1236,22 @@ const {
 // 頂端算一次存進 shapeRigidNow，本模組其餘地方（updateMicroDrops／
 // updateNegativeDrops／主滴迴圈）都直接讀這個共用狀態，不必個別重算。
 const { shapeRigidMotion } = createShapeRigidMotion(P);
+
+// 打字機：波前掃過形狀，實體跟著被寫出來／抹掉。錨點跟形狀匯聚共用同一組
+// （形狀 A 的主錨點），所以同樣用 getter 傳入。微滴另外繫一份，讀的是密度高
+// 得多的那組錨點 —— 兩者的水滴數與錨點池都不同，共用一份會讓微滴全部擠在
+// 主滴那幾個位置上（跟 morph 的主/微配對表分開是同一個理由）。
+const {
+  revealTimeline, revealFront, revealDropPosition, revealRadiusFactor,
+} = createRevealMotion(P, { anchors: () => formationAnchors });
+const {
+  revealDropPosition: revealMicroPosition, revealRadiusFactor: revealMicroRadius,
+} = createRevealMotion(P, { anchors: () => microFormationAnchors });
+
+// 果凍：造型完整靜止，週期性被戳一下做阻尼彈簧回彈。它產出的是跟
+// shapeRigidMotion 同一種形狀的變換物件，所以下面那條「歐拉角 → 旋轉矩陣」的
+// 通用轉換兩者共用。
+const { jellyTransform } = createJellyMotion(P);
 let shapeRigidNow = null;
 const shapeRigidVec = new THREE.Vector3();
 // 旋轉現在是任意軸（XYZ 各自振幅），用歐拉角組出一個 3x3 旋轉矩陣，比逐軸
@@ -1228,7 +1283,7 @@ const formationPosNow = new THREE.Vector3();
 const formationPosBefore = new THREE.Vector3();
 const formationPosAfter = new THREE.Vector3();
 
-function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false) {
+function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false, revealSolid = false) {
   // 崩解噴濺不走匯聚管線，但微滴群正好是最好用的碎片來源（20 顆，是主滴的
   // 近兩倍），所以它也要把微滴開起來，只是位置改由彈道決定。
   const shattering = P.motion === 'shatter';
@@ -1238,7 +1293,12 @@ function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false) {
   // 形狀變形的微滴不是「細節補強」而是主力之一：整個畫面只有水滴，主滴 12 顆
   // 撐不出兩顆形狀的輪廓，微滴那 20 顆負責把輪廓填細。
   const morphing = P.motion === 'morph';
-  const activeCount = (isFormationMotion(P.motion) || shattering || melting || morphing) && shapeField
+  // 打字機的微滴負責把波前那一條的密度撐起來：只有主滴的話，波前看起來是幾顆
+  // 大球在推進，而不是一整條液體被鋪上去。果凍不列入——它的造型完整靜止，
+  // 沒有「正在成形的細節」可補，微滴只會變成貼在表面的一圈贅球。
+  const revealing = P.motion === 'reveal';
+  const activeCount = (isFormationMotion(P.motion) || shattering || melting || morphing || revealing)
+    && shapeField
     ? Math.max(0, Math.min(MAX_MICRO_DROPS, Math.round(P.microCount)))
     : 0;
   const amount = formationAmount(phase);
@@ -1322,6 +1382,23 @@ function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false) {
       microShapeData[o + 3] = 1;
       continue;
     }
+    if (revealing) {
+      revealMicroPosition(i, phase, formationPosNow);
+      applyShapeRigid(formationPosNow.x, formationPosNow.y, formationPosNow.z, formationPosNow);
+      microDropData[o] = formationPosNow.x;
+      microDropData[o + 1] = formationPosNow.y;
+      microDropData[o + 2] = formationPosNow.z;
+      // 錨點自帶的 radiusHint 是「這個位置的造型有多厚」，用它波前的粗細才會跟著
+      // 形狀走（細筆畫處落小滴、粗桿處落大滴）；缺就退回依 h2 分散的尺寸。
+      const target = pool[i % pool.length];
+      const hint = target.radiusHint || P.radius * (0.28 + h2 * 0.16);
+      microDropData[o + 3] = hint * 0.72 * revealMicroRadius(i, phase, revealSolid);
+      microShapeData[o] = 1;
+      microShapeData[o + 1] = 0;
+      microShapeData[o + 2] = 0;
+      microShapeData[o + 3] = 1;
+      continue;
+    }
     const anchor = i * Math.PI * 2 / activeCount + h1 * 0.8;
     const orbit = P.spread * (1.15 + h2 * 0.75);
     const free = freeOrbitPosition(a, anchor, orbit, h2, h3, MICRO_ORBIT_TUNE, freeOrbitVec);
@@ -1363,7 +1440,12 @@ function updateNegativeDrops(phase, fidelityAbsorb = 0) {
   // 空腔（負滴）是形狀的一部分，不是水滴的一部分。崩解噴濺沒有匯聚包絡可讀，
   // 直接跟著形狀本身的可見度走：炸開後形狀不在，空腔自然也不該留在畫面上。
   // 融化的形狀始終完整，空腔自然也要一直在，不隨任何包絡消長。
-  const amount = P.motion === 'melt'
+  // 打字機與果凍的實體同樣全程都在（uShapeProgress 恆為 1），空腔要一直在，
+  // 否則有真孔洞的模型（例如環形 GLB）會被填實。打字機在波前還沒掃到的區域
+  // 確實會有幾顆「懸空的挖洞球」，但空腔在造型內部、飛進來的水滴在造型外部，
+  // 兩者重疊的時間極短；而 SVG 路徑根本沒有空腔（cavityTargets 是空陣列），
+  // 打字機的主場正是 SVG。
+  const amount = P.motion === 'melt' || P.motion === 'reveal' || P.motion === 'jelly'
     ? 1
     // 形狀變形不顯示距離場實體（uShapeProgress 為 0），空腔沒有母體可挖，留著
     // 只會變成幾顆漂在水滴群裡的隱形挖洞球，把輪廓咬掉幾塊。
@@ -1452,7 +1534,13 @@ function updateDropUniforms(t) {
   const a = phase * tau;
   // 只有走 SDF 的模式才有造型可動；'split' 等不用形狀場的模式維持 null，
   // applyShapeRigid 在那些模式底下自然是恆等變換。
-  shapeRigidNow = usesShapeField(P.motion) ? shapeRigidMotion(phase) : null;
+  //
+  // 果凍走自己那條阻尼彈簧，不疊「造型動態」那組週期性旋轉／呼吸：兩者都在改
+  // 同一份變換，疊起來會看不出哪一下是被戳的。果凍的形變本身就是這個模式的
+  // 全部內容，讓它獨佔這個通道。
+  shapeRigidNow = P.motion === 'jelly'
+    ? jellyTransform(phase)
+    : usesShapeField(P.motion) ? shapeRigidMotion(phase) : null;
   if (shapeRigidNow) {
     shapeRigidEuler.set(shapeRigidNow.angleX, shapeRigidNow.angleY, shapeRigidNow.angleZ, 'XYZ');
     shapeRigidRot.setFromMatrix4(shapeRigidMat4.makeRotationFromEuler(shapeRigidEuler));
@@ -1473,19 +1561,27 @@ function updateDropUniforms(t) {
   const shatterPrimary = shatter ? shatterAnchorSets().primary : null;
   const melting = P.motion === 'melt';
   const morphing = P.motion === 'morph';
+  const revealing = P.motion === 'reveal';
+  const jelly = P.motion === 'jelly';
   if (melting) rebuildMeltAnchors();
   if (morphing) { ensureMorphTarget(); rebuildMorphPairs(); }
   // 實體變形要有雙通道貼圖才成立；沒有就只剩水滴（見 rebuildMorphPackedTexture）。
   const morphSolid = morphing && !!morphPackedTexture && morphPairs.length > 0;
   const morphCut = morphSolid ? morphFronts(morphPairs, phase) : null;
   const morphCutT = morphSolid ? morphTimelineOf(phase).t : 0;
+  // 打字機只需要形狀 A 自己那張貼圖（波前讀的是它的 r 通道，見 reveal.js 檔頭），
+  // 所以條件比 morphSolid 寬鬆得多——不必等第二顆形狀烘焙、也不必打包雙通道。
+  const revealSolid = revealing && !!shapeField?.texture && formationAnchors.length > 0;
+  const revealCut = revealSolid ? revealFront(phase) : null;
   const formationShapeProgress = !shapeField
     ? 0
     // 融化的形狀從頭到尾完整不變：滴下去的是額外長出來的水滴，不是造型被削掉的
     // 部分。所以跟穿梭環繞一樣永遠滿值，不參與任何體積交接。
     // 形狀變形的實體同樣永遠滿值：它不靠淡入淡出交接，兩顆形狀是被兩道波前
     // 各自削掉／放出來的（見 shaders.js 的 uShapeCut），整個循環都該全力顯示。
-    : P.motion === 'weave' || melting || morphSolid
+    // 打字機同理：實體是被單一道波前寫出來／抹掉的，交接由 uShapeCut 負責。
+    // 果凍的形狀從頭到尾完整，只是在晃——完全不參與任何體積交接。
+    : P.motion === 'weave' || melting || morphSolid || revealSolid || jelly
       ? 1
       : shatter
         ? shatterShapeAmount(shatter)
@@ -1499,7 +1595,7 @@ function updateDropUniforms(t) {
           : 0;
   // 模型已大致長成後，讓可見水滴在目標體積內連續被 SDF 吸收。
   // 最後輪廓只剩匯入模型場；吸收在模型完成前不啟動，避免「水滴先縮、模型才出現」。
-  const microCount = updateMicroDrops(phase, fidelityAbsorb, morphSolid);
+  const microCount = updateMicroDrops(phase, fidelityAbsorb, morphSolid, revealSolid);
   const negativeCount = updateNegativeDrops(phase, fidelityAbsorb);
 
   const splitBeat = splitTimeline(phase);
@@ -1520,7 +1616,8 @@ function updateDropUniforms(t) {
     // 融化也是一次出現很多顆各自獨立的水滴，同樣需要這套正規化。
     // 形狀變形同樣是「一次出現很多顆」：水滴群就是整個畫面，沒有正規化的話
     // 排成形狀的那一刻整組會黏成一大團，輪廓完全糊掉。
-    : isFormationMotion(P.motion) || P.motion === 'shatter' || melting || morphing
+    // 打字機的水滴同樣整群同時在場（波前那一整條），需要同一套正規化。
+    : isFormationMotion(P.motion) || P.motion === 'shatter' || melting || morphing || revealing
       // smooth-min 連續合併很多顆時會累積膨脹；依數量正規化融合半徑，
       // 讓 12–16 顆仍只在真正接觸處形成液橋，不把整組擴成巨大距離場。
       ? Math.max(0.10, 0.42 / Math.sqrt(layoutCount))
@@ -1587,6 +1684,19 @@ function updateDropUniforms(t) {
       y = formationPosNow.y;
       z = formationPosNow.z;
       radiusFactor = morphRadiusFactor(morphPairs, i, phase, morphSolid);
+    } else if (revealing) {
+      revealDropPosition(i, phase, formationPosNow);
+      x = formationPosNow.x;
+      y = formationPosNow.y;
+      z = formationPosNow.z;
+      radiusFactor = revealRadiusFactor(i, phase, revealSolid);
+    } else if (jelly) {
+      // 果凍預設沒有水滴（count 0）。使用者調高的話讓它們貼在表面錨點上，
+      // 下面的 applyShapeRigid 會把果凍的形變一併套上去，水滴因此跟著一起
+      // 晃，而不是浮在旁邊各動各的。
+      const pool = weaveSurfaceAnchors.length ? weaveSurfaceAnchors : formationAnchors;
+      const home = pool.length ? pool[Math.floor(h2 * pool.length) % pool.length] : null;
+      if (home) { x = home.x; y = home.y; z = home.z; }
     } else if (isFormationMotion(P.motion)) {
       const formation = amount;
       formationDropPosition(i, phase, layoutCount, formationPosNow);
@@ -1600,7 +1710,11 @@ function updateDropUniforms(t) {
     // 憑空浮在造型下方。它自己的墜落已經在 meltPosition 裡算過了。
     // 形狀變形也排除：這個偏移隨每顆水滴的大小不同，而變形模式的輪廓完全由
     // 水滴自己排出來，大小不一的下沉量會讓靜止的形狀邊緣參差不齊。
-    if (!melting && !morphing) y -= P.gravity * P.spread * 0.045 * Math.pow(radius, 1.35);
+    // 打字機與果凍同樣排除：兩者的水滴都要正好落在實體表面上（波前抵達點／
+    // 表面錨點），各自被推低不同的量就會在輪廓旁浮出一圈對不上的球。
+    if (!melting && !morphing && !revealing && !jelly) {
+      y -= P.gravity * P.spread * 0.045 * Math.pow(radius, 1.35);
+    }
     if (isFormationMotion(P.motion)) {
       // anchor 可能落在模型表層；吸收時稍微往模型中心推入，避免半徑縮小後
       // 先失去液橋、在輪廓旁短暫留下孤立小球。
@@ -1740,7 +1854,9 @@ function updateDropUniforms(t) {
   // 正在形成」與「已經墜到半空」兩種水滴。收太緊，正在形成的那顆會變成貼在表面
   // 的一顆獨立球，失去液體被拉出來的樣子；放太鬆，落下的幾滴會彼此牽絲黏成
   // 一條水柱。0.4 是兩者都還能看的折衷，再細調交給「黏度」滑桿。
-  const mergeScale = P.motion === 'weave'
+  // 果凍的水滴是貼在造型表面的點綴，跟穿梭環繞一樣該保持清楚的球體輪廓，
+  // 不該跟造型融成一坨黏液。
+  const mergeScale = P.motion === 'weave' || jelly
     ? 0.15
     : melting
       ? 0.4
@@ -1767,14 +1883,16 @@ function updateDropUniforms(t) {
     // 半徑外被往內削 0.015、半徑內不削，形狀表面就整片整片地漲縮。
     // 形狀變形也關掉，理由跟融化同一條：實體恆為滿值，contactLead 只剩副作用
     // ——影響半徑遠大於水滴本身，飛過去的水滴會像幾把刨刀掃過兩顆形狀的表面。
-    uniforms.uContactLead.value = (shatter || melting || morphSolid) ? 0 : 1;
+    // 打字機與果凍同理：兩者的實體都恆為滿值，沒有「正在成形」可言。
+    uniforms.uContactLead.value = (shatter || melting || morphSolid || revealSolid || jelly)
+      ? 0 : 1;
     if (morphSolid) {
       uniforms.uShapeTex.value = morphPackedTexture;
       uniforms.uShapeMorph.value = morphCut.mode;
       uniforms.uShapeCut.value.set(
         morphCut.nx, morphCut.ny, morphCut.fromFront, morphCut.toFront,
       );
-      // 這兩個是打包型 uniform，不走「滑桿 key → u+首字大寫」那條自動對應，
+      // 這幾個是打包型 uniform，不走「滑桿 key → u+首字大寫」那條自動對應，
       // 所以在這裡跟著波前一起送。
       uniforms.uMorphBreak.value.set(
         P.morphNoise, P.morphNoiseScale, P.morphCell, P.morphCellScale,
@@ -1783,8 +1901,44 @@ function updateDropUniforms(t) {
       uniforms.uMorphActive.value.set(
         morphCut.fromActive ? 1 : 0, morphCut.toActive ? 1 : 0,
       );
+      // 波前形狀與切口軟硬本來靠「滑桿 → uniform」的自動對應就會寫進去，這裡仍
+      // 明確再送一次：打字機也在改同一組 uniform（它固定用平面掃描），而自動對應
+      // 只在滑桿被拖動時觸發。少了這一行，從打字機切回變形模式時波前會卡在
+      // 打字機留下的值，直到使用者剛好去動那兩根滑桿才恢復。
+      uniforms.uMorphFront.value = P.morphFront;
+      uniforms.uMorphSpiral.value = P.morphSpiral;
+      uniforms.uShapeCutBlend.value = P.morphCutBlend;
+    } else if (revealSolid) {
+      // 打字機讀的是形狀 A 自己那張貼圖的 r 通道，不需要雙通道打包圖。
+      uniforms.uShapeTex.value = shapeField.texture;
+      if (revealCut.holding) {
+        // 定格段：整顆形狀完整顯示，直接走單一形狀那條路，省掉兩次距離場取樣
+        // 與整條切削運算。定格佔循環一大段，這筆省得值得。
+        uniforms.uShapeMorph.value = 0;
+      } else {
+        uniforms.uShapeMorph.value = revealCut.mode;
+        // 兩條波前給同一個位置：只有一邊是啟用的（另一邊被 uMorphActive 關掉），
+        // 而 dissolveField 的擾動帶寬取的是「到最近一條波前的距離」——給同值，
+        // 擾動才會正好圍著這唯一的一條波前，不會在遠處多開一條帶。
+        uniforms.uShapeCut.value.set(
+          revealCut.nx, revealCut.ny, revealCut.front, revealCut.front,
+        );
+        uniforms.uMorphActive.value.set(
+          revealCut.erasing ? (revealCut.active ? 1 : 0) : 0,
+          revealCut.erasing ? 0 : (revealCut.active ? 1 : 0),
+        );
+      }
+      // 波前形狀固定平面掃描：放射與螺旋讀起來是「從中心綻開」與「捲進來」，
+      // 都不是打字機（想要那些效果的話形狀變形模式已經有了）。
+      uniforms.uMorphFront.value = 0;
+      uniforms.uMorphSpiral.value = 1;
+      uniforms.uMorphBreak.value.set(P.revealNoise, P.revealNoiseScale, 0, 4);
+      uniforms.uMorphNecking.value.set(P.revealNeck, 0.55);
+      // 切口軟硬不開成滑桿：這個模式的重點是「波掃過去把字寫出來」，一刀平切
+      // 看起來像貼紙、太軟又看不出波前在哪，固定在兩者之間的液體感上。
+      uniforms.uShapeCutBlend.value = 0.06;
     } else {
-      // 離開變形模式（或還沒備妥雙通道貼圖）就把貼圖交還給形狀本身那張，
+      // 離開變形／打字機模式（或還沒備妥貼圖）就把貼圖交還給形狀本身那張，
       // 否則其餘模式會繼續讀到打包過的圖。
       if (shapeField?.texture) uniforms.uShapeTex.value = shapeField.texture;
       uniforms.uShapeMorph.value = 0;
@@ -1796,7 +1950,9 @@ function updateDropUniforms(t) {
     // 因此比整顆形狀常駐的穿梭環繞貴了兩倍多。定格佔循環三成，而且正是使用者
     // 盯著形狀看的時候，所以這裡明確把數量歸零。
     const morphIdle = morphSolid && (morphCutT <= 0 || morphCutT >= 1);
-    const dropsHidden = fidelityComplete || morphIdle;
+    // 打字機的定格段同理：水滴此刻全都是實體的一部分，半徑全為 0。
+    const revealIdle = revealSolid && revealCut.holding;
+    const dropsHidden = fidelityComplete || morphIdle || revealIdle;
     uniforms.uCount.value = dropsHidden ? 0 : count;
     uniforms.uMicroCount.value = dropsHidden ? 0 : microCount;
     uniforms.uNegativeCount.value = dropsHidden ? 0 : negativeCount;

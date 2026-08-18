@@ -46,6 +46,8 @@
       <option value="shatter">崩解噴濺 Shatter</option>
       <option value="melt">融化 Melt</option>
       <option value="morph">形狀變形 Morph</option>
+      <option value="reveal">打字機 Reveal</option>
+      <option value="jelly">果凍 Jelly</option>
       <!-- 已改名或已移除的舊值。留成隱藏選項，舊的參數組合檔寫進來時 value 才不會
            被瀏覽器丟成空字串；bindControls 會立刻把它導向現有選項（LEGACY_SELECT_VALUES）。 -->
       <option value="cinematic" hidden>分裂（舊值 cinematic）</option>
@@ -116,8 +118,28 @@
     <div class="row" id="morphCellRow"><label>晶格碎裂</label><input type="range" id="morphCell" min="0" max="0.6" step="0.005" value="0"><span class="val" id="morphCell_v"></span></div>
     <div class="row" id="morphCellScaleRow"><label>碎塊大小</label><input type="range" id="morphCellScale" min="1" max="12" step="0.5" value="4"><span class="val" id="morphCellScale_v"></span></div>
     </div>
+    <div class="modeBlock" data-gate="reveal">
+    <div class="row" id="revealHoldRow"><label>定格時間</label><input type="range" id="revealHold" min="0" max="0.6" step="0.01" value="0.34"><span class="val" id="revealHold_v"></span></div>
+    <div class="row" id="revealWaveAngleRow"><label>書寫方向</label><input type="range" id="revealWaveAngle" min="0" max="360" step="5" value="0"><span class="val" id="revealWaveAngle_v"></span></div>
+    <div class="row" id="revealStaggerRow"><label>波前錯開</label><input type="range" id="revealStagger" min="0" max="0.9" step="0.01" value="0.7"><span class="val" id="revealStagger_v"></span></div>
+    <div class="row" id="revealArcRow"><label>弧線高度</label><input type="range" id="revealArc" min="0" max="0.8" step="0.01" value="0.45"><span class="val" id="revealArc_v"></span></div>
+    <div class="row" id="revealNeckRow"><label>前緣收頸</label><input type="range" id="revealNeck" min="0" max="0.12" step="0.002" value="0.1"><span class="val" id="revealNeck_v"></span></div>
+    <div class="row" id="revealNoiseRow"><label>邊緣亂流</label><input type="range" id="revealNoise" min="0" max="0.6" step="0.005" value="0.18"><span class="val" id="revealNoise_v"></span></div>
+    <div class="row" id="revealNoiseScaleRow"><label>亂流尺度</label><input type="range" id="revealNoiseScale" min="0.5" max="8" step="0.1" value="1.5"><span class="val" id="revealNoiseScale_v"></span></div>
+    <div id="revealNote" class="note">一道波從一側掃過去，形狀跟著波前被「寫」出來 → 定格 → 再反向掃回去抹掉。水滴只存在於波前那一小撮：它們從波掃來的方向飛進來、在波前抵達自己位置的那一刻併進實體，所以看起來是液體被那道波鋪上去的，不是一群球各自飛到定位。「書寫方向」0° 是由左至右（讀字的方向），抹除固定反向掃，讀起來像倒退鍵把字一個個吃掉。「波前錯開」同時是波前的掃描寬度：調高＝波掃得長、實體緊跟著波前長出來；調低＝整排水滴同時出發，中途畫面上實體會少一大塊。「前緣收頸」讓實體在波前處先變薄再長出來，給的是液體的身分而不是貼紙的硬邊，建議一直開著。形狀在下方「形狀匯聚」那一組匯入，SVG 與 GLB 都支援。</div>
+    </div>
+    <div class="modeBlock" data-gate="jelly">
+    <div class="row" id="jellyPokesRow"><label>戳擊次數</label><input type="range" id="jellyPokes" min="1" max="6" step="1" value="2"><span class="val" id="jellyPokes_v"></span></div>
+    <div class="row" id="jellyAmountRow"><label>彈性幅度</label><input type="range" id="jellyAmount" min="0" max="0.6" step="0.01" value="0.22"><span class="val" id="jellyAmount_v"></span></div>
+    <div class="row" id="jellyBouncesRow"><label>回彈次數</label><input type="range" id="jellyBounces" min="1" max="8" step="1" value="3"><span class="val" id="jellyBounces_v"></span></div>
+    <div class="row" id="jellyDampingRow"><label>阻尼衰減</label><input type="range" id="jellyDamping" min="0" max="8" step="0.1" value="2.4"><span class="val" id="jellyDamping_v"></span></div>
+    <div class="row" id="jellyTwistRow"><label>扭轉幅度</label><input type="range" id="jellyTwist" min="0" max="25" step="1" value="7"><span class="val" id="jellyTwist_v"></span></div>
+    <div id="jellyNote" class="note">造型從頭到尾完整靜止，只是週期性被「戳一下」，然後像果凍一樣阻尼彈簧回彈晃動幾下才平息。這不是物理模擬——沒有質量、碰撞或重力解算，走的是卡通彈性語言：「瞬間衝擊 → 過衝 → 遞減回彈」這個大家看慣的節奏。「戳擊次數」是一個循環戳幾下，「回彈次數」是每一下晃幾回；兩者都只取整數，前一下的晃動一定收乾淨了下一下才開始，循環頭尾也因此精確接上。「阻尼衰減」調低會晃很久（軟果凍），調高則一下就穩住（硬果凍）。「扭轉幅度」讓每次戳擊附帶不同方向的側傾與扭轉，同一顆果凍才不會每次都用完全一樣的晃法。水滴預設不出場（造型本身就是全部的戲）；調高「水滴數量」的話它們會貼在表面錨點上跟著果凍一起晃。</div>
+    </div>
     <div data-gate="split" class="row" id="flowSpeedRow"><label>動態張力</label><input type="range" id="flowSpeed" min="0" max="1.5" step="0.01" value="0.47"><span class="val" id="flowSpeed_v"></span></div>
-    <details class="subgroup" data-gate="shape" id="shapeMotionGroup">
+    <!-- 果凍排除：它的阻尼彈簧走的是同一份造型變換（見 bubble.js 的 shapeRigidNow），
+         兩者疊起來會看不出哪一下是被戳的，所以那個模式底下這一組不開放。 -->
+    <details class="subgroup" data-gate="shape !jelly" id="shapeMotionGroup">
       <summary><h4>造型動態 Shape Motion</h4><span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="shapeMotionOn"><span class="switchTrack" aria-hidden="true"></span></span></summary>
       <div class="row"><label>循環圈數</label><input type="range" id="shapeMotionCycles" min="1" max="4" step="1" value="1"><span class="val" id="shapeMotionCycles_v"></span></div>
       <div class="row"><label>回彈感</label><input type="range" id="shapeMotionEase" min="0" max="1" step="0.01" value="0.3"><span class="val" id="shapeMotionEase_v"></span></div>
@@ -150,7 +172,7 @@
       <div data-gate="formation" class="row timelineRow"><label>完成停留</label><input type="range" id="shapeHold" min="0.05" max="0.45" step="0.01" value="0.45"><span class="val" id="shapeHold_v"></span></div>
       <div data-gate="formation" id="timelineSummary" class="note timelineRow"></div>
       <div class="effectSubhead">外形細節</div>
-      <div data-gate="!weave" class="row" id="microCountRow"><label>輪廓細節滴</label><input type="range" id="microCount" min="8" max="20" step="1" value="14"><span class="val" id="microCount_v"></span></div>
+      <div data-gate="!weave !jelly" class="row" id="microCountRow"><label>輪廓細節滴</label><input type="range" id="microCount" min="8" max="20" step="1" value="14"><span class="val" id="microCount_v"></span></div>
       <div data-gate="svg" class="row"><label>形狀厚度</label><input type="range" id="shapeDepth" min="0.05" max="0.8" step="0.01" value="0.1"><span class="val" id="shapeDepth_v"></span></div>
       <div data-gate="svg" class="row"><label>邊緣圓角</label><input type="range" id="shapeEdgeBevel" min="0" max="0.15" step="0.001" value="0.025"><span class="val" id="shapeEdgeBevel_v"></span></div>
       <div class="row"><label>邊緣液化</label><input type="range" id="shapeSoftness" min="0" max="0.25" step="0.005" value="0"><span class="val" id="shapeSoftness_v"></span></div>
@@ -439,6 +461,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=universal-dbg58"></script>
+<script type="module" src="./bubble.js?v=universal-dbg59"></script>
 </body>
 </html>
