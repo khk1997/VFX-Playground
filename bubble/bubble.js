@@ -2,26 +2,26 @@
 import * as THREE from 'three';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
-} from './shape-field.js?v=svg-shape-54';
+} from './shape-field.js?v=svg-shape-55';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
   MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
   MORPH_TARGET_SVG_NAME, makeMorphTargetSvgFile,
   MORPH_TARGET_SOLID_NAME, buildMorphTargetSolid,
-} from './default-shapes.js?v=svg-shape-54';
+} from './default-shapes.js?v=svg-shape-55';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-54';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-54';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-54';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-54';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-54';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-54';
-import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-54';
-import createRevealMotion from './motions/reveal.js?v=svg-shape-54';
-import createJellyMotion from './motions/jelly.js?v=svg-shape-54';
+} from './motions/registry.js?v=svg-shape-55';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-55';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-55';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-55';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-55';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-55';
+import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-55';
+import createRevealMotion from './motions/reveal.js?v=svg-shape-55';
+import createJellyMotion from './motions/jelly.js?v=svg-shape-55';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -178,22 +178,21 @@ const DEFAULTS = {              // 數值滑桿
   morphCellScale: 4,
   morphNeck: 0.12,
   morphNeckWidth: 0.55,
-  // 打字機（見 motions/reveal.js）。三段時間軸「寫入 → 定格 → 抹除」，revealHold
-  // 是定格佔循環的比例，剩下的對半分給寫入與抹除。
+  // 打字機（見 motions/reveal.js）。三段時間軸「打字 → 定格 → 倒退」，revealHold
+  // 是定格佔循環的比例，剩下的對半分給打字與倒退。
   revealHold: 0.34,
-  // 掃描方向（度，XY 平面）。0 = 由左至右，也就是讀字的方向；抹除固定反向掃。
+  // 一段字分成幾格跳出來。這是這個模式的關鍵參數：格數要對上形狀裡實際的字數，
+  // 才會是「一個字一個字出現」；格數遠多於字數就退化成一條線橫著抹過去。
+  revealSteps: 8,
+  // 掃描方向（度，XY 平面）。0 = 由左至右，也就是讀字的方向；倒退固定反向。
   revealWaveAngle: 0,
-  // 波前錯開：每顆水滴的出發時間依它在掃描軸上的位置差開多少。這同時就是波前的
-  // 掃描寬度——調高＝波掃得長、每顆水滴只飛一小段、實體幾乎緊跟著波前長出來；
-  // 調低＝整排水滴同時出發、飛很久才落定，中途畫面上實體會少一大塊。
-  revealStagger: 0.7,
-  // 水滴進場路徑往外凸多少。液體貼上表面是「隆起 → 攤平」，直線插值像瞬移。
-  revealArc: 0.45,
-  // 前緣收頸：實體在波前處先變薄再長出來，給的是液體的身分而不是貼紙的硬邊。
-  revealNeck: 0.1,
-  // 亂流：把波前擾成參差的有機邊緣，水滴的出發時機也跟著參差（見 dropProgress
-  // 的 breakJitter）。0 是一條筆直的切線。
-  revealNoise: 0.18,
+  // 游標的寬度（0 = 不顯示游標）與一個循環閃幾次（0 = 恆亮）。
+  revealCaret: 0.12,
+  revealBlink: 8,
+  // 前緣收頸與亂流：兩者都是把切口從「貼紙的硬邊」推向「液體的邊」。預設 0，
+  // 因為打字機要的是乾淨的一格一格；想要液態墨水感再往上加。
+  revealNeck: 0,
+  revealNoise: 0,
   revealNoiseScale: 1.5,
   // 果凍（見 motions/jelly.js）。一個循環戳幾下、每下晃幾回、以及晃動的幅度與
   // 衰減。戳擊次數與回彈次數都必須是整數，循環接縫才精確接得上。
@@ -629,9 +628,10 @@ const fmt = {
   shapeAScale: v => 'x' + v.toFixed(2),
   shapeBScale: v => 'x' + v.toFixed(2),
   revealHold: v => (v * P.loopDuration).toFixed(1) + 's',
+  revealSteps: v => Math.round(v) + ' 格',
   revealWaveAngle: v => v.toFixed(0) + '°',
-  revealStagger: v => v === 0 ? '全體同時' : Math.round(v * 100) + '%',
-  revealArc: v => v === 0 ? '直線' : v.toFixed(2),
+  revealCaret: v => v === 0 ? '不顯示' : v.toFixed(2),
+  revealBlink: v => v === 0 ? '恆亮' : Math.round(v) + ' 次/循環',
   revealNeck: v => v === 0 ? '不收頸' : v.toFixed(3),
   revealNoise: v => v === 0 ? '筆直' : v.toFixed(3),
   revealNoiseScale: v => 'x' + v.toFixed(1),
@@ -1237,16 +1237,12 @@ const {
 // updateNegativeDrops／主滴迴圈）都直接讀這個共用狀態，不必個別重算。
 const { shapeRigidMotion } = createShapeRigidMotion(P);
 
-// 打字機：波前掃過形狀，實體跟著被寫出來／抹掉。錨點跟形狀匯聚共用同一組
-// （形狀 A 的主錨點），所以同樣用 getter 傳入。微滴另外繫一份，讀的是密度高
-// 得多的那組錨點 —— 兩者的水滴數與錨點池都不同，共用一份會讓微滴全部擠在
-// 主滴那幾個位置上（跟 morph 的主/微配對表分開是同一個理由）。
+// 打字機：波前一格一格跳過形狀，實體跟著一個字一個字出現，右邊跟著一條會閃的
+// 游標。錨點跟形狀匯聚共用同一組（形狀 A 的主錨點），所以同樣用 getter 傳入。
+// 不繫微滴那一份：這個模式沒有飛行中的水滴要補密度（見 reveal.js 檔頭）。
 const {
-  revealTimeline, revealFront, revealDropPosition, revealRadiusFactor,
+  revealFront, caretVisible, revealDropPosition, revealDropVisible,
 } = createRevealMotion(P, { anchors: () => formationAnchors });
-const {
-  revealDropPosition: revealMicroPosition, revealRadiusFactor: revealMicroRadius,
-} = createRevealMotion(P, { anchors: () => microFormationAnchors });
 
 // 果凍：造型完整靜止，週期性被戳一下做阻尼彈簧回彈。它產出的是跟
 // shapeRigidMotion 同一種形狀的變換物件，所以下面那條「歐拉角 → 旋轉矩陣」的
@@ -1283,7 +1279,7 @@ const formationPosNow = new THREE.Vector3();
 const formationPosBefore = new THREE.Vector3();
 const formationPosAfter = new THREE.Vector3();
 
-function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false, revealSolid = false) {
+function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false) {
   // 崩解噴濺不走匯聚管線，但微滴群正好是最好用的碎片來源（20 顆，是主滴的
   // 近兩倍），所以它也要把微滴開起來，只是位置改由彈道決定。
   const shattering = P.motion === 'shatter';
@@ -1293,11 +1289,10 @@ function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false, revealS
   // 形狀變形的微滴不是「細節補強」而是主力之一：整個畫面只有水滴，主滴 12 顆
   // 撐不出兩顆形狀的輪廓，微滴那 20 顆負責把輪廓填細。
   const morphing = P.motion === 'morph';
-  // 打字機的微滴負責把波前那一條的密度撐起來：只有主滴的話，波前看起來是幾顆
-  // 大球在推進，而不是一整條液體被鋪上去。果凍不列入——它的造型完整靜止，
-  // 沒有「正在成形的細節」可補，微滴只會變成貼在表面的一圈贅球。
-  const revealing = P.motion === 'reveal';
-  const activeCount = (isFormationMotion(P.motion) || shattering || melting || morphing || revealing)
+  // 打字機與果凍都不列入：兩者的造型都是完整的實體，沒有「正在成形的細節」需要
+  // 微滴去補，加上去只會變成貼在表面的一圈贅球。打字機尤其不要——它的重點是
+  // 乾淨的一格一格跳出來，一堆泡泡只會把離散感糊掉。
+  const activeCount = (isFormationMotion(P.motion) || shattering || melting || morphing)
     && shapeField
     ? Math.max(0, Math.min(MAX_MICRO_DROPS, Math.round(P.microCount)))
     : 0;
@@ -1376,23 +1371,6 @@ function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false, revealS
       const toHint = (back ? pair.a : pair.b).radiusHint || fallback;
       microDropData[o + 3] = (fromHint + (toHint - fromHint) * t) * 0.72
         * morphRadiusFactor(morphMicroPairs, i, phase, morphSolid);
-      microShapeData[o] = 1;
-      microShapeData[o + 1] = 0;
-      microShapeData[o + 2] = 0;
-      microShapeData[o + 3] = 1;
-      continue;
-    }
-    if (revealing) {
-      revealMicroPosition(i, phase, formationPosNow);
-      applyShapeRigid(formationPosNow.x, formationPosNow.y, formationPosNow.z, formationPosNow);
-      microDropData[o] = formationPosNow.x;
-      microDropData[o + 1] = formationPosNow.y;
-      microDropData[o + 2] = formationPosNow.z;
-      // 錨點自帶的 radiusHint 是「這個位置的造型有多厚」，用它波前的粗細才會跟著
-      // 形狀走（細筆畫處落小滴、粗桿處落大滴）；缺就退回依 h2 分散的尺寸。
-      const target = pool[i % pool.length];
-      const hint = target.radiusHint || P.radius * (0.28 + h2 * 0.16);
-      microDropData[o + 3] = hint * 0.72 * revealMicroRadius(i, phase, revealSolid);
       microShapeData[o] = 1;
       microShapeData[o + 1] = 0;
       microShapeData[o + 2] = 0;
@@ -1595,7 +1573,7 @@ function updateDropUniforms(t) {
           : 0;
   // 模型已大致長成後，讓可見水滴在目標體積內連續被 SDF 吸收。
   // 最後輪廓只剩匯入模型場；吸收在模型完成前不啟動，避免「水滴先縮、模型才出現」。
-  const microCount = updateMicroDrops(phase, fidelityAbsorb, morphSolid, revealSolid);
+  const microCount = updateMicroDrops(phase, fidelityAbsorb, morphSolid);
   const negativeCount = updateNegativeDrops(phase, fidelityAbsorb);
 
   const splitBeat = splitTimeline(phase);
@@ -1689,7 +1667,9 @@ function updateDropUniforms(t) {
       x = formationPosNow.x;
       y = formationPosNow.y;
       z = formationPosNow.z;
-      radiusFactor = revealRadiusFactor(i, phase, revealSolid);
+      // 預設 count 為 0，這些水滴不出場；調高的話它們是打好的字上面的點綴，
+      // 還沒打到的那幾格半徑為 0（見 reveal.js 的 revealDropVisible）。
+      radiusFactor = revealDropVisible(i, phase);
     } else if (jelly) {
       // 果凍預設沒有水滴（count 0）。使用者調高的話讓它們貼在表面錨點上，
       // 下面的 applyShapeRigid 會把果凍的形變一併套上去，水滴因此跟著一起
@@ -1934,14 +1914,32 @@ function updateDropUniforms(t) {
       uniforms.uMorphSpiral.value = 1;
       uniforms.uMorphBreak.value.set(P.revealNoise, P.revealNoiseScale, 0, 4);
       uniforms.uMorphNecking.value.set(P.revealNeck, 0.55);
-      // 切口軟硬不開成滑桿：這個模式的重點是「波掃過去把字寫出來」，一刀平切
-      // 看起來像貼紙、太軟又看不出波前在哪，固定在兩者之間的液體感上。
-      uniforms.uShapeCutBlend.value = 0.06;
+      // 切口軟硬不開成滑桿：打字機要的是乾淨俐落的一格一格，切口該近乎刀切。
+      // 想要液態墨水那種軟邊，「前緣收頸」與「邊緣亂流」兩根滑桿才是入口。
+      uniforms.uShapeCutBlend.value = 0.015;
     } else {
       // 離開變形／打字機模式（或還沒備妥貼圖）就把貼圖交還給形狀本身那張，
       // 否則其餘模式會繼續讀到打包過的圖。
       if (shapeField?.texture) uniforms.uShapeTex.value = shapeField.texture;
       uniforms.uShapeMorph.value = 0;
+    }
+    // 打字機的游標。半寬送 0 就等於關掉（shader 那邊整段跳過），所以「其餘模式」
+    // 與「閃到滅的那半格」共用同一條出口，不必另外開一顆開關 uniform。
+    const caretOn = revealCut && !!P.revealCaret && caretVisible(phase);
+    uniforms.uCaret.value.set(
+      caretOn ? revealCut.nx : 1,
+      caretOn ? revealCut.ny : 0,
+      caretOn ? revealCut.caretAlong : 0,
+      caretOn ? revealCut.caretHalfWidth : 0,
+    );
+    if (caretOn) {
+      uniforms.uCaretSpan.value.set(
+        revealCut.caretHalfHeight,
+        revealCut.caretCenterAcross,
+        // 圓角取半寬的一部分，游標才是一條圓潤的玻璃條而不是尖角方塊。
+        revealCut.caretHalfWidth * 0.5,
+        0,
+      );
     }
     // 半徑已連續收至零後才停止 shader 迴圈；切換當下幾何場完全相同。
     const fidelityComplete = fidelityAbsorb > 0.9999;
@@ -2518,6 +2516,10 @@ function initGL() {
     uShapeScale: { value: 1 },
     uShapeAScale: { value: 1 },
     uShapeBScale: { value: 1 },
+    // 打字機的游標（見 shaders.js 的 uCaret）。w = 半寬，0 代表不畫——游標閃到
+    // 滅的那半格、以及其餘所有模式，都是靠這個 0 讓 shader 整段跳過。
+    uCaret: { value: new THREE.Vector4(1, 0, 0, 0) },
+    uCaretSpan: { value: new THREE.Vector4(0.5, 0, 0.04, 0) },
     // 造型剛體動態（見 motions/shapeRigid.js）。未啟用時維持單位變換。
     uShapeRigidRot: { value: new THREE.Matrix3() },
     uShapeRigidOffsetY: { value: 0 },

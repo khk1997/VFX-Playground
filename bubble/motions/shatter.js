@@ -1,7 +1,7 @@
 'use strict';
-import { hash11CPU, smoothstepCPU } from './util.js?v=svg-shape-54';
+import { hash11CPU, smoothstepCPU } from './util.js?v=svg-shape-55';
 
-// 崩解噴濺的碎片大小基準：「水滴大小」滑桿的最小值，在這個模式代表 ×1 原尺寸。
+// 崩解噴濺的碎片大小基準：「水滴大小」滑桿等於這個值時，在這個模式代表 ×1 原尺寸。
 export const SHATTER_RADIUS_BASE = 0.25;
 
 // burst 與 shapeOut 的時鐘（見下方 shatterTimeline 的說明）。
@@ -164,9 +164,8 @@ function shatterShapeAmount(timeline) {
 // 問號那種細筆畫上等於長出三倍粗的球，形狀還沒退場就先被撐出一個包。
 //
 // 「水滴大小」滑桿在這個模式退化成整體乘數（0.25 = 原尺寸，拉到 0 碎片就完全
-// 消失）；碎片之間
-// 的大小差異改由「碎片大小差異」控制，且是乘在各自的局部厚度上，所以厚的地方
-// 剝下大塊、細的地方是小屑，不會有哪一顆突出到輪廓外。
+// 消失）；碎片之間的大小差異改由「碎片大小差異」控制，且是乘在各自的局部厚度
+// 上，所以厚的地方剝下大塊、細的地方是小屑，不會有哪一顆突出到輪廓外。
 function shatterFragmentRadius(anchor, h) {
   const thickness = anchor.thickness || anchor.radiusHint || 0.1;
   const variety = 1 + (h - 0.5) * 2 * P.shatterVariety;
