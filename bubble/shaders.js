@@ -184,7 +184,7 @@ uniform float uRayBeamIntensity;
 uniform float uRayBeamSeparation;
 uniform float uRayBeamZoom;
 uniform float uRayBeamRings;
-uniform float uRayBeamPulse;
+uniform float uRayBeamSpeed;
 uniform float uRayBeamGlow;
 uniform float uRayBeamChroma;
 uniform float uRayBeamAzimuth;
@@ -914,22 +914,32 @@ vec3 prismBeamField(vec2 q, float radius){
   float l = max(length(q), 0.02);
   // 未縮放的半徑，用於環紋與中心衰減（見 prismBeamCoord）。
   float r = max(radius, 0.02);
-  // 一個循環轉整數圈 —— 循環接縫的唯一保證，見檔頭。0 圈是合法值，代表圖樣
-  // 完全靜止：basePhase 恆為 0，而這裡是唯一的時間來源，所以光芒自己不會動。
-  // （造型轉動時光芒仍會被折射推著走，那是透鏡該有的行為，見 prismBeamCoord；
-  // 想連那個也凍住就把「折射扭曲」設 0。）
-  float cycles = max(0.0, floor(uRayBeamPulse + 0.5));
-  float basePhase = TAU * cycles * fract(uTime / max(0.001, uLoopDuration));
+  // 流動：把整個格點晶格沿一個固定軸平移。
+  //
+  // 為什麼是平移而不是推進相位：相位（sin 那一層）的週期是 2π，一個循環要走完
+  // 整數個 2π 才接得回去，所以最慢就是「一個循環一整圈」—— 那個速度已經相當
+  // 明顯，再慢不下去。而格點晶格的週期是 mod() 的 1.0，一個循環只要滑「整數個
+  // 格子」就精確接回原狀；格子在球面上有幾十個（隨「光芒尺度」而定），滑一格
+  // 因此是極小的位移，這才做得出很慢的流速。
+  //
+  // 沿固定軸而不是沿放射方向：只有「整數向量」的平移才會在 mod() 之後同值。
+  // 放射方向是單位向量，乘上整數位移量之後不是整數向量，接縫會跳。
+  //
+  // 速度可正可負（反向流動），0 = 完全靜止。
+  float speed = floor(uRayBeamSpeed + (uRayBeamSpeed < 0.0 ? -0.5 : 0.5));
+  vec2 drift = vec2(speed * fract(uTime / max(0.001, uLoopDuration)), 0.0);
   // 亮點的核心尺寸。銳利度調高 → 分子變小、亮點收緊成細長的光針；調低 →
   // 糊成一團柔光。
   float core = mix(0.035, 0.004, clamp(uRayBeamGlow, 0.0, 1.0));
 
   vec3 beams = vec3(0.0);
   for (int i = 0; i < 3; i++) {
-    float z = basePhase + float(i) * uRayBeamSeparation;
-    // 徑向漣漪：(q/l) 是徑向單位向量，(sin(z)+1) 是整體呼吸，
-    // abs(sin(l*rings - 2z)) 是一組往外跑的同心環。
-    vec2 cellUv = q * 0.5 + 0.5
+    // 色散：三個通道的相位各錯開一點（見檔頭）。這一層現在不隨時間走，只負責
+    // 把三個通道的圖樣錯開，時間交給上面的 drift。
+    float z = float(i) * uRayBeamSeparation;
+    // 徑向漣漪：(q/l) 是徑向單位向量，(sin(z)+1) 是整體幅度，
+    // abs(sin(r*rings*π - 2z)) 是一組同心環。
+    vec2 cellUv = q * 0.5 + 0.5 + drift
       + (q / l) * (sin(z) + 1.0)
         * abs(sin(r * max(0.5, uRayBeamRings) * PI - z * 2.0));
     // 切格 + 到格心的反距離 = 亮點與十字光芒。

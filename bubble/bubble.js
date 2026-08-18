@@ -2,25 +2,25 @@
 import * as THREE from 'three';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
-} from './shape-field.js?v=svg-shape-64';
+} from './shape-field.js?v=svg-shape-65';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
   MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
   MORPH_TARGET_SVG_NAME, makeMorphTargetSvgFile,
   MORPH_TARGET_SOLID_NAME, buildMorphTargetSolid,
-} from './default-shapes.js?v=svg-shape-64';
+} from './default-shapes.js?v=svg-shape-65';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-64';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-64';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-64';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-64';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-64';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-64';
-import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-64';
-import createJellyMotion from './motions/jelly.js?v=svg-shape-64';
+} from './motions/registry.js?v=svg-shape-65';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-65';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-65';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-65';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-65';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-65';
+import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-65';
+import createJellyMotion from './motions/jelly.js?v=svg-shape-65';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -61,9 +61,10 @@ const DEFAULTS = {              // 數值滑桿
   // 圖樣的尺度與同心環密度。
   rayBeamZoom: 14,
   rayBeamRings: 5,
-  // 一個循環脈動幾圈。0 = 圖樣完全靜止（光芒自己不動）。必須是整數，否則循環
-  // 接縫會跳（見 prismBeamField）。
-  rayBeamPulse: 0,
+  // 流動速度：一個循環把格點晶格滑過幾個格子。0 = 完全靜止，負值 = 反向。
+  // 必須是整數，否則循環接縫會跳（見 prismBeamField 的說明）。格子在球面上有
+  // 幾十個，所以 1 就已經是很慢的流速。
+  rayBeamSpeed: 1,
   // 亮點的收束程度：調高是細長的光針，調低是糊成一團的柔光。
   rayBeamGlow: 0.9,
   // 等亮度彩度調整。1 = 原樣，調高讓三通道的差異更明顯。
@@ -512,7 +513,13 @@ const fmt = {
   rayBeamSeparation: v => v === 0 ? '無色散' : v.toFixed(3),
   rayBeamZoom: v => 'x' + v.toFixed(2),
   rayBeamRings: v => v.toFixed(1),
-  rayBeamPulse: v => v === 0 ? '靜止不動' : Math.round(v) + ' 圈/循環',
+  rayBeamSpeed: v => {
+    const n = Math.round(v);
+    if (n === 0) return '靜止不動';
+    // 讀數換算成「幾秒滑過一格」，比「幾格/循環」直觀得多 —— 這才是眼睛看到的
+    // 速度。循環秒數一變也要重算，所以列進 LOOP_SCALED_KEYS。
+    return (P.loopDuration / Math.abs(n)).toFixed(1) + 's/格' + (n < 0 ? '（反向）' : '');
+  },
   rayBeamGlow: v => Math.round(v * 100) + '%',
   rayBeamChroma: v => v === 0 ? '去彩' : 'x' + v.toFixed(2),
   rayBeamAzimuth: v => v.toFixed(0) + '°',
@@ -652,7 +659,7 @@ function refreshShatterTimelineReadouts() {
 // 就得重畫，否則會停在用舊循環長度算出來的數字。切換動態模式時循環秒數會跟著
 // 換（每個模式各自記憶），所以這不是罕見情況——morphHold 一開始就漏了列進來，
 // 結果切到形狀變形時定格時間顯示的是用上一個模式的循環秒數算的值。
-const LOOP_SCALED_KEYS = ['gatherDuration', 'shapeHold', 'morphHold'];
+const LOOP_SCALED_KEYS = ['gatherDuration', 'shapeHold', 'morphHold', 'rayBeamSpeed'];
 function refreshLoopScaledReadouts() {
   for (const key of LOOP_SCALED_KEYS) {
     const valEl = document.getElementById(key + '_v');
@@ -2341,7 +2348,7 @@ function initGL() {
     uRayBeamSeparation: { value: P.rayBeamSeparation },
     uRayBeamZoom: { value: P.rayBeamZoom },
     uRayBeamRings: { value: P.rayBeamRings },
-    uRayBeamPulse: { value: P.rayBeamPulse },
+    uRayBeamSpeed: { value: P.rayBeamSpeed },
     uRayBeamGlow: { value: P.rayBeamGlow },
     uRayBeamChroma: { value: P.rayBeamChroma },
     uRayBeamAzimuth: { value: P.rayBeamAzimuth },
