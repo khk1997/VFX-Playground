@@ -1,5 +1,5 @@
 'use strict';
-import { hash11CPU, smoothstepCPU } from './util.js?v=svg-shape-71';
+import { hash11CPU, smoothstepCPU } from './util.js?v=svg-shape-73';
 
 // 崩解噴濺的碎片大小基準：「水滴大小」滑桿等於這個值時，在這個模式代表 ×1 原尺寸。
 export const SHATTER_RADIUS_BASE = 0.25;

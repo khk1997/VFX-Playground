@@ -1195,8 +1195,8 @@ void main(){
   // beamMask 供後面的彩度後處理使用。
   vec3 beamLight = vec3(0.0);
   float beamMask = 0.0;
-  // 亮底用的染色乘數（見下方合成處與通用玻璃的 over 合成）。1 = 不染色。
-  vec3 beamTint = vec3(1.0);
+  // 亮底的吸收乘數（見下方合成處）。1 = 不吸收。暗底恆為 1。
+  vec3 beamAbsorb = vec3(1.0);
   vec3 exitPoint = p;
   vec3 exitNormal = -N;
   float pathLength = 0.0;
@@ -1583,24 +1583,22 @@ void main(){
       vec3(beamLuma) + (beamEnergy - vec3(beamLuma)) * max(0.0, uRayBeamChroma),
       vec3(0.0)
     );
-    // 亮底把光點的彩度與強度一起收回來。
+    // 亮底 ↔ 暗底的交叉淡化：加光換成減光。
     //
-    // 這是「白底的 RGB 光點看起來很怪」真正的成因，而且跟合成方式無關：光點的
-    // 絕對顏色在黑底與白底是一樣的，變的是它周圍的環境。一顆飽和的藍點放在暗玻璃
-    // 上會讀成細緻的閃光，放在一片白裡就成了突兀的純色斑 —— 白色沒有任何色彩可以
-    // 跟它形成過渡，對比直接拉到最大。
+    // 為什麼非換不可：白色已經沒有任何加色空間，額外的光加上去只會被夾在 1，
+    // 所以在白底「加光」本質上是看不見的。要在白底看得見，唯一的辦法是反過來
+    // 「減光」—— 真實的稜鏡打在燈箱上，看到的也是比白紙暗的彩帶，不是更亮的。
     //
-    // 所以在亮底時把光點往自己的亮度拉回去、順帶壓一點強度，讓它變成淡淡的虹彩
-    // 而不是原色點。用的是 trueBgLum（見上方）而不是 bgLum：後者在通用玻璃底下
-    // 被歸零，問不出背景亮度。暗底時 brightWash 為 0，整段不生效，黑底外觀因此
-    // 完全不變。
+    // 上一版只把加光壓掉、沒給白底任何替代，所以變得太淡。這一版是真的交叉：
+    //   加法隨背景變亮而淡出（白底上的突兀原色斑因此消失）
+    //   減法隨背景變亮而長出（白光被光譜濾過，彩帶清楚而且飽和）
+    //
+    // 兩者都由 brightWash 驅動，而它用的是 trueBgLum（見上方）而不是 bgLum ——
+    // 後者在通用玻璃底下被歸零，問不出背景亮度。暗底時 brightWash 為 0：加法
+    // 完整保留、減法乘數為 1，所以黑底外觀完全不變。
     float brightWash = smoothstep(0.35, 0.92, trueBgLum);
-    if (brightWash > 0.001) {
-      float energyLuma = dot(beamEnergy, vec3(0.2126, 0.7152, 0.0722));
-      beamEnergy = mix(beamEnergy, vec3(energyLuma) * 0.72, brightWash * 0.78);
-      beamPeak = max(beamEnergy.r, max(beamEnergy.g, beamEnergy.b));
-    }
-    vec3 beamScreen = 1.0 - (1.0 - finalColor) * (1.0 - beamEnergy);
+    vec3 beamAdd = beamEnergy * (1.0 - brightWash * 0.88);
+    vec3 beamScreen = 1.0 - (1.0 - finalColor) * (1.0 - beamAdd);
     // 亮底路徑。之前這裡是「把顏色整片換成一個偏藍的色相、權重上限 0.68」，在白底
     // 上就變成一塊塊不透明的彩色貼片 —— 底下玻璃的明暗結構有近七成被蓋掉，所以
     // 難看。改成跟 ART 藝術色散同一套經過調校的做法，三個關鍵差別：
@@ -1617,32 +1615,21 @@ void main(){
     // 暗底那條 screen 路徑完全沒動 —— 純黑底目前的樣子是刻意保留的。
     vec3 beamHue = beamEnergy / max(beamPeak, 0.001);
 
-    // 亮底的真正解法。通用玻璃（預設材質）最後一步是
-    //   finalColor = clamp(自身能量 + 透射背景 * (1 - 覆蓋率), 0, 1)
-    // 白底時「透射背景」接近 1，光束再用加法疊上去就會把總和推過 1 而被截頂 ——
-    // 例如 (1.0, 0.3, 0.2) 的光束加上 0.5 的白光變成 (1.5, 0.8, 0.7)，夾完是
-    // (1.0, 0.8, 0.7)：亮度保住了，但彩度被白光沖掉，看起來就是灰濛濛的髒色。
-    // 這就是「背景變白變亮就醜」的成因，跟光束圖樣本身無關。
+    // 減法那一半：白光被光譜濾過。乘法永遠不會超過 1,所以不會像加法那樣被截頂
+    // 沖成灰白。深度給得夠（上限 0.72）彩帶才看得清楚 —— 這正是上一版太淡的地方，
+    // 它只染在「透過去的背景」上、而且深度只有 0.32。
     //
-    // 改成讓光束「染」透射光而不是「加」上去：乘法永遠不會超過 1，所以不會截頂，
-    // 白底上看到的是被光譜濾過的白光 —— 那才是真實的色散透射。
-    //
-    // 這個做法不需要任何背景亮度的閘門：它作用的對象就是透射光本身，而透射光在
-    // 暗底時本來就接近 0，乘數自然失效。所以純黑底目前的外觀完全不受影響。
-    //
-    // 但染色的「彩度」與「深度」都必須壓住，否則白底會出現純 R/G/B 的硬色塊 ——
-    // 那正是第一版的毛病。原因在 beamHue 是除以最強通道正規化出來的，峰值恆為 1，
-    // 所以藍色主導的點就是接近 (0.1, 0.2, 1.0) 的全飽和純藍；再用 0.85 的深度染上
-    // 白光，看起來就像壞點而不是光。暗底沒事是因為那條走加法，能量本身很小。
-    //
-    // 兩道收斂：
-    //   彩度：把色相往自己的亮度拉回一半，變成粉彩而不是原色。真實稜鏡打在白紙上
-    //         也是淡淡的虹彩，不是純色點。
-    //   深度：上限 0.32。白光至少留下三分之二，所以是「染上一層」而不是「換成另一
-    //         個顏色」。
-    float beamHueLuma = dot(beamHue, vec3(0.2126, 0.7152, 0.0722));
-    vec3 beamSoftHue = mix(vec3(beamHueLuma), beamHue, 0.55);
-    beamTint = mix(vec3(1.0), beamSoftHue, clamp(beamPeak * 0.9, 0.0, 0.32));
+    // 色相直接用 beamHue 不再降彩度：減法出來的顏色比白底暗，讀起來是彩帶而不是
+    // 發光的原色斑，所以飽和在這裡是對的，不會有上一版那種突兀感。
+    // sqrt 而不是線性：線性只有在最亮的那幾個點才吃到有意義的深度，而那些點面積
+    // 很小 —— 在黑底上小點靠明暗對比就很搶眼，在白底上一樣大的小點卻不顯眼，這是
+    // 白底看起來還是比較弱的真正原因。sqrt 把中低能量一起抬起來，彩帶因此鋪得開，
+    // 而峰值處又不會過飽和（跟 ART 藝術色散用的是同一招）。
+    beamAbsorb = mix(
+      vec3(1.0),
+      beamHue,
+      clamp(sqrt(max(beamPeak, 0.0)) * 0.85, 0.0, 0.72) * brightWash
+    );
 
     vec3 beamTransmission = mix(vec3(0.76, 0.90, 1.0), beamHue, 0.62);
     float beamLocality = clamp(
@@ -1934,9 +1921,6 @@ void main(){
   if (universalGlass) {
     universalTransmitted = refractedBg * material.transmission * volumeAbsorption
       * (1.0 - backFres * 0.72);
-    // 稜光光芒染在透射光上。放在這裡而不是在光芒自己的合成段，是因為透射背景要到
-    // 這一行才算出來 —— 而它正是亮底截頂的來源（見 beamTint 的說明）。
-    universalTransmitted *= beamTint;
     // 覆蓋率取材質不透明度與自身能量兩者的較大值。不能只用
     // luma：純藍光的亮度權重只有 0.072，飽和色散即使能量很高也會
     // 被計成幾乎透明，PNG 疊在亮底上就會被背景沖成淡灰色。以最強
@@ -1949,6 +1933,17 @@ void main(){
     );
     finalColor = clamp(finalColor + universalTransmitted * (1.0 - universalCovered), 0.0, 1.0);
   }
+
+  // 稜光光芒的減法那一半，套在「已經合成完背景」的顏色上。
+  //
+  // 位置很關鍵：必須在通用玻璃把透射背景加進來之後。白底的亮度絕大部分來自那一
+  // 項，光譜濾色要吃得到它才看得見 —— 上一版套在 universalTransmitted 上（加進來
+  // 之前）只影響透過去的那部分，自身能量沒被濾到，所以效果被稀釋掉一半。
+  //
+  // 對其餘材質同樣有效：universalGlass 為假時上面那個 if 整段跳過，但 finalColor
+  // 此時也已經是合成完的顏色，乘上去的語意一致。暗底時 beamAbsorb 恆為 vec3(1)，
+  // 這一行是精確的恆等運算。
+  finalColor = clamp(finalColor * beamAbsorb, 0.0, 1.0);
 
   float outputAlpha = 1.0;
   if (uTransparentBackground == 1) {
@@ -1972,7 +1967,8 @@ void main(){
       // over 合成夾過的自身能量除以覆蓋率反解出 straight color，不從已經
       // 截頂的畫面反減，亮部才不會在去背後失真變暗。
       outputAlpha = clamp(universalCovered, 0.02, 1.0);
-      finalColor = clamp(universalOwnEnergy / outputAlpha, 0.0, 1.0);
+      // 自身能量也要吃同一份光譜吸收，否則去背輸出會比畫面上看到的少一層彩帶。
+      finalColor = clamp(universalOwnEnergy * beamAbsorb / outputAlpha, 0.0, 1.0);
     } else if (uMembraneOverWhite > 0.5) {
       // 液態薄膜的去背輸出。膜身「就是背景」（見 transparentMembrane 那行），
       // 而且亮底顯色路徑是由背景亮度開的閘 —— 把背景抽成黑色等於連材質模型

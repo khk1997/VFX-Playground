@@ -2,25 +2,25 @@
 import * as THREE from 'three';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
-} from './shape-field.js?v=svg-shape-71';
+} from './shape-field.js?v=svg-shape-73';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
   MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
   MORPH_TARGET_SVG_NAME, makeMorphTargetSvgFile,
   MORPH_TARGET_SOLID_NAME, buildMorphTargetSolid,
-} from './default-shapes.js?v=svg-shape-71';
+} from './default-shapes.js?v=svg-shape-73';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-71';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-71';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-71';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-71';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-71';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-71';
-import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-71';
-import createJellyMotion from './motions/jelly.js?v=svg-shape-71';
+} from './motions/registry.js?v=svg-shape-73';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-73';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-73';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-73';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-73';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-73';
+import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-73';
+import createJellyMotion from './motions/jelly.js?v=svg-shape-73';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
