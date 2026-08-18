@@ -187,8 +187,9 @@ uniform float uRayBeamRings;
 uniform float uRayBeamPulse;
 uniform float uRayBeamGlow;
 uniform float uRayBeamChroma;
-uniform float uRayBeamAzimuth;
-uniform float uRayBeamElevation;
+uniform float uRayBeamCenterX;
+uniform float uRayBeamCenterY;
+uniform float uRayBeamRefract;
 uniform float uSpectralCausticEnabled;
 uniform float uSpectralCausticIntensity;
 uniform float uSpectralCausticFocus;
@@ -856,35 +857,33 @@ bool traceExitSurface(
 //   時間必須能無縫循環。原作直接吃 iTime，永遠不會接回起點；這裡把相位換成
 //   「一個循環轉整數圈」，sin 與 abs(sin) 兩層在 phase 0 與 1 因此完全同值。
 
-vec3 rayBeamLightDirection(){
-  float azimuth = radians(uRayBeamAzimuth);
-  float elevation = radians(uRayBeamElevation);
-  return normalize(vec3(
-    cos(elevation) * sin(azimuth),
-    sin(elevation),
-    cos(elevation) * cos(azimuth)
-  ));
+// 圖樣的取樣座標。這裡是整個效果成敗的關鍵，第一版做錯了：
+//
+// 第一版把座標算成「出射光線方向相對光源方向的偏移」，想讓光芒完全長在玻璃裡。
+// 結果是光芒糊掉、完全讀不出放射狀 —— 因為出射方向在一顆凸面體上會掃出一個
+// 圓錐並且折回來（同一個方向值出現在多個位置），圖樣座標因此不是連續單調變化
+// 的，鄰近像素會跳到圖樣的不同地方，光束自然不成形。放射光芒的前提是「鄰近
+// 像素必須對應鄰近的圖樣座標」。
+//
+// 這一版改成：圖樣錨定在畫面座標（連續且單調，光束因此是完整的放射狀），而
+// 折射只負責把取樣點推開 —— 也就是真實透鏡在做的事：背後有一片光束，玻璃把它
+// 扭曲、放大。所以光芒既是連續的放射狀，又會隨造型與視角流動。
+vec2 prismBeamCoord(vec2 screenUv, vec3 viewDir, vec3 exitDir){
+  // uRot 的前兩軸就是相機的右／上方向（見 main 的 rd 建構）。把世界空間的折射
+  // 偏差投影到這兩軸，才能和畫面座標相加。
+  vec3 camRight = uRot * vec3(1.0, 0.0, 0.0);
+  vec3 camUp = uRot * vec3(0.0, 1.0, 0.0);
+  vec3 bend = exitDir - viewDir;
+  vec2 bendScreen = vec2(dot(bend, camRight), dot(bend, camUp));
+  // 中心點直接放在畫面上，不用球座標角度：光芒是從畫面上某一點放射出來的，
+  // 用角度反而要多繞一次透視投影，也不直觀。
+  vec2 center = vec2(uRayBeamCenterX, uRayBeamCenterY);
+  return (screenUv - center + bendScreen * uRayBeamRefract)
+    * max(0.05, uRayBeamZoom);
 }
 
-// dir 是光線離開玻璃後的方向。回傳三通道各自的光芒強度（未上色，RGB 差異
-// 本身就是色散）。
-vec3 prismBeamField(vec3 dir){
-  vec3 lightDir = rayBeamLightDirection();
-  // 以光源方向為中心建切線基底。y 接近極點時 up 會與 lightDir 平行、cross
-  // 退化成零向量，所以換一根軸（跟虛擬光譜焦散的基底建構同一套處理）。
-  vec3 basisUp = abs(lightDir.y) > 0.94 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
-  vec3 tangent = normalize(cross(basisUp, lightDir));
-  vec3 bitangent = cross(lightDir, tangent);
-
-  // 出射方向在「垂直於光源方向」那個平面上的分量。dir 與 lightDir 同向時為
-  // 零，也就是圖樣的中心；夾角 90° 時長度為 1。
-  vec2 q = vec2(dot(dir, tangent), dot(dir, bitangent)) * max(0.05, uRayBeamZoom);
-  // 背向光源的半球會把前半球的圖樣鏡射一份出來（|q| 過了 90° 又開始變小），
-  // 所以用軸向分量淡出，只讓面向光源的那半邊發光。
-  float axial = dot(dir, lightDir);
-  float hemisphere = smoothstep(-0.35, 0.25, axial);
-  if (hemisphere <= 0.001) return vec3(0.0);
-
+// 回傳三通道各自的光芒強度（未上色，RGB 之間的差異本身就是色散）。
+vec3 prismBeamField(vec2 q){
   float l = max(length(q), 0.02);
   // 一個循環轉整數圈 —— 循環接縫的唯一保證，見檔頭。
   float cycles = max(1.0, floor(uRayBeamPulse + 0.5));
@@ -898,15 +897,15 @@ vec3 prismBeamField(vec3 dir){
     float z = basePhase + float(i) * uRayBeamSeparation;
     // 徑向漣漪：(q/l) 是徑向單位向量，(sin(z)+1) 是整體呼吸，
     // abs(sin(l*rings - 2z)) 是一組往外跑的同心環。
-    vec2 uv = q * 0.5 + 0.5
+    vec2 cellUv = q * 0.5 + 0.5
       + (q / l) * (sin(z) + 1.0)
         * abs(sin(l * max(0.5, uRayBeamRings) - z * 2.0));
     // 切格 + 到格心的反距離 = 亮點與十字光芒。
-    vec2 cell = mod(uv, 1.0) - 0.5;
+    vec2 cell = mod(cellUv, 1.0) - 0.5;
     beams[i] = core / max(length(cell), 0.004);
   }
-  // 越靠中心越亮。夾一個下限，否則正對光源那一點會除到爆掉。
-  return beams / l * hemisphere;
+  // 越靠中心越亮。夾一個下限，否則正中心那一點會除到爆掉。
+  return beams / l;
 }
 
 
@@ -1227,7 +1226,8 @@ void main(){
   if (uRayDispersionEnabled > 0.5 && uRayBeamIntensity > 0.001) {
     // 背面追蹤成功時 transmissionDir 是穿過整塊玻璃後的方向；沒命中時它會保留
     // 前表面的 Snell 折射方向，效果仍然成立（只是少了背面那一次彎折）。
-    vec3 beams = prismBeamField(transmissionDir);
+    vec2 beamQ = prismBeamCoord(uv, rd, transmissionDir);
+    vec3 beams = prismBeamField(beamQ);
     // 讓光芒真的「在玻璃裡」而不是浮在表面上：
     //   透射率決定有多少光穿得過來（反射掉的那部分不該帶著光束）
     //   體積吸收讓光程長的地方偏色、變暗，光束因此有厚度感
