@@ -1232,7 +1232,9 @@ void main(){
     //   透射率決定有多少光穿得過來（反射掉的那部分不該帶著光束）
     //   體積吸收讓光程長的地方偏色、變暗，光束因此有厚度感
     //   折射彎曲量讓光束集中在造型真正起透鏡作用的地方，平坦處自然收斂
-    float transmit = material.transmission * (1.0 - backFres * 0.55);
+    // material.transmission 是 vec3（各通道的透射率不同），所以這裡也必須是
+    // vec3 —— 順帶讓光束被玻璃自身的透射色染色，比取單一純量更對。
+    vec3 transmit = material.transmission * (1.0 - backFres * 0.55);
     // 下限刻意留高（0.5 而非更低）：localPrism 在平坦的中央幾乎為 0，壓太狠會讓
     // 光芒只剩輪廓一圈，變成邊緣描邊而不是「光束穿過整塊玻璃」。
     float lensing = mix(0.5, 1.0, clamp(localPrism * 1.6, 0.0, 1.0));
