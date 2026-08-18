@@ -1169,6 +1169,10 @@ void main(){
   // 通用玻璃把顯色階段的「背景」視為黑場：不是丟掉背景，而是把背景的貢獻
   // 從顏色生成裡拿掉，改由最後的 over 合成負責 —— 折射進來的光仍然完整保留
   // 在 refractedBg 裡。
+  // 真正的背景亮度，在通用玻璃把 bgLum 歸零之前先留一份。稜光光芒需要它：光束
+  // 的彩度要隨背景變亮而收回來（見 beamEnergy 的 brightWash），而 bgLum 歸零之後
+  // 就問不出「背景到底有多亮」了。
+  float trueBgLum = bgLum;
   if (universalGlass) bgLum = 0.0;
   float brightBg = smoothstep(0.45, 0.90, bgLum);
   // 灰底維持原本美術模型；只有純色畫布接近白色時才啟用保色補償。
@@ -1579,6 +1583,23 @@ void main(){
       vec3(beamLuma) + (beamEnergy - vec3(beamLuma)) * max(0.0, uRayBeamChroma),
       vec3(0.0)
     );
+    // 亮底把光點的彩度與強度一起收回來。
+    //
+    // 這是「白底的 RGB 光點看起來很怪」真正的成因，而且跟合成方式無關：光點的
+    // 絕對顏色在黑底與白底是一樣的，變的是它周圍的環境。一顆飽和的藍點放在暗玻璃
+    // 上會讀成細緻的閃光，放在一片白裡就成了突兀的純色斑 —— 白色沒有任何色彩可以
+    // 跟它形成過渡，對比直接拉到最大。
+    //
+    // 所以在亮底時把光點往自己的亮度拉回去、順帶壓一點強度，讓它變成淡淡的虹彩
+    // 而不是原色點。用的是 trueBgLum（見上方）而不是 bgLum：後者在通用玻璃底下
+    // 被歸零，問不出背景亮度。暗底時 brightWash 為 0，整段不生效，黑底外觀因此
+    // 完全不變。
+    float brightWash = smoothstep(0.35, 0.92, trueBgLum);
+    if (brightWash > 0.001) {
+      float energyLuma = dot(beamEnergy, vec3(0.2126, 0.7152, 0.0722));
+      beamEnergy = mix(beamEnergy, vec3(energyLuma) * 0.72, brightWash * 0.78);
+      beamPeak = max(beamEnergy.r, max(beamEnergy.g, beamEnergy.b));
+    }
     vec3 beamScreen = 1.0 - (1.0 - finalColor) * (1.0 - beamEnergy);
     // 亮底路徑。之前這裡是「把顏色整片換成一個偏藍的色相、權重上限 0.68」，在白底
     // 上就變成一塊塊不透明的彩色貼片 —— 底下玻璃的明暗結構有近七成被蓋掉，所以
@@ -1608,7 +1629,20 @@ void main(){
     //
     // 這個做法不需要任何背景亮度的閘門：它作用的對象就是透射光本身，而透射光在
     // 暗底時本來就接近 0，乘數自然失效。所以純黑底目前的外觀完全不受影響。
-    beamTint = mix(vec3(1.0), beamHue, clamp(beamPeak * 1.15, 0.0, 0.85));
+    //
+    // 但染色的「彩度」與「深度」都必須壓住，否則白底會出現純 R/G/B 的硬色塊 ——
+    // 那正是第一版的毛病。原因在 beamHue 是除以最強通道正規化出來的，峰值恆為 1，
+    // 所以藍色主導的點就是接近 (0.1, 0.2, 1.0) 的全飽和純藍；再用 0.85 的深度染上
+    // 白光，看起來就像壞點而不是光。暗底沒事是因為那條走加法，能量本身很小。
+    //
+    // 兩道收斂：
+    //   彩度：把色相往自己的亮度拉回一半，變成粉彩而不是原色。真實稜鏡打在白紙上
+    //         也是淡淡的虹彩，不是純色點。
+    //   深度：上限 0.32。白光至少留下三分之二，所以是「染上一層」而不是「換成另一
+    //         個顏色」。
+    float beamHueLuma = dot(beamHue, vec3(0.2126, 0.7152, 0.0722));
+    vec3 beamSoftHue = mix(vec3(beamHueLuma), beamHue, 0.55);
+    beamTint = mix(vec3(1.0), beamSoftHue, clamp(beamPeak * 0.9, 0.0, 0.32));
 
     vec3 beamTransmission = mix(vec3(0.76, 0.90, 1.0), beamHue, 0.62);
     float beamLocality = clamp(
