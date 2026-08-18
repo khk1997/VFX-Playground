@@ -2,25 +2,25 @@
 import * as THREE from 'three';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
-} from './shape-field.js?v=svg-shape-56';
+} from './shape-field.js?v=svg-shape-57';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
   MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
   MORPH_TARGET_SVG_NAME, makeMorphTargetSvgFile,
   MORPH_TARGET_SOLID_NAME, buildMorphTargetSolid,
-} from './default-shapes.js?v=svg-shape-56';
+} from './default-shapes.js?v=svg-shape-57';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-56';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-56';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-56';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-56';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-56';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-56';
-import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-56';
-import createJellyMotion from './motions/jelly.js?v=svg-shape-56';
+} from './motions/registry.js?v=svg-shape-57';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-57';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-57';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-57';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-57';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-57';
+import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-57';
+import createJellyMotion from './motions/jelly.js?v=svg-shape-57';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -51,13 +51,25 @@ const DEFAULTS = {              // 數值滑桿
   dispersionSeparation: 1.5,
   causticScale: 1.0,
   causticSharpness: 0.65,
-  rayDispersion: 6,
-  rayDispersionAbbe: 25,
-  rayDispersionLightIntensity: 4,
-  rayDispersionLightSize: 0.32,
-  rayDispersionFocus: 0.55,
-  rayDispersionAzimuth: 0,
-  rayDispersionElevation: 0,
+  // 稜光光芒（見 shaders.js 的 prismBeamField）。取代原本走 Cauchy 曲線的物理
+  // 分光：那條路每個 fragment 要多跑四次波長追蹤，換來的只是輪廓上一層很薄的
+  // 邊緣分光。這一版是程序化的放射光束，零額外 raymarch。
+  rayBeamIntensity: 2.4,
+  // 色散的來源：三個顏色通道取樣同一個圖樣時的相位差。這是整個效果的靈魂，
+  // 0 = 三通道同步（純白光束，完全沒有彩虹）。
+  rayBeamSeparation: 0.07,
+  // 圖樣的尺度與同心環密度。
+  rayBeamZoom: 2.4,
+  rayBeamRings: 9,
+  // 一個循環脈動幾圈。必須是整數，否則循環接縫會跳（見 prismBeamField）。
+  rayBeamPulse: 1,
+  // 亮點的收束程度：調高是細長的光針，調低是糊成一團的柔光。
+  rayBeamGlow: 0.5,
+  // 等亮度彩度調整。1 = 原樣，調高讓三通道的差異更明顯。
+  rayBeamChroma: 1.4,
+  // 光芒的放射中心（球座標）。圖樣以這個方向為原點展開。
+  rayBeamAzimuth: 0,
+  rayBeamElevation: 0,
   spectralCausticIntensity: 3,
   spectralCausticFocus: 0.12,
   spectralCausticWidth: 0.42,
@@ -492,13 +504,15 @@ const fmt = {
   dispersionSeparation: v => 'x' + v.toFixed(2),
   causticScale: v => 'x' + v.toFixed(2),
   causticSharpness: v => Math.round(v * 100) + '%',
-  rayDispersion: v => 'x' + v.toFixed(2),
-  rayDispersionAbbe: v => v.toFixed(0),
-  rayDispersionLightIntensity: v => 'x' + v.toFixed(2),
-  rayDispersionLightSize: v => Math.round(v * 100) + '%',
-  rayDispersionFocus: v => Math.round(v * 100) + '%',
-  rayDispersionAzimuth: v => v.toFixed(0) + '°',
-  rayDispersionElevation: v => v.toFixed(0) + '°',
+  rayBeamIntensity: v => v === 0 ? '關閉' : 'x' + v.toFixed(2),
+  rayBeamSeparation: v => v === 0 ? '無色散' : v.toFixed(3),
+  rayBeamZoom: v => 'x' + v.toFixed(2),
+  rayBeamRings: v => v.toFixed(1),
+  rayBeamPulse: v => Math.round(v) + ' 圈/循環',
+  rayBeamGlow: v => Math.round(v * 100) + '%',
+  rayBeamChroma: v => v === 0 ? '去彩' : 'x' + v.toFixed(2),
+  rayBeamAzimuth: v => v.toFixed(0) + '°',
+  rayBeamElevation: v => v.toFixed(0) + '°',
   spectralCausticIntensity: v => Math.round(v * 100) + '%',
   spectralCausticFocus: v => Math.round(v * 100) + '%',
   spectralCausticWidth: v => 'x' + v.toFixed(2),
@@ -2318,13 +2332,15 @@ function initGL() {
     uDispersionSeparation: { value: P.dispersionSeparation },
     uCausticScale: { value: P.causticScale },
     uCausticSharpness: { value: P.causticSharpness },
-    uRayDispersion: { value: P.rayDispersion },
-    uRayDispersionAbbe: { value: P.rayDispersionAbbe },
-    uRayDispersionLightIntensity: { value: P.rayDispersionLightIntensity },
-    uRayDispersionLightSize: { value: P.rayDispersionLightSize },
-    uRayDispersionFocus: { value: P.rayDispersionFocus },
-    uRayDispersionAzimuth: { value: P.rayDispersionAzimuth },
-    uRayDispersionElevation: { value: P.rayDispersionElevation },
+    uRayBeamIntensity: { value: P.rayBeamIntensity },
+    uRayBeamSeparation: { value: P.rayBeamSeparation },
+    uRayBeamZoom: { value: P.rayBeamZoom },
+    uRayBeamRings: { value: P.rayBeamRings },
+    uRayBeamPulse: { value: P.rayBeamPulse },
+    uRayBeamGlow: { value: P.rayBeamGlow },
+    uRayBeamChroma: { value: P.rayBeamChroma },
+    uRayBeamAzimuth: { value: P.rayBeamAzimuth },
+    uRayBeamElevation: { value: P.rayBeamElevation },
     uSpectralCausticIntensity: { value: P.spectralCausticIntensity },
     uSpectralCausticFocus: { value: P.spectralCausticFocus },
     uSpectralCausticWidth: { value: P.spectralCausticWidth },

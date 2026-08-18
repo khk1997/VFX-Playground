@@ -244,16 +244,19 @@
       </div>
 
       <div class="effectBlock effectBlock--physical" id="rayDispersionGroup">
-        <div class="effectTitle"><span>RAY</span> 造型光線色散<span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="rayDispersionEnabled"><span class="switchTrack" aria-hidden="true"></span></span></div>
-        <div class="row"><label>光譜展寬</label><input type="range" id="rayDispersion" min="0" max="12" step="0.01" value="6"><span class="val" id="rayDispersion_v"></span></div>
-        <div class="row"><label>阿貝數</label><input type="range" id="rayDispersionAbbe" min="15" max="90" step="1" value="25"><span class="val" id="rayDispersionAbbe_v"></span></div>
-        <div class="effectSubhead">光譜光源</div>
-        <div class="row"><label>光源亮度</label><input type="range" id="rayDispersionLightIntensity" min="0" max="4" step="0.01" value="4"><span class="val" id="rayDispersionLightIntensity_v"></span></div>
-        <div class="row"><label>光源尺寸</label><input type="range" id="rayDispersionLightSize" min="0" max="1" step="0.01" value="0.32"><span class="val" id="rayDispersionLightSize_v"></span></div>
-        <div class="row"><label>彩帶對比</label><input type="range" id="rayDispersionFocus" min="0" max="1" step="0.01" value="0.55"><span class="val" id="rayDispersionFocus_v"></span></div>
-        <div class="row"><label>光源水平</label><input type="range" id="rayDispersionAzimuth" min="-180" max="180" step="1" value="0"><span class="val" id="rayDispersionAzimuth_v"></span></div>
-        <div class="row"><label>光源高度</label><input type="range" id="rayDispersionElevation" min="-80" max="80" step="1" value="0"><span class="val" id="rayDispersionElevation_v"></span></div>
-        <div class="note">五個波長各自穿過目前的 SDF 造型，再與同一個白色光源對準；展寬 1× 是目前阿貝數的物理尺度，提高可補償圓角造型缺少尖銳棱面的分光。彩帶對比同時控制白光源與 HDRI 分光結果：0% 接近中性色，100% 色彩分界鮮明；不改變光帶位置與寬度。HDRI 只提供周圍反射，不再決定光帶形狀。</div>
+        <div class="effectTitle"><span>RAY</span> 稜光光芒<span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="rayDispersionEnabled"><span class="switchTrack" aria-hidden="true"></span></span></div>
+        <div class="row"><label>光芒強度</label><input type="range" id="rayBeamIntensity" min="0" max="4" step="0.01" value="2.4"><span class="val" id="rayBeamIntensity_v"></span></div>
+        <div class="row"><label>色散分離</label><input type="range" id="rayBeamSeparation" min="0" max="0.4" step="0.005" value="0.07"><span class="val" id="rayBeamSeparation_v"></span></div>
+        <div class="row"><label>彩度</label><input type="range" id="rayBeamChroma" min="0" max="3" step="0.05" value="1.4"><span class="val" id="rayBeamChroma_v"></span></div>
+        <div class="effectSubhead">光芒圖樣</div>
+        <div class="row"><label>光芒尺度</label><input type="range" id="rayBeamZoom" min="0.5" max="8" step="0.05" value="2.4"><span class="val" id="rayBeamZoom_v"></span></div>
+        <div class="row"><label>環紋密度</label><input type="range" id="rayBeamRings" min="1" max="24" step="0.5" value="9"><span class="val" id="rayBeamRings_v"></span></div>
+        <div class="row"><label>光點銳利</label><input type="range" id="rayBeamGlow" min="0" max="1" step="0.01" value="0.5"><span class="val" id="rayBeamGlow_v"></span></div>
+        <div class="row"><label>脈動圈數</label><input type="range" id="rayBeamPulse" min="1" max="6" step="1" value="1"><span class="val" id="rayBeamPulse_v"></span></div>
+        <div class="effectSubhead">放射中心</div>
+        <div class="row"><label>光源水平</label><input type="range" id="rayBeamAzimuth" min="-180" max="180" step="1" value="0"><span class="val" id="rayBeamAzimuth_v"></span></div>
+        <div class="row"><label>光源高度</label><input type="range" id="rayBeamElevation" min="-80" max="80" step="1" value="0"><span class="val" id="rayBeamElevation_v"></span></div>
+        <div class="note">程序化的放射光束，沿折射後的出射方向取樣 —— 物體因此變成一顆會把光束扭曲、放大、分光的透鏡，光芒真的長在玻璃裡，會隨造型與視角流動。手法參考 Shadertoy 的 "Creation"（作者 Danilo Guanabara）。<br><strong>「色散分離」是這個效果的靈魂</strong>：色散不是來自折射率差，而是三個顏色通道取樣同一個圖樣時的相位差 —— 設 0 就是純白光束、完全沒有彩虹，往上加彩虹越開。「環紋密度」是往外跑的同心環有幾圈，「光點銳利」調高是細長的光針、調低是糊成一團的柔光。「脈動圈數」是一個循環脈動幾次，只取整數（循環頭尾才接得上）。這一版不做額外的光線追蹤，比舊的物理分光便宜得多。</div>
       </div>
 
       <div class="effectBlock effectBlock--caustic" id="spectralCausticGroup">
@@ -450,6 +453,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=universal-dbg61"></script>
+<script type="module" src="./bubble.js?v=universal-dbg62"></script>
 </body>
 </html>

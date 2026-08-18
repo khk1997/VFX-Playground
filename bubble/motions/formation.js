@@ -1,5 +1,5 @@
 'use strict';
-import { smoothstepCPU } from './util.js?v=svg-shape-56';
+import { smoothstepCPU } from './util.js?v=svg-shape-57';
 
 // 這個模組同時服務兩個模式：形狀匯聚（完整的 gather → hold → release 時間軸）
 // 與穿梭環繞（只借用自由飛行軌道的手法，不吸收水滴）。兩者共用 freeOrbitPosition
