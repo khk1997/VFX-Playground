@@ -118,30 +118,9 @@ export const MOTIONS = {
       shapeEdgeBevel: 0.086,
     },
   },
-  reveal: {
-    label: '打字機 Reveal',
-    uniform: 6,
-    usesShapeField: true,
-    gate: 'reveal',
-    // 打字不需要一堆泡泡做轉場：字是直接跳出來的，水滴預設不出場。調高的話
-    // 它們會貼在已經打好的那幾格上當液體點綴（見 reveal.js 的 revealDropVisible）。
-    count: 0,
-    radius: 0.25,
-    loopDuration: 7,
-    // 波已經是全畫面的橫向運動，鏡頭再推軌只會讓人看不清波掃到哪裡。
-    dolly: false,
-    svgDemo: 'question',
-    // 跟形狀變形同一個理由：這個模式的形狀從頭到尾都是實體，擠出厚度薄一點、
-    // 邊緣圓角大一點，一格一格的切口才不會被厚實的側壁蓋住。輪廓細節滴一併關掉
-    // ——這個模式沒有微滴（見 bubble.js 的 activeCount），留著只會誤導。
-    overrides: {
-      shapeDepth: 0.09,
-      shapeEdgeBevel: 0.086,
-    },
-  },
   jelly: {
     label: '果凍 Jelly',
-    uniform: 7,
+    uniform: 6,
     usesShapeField: true,
     gate: 'jelly',
     // 造型本身就是全部的戲：水滴預設不出場。使用者想加幾顆點綴仍然可以調高，

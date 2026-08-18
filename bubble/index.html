@@ -46,7 +46,6 @@
       <option value="shatter">崩解噴濺 Shatter</option>
       <option value="melt">融化 Melt</option>
       <option value="morph">形狀變形 Morph</option>
-      <option value="reveal">打字機 Reveal</option>
       <option value="jelly">果凍 Jelly</option>
       <!-- 已改名或已移除的舊值。留成隱藏選項，舊的參數組合檔寫進來時 value 才不會
            被瀏覽器丟成空字串；bindControls 會立刻把它導向現有選項（LEGACY_SELECT_VALUES）。 -->
@@ -118,19 +117,6 @@
     <div class="row" id="morphCellRow"><label>晶格碎裂</label><input type="range" id="morphCell" min="0" max="0.6" step="0.005" value="0"><span class="val" id="morphCell_v"></span></div>
     <div class="row" id="morphCellScaleRow"><label>碎塊大小</label><input type="range" id="morphCellScale" min="1" max="12" step="0.5" value="4"><span class="val" id="morphCellScale_v"></span></div>
     </div>
-    <div class="modeBlock" data-gate="reveal">
-    <div class="row" id="revealStepsRow"><label>字數格數</label><input type="range" id="revealSteps" min="1" max="40" step="1" value="8"><span class="val" id="revealSteps_v"></span></div>
-    <div class="row" id="revealHoldRow"><label>定格時間</label><input type="range" id="revealHold" min="0" max="0.6" step="0.01" value="0.34"><span class="val" id="revealHold_v"></span></div>
-    <div class="row" id="revealWaveAngleRow"><label>書寫方向</label><input type="range" id="revealWaveAngle" min="0" max="360" step="5" value="0"><span class="val" id="revealWaveAngle_v"></span></div>
-    <div class="effectSubhead">游標 Caret</div>
-    <div class="row" id="revealCaretRow"><label>游標寬度</label><input type="range" id="revealCaret" min="0" max="0.4" step="0.01" value="0.12"><span class="val" id="revealCaret_v"></span></div>
-    <div class="row" id="revealBlinkRow"><label>閃爍次數</label><input type="range" id="revealBlink" min="0" max="30" step="1" value="8"><span class="val" id="revealBlink_v"></span></div>
-    <div class="effectSubhead">墨水邊緣</div>
-    <div class="row" id="revealNeckRow"><label>前緣收頸</label><input type="range" id="revealNeck" min="0" max="0.12" step="0.002" value="0"><span class="val" id="revealNeck_v"></span></div>
-    <div class="row" id="revealNoiseRow"><label>邊緣亂流</label><input type="range" id="revealNoise" min="0" max="0.6" step="0.005" value="0"><span class="val" id="revealNoise_v"></span></div>
-    <div class="row" id="revealNoiseScaleRow"><label>亂流尺度</label><input type="range" id="revealNoiseScale" min="0.5" max="8" step="0.1" value="1.5"><span class="val" id="revealNoiseScale_v"></span></div>
-    <div id="revealNote" class="note">形狀一格一格跳出來、右邊跟著一條會閃的游標 → 打完定格 → 再用倒退鍵一格一格刪回去。跟「形狀變形」最大的差別是這裡的節奏是離散的：字在那裡等著，然後「跳」出來，中間沒有過渡，也沒有水滴做轉場（水滴數量預設 0）。<br><strong>「字數格數」是這個模式唯一需要調對的參數</strong>：它要對上你的 SVG 裡實際有幾個字，才會是一個字一個字出現；格數遠多於字數就退化成一條線橫著抹過去，遠少於字數則會好幾個字一起跳出來。「書寫方向」0° 是由左至右（讀字的方向），倒退固定反向，所以刪除是從右邊開始吃回來。「游標寬度」設 0 就不顯示游標，「閃爍次數」設 0 是恆亮；閃爍必須是整數次，循環頭尾才對得上。「前緣收頸」與「邊緣亂流」預設都是 0，因為打字機要的是乾淨的一格一格；往上加會把切口從貼紙的硬邊推向液態墨水的邊。形狀在下方「形狀匯聚」那一組匯入，SVG 與 GLB 都支援。</div>
-    </div>
     <div class="modeBlock" data-gate="jelly">
     <div class="row" id="jellyPokesRow"><label>戳擊次數</label><input type="range" id="jellyPokes" min="1" max="6" step="1" value="2"><span class="val" id="jellyPokes_v"></span></div>
     <div class="row" id="jellyAmountRow"><label>彈性幅度</label><input type="range" id="jellyAmount" min="0" max="0.6" step="0.01" value="0.22"><span class="val" id="jellyAmount_v"></span></div>
@@ -175,7 +161,7 @@
       <div data-gate="formation" class="row timelineRow"><label>完成停留</label><input type="range" id="shapeHold" min="0.05" max="0.45" step="0.01" value="0.45"><span class="val" id="shapeHold_v"></span></div>
       <div data-gate="formation" id="timelineSummary" class="note timelineRow"></div>
       <div class="effectSubhead">外形細節</div>
-      <div data-gate="!weave !jelly !reveal" class="row" id="microCountRow"><label>輪廓細節滴</label><input type="range" id="microCount" min="8" max="20" step="1" value="14"><span class="val" id="microCount_v"></span></div>
+      <div data-gate="!weave !jelly" class="row" id="microCountRow"><label>輪廓細節滴</label><input type="range" id="microCount" min="8" max="20" step="1" value="14"><span class="val" id="microCount_v"></span></div>
       <div data-gate="svg" class="row"><label>形狀厚度</label><input type="range" id="shapeDepth" min="0.05" max="0.8" step="0.01" value="0.1"><span class="val" id="shapeDepth_v"></span></div>
       <div data-gate="svg" class="row"><label>邊緣圓角</label><input type="range" id="shapeEdgeBevel" min="0" max="0.15" step="0.001" value="0.025"><span class="val" id="shapeEdgeBevel_v"></span></div>
       <div class="row"><label>邊緣液化</label><input type="range" id="shapeSoftness" min="0" max="0.25" step="0.005" value="0"><span class="val" id="shapeSoftness_v"></span></div>
@@ -464,6 +450,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=universal-dbg60"></script>
+<script type="module" src="./bubble.js?v=universal-dbg61"></script>
 </body>
 </html>

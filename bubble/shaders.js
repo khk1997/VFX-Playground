@@ -136,12 +136,6 @@ uniform float uShapeScale;
 // 兩顆形狀能各自放大縮小，不會互相牽動。
 uniform float uShapeAScale;
 uniform float uShapeBScale;
-// 打字機的游標（見 motions/reveal.js）。一條站在剛打出來那一格後面的豎線，
-// 明滅由 CPU 端決定 —— 滅掉時 w 直接送 0，shader 這邊就整個跳過。
-//   uCaret     xy = 掃描軸單位向量、z = 沿掃描軸的位置、w = 半寬（0 = 不顯示）
-//   uCaretSpan x = 垂直半高、y = 垂直中心、z = 圓角半徑
-uniform vec4  uCaret;
-uniform vec4  uCaretSpan;
 // 造型本身的剛體動態（見 motions/shapeRigid.js）：呼吸縮放、任意軸旋轉、上下
 // 浮動、擠壓拉伸疊在 SDF 取樣座標上，讓匯入的 SVG/GLB 造型自己也會動，不只是
 // 水滴在動。CPU 端算的是「本地座標 → 世界座標」的正變換（水滴的目標位置也套
@@ -757,29 +751,6 @@ float mapScene(vec3 p, bool smoothShape){
       growingDetail,
       max(0.0001, max(0.018, uMicroBlend * localGrowth) * dropletBlendFade)
     );
-  }
-  // 打字機的游標。獨立於上面那整段造型邏輯：它不是形狀的一部分，定格段
-  // （uShapeMorph 回到 0）也還在閃，所以放在造型的 if 之外。
-  if (uCaret.w > 0.0001) {
-    // 造型剛體動態的反變換，跟上面的 shapeP 同一套 —— 游標的位置是從錨點算的，
-    // 錨點活在造型本地空間，所以要把 ray march 的世界座標換回同一個空間，游標
-    // 才會跟著造型一起轉／浮，而不是自己留在原地。
-    vec3 caretP = (vec3(p.x, p.y - uShapeRigidOffsetY, p.z) * uShapeRigidRot)
-      / uShapeRigidScale / uShapeScale;
-    vec2 axis = uCaret.xy;
-    float along = dot(caretP.xy, axis) - uCaret.z;
-    // 掃描軸的法向量：游標是沿著它站起來的那條豎線。
-    float across = dot(caretP.xy, vec2(-axis.y, axis.x)) - uCaretSpan.y;
-    // 圓角方塊：先內縮圓角半徑做標準方塊距離，再減回來。圓角必須小於「每一個」
-    // 半軸長，否則那一軸內縮後會變成負值、整條游標塌成一片薄面或直接消失 ——
-    // 厚度那一軸最容易踩到（游標拉寬 + 擠出厚度調薄就會發生），所以三軸都要夾。
-    float round = min(min(uCaretSpan.z, uCaret.w * 0.6), uShapeDepth * 0.6);
-    vec3 q = abs(vec3(along, across, caretP.z))
-      - vec3(uCaret.w, uCaretSpan.x, uShapeDepth) + vec3(round);
-    float caretD = length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0) - round;
-    // 硬聯集，不用 smin：游標緊貼著剛打出來的那個字，柔性融合會在兩者之間拉出
-    // 一條液橋，看起來是字長出一根尾巴，而不是一條獨立的游標。
-    d = min(d, caretD);
   }
   // 最大位移遠小於 0.25；遠離表面時略過 noise，不影響射線接近表面的安全性。
   float geometryWobble = uWobble * mix(1.0, 0.10, uShapeProgress);
