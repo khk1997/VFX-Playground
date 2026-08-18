@@ -1191,6 +1191,8 @@ void main(){
   // beamMask 供後面的彩度後處理使用。
   vec3 beamLight = vec3(0.0);
   float beamMask = 0.0;
+  // 亮底用的染色乘數（見下方合成處與通用玻璃的 over 合成）。1 = 不染色。
+  vec3 beamTint = vec3(1.0);
   vec3 exitPoint = p;
   vec3 exitNormal = -N;
   float pathLength = 0.0;
@@ -1578,14 +1580,55 @@ void main(){
       vec3(0.0)
     );
     vec3 beamScreen = 1.0 - (1.0 - finalColor) * (1.0 - beamEnergy);
+    // 亮底路徑。之前這裡是「把顏色整片換成一個偏藍的色相、權重上限 0.68」，在白底
+    // 上就變成一塊塊不透明的彩色貼片 —— 底下玻璃的明暗結構有近七成被蓋掉，所以
+    // 難看。改成跟 ART 藝術色散同一套經過調校的做法，三個關鍵差別：
+    //
+    //   局部性遮罩：只在物理上說得通的地方著色 —— 邊緣、折射真正彎曲處、背面
+    //   rim、薄膜的膜褶。原本無視位置整片上色，才會糊成色塊。
+    //
+    //   sqrt 感知響應：低強度在白底仍看得見，高強度則逐漸壓縮，而不是一過某個
+    //   值就跳成不透明貼圖。
+    //
+    //   上限收到 0.30（原本 0.68）：底下玻璃至少保留七成，色散是「染上去」而不是
+    //   「蓋掉」。這是白底好不好看最主要的一項。
+    //
+    // 暗底那條 screen 路徑完全沒動 —— 純黑底目前的樣子是刻意保留的。
     vec3 beamHue = beamEnergy / max(beamPeak, 0.001);
-    vec3 beamTransmission = mix(vec3(0.78, 0.90, 1.0), beamHue, 0.82);
-    float beamBrightSupport = max(whiteBackdrop, membraneMode * brightBg);
-    finalColor = mix(
-      beamScreen,
-      beamTransmission,
-      beamBrightSupport * clamp(beamPeak * 0.72, 0.0, 0.68)
+
+    // 亮底的真正解法。通用玻璃（預設材質）最後一步是
+    //   finalColor = clamp(自身能量 + 透射背景 * (1 - 覆蓋率), 0, 1)
+    // 白底時「透射背景」接近 1，光束再用加法疊上去就會把總和推過 1 而被截頂 ——
+    // 例如 (1.0, 0.3, 0.2) 的光束加上 0.5 的白光變成 (1.5, 0.8, 0.7)，夾完是
+    // (1.0, 0.8, 0.7)：亮度保住了，但彩度被白光沖掉，看起來就是灰濛濛的髒色。
+    // 這就是「背景變白變亮就醜」的成因，跟光束圖樣本身無關。
+    //
+    // 改成讓光束「染」透射光而不是「加」上去：乘法永遠不會超過 1，所以不會截頂，
+    // 白底上看到的是被光譜濾過的白光 —— 那才是真實的色散透射。
+    //
+    // 這個做法不需要任何背景亮度的閘門：它作用的對象就是透射光本身，而透射光在
+    // 暗底時本來就接近 0，乘數自然失效。所以純黑底目前的外觀完全不受影響。
+    beamTint = mix(vec3(1.0), beamHue, clamp(beamPeak * 1.15, 0.0, 0.85));
+
+    vec3 beamTransmission = mix(vec3(0.76, 0.90, 1.0), beamHue, 0.62);
+    float beamLocality = clamp(
+      material.edgeFactor * 0.76
+        + localPrism * 0.62
+        + backRim * 0.34
+        + membraneFold * membraneMode * 0.52,
+      0.0,
+      1.0
     );
+    float beamBrightSupport = max(whiteBackdrop, membraneMode * brightBg);
+    float beamTransmissionAmount = beamBrightSupport * clamp(
+      sqrt(max(beamPeak, 0.0))
+        * 0.42
+        * mix(0.18, 1.0, beamLocality)
+        * mix(1.0, 1.36, membraneMode),
+      0.0,
+      0.30
+    );
+    finalColor = mix(beamScreen, beamTransmission, beamTransmissionAmount);
   }
   // 通用玻璃的亮底補償仍由原開關管理；液態薄膜本身就是透射模型，不依賴該開關。
   float brightColorSupport = max(
@@ -1857,6 +1900,9 @@ void main(){
   if (universalGlass) {
     universalTransmitted = refractedBg * material.transmission * volumeAbsorption
       * (1.0 - backFres * 0.72);
+    // 稜光光芒染在透射光上。放在這裡而不是在光芒自己的合成段，是因為透射背景要到
+    // 這一行才算出來 —— 而它正是亮底截頂的來源（見 beamTint 的說明）。
+    universalTransmitted *= beamTint;
     // 覆蓋率取材質不透明度與自身能量兩者的較大值。不能只用
     // luma：純藍光的亮度權重只有 0.072，飽和色散即使能量很高也會
     // 被計成幾乎透明，PNG 疊在亮底上就會被背景沖成淡灰色。以最強
