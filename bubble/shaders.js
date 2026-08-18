@@ -885,8 +885,11 @@ vec2 prismBeamCoord(vec2 screenUv, vec3 viewDir, vec3 exitDir){
 // 回傳三通道各自的光芒強度（未上色，RGB 之間的差異本身就是色散）。
 vec3 prismBeamField(vec2 q){
   float l = max(length(q), 0.02);
-  // 一個循環轉整數圈 —— 循環接縫的唯一保證，見檔頭。
-  float cycles = max(1.0, floor(uRayBeamPulse + 0.5));
+  // 一個循環轉整數圈 —— 循環接縫的唯一保證，見檔頭。0 圈是合法值，代表圖樣
+  // 完全靜止：basePhase 恆為 0，而這裡是唯一的時間來源，所以光芒自己不會動。
+  // （造型轉動時光芒仍會被折射推著走，那是透鏡該有的行為，見 prismBeamCoord；
+  // 想連那個也凍住就把「折射扭曲」設 0。）
+  float cycles = max(0.0, floor(uRayBeamPulse + 0.5));
   float basePhase = TAU * cycles * fract(uTime / max(0.001, uLoopDuration));
   // 亮點的核心尺寸。銳利度調高 → 分子變小、亮點收緊成細長的光針；調低 →
   // 糊成一團柔光。

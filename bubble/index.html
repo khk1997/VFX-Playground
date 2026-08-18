@@ -252,12 +252,12 @@
         <div class="row"><label>光芒尺度</label><input type="range" id="rayBeamZoom" min="0.5" max="8" step="0.05" value="1.8"><span class="val" id="rayBeamZoom_v"></span></div>
         <div class="row"><label>環紋密度</label><input type="range" id="rayBeamRings" min="1" max="24" step="0.5" value="9"><span class="val" id="rayBeamRings_v"></span></div>
         <div class="row"><label>光點銳利</label><input type="range" id="rayBeamGlow" min="0" max="1" step="0.01" value="0.8"><span class="val" id="rayBeamGlow_v"></span></div>
-        <div class="row"><label>脈動圈數</label><input type="range" id="rayBeamPulse" min="1" max="6" step="1" value="1"><span class="val" id="rayBeamPulse_v"></span></div>
+        <div class="row"><label>脈動圈數</label><input type="range" id="rayBeamPulse" min="0" max="6" step="1" value="0"><span class="val" id="rayBeamPulse_v"></span></div>
         <div class="effectSubhead">放射中心與折射</div>
         <div class="row"><label>中心水平</label><input type="range" id="rayBeamCenterX" min="-1.5" max="1.5" step="0.01" value="0"><span class="val" id="rayBeamCenterX_v"></span></div>
         <div class="row"><label>中心垂直</label><input type="range" id="rayBeamCenterY" min="-1.5" max="1.5" step="0.01" value="0"><span class="val" id="rayBeamCenterY_v"></span></div>
         <div class="row"><label>折射扭曲</label><input type="range" id="rayBeamRefract" min="0" max="6" step="0.05" value="1.5"><span class="val" id="rayBeamRefract_v"></span></div>
-        <div class="note">程序化的放射光束：圖樣錨定在畫面上（所以光束是完整連續的放射狀），再由造型的折射把它扭曲、放大 —— 也就是真實透鏡對背後光束做的事。手法參考 Shadertoy 的 "Creation"（作者 Danilo Guanabara）。<br><strong>「色散分離」是這個效果的靈魂</strong>：色散不是來自折射率差，而是三個顏色通道取樣同一個圖樣時的相位差 —— 設 0 就是純白光束、完全沒有彩虹，往上加彩虹越開。「折射扭曲」是這個效果的另一半：0 時圖樣完全貼在畫面上（像後製濾鏡、不隨物體動），調高則造型的折射會把光束推開、扭出透鏡感。「環紋密度」是往外跑的同心環有幾圈，「光點銳利」調高是細長的光針、調低是糊成一團的柔光。「脈動圈數」是一個循環脈動幾次，只取整數（循環頭尾才接得上）。這一版不做額外的光線追蹤，比舊的物理分光便宜得多。</div>
+        <div class="note">程序化的放射光束：圖樣錨定在畫面上（所以光束是完整連續的放射狀），再由造型的折射把它扭曲、放大 —— 也就是真實透鏡對背後光束做的事。手法參考 Shadertoy 的 "Creation"（作者 Danilo Guanabara）。<br><strong>「色散分離」是這個效果的靈魂</strong>：色散不是來自折射率差，而是三個顏色通道取樣同一個圖樣時的相位差 —— 設 0 就是純白光束、完全沒有彩虹，往上加彩虹越開。「折射扭曲」是這個效果的另一半：0 時圖樣完全貼在畫面上（像後製濾鏡、不隨物體動），調高則造型的折射會把光束推開、扭出透鏡感。「環紋密度」是往外跑的同心環有幾圈，「光點銳利」調高是細長的光針、調低是糊成一團的柔光。「脈動圈數」是一個循環脈動幾次，<strong>設 0 光芒就完全靜止</strong>（預設即靜止）；要動的話只取整數，循環頭尾才接得上。造型轉動時光芒仍會被折射推著走，那是透鏡該有的行為，想連那個也凍住就把「折射扭曲」設 0。這一版不做額外的光線追蹤，比舊的物理分光便宜得多。</div>
       </div>
 
       <div class="effectBlock effectBlock--caustic" id="spectralCausticGroup">
@@ -454,6 +454,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=universal-dbg65"></script>
+<script type="module" src="./bubble.js?v=universal-dbg66"></script>
 </body>
 </html>

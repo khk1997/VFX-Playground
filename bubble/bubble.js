@@ -2,25 +2,25 @@
 import * as THREE from 'three';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
-} from './shape-field.js?v=svg-shape-60';
+} from './shape-field.js?v=svg-shape-61';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
   MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
   MORPH_TARGET_SVG_NAME, makeMorphTargetSvgFile,
   MORPH_TARGET_SOLID_NAME, buildMorphTargetSolid,
-} from './default-shapes.js?v=svg-shape-60';
+} from './default-shapes.js?v=svg-shape-61';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-60';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-60';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-60';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-60';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-60';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-60';
-import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-60';
-import createJellyMotion from './motions/jelly.js?v=svg-shape-60';
+} from './motions/registry.js?v=svg-shape-61';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-61';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-61';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-61';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-61';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-61';
+import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-61';
+import createJellyMotion from './motions/jelly.js?v=svg-shape-61';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -61,8 +61,9 @@ const DEFAULTS = {              // 數值滑桿
   // 圖樣的尺度與同心環密度。
   rayBeamZoom: 1.8,
   rayBeamRings: 9,
-  // 一個循環脈動幾圈。必須是整數，否則循環接縫會跳（見 prismBeamField）。
-  rayBeamPulse: 1,
+  // 一個循環脈動幾圈。0 = 圖樣完全靜止（光芒自己不動）。必須是整數，否則循環
+  // 接縫會跳（見 prismBeamField）。
+  rayBeamPulse: 0,
   // 亮點的收束程度：調高是細長的光針，調低是糊成一團的柔光。
   rayBeamGlow: 0.8,
   // 等亮度彩度調整。1 = 原樣，調高讓三通道的差異更明顯。
@@ -512,7 +513,7 @@ const fmt = {
   rayBeamSeparation: v => v === 0 ? '無色散' : v.toFixed(3),
   rayBeamZoom: v => 'x' + v.toFixed(2),
   rayBeamRings: v => v.toFixed(1),
-  rayBeamPulse: v => Math.round(v) + ' 圈/循環',
+  rayBeamPulse: v => v === 0 ? '靜止不動' : Math.round(v) + ' 圈/循環',
   rayBeamGlow: v => Math.round(v * 100) + '%',
   rayBeamChroma: v => v === 0 ? '去彩' : 'x' + v.toFixed(2),
   rayBeamCenterX: v => v.toFixed(2),
