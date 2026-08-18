@@ -165,8 +165,9 @@ export const MOTIONS = {
     gate: 'shatter',
     // 碎片愈多愈像噴濺，主水滴與微滴一起當碎片用。
     count: 8,
-    // 「水滴大小」在這個模式是碎片的整體乘數，滑桿最小值 0.25 剛好＝×1 原尺寸
-    // （見 shatter.js 的 SHATTER_RADIUS_BASE）。
+    // 「水滴大小」在這個模式是碎片的整體乘數，0.25 這個預設值剛好＝×1 原尺寸
+    // （見 shatter.js 的 SHATTER_RADIUS_BASE）。滑桿本身可以拉到 0（碎片完全
+    // 消失），所以這個值是「基準」而不是「下限」。
     radius: 0.25,
     // 四段時長預設 1.1 / 0.5 / 0.4 / 2.0 合計正好 4 秒，面板才顯示得出實際秒數。
     loopDuration: 4,
