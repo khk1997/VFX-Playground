@@ -115,8 +115,6 @@
     <div class="row" id="morphNoiseScaleRow"><label>撕裂尺度</label><input type="range" id="morphNoiseScale" min="0.5" max="8" step="0.1" value="1.5"><span class="val" id="morphNoiseScale_v"></span></div>
     <div class="row" id="morphCellRow"><label>晶格碎裂</label><input type="range" id="morphCell" min="0" max="0.6" step="0.005" value="0"><span class="val" id="morphCell_v"></span></div>
     <div class="row" id="morphCellScaleRow"><label>碎塊大小</label><input type="range" id="morphCellScale" min="1" max="12" step="0.5" value="4"><span class="val" id="morphCellScale_v"></span></div>
-    <div id="morphDissolveNote" class="note">形狀不是被一刀切掉的：切削的位置由一條「消失場」決定，這幾個滑桿就是往那條場上疊東西，可以任意組合而不是互斥的選單。「波前形狀」換的是波怎麼走——平面掃描、從中心放射（像一圈擴張的環）、螺旋（接縫那一臂就是螺旋本身）。「前緣收頸」是斷開前先把材料侵蝕變薄、收出一個頸再斷，這一項給的是液體的身分而不是圖形花樣，四種波前都適用，建議一直開著。「亂流撕裂」把波前擾成參差的有機邊緣，幅度大時整片碎成島嶼；「晶格碎裂」則是同一格內完全等值，所以是整塊整塊剝落，那種一片一片解體的碎裂感來自這裡——兩者可以疊。水滴的出發時機會跟著擾動量一起變參差。</div>
-    <div id="morphNote" class="note">上方匯入的形狀 A 定格 → 一道波橫掃過去、把它削成水滴流走，新的形狀 B（目前固定是內建星形）在波前之後長出來 → 定格 → 再掃回來。整個過程形狀本體都在畫面上，水滴只存在於「已經離開舊形狀、還沒併進新形狀」的飛行途中，所以定格時看到的是一顆乾淨完整的造型，不是外面黏著一圈球。「定格時間」是單邊定格佔的時間，剩下的對半分給兩趟變形。「波前錯開」是這個模式最關鍵的一項，它決定「畫面上隨時有多少實體」：調高＝波掃得長、每顆水滴只飛一小段、舊形狀退到哪裡新形狀就跟到哪裡，實體幾乎不間斷；調低＝所有水滴同時出發、飛很久才重組，中間會空出一段兩顆形狀都不在、畫面只剩水滴的時間。預設偏高。「波掃方向」是波從哪個方向掃進來（回程固定轉 90°，否則兩趟看起來像同一段動畫正放再倒放）。「弧線高度」讓水滴沿路往外凸起再落下，走直線會像瞬移。「波前軟硬」是 0 時實體被一刀平切，調高會先收薄再斷開，比較像液體。形狀 A 與形狀 B 都在上方「形狀匯聚」那一組匯入，兩個槽共用同一個「形狀來源」。SVG↔SVG 與 GLB↔GLB 都支援；GLB 的兩顆形狀必須用同一個「模型品質」烘焙（換品質會自動重烘兩顆），高品質下記憶體佔用會是單一形狀的三倍左右。萬一兩顆形狀對不起來（來源或解析度不一致），畫面會退回只有水滴而不是畫出一顆錯位的形狀。</div>
     </div>
     <div data-gate="split" class="row" id="flowSpeedRow"><label>動態張力</label><input type="range" id="flowSpeed" min="0" max="1.5" step="0.01" value="0.47"><span class="val" id="flowSpeed_v"></span></div>
     <details class="subgroup" data-gate="shape" id="shapeMotionGroup">
@@ -144,6 +142,7 @@
         <option value="high">高品質 128³</option>
       </select><span class="val"></span></div>
       <div class="row"><button class="fileBtn" id="shapeBtn">選擇 SVG…</button></div>
+      <div class="row"><label>形狀 A 大小</label><input type="range" id="shapeAScale" min="0.4" max="1.8" step="0.02" value="1"><span class="val" id="shapeAScale_v"></span></div>
       <div id="shapeState" class="note">切到「形狀匯聚 / 穿梭環繞 / 崩解噴濺」會先套用內建預設造型，可再自行匯入取代</div>
       <input type="file" id="shapeInput" accept=".svg,image/svg+xml" hidden>
       <div data-gate="formation" class="effectSubhead">時間軸</div>
@@ -159,7 +158,8 @@
       <div data-gate="morph" class="effectSubhead">變形目標（形狀 B）</div>
       <div data-gate="morph" class="row"><button class="fileBtn" id="morphTargetBtn">選擇變形目標 SVG…</button></div>
       <div data-gate="morph" class="row"><button class="fileBtn" id="morphTargetResetBtn">還原內建變形目標</button></div>
-      <div data-gate="morph" id="morphTargetState" class="note">上方匯入的是形狀 A（變形前），這裡匯入形狀 B（變形後）。兩個槽共用上方的「形狀來源」，不能一個 SVG、一個 GLB——兩種距離場的編碼方式不同，疊不進同一張貼圖。沒有匯入時使用內建預設（SVG 是星形、GLB 是多面體）。</div>
+      <div data-gate="morph" class="row"><label>形狀 B 大小</label><input type="range" id="shapeBScale" min="0.4" max="1.8" step="0.02" value="1"><span class="val" id="shapeBScale_v"></span></div>
+      <div data-gate="morph" id="morphTargetState" class="note">上方匯入的是形狀 A（變形前），這裡匯入形狀 B（變形後）。兩個槽共用上方的「形狀來源」，不能一個 SVG、一個 GLB——兩種距離場的編碼方式不同，疊不進同一張貼圖。沒有匯入時使用內建預設（SVG 是星形、GLB 是多面體）。「形狀 A/B 大小」各自獨立縮放兩顆形狀本體，互不影響。</div>
       <input type="file" id="morphTargetInput" accept=".svg,image/svg+xml" hidden>
     </div>
 

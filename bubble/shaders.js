@@ -130,6 +130,12 @@ uniform vec2  uMorphActive;
 // 會把輪廓加粗、細節連在一起，縮放才是整顆造型一起脹縮。均勻縮放對 SDF 是精確
 // 的 d(p) = s·d(p/s)，所以 raymarch 的步長仍然安全。
 uniform float uShapeScale;
+// 形狀 A（來源）／形狀 B（變形目標）各自的大小倍率，獨立於上面共用的
+// uShapeScale。做法跟 uShapeScale 一樣是均勻縮放 d(p) = s·d(p/s)，只是
+// 分開套在 morph 的兩個通道（fromCh/toCh）與非 morph 時的單一形狀上，讓
+// 兩顆形狀能各自放大縮小，不會互相牽動。
+uniform float uShapeAScale;
+uniform float uShapeBScale;
 // 造型本身的剛體動態（見 motions/shapeRigid.js）：呼吸縮放、任意軸旋轉、上下
 // 浮動、擠壓拉伸疊在 SDF 取樣座標上，讓匯入的 SVG/GLB 造型自己也會動，不只是
 // 水滴在動。CPU 端算的是「本地座標 → 世界座標」的正變換（水滴的目標位置也套
@@ -674,23 +680,34 @@ float mapScene(vec3 p, bool smoothShape){
     vec3 rigidP = vec3(p.x, p.y - uShapeRigidOffsetY, p.z);
     vec3 unrotatedP = rigidP * uShapeRigidRot;
     vec3 shapeP = (unrotatedP / uShapeRigidScale) / uShapeScale;
+    // 形狀 A/B 各自的獨立倍率再疊一層，跟 uShapeScale 是同一種均勻縮放，只是
+    // 分開套在各自的通道上。fromCh/toCh 哪個是 A、哪個是 B 由 uShapeMorph 決定
+    // （見下方），所以要先分出 shapeP 對應 A、B 各自的本地座標。
+    vec3 shapePA = shapeP / uShapeAScale;
+    vec3 shapePB = shapeP / uShapeBScale;
     float detailD;
     if (uShapeMorph > 0.5) {
       // 兩顆形狀同時在場：舊的被「消失波前」削掉，新的被「出現波前」放出來，
       // 兩者聯集。單一貼圖的兩個通道，所以這裡沒有多綁任何取樣器。
       int fromCh = uShapeMorph > 1.5 ? 1 : 0;
       int toCh = 1 - fromCh;
+      // 通道 0 一律是形狀 A、通道 1 一律是形狀 B（見 bubble.js 的
+      // rebuildMorphPackedTexture：r=A、g=B），跟 fromCh/toCh 哪個先哪個後無關。
+      vec3 shapePFrom = fromCh == 0 ? shapePA : shapePB;
+      vec3 shapePTo = toCh == 0 ? shapePA : shapePB;
+      float scaleFrom = fromCh == 0 ? uShapeAScale : uShapeBScale;
+      float scaleTo = toCh == 0 ? uShapeAScale : uShapeBScale;
       // 兩顆形狀一定是同一種來源（面板的「形狀來源」對兩個匯入槽共用），所以
       // 這裡只需要看一次 uShapeType，不會出現一顆走 SVG、一顆走體素的情況。
       float dFrom = uMorphActive.x > 0.5
         ? (uShapeType == 1
-          ? svgShapeDistance(shapeP, smoothShape, fromCh)
-          : volumeShapeDistance(shapeP, fromCh)) * uShapeScale
+          ? svgShapeDistance(shapePFrom, smoothShape, fromCh)
+          : volumeShapeDistance(shapePFrom, fromCh)) * uShapeScale * scaleFrom
         : 1e6;
       float dTo = uMorphActive.y > 0.5
         ? (uShapeType == 1
-          ? svgShapeDistance(shapeP, smoothShape, toCh)
-          : volumeShapeDistance(shapeP, toCh)) * uShapeScale
+          ? svgShapeDistance(shapePTo, smoothShape, toCh)
+          : volumeShapeDistance(shapePTo, toCh)) * uShapeScale * scaleTo
         : 1e6;
       float field = dissolveField(p);
       // 收頸：波前前方那一小段裡，對距離場加一個正偏移把實體「侵蝕變薄」。
@@ -712,9 +729,10 @@ float mapScene(vec3 p, bool smoothShape){
       float keptTo = -smin(-dTo, -(field - uShapeCut.w), k);
       detailD = smin(keptFrom, keptTo, k);
     } else {
+      // 非 morph 情境下場上只有形狀 A（通道 0）。
       detailD = (uShapeType == 1
-        ? svgShapeDistance(shapeP, smoothShape, 0)
-        : volumeShapeDistance(shapeP, 0)) * uShapeScale;
+        ? svgShapeDistance(shapePA, smoothShape, 0)
+        : volumeShapeDistance(shapePA, 0)) * uShapeScale * uShapeAScale;
     }
     float growth = smoothstep(0.0, 1.0, uShapeProgress);
     // 已抵達水滴附近先成形，遠處隨全域進度稍晚跟上；這是幾何侵蝕，

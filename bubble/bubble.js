@@ -244,6 +244,10 @@ const DEFAULTS = {              // 數值滑桿
   shapeBreathe: 0.05,
   shapeBob: 0.08,
   shapeSquash: 0.35,
+  // 形狀 A（來源）／形狀 B（變形目標）各自的大小倍率，1 = 原尺寸。兩者獨立，
+  // 不共用同一個縮放，才能讓來源跟變形目標各自放大縮小。
+  shapeAScale: 1,
+  shapeBScale: 1,
 };
 
 // 走完整 SDF 匯聚管線（錨點、細節滴、負滴、體積交接）＋ 匯聚→停留→散開時間軸
@@ -595,6 +599,8 @@ const fmt = {
   shapeBreathe: v => Math.round(v * 100) + '%',
   shapeBob: v => v.toFixed(2),
   shapeSquash: v => Math.round(v * 100) + '%',
+  shapeAScale: v => 'x' + v.toFixed(2),
+  shapeBScale: v => 'x' + v.toFixed(2),
 };
 
 // 崩解噴濺的四段時長是正規化的相對權重，所以動任何一段，其他三段實際佔的秒數
@@ -675,6 +681,58 @@ let shapeTargets = [];
 let formationAnchors = [];
 let microFormationAnchors = [];
 let negativeFormationAnchors = [];
+// 形狀 A 未套用「形狀 A 大小」倍率前的原始烘焙結果。滑桿拖動時只需要從這裡
+// 重新縮放＋重挑錨點，不必整顆重新烘焙距離場（那是幾百毫秒到幾秒的 CPU 工作）。
+let shapeTargetsBase = [];
+let shapeCavityBase = [];
+
+// 把候選點集合（THREE.Vector3，帶 radiusHint/thickness/surface 附加屬性）整體
+// 縮放 scale 倍。scale === 1 時直接回傳原陣列，拖桿停在預設值時不用多做一次
+// clone。
+function scalePoints(points, scale) {
+  if (!points.length || scale === 1) return points;
+  return points.map(p => {
+    const copy = p.clone();
+    copy.multiplyScalar(scale);
+    if (p.radiusHint != null) copy.radiusHint = p.radiusHint * scale;
+    if (p.thickness != null) copy.thickness = p.thickness * scale;
+    copy.surface = p.surface;
+    return copy;
+  });
+}
+
+// 依目前的 P.shapeAScale 從 shapeTargetsBase 重新縮放並重挑錨點。呼叫端負責
+// 視情況遞增 shapeFieldSerial（崩解切法／融化滴落點／變形配對都拿它當快取
+// key 的一部分，serial 一變就會自動重算，不必逐一手動清快取）。
+// 重挑錨點是 O(候選點 × 錨點數) 的貪婪取樣，跟崩解切法一樣不便宜，所以等
+// 滑桿停下來才做——拖動期間先讓水滴留在舊尺寸，停手 120ms 後才重新分佈。
+let shapeAScaleTimer = 0;
+function scheduleShapeAScaleRebuild() {
+  clearTimeout(shapeAScaleTimer);
+  shapeAScaleTimer = setTimeout(() => {
+    rebuildShapeAAnchors();
+    shapeFieldSerial++;
+  }, 120);
+}
+let shapeBScaleTimer = 0;
+function scheduleShapeBScaleRebuild() {
+  clearTimeout(shapeBScaleTimer);
+  shapeBScaleTimer = setTimeout(() => {
+    rebuildShapeBAnchors();
+    shapeFieldSerial++;
+  }, 120);
+}
+
+function rebuildShapeAAnchors() {
+  if (!shapeTargetsBase.length) return;
+  shapeTargets = scalePoints(shapeTargetsBase, P.shapeAScale);
+  formationAnchors = distributePrimaryAnchors(shapeTargets);
+  microFormationAnchors = distributeDetailedAnchors(shapeTargets, MAX_MICRO_DROPS);
+  negativeFormationAnchors = distributeFormationAnchors(
+    scalePoints(shapeCavityBase, P.shapeAScale), MAX_NEGATIVE_DROPS,
+  );
+  rebuildWeaveAnchorSets();
+}
 // 穿梭環繞的路徑點：只取 formationAnchors 裡標記為表面的錨點。每顆水滴分到
 // 一個表面點當「家」，在旁邊小幅度飄浮晃動，而不是精確衝向某個目標點——
 // 參考的泡泡影片裡，泡泡是懸浮在原地輕輕晃動，不是有明確路徑地移動。
@@ -711,6 +769,17 @@ let morphPairKey = null;
 // 貼圖要留著（不像早期只有水滴的版本烘完就 dispose）：實體變形要拿它的 g 通道。
 let morphTargetPoints = null;
 let morphTargetPending = null;
+// 形狀 B 未套用「形狀 B 大小」倍率前的原始烘焙結果，用途同 shapeTargetsBase。
+let morphTargetBaseField = null;
+
+// 依目前的 P.shapeBScale 從 morphTargetBaseField 重新縮放並重挑錨點。
+function rebuildShapeBAnchors() {
+  if (!morphTargetBaseField || !morphTargetPoints) return;
+  const scaled = scalePoints(morphTargetBaseField.targets, P.shapeBScale);
+  morphTargetPoints.primary = distributePrimaryAnchors(scaled);
+  morphTargetPoints.micro = distributeDetailedAnchors(scaled, MAX_MICRO_DROPS);
+  morphPairKey = null;
+}
 // 使用者自己匯入的形狀 B，跟形狀 A 一樣依來源分開記住；沒有就用內建預設
 // （SVG 用星形、GLB 用多面體）。
 const morphTargetFiles = { svg: null, gltf: null };
@@ -790,16 +859,17 @@ function ensureMorphTarget() {
       // 烘的途中使用者又換了設定：這份已經過期，丟掉貼圖直接走，讓下一輪重烘。
       if (morphTargetPending !== key) { field.texture?.dispose(); return; }
       morphTargetPoints?.texture?.dispose();
+      morphTargetBaseField = field;
       morphTargetPoints = {
         key,
         kind,
         texture: field.texture,
         grid: field.grid,
         atlas: field.atlas,
-        primary: distributePrimaryAnchors(field.targets),
-        micro: distributeDetailedAnchors(field.targets, MAX_MICRO_DROPS),
+        primary: [],
+        micro: [],
       };
-      morphPairKey = null;
+      rebuildShapeBAnchors();
       morphPackedKey = null;
       setMorphTargetState(`變形目標已就緒：${label}${file ? '' : '（內建預設，可自行匯入取代）'}`);
     } catch (error) {
@@ -2290,6 +2360,8 @@ function initGL() {
     uMorphActive: { value: new THREE.Vector2(1, 1) },
     uMembraneOverWhite: { value: 0 },
     uShapeScale: { value: 1 },
+    uShapeAScale: { value: 1 },
+    uShapeBScale: { value: 1 },
     // 造型剛體動態（見 motions/shapeRigid.js）。未啟用時維持單位變換。
     uShapeRigidRot: { value: new THREE.Matrix3() },
     uShapeRigidOffsetY: { value: 0 },
@@ -2589,6 +2661,8 @@ function bindControls() {
         motionMemory[key][P.motion] = key === 'count' ? Math.round(P[key]) : P[key];
       }
       if (key === 'shapeLiquidPosition') applyEdgeDropDistribution(P[key]);
+      if (key === 'shapeAScale') scheduleShapeAScaleRebuild();
+      if (key === 'shapeBScale') scheduleShapeBScaleRebuild();
       if (valEl) valEl.textContent = (fmt[key] || (v => +v.toFixed(2)))(P[key]);
       if (uniforms && uniforms[uName]) uniforms[uName].value = (key === 'count') ? Math.round(P[key]) : P[key];
       if (SHATTER_TIMELINE_KEYS.includes(key)) refreshShatterTimelineReadouts();
@@ -3168,14 +3242,9 @@ async function importShapeFile(file, kind, { rebuilding = false } = {}) {
     const old = shapeField?.texture;
     shapeField = next;
     shapeFieldSerial++;
-    shapeTargets = next.targets;
-    formationAnchors = distributePrimaryAnchors(shapeTargets);
-    microFormationAnchors = distributeDetailedAnchors(shapeTargets, MAX_MICRO_DROPS);
-    negativeFormationAnchors = distributeFormationAnchors(
-      next.cavityTargets || [],
-      MAX_NEGATIVE_DROPS,
-    );
-    rebuildWeaveAnchorSets();
+    shapeTargetsBase = next.targets;
+    shapeCavityBase = next.cavityTargets || [];
+    rebuildShapeAAnchors();
     // key 帶著 shapeFieldSerial，換形狀後下一幀就會重挑滴落點／重配變形配對。
     meltAnchorKey = null;
     morphPairKey = null;
