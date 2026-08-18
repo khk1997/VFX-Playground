@@ -190,6 +190,9 @@ uniform float uRayBeamChroma;
 uniform float uRayBeamAzimuth;
 uniform float uRayBeamElevation;
 uniform float uRayBeamRefract;
+uniform float uRayBeamFresnelMask;
+uniform float uRayBeamNoiseMask;
+uniform float uRayBeamNoiseScale;
 uniform float uSpectralCausticEnabled;
 uniform float uSpectralCausticIntensity;
 uniform float uSpectralCausticFocus;
@@ -1281,8 +1284,38 @@ void main(){
     // 下限刻意留高（0.5 而非更低）：localPrism 在平坦的中央幾乎為 0，壓太狠會讓
     // 光芒只剩輪廓一圈，變成邊緣描邊而不是「光束穿過整塊玻璃」。
     float lensing = mix(0.5, 1.0, clamp(localPrism * 1.6, 0.0, 1.0));
+
+    // Fresnel 遮罩。跟虛擬光譜焦散同一套寫法：mix(1.0, mask, 滑桿)，所以滑桿為 0
+    // 時是「完全不限制」，語意乾淨。
+    //
+    // 它跟上面的 lensing 是同一個軸（都把光芒往邊緣集中），不是新維度 —— 存在的
+    // 理由是 lensing 的下限刻意留在 0.5 以保住內部可見度，這根滑桿讓那個決定可以
+    // 被覆寫，想要純邊緣描邊的畫面時才用得到。
+    //
+    // 焦散那邊還會用膜褶（membraneFold）補一項，這裡沒有：membraneFold 要到更
+    // 後面才算得出來，而把整段光芒搬到它後面只為了一個薄膜專屬的加成不值得。
+    float beamFresnel = pow(clamp(material.edgeFactor, 0.0, 1.0), 1.8);
+    beamFresnel = mix(1.0, beamFresnel, clamp(uRayBeamFresnelMask, 0.0, 1.0));
+
+    // Noise 遮罩。圖樣本身是完美規則的極座標晶格，那正是它有時看起來機械的原因；
+    // 用噪聲把它打散成參差的斑塊，質地才像光穿過不均勻的介質而不是印上去的網格。
+    //
+    // 噪聲的流動速度直接掛在「流動速度」上（乘 0.02 收成很慢），不另外開滑桿：
+    // 兩者本來就該同步，光點在流、底下的遮罩卻不動會看出分層。loopNoiseOffset 是
+    // 現成的循環安全位移（相位式，不是線性累加），速度為 0 時回傳零向量，所以
+    // 靜止時噪聲也精確靜止。
+    float beamNoise = fbmFast(
+      p * max(0.05, uRayBeamNoiseScale)
+        + loopNoiseOffset(abs(uRayBeamSpeed) * 0.02)
+    );
+    float beamNoiseMask = mix(
+      1.0,
+      smoothstep(0.32, 0.68, 0.5 + beamNoise * 0.72),
+      clamp(uRayBeamNoiseMask, 0.0, 1.0)
+    );
+
     beamLight = beams * volumeAbsorption * transmit * lensing
-      * uRayBeamIntensity;
+      * beamFresnel * beamNoiseMask * uRayBeamIntensity;
     beamMask = clamp(max(beamLight.r, max(beamLight.g, beamLight.b)), 0.0, 1.0);
   }
   // 純色只控制畫布；水滴內部獨立取樣同一張 HDRI。若背面追蹤未命中，

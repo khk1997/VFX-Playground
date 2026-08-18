@@ -257,7 +257,11 @@
         <div class="row"><label>放射水平</label><input type="range" id="rayBeamAzimuth" min="-180" max="180" step="1" value="0"><span class="val" id="rayBeamAzimuth_v"></span></div>
         <div class="row"><label>放射高度</label><input type="range" id="rayBeamElevation" min="-90" max="90" step="1" value="0"><span class="val" id="rayBeamElevation_v"></span></div>
         <div class="row"><label>折射強度</label><input type="range" id="rayBeamRefract" min="0" max="1" step="0.01" value="1"><span class="val" id="rayBeamRefract_v"></span></div>
-        <div class="note">程序化的放射光束，鋪滿整個方向球（跟 HDRI 一樣是全方位環境，不是貼在鏡頭前的平面投影）：物體用自己的折射方向去查這片光束環境，所以是真正的透射，會隨造型曲面與視角流動。手法參考 Shadertoy 的 "Creation"（作者 Danilo Guanabara）。<br><strong>「色散分離」是這個效果的靈魂</strong>：色散不是來自折射率差，而是三個顏色通道取樣同一個圖樣時的相位差 —— 設 0 就是純白光束、完全沒有彩虹，往上加彩虹越開。「折射強度」是這個效果的另一半：0 時沿原視線取樣，環境像背景一樣直接透過去、不被造型扭曲；100% 則完全用折射後的出射方向，造型變成真正的透鏡。「環紋密度」是往外跑的同心環有幾圈，「光點銳利」調高是細長的光針、調低是糊成一團的柔光。「流動速度」設 0 是完全靜止，負值是反向流動；讀數顯示的是「幾秒滑過一格」，也就是眼睛實際看到的速度。它平移的是球面上的光點晶格而不是波形相位 —— 晶格有幾十格（隨「光芒尺度」而定），所以 1 就已經是很慢的流速，把「光芒尺度」調大還會更慢。只取整數是循環接縫的必要條件：一個循環必須剛好滑過整數個格子才接得回原狀。造型轉動時光芒仍會被折射推著走，那是透鏡該有的行為，想連那個也凍住就把「折射強度」設 0。這一版不做額外的光線追蹤，比舊的物理分光便宜得多。</div>
+        <div class="effectSubhead">遮罩</div>
+        <div class="row"><label>Fresnel 遮罩</label><input type="range" id="rayBeamFresnelMask" min="0" max="1" step="0.01" value="0"><span class="val" id="rayBeamFresnelMask_v"></span></div>
+        <div class="row"><label>Noise 遮罩</label><input type="range" id="rayBeamNoiseMask" min="0" max="1" step="0.01" value="0.4"><span class="val" id="rayBeamNoiseMask_v"></span></div>
+        <div class="row"><label>Noise 尺度</label><input type="range" id="rayBeamNoiseScale" min="0.5" max="8" step="0.1" value="2.5"><span class="val" id="rayBeamNoiseScale_v"></span></div>
+        <div class="note">程序化的放射光束，鋪滿整個方向球（跟 HDRI 一樣是全方位環境，不是貼在鏡頭前的平面投影）：物體用自己的折射方向去查這片光束環境，所以是真正的透射，會隨造型曲面與視角流動。手法參考 Shadertoy 的 "Creation"（作者 Danilo Guanabara）。<br><strong>「色散分離」是這個效果的靈魂</strong>：色散不是來自折射率差，而是三個顏色通道取樣同一個圖樣時的相位差 —— 設 0 就是純白光束、完全沒有彩虹，往上加彩虹越開。「折射強度」是這個效果的另一半：0 時沿原視線取樣，環境像背景一樣直接透過去、不被造型扭曲；100% 則完全用折射後的出射方向，造型變成真正的透鏡。「環紋密度」是往外跑的同心環有幾圈，「光點銳利」調高是細長的光針、調低是糊成一團的柔光。「流動速度」設 0 是完全靜止，負值是反向流動；讀數顯示的是「幾秒滑過一格」，也就是眼睛實際看到的速度。它平移的是球面上的光點晶格而不是波形相位 —— 晶格有幾十格（隨「光芒尺度」而定），所以 1 就已經是很慢的流速，把「光芒尺度」調大還會更慢。只取整數是循環接縫的必要條件：一個循環必須剛好滑過整數個格子才接得回原狀。造型轉動時光芒仍會被折射推著走，那是透鏡該有的行為，想連那個也凍住就把「折射強度」設 0。<br>兩個遮罩都是 0 = 完全不限制。「Noise 遮罩」把規則的極座標晶格打散成參差斑塊，質地才像光穿過不均勻的介質而不是印上去的網格，是這兩者裡比較有感的一個（預設就開著）。「Fresnel 遮罩」把光芒往邊緣集中，預設 0 是刻意的 —— 它跟內部既有的透鏡集中項是同一個軸，開了會抵銷「光束穿過整塊玻璃」的手感,想做純邊緣描邊時才用。Noise 的流動速度直接跟著「流動速度」，不另外開滑桿，兩者才不會看出分層。這一版不做額外的光線追蹤，比舊的物理分光便宜得多。</div>
       </div>
 
       <div class="effectBlock effectBlock--caustic" id="spectralCausticGroup">
@@ -454,6 +458,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=universal-dbg70"></script>
+<script type="module" src="./bubble.js?v=universal-dbg71"></script>
 </body>
 </html>

@@ -2,25 +2,25 @@
 import * as THREE from 'three';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
-} from './shape-field.js?v=svg-shape-65';
+} from './shape-field.js?v=svg-shape-66';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
   MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
   MORPH_TARGET_SVG_NAME, makeMorphTargetSvgFile,
   MORPH_TARGET_SOLID_NAME, buildMorphTargetSolid,
-} from './default-shapes.js?v=svg-shape-65';
+} from './default-shapes.js?v=svg-shape-66';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-65';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-65';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-65';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-65';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-65';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-65';
-import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-65';
-import createJellyMotion from './motions/jelly.js?v=svg-shape-65';
+} from './motions/registry.js?v=svg-shape-66';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-66';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-66';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-66';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-66';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-66';
+import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-66';
+import createJellyMotion from './motions/jelly.js?v=svg-shape-66';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -75,6 +75,13 @@ const DEFAULTS = {              // 數值滑桿
   // 折射強度：0 = 沿原視線取樣（環境直接透過去、不被造型扭曲），1 = 完全用
   // 折射後的出射方向（造型變成真正的透鏡）。
   rayBeamRefract: 1.0,
+  // 兩個遮罩，寫法與虛擬光譜焦散一致：0 = 完全不限制。
+  // Fresnel 把光芒往邊緣集中（跟內部的 lensing 同一個軸，見 shaders.js 的說明），
+  // 預設 0 是刻意的 —— 開了會抵銷「光束穿過整塊玻璃」那個手感。
+  rayBeamFresnelMask: 0,
+  // Noise 把規則的極座標晶格打散成參差斑塊，是這兩者裡比較有感的一個。
+  rayBeamNoiseMask: 0.4,
+  rayBeamNoiseScale: 2.5,
   spectralCausticIntensity: 3,
   spectralCausticFocus: 0.12,
   spectralCausticWidth: 0.42,
@@ -525,6 +532,9 @@ const fmt = {
   rayBeamAzimuth: v => v.toFixed(0) + '°',
   rayBeamElevation: v => v.toFixed(0) + '°',
   rayBeamRefract: v => v === 0 ? '不折射' : Math.round(v * 100) + '%',
+  rayBeamFresnelMask: v => v === 0 ? '不限制' : Math.round(v * 100) + '%',
+  rayBeamNoiseMask: v => v === 0 ? '不限制' : Math.round(v * 100) + '%',
+  rayBeamNoiseScale: v => 'x' + v.toFixed(1),
   spectralCausticIntensity: v => Math.round(v * 100) + '%',
   spectralCausticFocus: v => Math.round(v * 100) + '%',
   spectralCausticWidth: v => 'x' + v.toFixed(2),
@@ -2354,6 +2364,9 @@ function initGL() {
     uRayBeamAzimuth: { value: P.rayBeamAzimuth },
     uRayBeamElevation: { value: P.rayBeamElevation },
     uRayBeamRefract: { value: P.rayBeamRefract },
+    uRayBeamFresnelMask: { value: P.rayBeamFresnelMask },
+    uRayBeamNoiseMask: { value: P.rayBeamNoiseMask },
+    uRayBeamNoiseScale: { value: P.rayBeamNoiseScale },
     uSpectralCausticIntensity: { value: P.spectralCausticIntensity },
     uSpectralCausticFocus: { value: P.spectralCausticFocus },
     uSpectralCausticWidth: { value: P.spectralCausticWidth },
