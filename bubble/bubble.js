@@ -2,25 +2,25 @@
 import * as THREE from 'three';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
-} from './shape-field.js?v=svg-shape-61';
+} from './shape-field.js?v=svg-shape-64';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
   MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
   MORPH_TARGET_SVG_NAME, makeMorphTargetSvgFile,
   MORPH_TARGET_SOLID_NAME, buildMorphTargetSolid,
-} from './default-shapes.js?v=svg-shape-61';
+} from './default-shapes.js?v=svg-shape-64';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-61';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-61';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-61';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-61';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-61';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-61';
-import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-61';
-import createJellyMotion from './motions/jelly.js?v=svg-shape-61';
+} from './motions/registry.js?v=svg-shape-64';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-64';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-64';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-64';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-64';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-64';
+import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-64';
+import createJellyMotion from './motions/jelly.js?v=svg-shape-64';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -59,22 +59,21 @@ const DEFAULTS = {              // 數值滑桿
   // 0 = 三通道同步（純白光束，完全沒有彩虹）。
   rayBeamSeparation: 0.07,
   // 圖樣的尺度與同心環密度。
-  rayBeamZoom: 1.8,
-  rayBeamRings: 9,
+  rayBeamZoom: 14,
+  rayBeamRings: 5,
   // 一個循環脈動幾圈。0 = 圖樣完全靜止（光芒自己不動）。必須是整數，否則循環
   // 接縫會跳（見 prismBeamField）。
   rayBeamPulse: 0,
   // 亮點的收束程度：調高是細長的光針，調低是糊成一團的柔光。
-  rayBeamGlow: 0.8,
+  rayBeamGlow: 0.9,
   // 等亮度彩度調整。1 = 原樣，調高讓三通道的差異更明顯。
   rayBeamChroma: 1.4,
-  // 光芒的放射中心，直接是畫面座標（0,0 = 畫面中心）。用角度反而要多繞一次
-  // 透視投影，也不直觀。
-  rayBeamCenterX: 0,
-  rayBeamCenterY: 0,
-  // 折射把圖樣推開多少 —— 這一項就是「光芒長在玻璃裡」的來源：0 時圖樣完全貼在
-  // 畫面上（像後製濾鏡），調高則造型的折射會把光束扭曲、放大。
-  rayBeamRefract: 1.5,
+  // 光芒從哪個方向放射出來（球座標）。圖樣鋪滿整個方向球，這只決定極點在哪。
+  rayBeamAzimuth: 0,
+  rayBeamElevation: 0,
+  // 折射強度：0 = 沿原視線取樣（環境直接透過去、不被造型扭曲），1 = 完全用
+  // 折射後的出射方向（造型變成真正的透鏡）。
+  rayBeamRefract: 1.0,
   spectralCausticIntensity: 3,
   spectralCausticFocus: 0.12,
   spectralCausticWidth: 0.42,
@@ -516,9 +515,9 @@ const fmt = {
   rayBeamPulse: v => v === 0 ? '靜止不動' : Math.round(v) + ' 圈/循環',
   rayBeamGlow: v => Math.round(v * 100) + '%',
   rayBeamChroma: v => v === 0 ? '去彩' : 'x' + v.toFixed(2),
-  rayBeamCenterX: v => v.toFixed(2),
-  rayBeamCenterY: v => v.toFixed(2),
-  rayBeamRefract: v => v === 0 ? '貼齊畫面' : 'x' + v.toFixed(2),
+  rayBeamAzimuth: v => v.toFixed(0) + '°',
+  rayBeamElevation: v => v.toFixed(0) + '°',
+  rayBeamRefract: v => v === 0 ? '不折射' : Math.round(v * 100) + '%',
   spectralCausticIntensity: v => Math.round(v * 100) + '%',
   spectralCausticFocus: v => Math.round(v * 100) + '%',
   spectralCausticWidth: v => 'x' + v.toFixed(2),
@@ -2345,8 +2344,8 @@ function initGL() {
     uRayBeamPulse: { value: P.rayBeamPulse },
     uRayBeamGlow: { value: P.rayBeamGlow },
     uRayBeamChroma: { value: P.rayBeamChroma },
-    uRayBeamCenterX: { value: P.rayBeamCenterX },
-    uRayBeamCenterY: { value: P.rayBeamCenterY },
+    uRayBeamAzimuth: { value: P.rayBeamAzimuth },
+    uRayBeamElevation: { value: P.rayBeamElevation },
     uRayBeamRefract: { value: P.rayBeamRefract },
     uSpectralCausticIntensity: { value: P.spectralCausticIntensity },
     uSpectralCausticFocus: { value: P.spectralCausticFocus },
