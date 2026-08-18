@@ -56,12 +56,10 @@
     <div class="modeBlock" data-gate="formation">
     <div class="row" id="holdBreathRow"><label>定格呼吸</label><input type="range" id="holdBreath" min="0" max="0.2" step="0.005" value="0.05"><span class="val" id="holdBreath_v"></span></div>
     <div class="row" id="formationVarietyRow"><label>軌跡多樣性</label><input type="range" id="formationVariety" min="0" max="1" step="0.01" value="0.35"><span class="val" id="formationVariety_v"></span></div>
-    <div id="formationVarietyNote" class="note">匯聚前水滴四散飛行時的軌跡差異：0 是全體同方向、同一個軌道平面；調高會讓部分水滴反向繞行、軌道平面各自傾斜。</div>
     </div>
     <div class="modeBlock" data-gate="weave">
     <div class="row" id="weaveSizeMinRow"><label>大小差異下限</label><input type="range" id="weaveSizeMin" min="0.1" max="2" step="0.01" value="0.1"><span class="val" id="weaveSizeMin_v"></span></div>
     <div class="row" id="weaveSizeMaxRow"><label>大小差異上限</label><input type="range" id="weaveSizeMax" min="0.1" max="2" step="0.01" value="0.25"><span class="val" id="weaveSizeMax_v"></span></div>
-    <div id="weaveSizeNote" class="note">會乘在上方「水滴形態」的「水滴大小」基準值上，決定同一批水滴彼此的大小差異。</div>
     <div class="row" id="weaveDriftAmountRow"><label>飄浮幅度</label><input type="range" id="weaveDriftAmount" min="0" max="2" step="0.01" value="1"><span class="val" id="weaveDriftAmount_v"></span></div>
     <div class="row" id="weaveDriftSpeedRow"><label>飄浮速度</label><input type="range" id="weaveDriftSpeed" min="1" max="5" step="1" value="1"><span class="val" id="weaveDriftSpeed_v"></span></div>
     </div>
@@ -80,7 +78,6 @@
     <div class="row" id="shatterVarietyRow"><label>碎片大小差異</label><input type="range" id="shatterVariety" min="0" max="0.9" step="0.01" value="0.3"><span class="val" id="shatterVariety_v"></span></div>
     <div class="row" id="shatterSeedRow"><label>噴散種子</label><input type="range" id="shatterSeed" min="0" max="30" step="1" value="0"><span class="val" id="shatterSeed_v"></span></div>
     <div class="row" id="shatterCutRow"><label>崩解切法</label><input type="range" id="shatterCut" min="0" max="30" step="1" value="0"><span class="val" id="shatterCut_v"></span></div>
-    <div id="shatterNote" class="note">時間軸依序是「靜止 → 蓄力 → 飛散 → 重組」，四個滑桿是相對長度，會自動正規化填滿整個循環，所以任何組合都合法、右側秒數就是它實際佔的時間。重組是循環接縫的必要段落，收得太短會看到形狀突然出現。「蓄力幅度」是炸開前被內壓撐大的程度。噴散運動拆成三軸：「擴散範圍」是碎片最後散到多遠、「噴發減速」是運動曲線前傾的程度（0＝等速，調高就是一瞬間衝出去再慢下來）、「力道差異」是每顆碎片散開遠近的參差；三者互不干擾，調減速不會改變最終散開的大小。碎片大小由它所在位置的造型厚度決定（厚的地方剝下大塊、細的地方是小屑），「水滴大小」在這個模式是整體乘數、「碎片大小差異」控制彼此的參差程度。「噴散種子」換碎片往哪飛、飛多快；「崩解切法」換的是形狀被切成哪幾塊（碎片從哪裡剝離），需要重算錨點，所以放開滑桿後才會套用。</div>
     </div>
     <div class="modeBlock" data-gate="melt">
     <div class="row" id="meltRateRow"><label>滴落頻率</label><input type="range" id="meltRate" min="1" max="8" step="1" value="3"><span class="val" id="meltRate_v"></span></div>
@@ -97,8 +94,6 @@
     <div class="row" id="meltStretchRow"><label>懸垂拉長</label><input type="range" id="meltStretch" min="0" max="0.6" step="0.01" value="0.3"><span class="val" id="meltStretch_v"></span></div>
     <div class="row" id="meltNeckRow"><label>頸部尖端</label><input type="range" id="meltNeck" min="0" max="1" step="0.01" value="0.5"><span class="val" id="meltNeck_v"></span></div>
     <div class="row" id="meltWobbleRow"><label>脫離彈動</label><input type="range" id="meltWobble" min="0" max="1" step="0.01" value="0.5"><span class="val" id="meltWobble_v"></span></div>
-    <div id="meltShapeNote" class="note">水滴不是正圓球。真實的滴水跟卡通畫法相反：懸掛時才是淚滴形——重力把它往下拉長、上方收出一個細頸（「懸垂拉長」與「頸部尖端」）；墜落時反而回到接近球形，因為這個尺度下表面張力遠遠壓過重力，水滴會在拉長與壓扁之間彈動著收斂回球（「脫離彈動」），同時被空氣阻力壓得略扁。卡通那種「墜落中拖著尖尾的淚滴」現實中並不存在。彈動的頻率隨滴徑提高（小滴抖得快），收斂速度則由上方「水滴形態」的「表面張力」決定。所有形變都是體積守恆的：沿垂直軸拉長多少，橫向就縮多少。</div>
-    <div id="meltNote" class="note">形狀本身完全不動也不會消融，只在底部持續有水滴形成、垂下、墜落、縮小消失，然後同一個位置再長出下一滴，是一段永遠播下去的循環。「滴落頻率」是每顆水滴一個循環滴幾次，「節奏差異」讓各顆在這個基準上下錯開——兩者都只取整數倍，所以看起來此起彼落很隨機，循環接縫卻完全接得上、不會跳。「形成時間」是水滴掛在底部脹大所佔的比例，剩下的都是墜落。「縮小時機」是墜到幾成才開始收；它必須在墜落結束前收乾淨，否則水滴會帶著半徑跳回起點，所以這個值調太高會看到接縫。「底部範圍」是形狀高度的多少比例算底部，滴落點就從那一段裡挑；「滴落點種子」換的是挑中哪幾個位置。</div>
     </div>
     <div class="modeBlock" data-gate="morph">
     <div class="row" id="morphHoldRow"><label>定格時間</label><input type="range" id="morphHold" min="0" max="0.4" step="0.01" value="0.28"><span class="val" id="morphHold_v"></span></div>
@@ -123,7 +118,6 @@
     <div class="row" id="jellyBouncesRow"><label>回彈次數</label><input type="range" id="jellyBounces" min="1" max="8" step="1" value="3"><span class="val" id="jellyBounces_v"></span></div>
     <div class="row" id="jellyDampingRow"><label>阻尼衰減</label><input type="range" id="jellyDamping" min="0" max="8" step="0.1" value="2.4"><span class="val" id="jellyDamping_v"></span></div>
     <div class="row" id="jellyTwistRow"><label>扭轉幅度</label><input type="range" id="jellyTwist" min="0" max="25" step="1" value="7"><span class="val" id="jellyTwist_v"></span></div>
-    <div id="jellyNote" class="note">造型從頭到尾完整靜止，只是週期性被「戳一下」，然後像果凍一樣阻尼彈簧回彈晃動幾下才平息。這不是物理模擬——沒有質量、碰撞或重力解算，走的是卡通彈性語言：「瞬間衝擊 → 過衝 → 遞減回彈」這個大家看慣的節奏。「戳擊次數」是一個循環戳幾下，「回彈次數」是每一下晃幾回；兩者都只取整數，前一下的晃動一定收乾淨了下一下才開始，循環頭尾也因此精確接上。「阻尼衰減」調低會晃很久（軟果凍），調高則一下就穩住（硬果凍）。「扭轉幅度」讓每次戳擊附帶不同方向的側傾與扭轉，同一顆果凍才不會每次都用完全一樣的晃法。水滴預設不出場（造型本身就是全部的戲）；調高「水滴數量」的話它們會貼在表面錨點上跟著果凍一起晃。</div>
     </div>
     <div data-gate="split" class="row" id="flowSpeedRow"><label>動態張力</label><input type="range" id="flowSpeed" min="0" max="1.5" step="0.01" value="0.47"><span class="val" id="flowSpeed_v"></span></div>
     <!-- 果凍排除：它的阻尼彈簧走的是同一份造型變換（見 bubble.js 的 shapeRigidNow），
@@ -138,7 +132,6 @@
       <div class="row"><label>呼吸縮放</label><input type="range" id="shapeBreathe" min="0" max="0.3" step="0.005" value="0.05"><span class="val" id="shapeBreathe_v"></span></div>
       <div class="row"><label>浮動幅度</label><input type="range" id="shapeBob" min="0" max="0.3" step="0.005" value="0.08"><span class="val" id="shapeBob_v"></span></div>
       <div class="row"><label>擠壓拉伸</label><input type="range" id="shapeSquash" min="0" max="1" step="0.01" value="0.35"><span class="val" id="shapeSquash_v"></span></div>
-      <div id="shapeMotionNote" class="note">讓造型本身跟著循環旋轉／呼吸縮放／上下浮動，不只是水滴在動；水滴的目標位置也會套上同一份變換，兩者不會分家。「旋轉幅度 X/Y/Z」三軸共用同一條波形、只是振幅不同，疊起來是繞一根固定傾斜軸來回擺動；只給 Z 軸是原本 2D 貼紙常見的畫面翻轉，加 X/Y 可以做出立體翻滾感。旋轉／呼吸／浮動三者相位互相錯開，看起來比較有機。「回彈感」疊加二次諧波，做出蓄力後回彈的不對稱感，0 是單純正弦。「擠壓拉伸」依浮動的瞬時速度把造型沿垂直軸拉長／壓扁，在浮動的最高／最低點（瞬時靜止）退回單純呼吸縮放。「循環圈數」決定一次循環裡擺動幾次，必須是整數才能讓循環頭尾精確接上。</div>
     </details>
   </details>
 
@@ -165,7 +158,6 @@
       <div data-gate="svg" class="row"><label>形狀厚度</label><input type="range" id="shapeDepth" min="0.05" max="0.8" step="0.01" value="0.1"><span class="val" id="shapeDepth_v"></span></div>
       <div data-gate="svg" class="row"><label>邊緣圓角</label><input type="range" id="shapeEdgeBevel" min="0" max="0.15" step="0.001" value="0.025"><span class="val" id="shapeEdgeBevel_v"></span></div>
       <div class="row"><label>邊緣液化</label><input type="range" id="shapeSoftness" min="0" max="0.25" step="0.005" value="0"><span class="val" id="shapeSoftness_v"></span></div>
-      <div data-gate="glb" class="note">模型品質會在下一次匯入 GLB 時生效；提高品質主要增加匯入時間與記憶體，每幀 SDF 取樣次數不變。</div>
       <div data-gate="morph" class="effectSubhead">變形目標（形狀 B）</div>
       <div data-gate="morph" class="row"><button class="fileBtn" id="morphTargetBtn">選擇變形目標 SVG…</button></div>
       <div data-gate="morph" class="row"><button class="fileBtn" id="morphTargetResetBtn">還原內建變形目標</button></div>
@@ -181,7 +173,6 @@
       <div class="row"><label>水滴分佈</label><input type="range" id="shapeLiquidPosition" min="0" max="7" step="1" value="2"><span class="val" id="shapeLiquidPosition_v"></span></div>
       <div class="row"><label>水滴大小</label><input type="range" id="shapeLiquidSize" min="0.5" max="2" step="0.01" value="1.5"><span class="val" id="shapeLiquidSize_v"></span></div>
       <div class="row"><label>水滴流速</label><input type="range" id="shapeLiquidSpeed" min="0" max="3" step="1" value="1"><span class="val" id="shapeLiquidSpeed_v"></span></div>
-      <div class="note">液滴會沿 SVG 擠出輪廓附近移動；分佈組合固定，可重現同一段動畫。<br>擠出正面與側壁交界的圓角由上方「擠出外形」的「邊緣圓角」獨立控制，與液滴效果無關。</div>
     </div>
   </details>
 
@@ -198,7 +189,6 @@
     <div class="row"><label>起伏動畫</label><input type="range" id="wobbleSpeed" min="0" max="2" step="0.01" value="0.65"><span class="val" id="wobbleSpeed_v"></span></div>
     <div data-gate="split" id="capillaryGroup">
       <div class="effectSubhead">分離彈性 Capillary Wave</div>
-      <div class="note">毛細回彈與衛星滴串只在分裂 Split 模式的斷裂瞬間發生，形狀匯聚不會用到。</div>
       <div class="row"><label>分離回彈</label><input type="range" id="elasticStrength" min="0" max="0.2" step="0.005" value="0.024"><span class="val" id="elasticStrength_v"></span></div>
       <div class="row"><label>波紋密度</label><input type="range" id="elasticDensity" min="1" max="8" step="0.1" value="3.5"><span class="val" id="elasticDensity_v"></span></div>
       <div class="row"><label>波紋衰減</label><input type="range" id="elasticDamping" min="0" max="1" step="0.01" value="0.55"><span class="val" id="elasticDamping_v"></span></div>
@@ -217,51 +207,33 @@
     <div class="row" id="membraneReflectionColorRow"><label>棚燈反射色</label><input type="color" id="membraneReflectionColor" value="#94b8e6"><span class="val"></span></div>
     <div class="row" id="membraneCardColorRow"><label>藍卡反射色</label><input type="color" id="membraneCardColor" value="#94c7ff"><span class="val"></span></div>
     <div class="row" id="membraneShadeColorRow"><label>立體暗部色</label><input type="color" id="membraneShadeColor" value="#85b8e6"><span class="val"></span></div>
-    <div class="note" id="membraneColorsNote">只作用於液態薄膜，各自對應合成裡原本寫死的一個顏色常數：選什麼顏色，畫面上那一處就直接是那個顏色。預設值都是原本的藍紫色常數，維持改動前的外觀。</div>
     <div class="row"><label>反射強度</label><input type="range" id="reflect" min="0" max="2" step="0.02" value="1.6"><span class="val" id="reflect_v"></span></div>
     <div class="row"><label>透射率</label><input type="range" id="transmission" min="0" max="1" step="0.01" value="0.96"><span class="val" id="transmission_v"></span></div>
     <div class="row"><label>材質曝光</label><input type="range" id="materialExposure" min="0.25" max="2.5" step="0.05" value="1"><span class="val" id="materialExposure_v"></span></div>
     <div class="row"><label>粗糙度</label><input type="range" id="roughness" min="0" max="1" step="0.01" value="0.2"><span class="val" id="roughness_v"></span></div>
     <div class="row"><label>邊緣光</label><input type="range" id="fresnel" min="0" max="3" step="0.05" value="0.8"><span class="val" id="fresnel_v"></span></div>
     <div class="row"><label>折射率</label><input type="range" id="ior" min="1.0" max="1.8" step="0.01" value="1.33"><span class="val" id="ior_v"></span></div>
-    <div class="note" id="materialStyleNote">通用玻璃與液態薄膜各自記住材質及 HDRI 參數；液態薄膜僅適用純白背景（#ffffff），中央更透明，彩色集中在輪廓與曲面折疊處——它的顯色（亮底透射、白卡/藍卡反射卡、去背用的白底反乘）都是針對白底寫死的美術模型，離開白底就切回通用玻璃。</div>
 
     <details class="subgroup" id="dispersionGroup">
       <summary><h4>色散 Dispersion</h4><span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="dispersionMaster"><span class="switchTrack" aria-hidden="true"></span></span></summary>
-      <div class="effectBlock effectBlock--art" id="artDispersionGroup">
-        <div class="effectTitle"><span>ART</span> 薄膜式藝術色散<span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="dispersionEnabled" checked><span class="switchTrack" aria-hidden="true"></span></span></div>
-        <div class="row"><label>藝術強度</label><input type="range" id="dispersion" min="0" max="1" step="0.01" value="0.09"><span class="val" id="dispersion_v"></span></div>
-        <div class="row"><label>光譜分離</label><input type="range" id="dispersionSeparation" min="0" max="1.5" step="0.01" value="1.5"><span class="val" id="dispersionSeparation_v"></span></div>
-        <div class="effectSubhead">厚度與流動</div>
-        <div class="row"><label>色散厚度</label><input type="range" id="artThickness" min="120" max="760" step="5" value="165"><span class="val" id="artThickness_v"></span></div>
-        <div class="row"><label>厚度變化</label><input type="range" id="artThickVar" min="0" max="400" step="5" value="95"><span class="val" id="artThickVar_v"></span></div>
-        <div class="row"><label>紋理尺度</label><input type="range" id="artNoiseScale" min="0.5" max="6" step="0.1" value="1"><span class="val" id="artNoiseScale_v"></span></div>
-        <div class="row"><label>流動速度</label><input type="range" id="artPatternSpeed" min="0" max="2" step="0.01" value="0.21"><span class="val" id="artPatternSpeed_v"></span></div>
-        <div class="row"><label>重力影響</label><input type="range" id="artGravity" min="0" max="1" step="0.01" value="1"><span class="val" id="artGravity_v"></span></div>
-        <div class="effectSubhead">光帶塑形</div>
-        <div class="row"><label>焦散尺度</label><input type="range" id="causticScale" min="0.4" max="2.5" step="0.05" value="1"><span class="val" id="causticScale_v"></span></div>
-        <div class="row"><label>焦散銳利</label><input type="range" id="causticSharpness" min="0" max="1" step="0.01" value="0.65"><span class="val" id="causticSharpness_v"></span></div>
-      </div>
-
       <div class="effectBlock effectBlock--physical" id="rayDispersionGroup">
-        <div class="effectTitle"><span>RAY</span> 稜光光芒<span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="rayDispersionEnabled"><span class="switchTrack" aria-hidden="true"></span></span></div>
-        <div class="row"><label>光芒強度</label><input type="range" id="rayBeamIntensity" min="0" max="4" step="0.01" value="3"><span class="val" id="rayBeamIntensity_v"></span></div>
-        <div class="row"><label>色散分離</label><input type="range" id="rayBeamSeparation" min="0" max="0.4" step="0.005" value="0.07"><span class="val" id="rayBeamSeparation_v"></span></div>
-        <div class="row"><label>彩度</label><input type="range" id="rayBeamChroma" min="0" max="3" step="0.05" value="1.4"><span class="val" id="rayBeamChroma_v"></span></div>
+        <div class="effectTitle"><span>RAY</span> 稜光光芒<span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="rayDispersionEnabled" checked><span class="switchTrack" aria-hidden="true"></span></span></div>
+        <div class="row"><label>光芒強度</label><input type="range" id="rayBeamIntensity" min="0" max="4" step="0.01" value="4"><span class="val" id="rayBeamIntensity_v"></span></div>
+        <div class="row"><label>色散分離</label><input type="range" id="rayBeamSeparation" min="0" max="0.4" step="0.005" value="0.04"><span class="val" id="rayBeamSeparation_v"></span></div>
+        <div class="row"><label>彩度</label><input type="range" id="rayBeamChroma" min="0" max="3" step="0.05" value="1.5"><span class="val" id="rayBeamChroma_v"></span></div>
         <div class="effectSubhead">光芒圖樣</div>
-        <div class="row"><label>光芒尺度</label><input type="range" id="rayBeamZoom" min="1" max="30" step="0.5" value="14"><span class="val" id="rayBeamZoom_v"></span></div>
-        <div class="row"><label>環紋密度</label><input type="range" id="rayBeamRings" min="0.5" max="16" step="0.5" value="5"><span class="val" id="rayBeamRings_v"></span></div>
-        <div class="row"><label>光點銳利</label><input type="range" id="rayBeamGlow" min="0" max="1" step="0.01" value="0.9"><span class="val" id="rayBeamGlow_v"></span></div>
-        <div class="row"><label>流動速度</label><input type="range" id="rayBeamSpeed" min="-12" max="12" step="1" value="1"><span class="val" id="rayBeamSpeed_v"></span></div>
+        <div class="row"><label>光芒尺度</label><input type="range" id="rayBeamZoom" min="1" max="30" step="0.5" value="6"><span class="val" id="rayBeamZoom_v"></span></div>
+        <div class="row"><label>環紋密度</label><input type="range" id="rayBeamRings" min="0.5" max="16" step="0.5" value="0.5"><span class="val" id="rayBeamRings_v"></span></div>
+        <div class="row"><label>光點銳利</label><input type="range" id="rayBeamGlow" min="0" max="1" step="0.01" value="1"><span class="val" id="rayBeamGlow_v"></span></div>
+        <div class="row"><label>流動速度</label><input type="range" id="rayBeamSpeed" min="-12" max="12" step="1" value="0"><span class="val" id="rayBeamSpeed_v"></span></div>
         <div class="effectSubhead">放射方向與折射</div>
-        <div class="row"><label>放射水平</label><input type="range" id="rayBeamAzimuth" min="-180" max="180" step="1" value="0"><span class="val" id="rayBeamAzimuth_v"></span></div>
+        <div class="row"><label>放射水平</label><input type="range" id="rayBeamAzimuth" min="-180" max="180" step="1" value="-54"><span class="val" id="rayBeamAzimuth_v"></span></div>
         <div class="row"><label>放射高度</label><input type="range" id="rayBeamElevation" min="-90" max="90" step="1" value="0"><span class="val" id="rayBeamElevation_v"></span></div>
         <div class="row"><label>折射強度</label><input type="range" id="rayBeamRefract" min="0" max="1" step="0.01" value="1"><span class="val" id="rayBeamRefract_v"></span></div>
         <div class="effectSubhead">遮罩</div>
-        <div class="row"><label>Fresnel 遮罩</label><input type="range" id="rayBeamFresnelMask" min="0" max="1" step="0.01" value="0"><span class="val" id="rayBeamFresnelMask_v"></span></div>
-        <div class="row"><label>Noise 遮罩</label><input type="range" id="rayBeamNoiseMask" min="0" max="1" step="0.01" value="0.4"><span class="val" id="rayBeamNoiseMask_v"></span></div>
-        <div class="row"><label>Noise 尺度</label><input type="range" id="rayBeamNoiseScale" min="0.5" max="8" step="0.1" value="2.5"><span class="val" id="rayBeamNoiseScale_v"></span></div>
-        <div class="note">程序化的放射光束，鋪滿整個方向球（跟 HDRI 一樣是全方位環境，不是貼在鏡頭前的平面投影）：物體用自己的折射方向去查這片光束環境，所以是真正的透射，會隨造型曲面與視角流動。手法參考 Shadertoy 的 "Creation"（作者 Danilo Guanabara）。<br><strong>「色散分離」是這個效果的靈魂</strong>：色散不是來自折射率差，而是三個顏色通道取樣同一個圖樣時的相位差 —— 設 0 就是純白光束、完全沒有彩虹，往上加彩虹越開。「折射強度」是這個效果的另一半：0 時沿原視線取樣，環境像背景一樣直接透過去、不被造型扭曲；100% 則完全用折射後的出射方向，造型變成真正的透鏡。「環紋密度」是往外跑的同心環有幾圈，「光點銳利」調高是細長的光針、調低是糊成一團的柔光。「流動速度」設 0 是完全靜止，負值是反向流動；讀數顯示的是「幾秒滑過一格」，也就是眼睛實際看到的速度。它平移的是球面上的光點晶格而不是波形相位 —— 晶格有幾十格（隨「光芒尺度」而定），所以 1 就已經是很慢的流速，把「光芒尺度」調大還會更慢。只取整數是循環接縫的必要條件：一個循環必須剛好滑過整數個格子才接得回原狀。造型轉動時光芒仍會被折射推著走，那是透鏡該有的行為，想連那個也凍住就把「折射強度」設 0。<br>兩個遮罩都是 0 = 完全不限制。「Noise 遮罩」把規則的極座標晶格打散成參差斑塊，質地才像光穿過不均勻的介質而不是印上去的網格，是這兩者裡比較有感的一個（預設就開著）。「Fresnel 遮罩」把光芒往邊緣集中，預設 0 是刻意的 —— 它跟內部既有的透鏡集中項是同一個軸，開了會抵銷「光束穿過整塊玻璃」的手感,想做純邊緣描邊時才用。Noise 的流動速度直接跟著「流動速度」，不另外開滑桿，兩者才不會看出分層。這一版不做額外的光線追蹤，比舊的物理分光便宜得多。</div>
+        <div class="row"><label>Fresnel 遮罩</label><input type="range" id="rayBeamFresnelMask" min="0" max="1" step="0.01" value="0.33"><span class="val" id="rayBeamFresnelMask_v"></span></div>
+        <div class="row"><label>Noise 遮罩</label><input type="range" id="rayBeamNoiseMask" min="0" max="1" step="0.01" value="1"><span class="val" id="rayBeamNoiseMask_v"></span></div>
+        <div class="row"><label>Noise 尺度</label><input type="range" id="rayBeamNoiseScale" min="0.5" max="8" step="0.1" value="1.6"><span class="val" id="rayBeamNoiseScale_v"></span></div>
       </div>
 
       <div class="effectBlock effectBlock--caustic" id="spectralCausticGroup">
@@ -295,7 +267,21 @@
         <div class="row"><label>光源水平</label><input type="range" id="spectralCausticAzimuth" min="-180" max="180" step="1" value="-177"><span class="val" id="spectralCausticAzimuth_v"></span></div>
         <div class="row"><label>光源高度</label><input type="range" id="spectralCausticElevation" min="-80" max="80" step="1" value="-19"><span class="val" id="spectralCausticElevation_v"></span></div>
         <div class="row"><label>HDRI 連動</label><input type="range" id="spectralCausticHdri" min="0" max="1" step="0.01" value="0.3"><span class="val" id="spectralCausticHdri_v"></span></div>
-        <div class="note">七個色標可獨立編輯，色標之間會平滑混色。HDRI 僅可調節整體亮度。</div>
+      </div>
+
+      <div class="effectBlock effectBlock--art" id="artDispersionGroup">
+        <div class="effectTitle"><span>ART</span> 薄膜式藝術色散<span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="dispersionEnabled" checked><span class="switchTrack" aria-hidden="true"></span></span></div>
+        <div class="row"><label>藝術強度</label><input type="range" id="dispersion" min="0" max="1" step="0.01" value="0.09"><span class="val" id="dispersion_v"></span></div>
+        <div class="row"><label>光譜分離</label><input type="range" id="dispersionSeparation" min="0" max="1.5" step="0.01" value="1.5"><span class="val" id="dispersionSeparation_v"></span></div>
+        <div class="effectSubhead">厚度與流動</div>
+        <div class="row"><label>色散厚度</label><input type="range" id="artThickness" min="120" max="760" step="5" value="165"><span class="val" id="artThickness_v"></span></div>
+        <div class="row"><label>厚度變化</label><input type="range" id="artThickVar" min="0" max="400" step="5" value="95"><span class="val" id="artThickVar_v"></span></div>
+        <div class="row"><label>紋理尺度</label><input type="range" id="artNoiseScale" min="0.5" max="6" step="0.1" value="1"><span class="val" id="artNoiseScale_v"></span></div>
+        <div class="row"><label>流動速度</label><input type="range" id="artPatternSpeed" min="0" max="2" step="0.01" value="0.21"><span class="val" id="artPatternSpeed_v"></span></div>
+        <div class="row"><label>重力影響</label><input type="range" id="artGravity" min="0" max="1" step="0.01" value="1"><span class="val" id="artGravity_v"></span></div>
+        <div class="effectSubhead">光帶塑形</div>
+        <div class="row"><label>焦散尺度</label><input type="range" id="causticScale" min="0.4" max="2.5" step="0.05" value="1"><span class="val" id="causticScale_v"></span></div>
+        <div class="row"><label>焦散銳利</label><input type="range" id="causticSharpness" min="0" max="1" step="0.01" value="0.65"><span class="val" id="causticSharpness_v"></span></div>
       </div>
     </details>
 
@@ -312,7 +298,6 @@
       <div class="row"><label>重力黑膜</label><input type="range" id="gravity" min="0" max="1" step="0.01" value="1"><span class="val" id="gravity_v"></span></div>
       <div class="effectBlock effectBlock--ramp" id="rampGroup">
         <div class="effectTitle"><span>RAMP</span> 薄膜自訂配色</div>
-        <div class="note">僅作用於薄膜的「自訂漸層」模式；右側滑桿控制每個色標的位置。</div>
         <div class="row"><label>配色數量</label><input type="range" id="rampCount" min="2" max="6" step="1" value="6"><span class="val" id="rampCount_v"></span></div>
         <div class="row stopRow" id="stopRow0"><label>色 1</label><input type="color" id="stopCol0" value="#3698d8"><input type="range" id="stopPos0" min="0" max="1" step="0.01" value="0.56"><span class="val" id="stopPos0_v"></span></div>
         <div class="row stopRow" id="stopRow1"><label>色 2</label><input type="color" id="stopCol1" value="#b794a6"><input type="range" id="stopPos1" min="0" max="1" step="0.01" value="0.20"><span class="val" id="stopPos1_v"></span></div>
@@ -332,8 +317,6 @@
     <div class="row"><label>垂直視角</label><input type="range" id="cameraRotationX" min="-90" max="90" step="0.1" value="9.7"><span class="val" id="cameraRotationX_v"></span></div>
     <div class="row"><label>環繞幅度</label><input type="range" id="spin" min="0" max="1" step="0.01" value="0.08"><span class="val" id="spin_v"></span></div>
     <div class="row toggleRow"><label>前後拉伸</label><input type="checkbox" id="dollyEnabled" checked><span class="switchTrack" aria-hidden="true"></span><span class="val" id="dollyEnabled_v">開啟</span></div>
-    <div id="dollyEnabledNote" class="note">在動作高潮（分裂約 1/4 循環處、融合約 4/5 循環處）鏡頭輕微推近，其餘時間拉回，讓畫面隨敘事有呼吸感。這兩個時機點是「分裂」模式的節奏，跟其他模式的動作不一定對得上——例如融化的形狀本身完全靜止，這段推近拉遠會讓整個畫面規律地放大縮小，反而像沒來由的呼吸感，所以融化模式預設關閉。每個動態模式各自記住這個開關的狀態，切換模式時會恢復。</div>
-    <div class="note">可使用滑鼠滾輪或觸控板拉近、拉遠；環繞幅度控制鏡頭隨循環自動環繞的幅度。</div>
   </details>
 
   <details class="group">
@@ -347,7 +330,6 @@
     <div class="row toggleRow"><label>亮底保色</label><input type="checkbox" id="brightBgAssist" checked><span class="switchTrack" aria-hidden="true"></span><span class="val" id="brightBgAssist_v">開啟</span></div>
     <div class="row"><button id="hdriBtn">更換 HDRI…</button></div>
     <div id="hdriState" class="note">通用玻璃預設 HDRI：photo_studio2_london_hall_1k.hdr</div>
-    <div class="note">亮底保色只在純色背景接近白色時介入：保留 HDRI 折射明暗、去除暖色偏色，並讓彩色焦散改以透射顯色。</div>
     <input type="file" id="hdriInput" accept=".hdr,image/*" hidden>
   </details>
 
@@ -458,6 +440,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=universal-dbg71"></script>
+<script type="module" src="./bubble.js?v=universal-dbg72"></script>
 </body>
 </html>

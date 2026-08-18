@@ -2,25 +2,25 @@
 import * as THREE from 'three';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
-} from './shape-field.js?v=svg-shape-66';
+} from './shape-field.js?v=svg-shape-67';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
   MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
   MORPH_TARGET_SVG_NAME, makeMorphTargetSvgFile,
   MORPH_TARGET_SOLID_NAME, buildMorphTargetSolid,
-} from './default-shapes.js?v=svg-shape-66';
+} from './default-shapes.js?v=svg-shape-67';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-66';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-66';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-66';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-66';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-66';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-66';
-import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-66';
-import createJellyMotion from './motions/jelly.js?v=svg-shape-66';
+} from './motions/registry.js?v=svg-shape-67';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-67';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-67';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-67';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-67';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-67';
+import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-67';
+import createJellyMotion from './motions/jelly.js?v=svg-shape-67';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -54,34 +54,34 @@ const DEFAULTS = {              // 數值滑桿
   // 稜光光芒（見 shaders.js 的 prismBeamField）。取代原本走 Cauchy 曲線的物理
   // 分光：那條路每個 fragment 要多跑四次波長追蹤，換來的只是輪廓上一層很薄的
   // 邊緣分光。這一版是程序化的放射光束，零額外 raymarch。
-  rayBeamIntensity: 3.0,
+  rayBeamIntensity: 4,
   // 色散的來源：三個顏色通道取樣同一個圖樣時的相位差。這是整個效果的靈魂，
   // 0 = 三通道同步（純白光束，完全沒有彩虹）。
-  rayBeamSeparation: 0.07,
+  rayBeamSeparation: 0.04,
   // 圖樣的尺度與同心環密度。
-  rayBeamZoom: 14,
-  rayBeamRings: 5,
+  rayBeamZoom: 6,
+  rayBeamRings: 0.5,
   // 流動速度：一個循環把格點晶格滑過幾個格子。0 = 完全靜止，負值 = 反向。
   // 必須是整數，否則循環接縫會跳（見 prismBeamField 的說明）。格子在球面上有
   // 幾十個，所以 1 就已經是很慢的流速。
-  rayBeamSpeed: 1,
+  rayBeamSpeed: 0,
   // 亮點的收束程度：調高是細長的光針，調低是糊成一團的柔光。
-  rayBeamGlow: 0.9,
+  rayBeamGlow: 1,
   // 等亮度彩度調整。1 = 原樣，調高讓三通道的差異更明顯。
-  rayBeamChroma: 1.4,
+  rayBeamChroma: 1.5,
   // 光芒從哪個方向放射出來（球座標）。圖樣鋪滿整個方向球，這只決定極點在哪。
-  rayBeamAzimuth: 0,
+  rayBeamAzimuth: -54,
   rayBeamElevation: 0,
   // 折射強度：0 = 沿原視線取樣（環境直接透過去、不被造型扭曲），1 = 完全用
   // 折射後的出射方向（造型變成真正的透鏡）。
-  rayBeamRefract: 1.0,
+  rayBeamRefract: 1,
   // 兩個遮罩，寫法與虛擬光譜焦散一致：0 = 完全不限制。
   // Fresnel 把光芒往邊緣集中（跟內部的 lensing 同一個軸，見 shaders.js 的說明），
   // 預設 0 是刻意的 —— 開了會抵銷「光束穿過整塊玻璃」那個手感。
-  rayBeamFresnelMask: 0,
+  rayBeamFresnelMask: 0.33,
   // Noise 把規則的極座標晶格打散成參差斑塊，是這兩者裡比較有感的一個。
-  rayBeamNoiseMask: 0.4,
-  rayBeamNoiseScale: 2.5,
+  rayBeamNoiseMask: 1,
+  rayBeamNoiseScale: 1.6,
   spectralCausticIntensity: 3,
   spectralCausticFocus: 0.12,
   spectralCausticWidth: 0.42,
@@ -318,7 +318,7 @@ const TOGGLE_DEFAULTS = {
   brightBgAssist: true,
   filmEnabled: false,
   dispersionEnabled: true,
-  rayDispersionEnabled: false,
+  rayDispersionEnabled: true,
   spectralCausticEnabled: true,
   // 前後拉伸（見下方 dolly 計算）。跟 count/radius/loopDuration 一樣按模式
   // 各自記憶，這裡只是進入畫面時的初始值。
@@ -3048,7 +3048,6 @@ function updateUIState() {
     document.getElementById(key).disabled = !membraneMaterial;
     document.getElementById(key + 'Row').style.display = membraneMaterial ? '' : 'none';
   }
-  document.getElementById('membraneColorsNote').style.display = membraneMaterial ? '' : 'none';
   // 液態薄膜本身就是前後表面透射模型，不讀取通用玻璃專用的亮底補償。
   const brightAssistUsable = colorBackground && !membraneMaterial;
   brightBgAssist.disabled = !brightAssistUsable;
