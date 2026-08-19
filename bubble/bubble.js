@@ -2260,6 +2260,25 @@ function buildRampLUT() {
   }
   rampTex.needsUpdate = true;
 }
+// 面板色票 → uniform。
+//
+// THREE.Color 預設把色票當 sRGB，寫進 uniform 前轉成線性工作空間；但這個 shader
+// 從頭到尾沒有 linear→sRGB 的輸出轉換（整套材質都是在顯示空間裡用眼睛調出來
+// 的），於是那次轉換沒有人轉回來 —— 挑 #808080，畫布畫出來的是 55,55,55
+// （0.5^2.2），面板旁邊 body 用的又是原始色票，兩邊對不起來。
+//
+// 背景色是唯一「挑什麼就該是什麼」的顏色：它是一片使用者直接看得到的純色，而且
+// 亮底判斷（bgLum / whiteBackdrop）與去背輸出對白底的反乘都以它為準，值不對這些
+// 都會跟著偏。所以這裡叫 THREE.Color 不要轉 —— setStyle 的第二個參數就是「這個
+// 值本來就在工作空間裡」。
+//
+// 只有背景色這樣處理。薄膜的五個色票與兩張漸層 LUT 走同一條轉換，但它們是被人眼
+// 在現況下調出來的美術輸入，改了會讓所有既有的參數組合換一個樣子。
+function setBgColorUniform(hex) {
+  if (!uniforms) return;
+  uniforms.uBgColor.value.setStyle(hex, THREE.LinearSRGBColorSpace);
+}
+
 function makeRampTexture() {
   rampTex = new THREE.DataTexture(new Uint8Array(RAMP_W * 4), RAMP_W, 1, THREE.RGBAFormat);
   rampTex.colorSpace = THREE.SRGBColorSpace;
@@ -2413,7 +2432,7 @@ function initGL() {
     uBgMode:     { value: SELECTS.bgMode.map[P.bgMode] },
     uMaterialStyle: { value: SELECTS.materialStyle.map[P.materialStyle] },
     uTransparentBackground: { value: 0 },
-    uBgColor:    { value: new THREE.Color(P.bgColor) },
+    uBgColor:    { value: new THREE.Color().setStyle(P.bgColor, THREE.LinearSRGBColorSpace) },
     uMembraneBaseColor: { value: new THREE.Color(P.membraneBaseColor) },
     uMembraneVeilColor: { value: new THREE.Color(P.membraneVeilColor) },
     uMembraneReflectionColor: { value: new THREE.Color(P.membraneReflectionColor) },
@@ -2701,7 +2720,10 @@ function syncPanelToUniforms() {
     if (u) u.value = SELECTS[key].map[P[key]];
   }
   for (const key of Object.keys(TOGGLES)) applyToggle(key);
-  for (const key of Object.keys(COLORS)) uniforms[COLORS[key]].value.set(P[key]);
+  for (const key of Object.keys(COLORS)) {
+    if (key === 'bgColor') setBgColorUniform(P[key]);
+    else uniforms[COLORS[key]].value.set(P[key]);
+  }
   document.body.style.background = (P.bgMode === 'hdri') ? '#000' : P.bgColor;
 }
 
@@ -2872,7 +2894,8 @@ function bindControls() {
     const uName = COLORS[key];
     const update = () => {
       P[key] = el.value;
-      if (uniforms) uniforms[uName].value.set(el.value);
+      if (key === 'bgColor') setBgColorUniform(el.value);
+      else if (uniforms) uniforms[uName].value.set(el.value);
       if (key === 'bgColor') {
         document.body.style.background = (P.bgMode === 'hdri') ? '#000' : el.value;
         updateUIState();
@@ -3788,7 +3811,7 @@ async function runExport(settings) {
   uniforms.uTransparentBackground.value = transparentExport ? 1 : 0;
   uniforms.uMembraneOverWhite.value = membraneOverWhite ? 1 : 0;
   uniforms.uBgMode.value = settings.background === 'scene' ? SELECTS.bgMode.map[P.bgMode] : 0;
-  if (transparentExport && !membraneOverWhite) uniforms.uBgColor.value.set(0x000000);
+  if (transparentExport && !membraneOverWhite) uniforms.uBgColor.value.setHex(0x000000, THREE.LinearSRGBColorSpace);
 
   try {
     previousDropT = null;
