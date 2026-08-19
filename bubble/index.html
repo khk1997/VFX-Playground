@@ -219,7 +219,7 @@
       <div class="effectBlock effectBlock--physical" id="rayDispersionGroup">
         <div class="effectTitle"><span>RAY</span> 模擬色散<span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="rayDispersionEnabled" checked><span class="switchTrack" aria-hidden="true"></span></span></div>
         <div class="row"><label>打燈圖樣</label><select id="rayBeamPattern"><option value="grid" selected>晶格光針</option><option value="starburst">放射星芒</option><option value="ring">同心光環</option><option value="softbox">條狀棚燈</option><option value="window">窗光格柵</option><option value="threePoint">三點棚燈</option></select><span class="val"></span></div>
-        <div class="row"><label>光芒強度</label><input type="range" id="rayBeamIntensity" min="0" max="4" step="0.01" value="4"><span class="val" id="rayBeamIntensity_v"></span></div>
+        <div class="row"><label>光芒強度</label><input type="range" id="rayBeamIntensity" min="0" max="32" step="0.05" value="4"><span class="val" id="rayBeamIntensity_v"></span></div>
         <div class="row"><label>色散分離</label><input type="range" id="rayBeamSeparation" min="0" max="0.4" step="0.005" value="0.04"><span class="val" id="rayBeamSeparation_v"></span></div>
         <div class="row"><label>彩度</label><input type="range" id="rayBeamChroma" min="0" max="3" step="0.05" value="1.5"><span class="val" id="rayBeamChroma_v"></span></div>
         <div class="effectSubhead">光芒圖樣</div>
@@ -441,6 +441,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=universal-dbg82"></script>
+<script type="module" src="./bubble.js?v=universal-dbg83"></script>
 </body>
 </html>
