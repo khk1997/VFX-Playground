@@ -182,6 +182,12 @@ uniform float uCausticSharpness;
 uniform float uRayDispersionEnabled;
 uniform float uRayBeamIntensity;
 uniform float uRayBeamSeparation;
+// 打燈圖樣（見 prismBeamField）：換一種圖樣等於換一盞棚燈的形狀，座標與所有
+// 遮罩都共用，只有「亮度怎麼分布在方向球上」不同。
+uniform int uRayBeamPattern;
+// 三點棚燈的燈具直徑。只有「三點棚燈」用得到（其他圖樣是鋪滿方向球的圖案，
+// 沒有「一顆燈」這回事），面板會依圖樣收起這一列。
+uniform float uRayBeamLightSize;
 uniform float uRayBeamZoom;
 uniform float uRayBeamRings;
 uniform float uRayBeamSpeed;
@@ -834,7 +840,7 @@ bool traceExitSurface(
   return found;
 }
 
-// ===== 稜光光芒 Prism Beams =====
+// ===== 稜光光芒 Prism Beams（面板上叫「模擬色散」）=====
 //
 // 取代原本的「造型光線色散」。舊版走的是物理路線：由 IOR 與阿貝數反推 Cauchy
 // 色散曲線，五個波長各自穿過 SDF、找自己的背面出口再折射出去。物理上是對的，
@@ -911,46 +917,164 @@ vec3 prismBeamCoord(vec3 viewDir, vec3 exitDir){
   return vec3(q, radius);
 }
 
+// 三點棚燈用的兩個小工具。
+//
+// 燈位寫在「方位等距投影」的平面上（見 prismBeamCoord）：半徑 = 與放射方向的
+// 夾角，角度 = 繞著它的方位角。所以 (0,0) 就是主燈打過來的方向本身。
+vec2 prismLampPos(float radius, float angle){
+  return radius * vec2(cos(angle), sin(angle));
+}
+
+// 一顆有直徑的燈：實心的燈面加一圈掉下去的光暈。edge 是燈面的邊緣柔化程度，
+// 由「光點銳利」給 —— 調高是硬光（清楚的燈框），調低是柔光罩。
+float prismLamp(vec2 pos, vec2 center, float radius, float edge){
+  float d = length(pos - center) / max(radius, 0.01);
+  float disc = smoothstep(1.0, 1.0 - edge, d);
+  float halo = 0.35 / (1.0 + d * d * 20.0);
+  return disc + halo;
+}
+
 // 回傳三通道各自的光芒強度（未上色，RGB 之間的差異本身就是色散）。
+//
+// 一共五種打燈圖樣，共用同一組座標、同一組遮罩與同一個相位，差別只在「亮度
+// 怎麼分布在方向球上」—— 等於換一盞棚燈的形狀，而不是換一套效果。每一種都得
+// 守住兩件事：隨時間走的量一律是週期 1 的 fract/mod（循環才接得回去），三個
+// 通道之間只差一個相位 z（色散才不必額外取樣）。
 vec3 prismBeamField(vec2 q, float radius){
   float l = max(length(q), 0.02);
   // 未縮放的半徑，用於環紋與中心衰減（見 prismBeamCoord）。
   float r = max(radius, 0.02);
-  // 流動：把整個格點晶格沿一個固定軸平移。
+  // 繞著放射方向的方位角。q 是「半徑 × 方向」，所以角度可以直接從 q 讀回來，
+  // 不必再從 prismBeamCoord 多帶一個分量出來。
+  float theta = atan(q.y, q.x);
+  // 流動：所有圖樣共用同一個相位。
   //
-  // 為什麼是平移而不是推進相位：相位（sin 那一層）的週期是 2π，一個循環要走完
-  // 整數個 2π 才接得回去，所以最慢就是「一個循環一整圈」—— 那個速度已經相當
-  // 明顯，再慢不下去。而格點晶格的週期是 mod() 的 1.0，一個循環只要滑「整數個
-  // 格子」就精確接回原狀；格子在球面上有幾十個（隨「光芒尺度」而定），滑一格
-  // 因此是極小的位移，這才做得出很慢的流速。
-  //
-  // 沿固定軸而不是沿放射方向：只有「整數向量」的平移才會在 mod() 之後同值。
-  // 放射方向是單位向量，乘上整數位移量之後不是整數向量，接縫會跳。
+  // 為什麼一定是整數速度：圖樣裡隨時間走的量全部寫成「週期 1 的 fract/mod」，
+  // 一個循環滑過整數個週期才精確接得回原狀。晶格在球面上有幾十格（隨「光芒
+  // 尺度」而定），所以 1 就已經是很慢的流速。
   //
   // 速度可正可負（反向流動），0 = 完全靜止。
   float speed = floor(uRayBeamSpeed + (uRayBeamSpeed < 0.0 ? -0.5 : 0.5));
-  vec2 drift = vec2(speed * fract(uTime / max(0.001, uLoopDuration)), 0.0);
-  // 亮點的核心尺寸。銳利度調高 → 分子變小、亮點收緊成細長的光針；調低 →
+  float phase = speed * fract(uTime / max(0.001, uLoopDuration));
+  // 亮點／光帶的核心尺寸。銳利度調高 → 分子變小、收緊成細長的光針；調低 →
   // 糊成一團柔光。
   float core = mix(0.035, 0.004, clamp(uRayBeamGlow, 0.0, 1.0));
+  // 「環紋 / 分支數」在每種圖樣裡都有意義，只是意義不同：晶格是徑向漣漪的環數，
+  // 星芒是分支數，光環是環數，條光與窗光是垂直方向的分割數。
+  float rings = max(0.5, uRayBeamRings);
+  // 線狀圖樣（星芒、光環、條光、窗光）量的是「到一條線的距離」，晶格量的是
+  // 「到一個點的距離」。同樣的核心尺寸，一維的線會細到幾乎取樣不到，所以線狀
+  // 那幾種統一放大核心，銳利度滑桿的手感才跟晶格一致。
+  float lineCore = core * 3.0;
 
   vec3 beams = vec3(0.0);
-  for (int i = 0; i < 3; i++) {
-    // 色散：三個通道的相位各錯開一點（見檔頭）。這一層現在不隨時間走，只負責
-    // 把三個通道的圖樣錯開，時間交給上面的 drift。
-    float z = float(i) * uRayBeamSeparation;
-    // 徑向漣漪：(q/l) 是徑向單位向量，(sin(z)+1) 是整體幅度，
-    // abs(sin(r*rings*π - 2z)) 是一組同心環。
-    vec2 cellUv = q * 0.5 + 0.5 + drift
-      + (q / l) * (sin(z) + 1.0)
-        * abs(sin(r * max(0.5, uRayBeamRings) * PI - z * 2.0));
-    // 切格 + 到格心的反距離 = 亮點與十字光芒。
-    vec2 cell = mod(cellUv, 1.0) - 0.5;
-    beams[i] = core / max(length(cell), 0.004);
+  // 中心衰減：越靠放射方向越亮。夾一個下限，否則極點那一點會除到爆掉。用未縮放
+  // 的半徑，亮度才不會隨「光芒尺度」漂移。棚燈類的圖樣（條光、窗光）本來就該像
+  // 一整面均勻的燈板，所以換一條平緩得多的衰減，不然中央會燒成一個白洞。
+  float falloff = max(r, 0.12);
+  // 各圖樣的覆蓋率差很多（點狀的晶格最疏、線狀的窗格最密），不補一個增益的話
+  // 切換圖樣時整體亮度會跳。
+  float gain = 1.0;
+
+  if (uRayBeamPattern == 1) {
+    // 放射星芒：一圈等角的光刺，像鏡頭前的星光鏡或一盞裸燈的繞射芒。
+    // 分支數必須取整數，否則 theta 繞回 ±π 時接縫會裂開。
+    float spokes = max(2.0, floor(rings * 4.0 + 0.5));
+    for (int i = 0; i < 3; i++) {
+      float z = float(i) * uRayBeamSeparation;
+      // 相位推進 1 = 剛好轉過一根光刺，所以循環無縫。
+      float a = abs(fract(theta / TAU * spokes + phase + z * 0.5) - 0.5);
+      // 角寬乘上 (0.35 + r)：光刺往外略微收細，才不會遠處看起來像扇形色塊。
+      beams[i] = lineCore / max(a * (0.35 + r) * 2.0, 0.004);
+    }
+    gain = 0.85;
+  } else if (uRayBeamPattern == 2) {
+    // 同心光環：以放射方向為心的一圈圈光暈，像環形燈或鏡頭鬼影。
+    // r 只走 0..1（1 = 對側），環數取整數時 fract 在兩極都連續。
+    float ringCount = max(1.0, floor(rings * 3.0 + 0.5));
+    for (int i = 0; i < 3; i++) {
+      float z = float(i) * uRayBeamSeparation;
+      float d = abs(fract(r * ringCount - phase + z * 0.5) - 0.5);
+      beams[i] = lineCore / max(d * 1.4, 0.004);
+    }
+    gain = 0.7;
+  } else if (uRayBeamPattern == 3) {
+    // 條狀棚燈：一排平行的長條光，像攝影棚的燈管或百葉窗打進來的光。
+    // 條的間距吃「光芒尺度」（q 已經被它縮放過），分割數再乘上環紋滑桿。
+    for (int i = 0; i < 3; i++) {
+      float z = float(i) * uRayBeamSeparation;
+      float v = q.y * rings + phase + z * 0.5;
+      float d = abs(fract(v) - 0.5);
+      // 沿條長方向收一個柔邊，讓每條光有頭有尾而不是無限延伸的斑馬紋。
+      float span = exp(-pow(abs(q.x) / max(0.6, uRayBeamZoom * 0.75), 3.0));
+      beams[i] = lineCore / max(d * 1.6, 0.004) * span;
+    }
+    falloff = 0.35 + r * 0.9;
+    gain = 0.8;
+  } else if (uRayBeamPattern == 4) {
+    // 窗光格柵：兩個方向的光帶交織成的框線，像窗框或柔光罩的格柵留在反射裡。
+    // 取 min(dx, dy) 而不是相乘 —— 相乘只在交點亮，取 min 才會留下整片格線。
+    for (int i = 0; i < 3; i++) {
+      float z = float(i) * uRayBeamSeparation;
+      vec2 w = vec2(q.x + phase, q.y * rings * 2.0) + z * 0.5;
+      vec2 d2 = abs(fract(w) - 0.5);
+      beams[i] = lineCore / max(min(d2.x, d2.y) * 1.6, 0.004);
+    }
+    falloff = 0.35 + r * 0.9;
+    gain = 0.65;
+  } else if (uRayBeamPattern == 5) {
+    // 三點棚燈：主燈 + 補燈 + 輪廓燈。這一種跟前面四種本質不同 —— 前面是鋪滿
+    // 整個方向球的圖案，這裡是三顆有位置、有直徑的燈具，所以主控項是「燈具
+    // 直徑」，而「環紋 / 分支數」在這裡沒有意義（面板會把那一列收起來）。
+    //
+    // 燈位用未縮放的極座標算。q 已經被「光芒尺度」乘過，直接拿來會讓燈距與
+    // 燈徑被縮放兩次。
+    vec2 pos = vec2(cos(theta), sin(theta)) * r;
+    // 「光芒尺度」在這裡的意義換成整組燈架的張開程度：6（預設值）= 原尺寸，
+    // 調大 = 燈架收攏靠近主燈，調小 = 三顆燈拉開。
+    float rig = 6.0 / max(0.05, uRayBeamZoom);
+    // 流動速度 = 燈架繞著放射方向旋轉。相位推進 1 剛好轉一整圈，循環無縫。
+    float spin = phase * TAU;
+    // 滑桿 1.0 = 半徑約 63°（一整面天幕光），0.02 = 幾乎是點光源。
+    float size = max(0.02, uRayBeamLightSize) * 0.35 * rig;
+    // 邊緣柔化：銳利度調高 = 硬光（看得到燈框），調低 = 柔光罩。
+    float edge = mix(0.95, 0.12, clamp(uRayBeamGlow, 0.0, 1.0));
+    // 三點打光的相對位置：主燈就在放射方向上；補燈斜側約 43°、比主燈暗一半；
+    // 輪廓燈拉到約 90°（側逆光），最小但相對亮。角度刻意沒有拉到真正的背光位，
+    // 那裡幾乎落在造型折射不到的半球，三顆燈得都在同一次取樣裡看得到才算數。
+    vec2 keyPos = prismLampPos(0.0, 0.0);
+    vec2 fillPos = prismLampPos(0.24 * rig, spin + 2.4);
+    vec2 rimPos = prismLampPos(0.5 * rig, spin - 0.7);
+    for (int i = 0; i < 3; i++) {
+      float z = float(i) * uRayBeamSeparation;
+      // 色散：三個通道各自把取樣點往外推一點，等同軸向色差 —— 燈的邊緣帶彩虹
+      // 邊，而不是整顆燈變成一個顏色。
+      vec2 sp = pos * (1.0 + z * 0.35);
+      beams[i] = prismLamp(sp, keyPos, size, edge)
+        + prismLamp(sp, fillPos, size * 0.8, edge) * 0.45
+        + prismLamp(sp, rimPos, size * 0.45, edge) * 0.7;
+    }
+    // 三顆燈自己就帶著位置與衰減，再乘中心衰減會把補燈與輪廓燈壓掉。
+    falloff = 1.0;
+    gain = 1.5;
+  } else {
+    // 晶格光針（預設）：切格 + 到格心的反距離，亮點沿格線拖出十字光芒。
+    vec2 drift = vec2(phase, 0.0);
+    for (int i = 0; i < 3; i++) {
+      // 色散：三個通道的相位各錯開一點（見檔頭）。這一層不隨時間走，只負責把
+      // 三個通道的圖樣錯開，時間交給 drift。
+      float z = float(i) * uRayBeamSeparation;
+      // 徑向漣漪：(q/l) 是徑向單位向量，(sin(z)+1) 是整體幅度，
+      // abs(sin(r*rings*π - 2z)) 是一組同心環。
+      vec2 cellUv = q * 0.5 + 0.5 + drift
+        + (q / l) * (sin(z) + 1.0)
+          * abs(sin(r * rings * PI - z * 2.0));
+      vec2 cell = mod(cellUv, 1.0) - 0.5;
+      beams[i] = core / max(length(cell), 0.004);
+    }
   }
-  // 越靠放射方向越亮。夾一個下限，否則極點那一點會除到爆掉。用未縮放的半徑，
-  // 亮度才不會隨「光芒尺度」漂移。
-  return beams / max(r, 0.12);
+
+  return beams * gain / falloff;
 }
 
 

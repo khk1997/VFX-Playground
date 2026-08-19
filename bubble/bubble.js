@@ -58,6 +58,8 @@ const DEFAULTS = {              // 數值滑桿
   // 色散的來源：三個顏色通道取樣同一個圖樣時的相位差。這是整個效果的靈魂，
   // 0 = 三通道同步（純白光束，完全沒有彩虹）。
   rayBeamSeparation: 0.04,
+  // 三點棚燈的燈具直徑（其他圖樣用不到，面板會收起來）。
+  rayBeamLightSize: 0.3,
   // 圖樣的尺度與同心環密度。
   rayBeamZoom: 6,
   rayBeamRings: 0.5,
@@ -302,6 +304,9 @@ const SELECT_DEFAULTS = {
   motion: 'split',
   shapeSource: 'svg',
   shapeQuality: 'balanced',
+  // 稜光光芒的打燈圖樣（見 shaders.js 的 prismBeamField）。grid 是原本唯一的
+  // 那一種，其餘四種共用同一組座標與遮罩，只換亮度在方向球上的分布。
+  rayBeamPattern: 'grid',
 };
 // 已移除的下拉選項 → 現存選項。用來讓舊的參數組合檔仍然打得開。選項本身必須還
 // 留在 <select> 裡（標成 hidden），否則瀏覽器會在寫入當下就把 value 丟成空字串，
@@ -438,6 +443,10 @@ const SELECTS = {
   bgMode:    { uniform: 'uBgMode',    map: { color: 0, hdri: 1 } },
   materialStyle: { uniform: 'uMaterialStyle', map: { membrane: 1, universal: 2 } },
   colorMode: { uniform: 'uColorMode', map: { spectral: 0, ramp: 1 } },
+  rayBeamPattern: {
+    uniform: 'uRayBeamPattern',
+    map: { grid: 0, starburst: 1, ring: 2, softbox: 3, window: 4, threePoint: 5 },
+  },
   motion:    { uniform: 'uMotion',    map: MOTION_UNIFORM_MAP },
   shapeSource: { uniform: 'uShapeType', map: { svg: 1, gltf: 2 } },
   // 僅控制下一次 GLB 烘焙尺寸，沒有對應 shader uniform。
@@ -516,6 +525,7 @@ const fmt = {
   causticSharpness: v => Math.round(v * 100) + '%',
   rayBeamIntensity: v => v === 0 ? '關閉' : 'x' + v.toFixed(2),
   rayBeamSeparation: v => v === 0 ? '無色散' : v.toFixed(3),
+  rayBeamLightSize: v => Math.round(v * 100) + '%',
   rayBeamZoom: v => 'x' + v.toFixed(2),
   rayBeamRings: v => v.toFixed(1),
   rayBeamSpeed: v => {
@@ -676,7 +686,7 @@ function refreshLoopScaledReadouts() {
   refreshShatterTimelineReadouts();
 }
 
-import { VERT, FRAG } from './shaders.js?v=universal-38';
+import { VERT, FRAG } from './shaders.js?v=universal-40';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -2354,6 +2364,8 @@ function initGL() {
     uCausticSharpness: { value: P.causticSharpness },
     uRayBeamIntensity: { value: P.rayBeamIntensity },
     uRayBeamSeparation: { value: P.rayBeamSeparation },
+    uRayBeamPattern: { value: SELECTS.rayBeamPattern.map[P.rayBeamPattern] },
+    uRayBeamLightSize: { value: P.rayBeamLightSize },
     uRayBeamZoom: { value: P.rayBeamZoom },
     uRayBeamRings: { value: P.rayBeamRings },
     uRayBeamSpeed: { value: P.rayBeamSpeed },
@@ -3036,6 +3048,11 @@ function updateUIState() {
     switchMaterialProfile(previousStyle, 'universal');
     if (uniforms) uniforms.uMaterialStyle.value = SELECTS.materialStyle.map.universal;
   }
+  // 稜光光芒的兩根圖樣專屬滑桿：三點棚燈用燈具直徑、其餘四種用環紋 / 分支數，
+  // 彼此互斥（見 shaders.js 的 prismBeamField），所以直接依圖樣互換那一列。
+  const threePointBeams = P.rayBeamPattern === 'threePoint';
+  document.getElementById('rayBeamLightSizeRow').style.display = threePointBeams ? '' : 'none';
+  document.getElementById('rayBeamRingsRow').style.display = threePointBeams ? 'none' : '';
   const membraneMaterial = P.materialStyle === 'membrane';
   const membraneDepth = document.getElementById('membraneDepth');
   membraneDepth.disabled = !membraneMaterial;
@@ -4015,6 +4032,7 @@ if (!PREVIEW && window.PresetIO) {
     // 配色數量會決定色標列的顯示，順序顛倒會讓後套的值被蓋掉。
     applyFirst: [
       'motion', 'bgMode', 'bgColor', 'materialStyle', 'colorMode', 'shapeSource', 'shapeQuality',
+      'rayBeamPattern',
       'filmEnabled', 'dispersionEnabled', 'rayDispersionEnabled',
       'spectralCausticEnabled', 'rampCount',
     ],
