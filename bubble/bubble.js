@@ -2,25 +2,25 @@
 import * as THREE from 'three';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
-} from './shape-field.js?v=svg-shape-75';
+} from './shape-field.js?v=svg-shape-76';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
   MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
   MORPH_TARGET_SVG_NAME, makeMorphTargetSvgFile,
   MORPH_TARGET_SOLID_NAME, buildMorphTargetSolid,
-} from './default-shapes.js?v=svg-shape-75';
+} from './default-shapes.js?v=svg-shape-76';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-75';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-75';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-75';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-75';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-75';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-75';
-import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-75';
-import createJellyMotion from './motions/jelly.js?v=svg-shape-75';
+} from './motions/registry.js?v=svg-shape-76';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-76';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-76';
+import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-76';
+import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -218,6 +218,17 @@ const DEFAULTS = {              // 數值滑桿
   // 自由段的「只用整數諧波」是同一個限制）。
   weaveDriftAmount: 1,
   weaveDriftSpeed: 1,
+  // 繞行程度：0 = 舊行為（每顆水滴只在自己的表面錨點附近原地飄浮），
+  // 1 = 繞著造型跑一整圈，途中會經過造型正面與背面（背面那段會被玻璃折射過去，
+  // 這個模式最好看的畫面就在那裡）。中間值是兩條路徑的插值。
+  weaveOrbit: 0.8,
+  // 繞行軌跡的多樣性，跟 formationVariety 同一套手法但各自一根滑桿：
+  // 0 = 全體同方向、同軌道平面，1 = 約半數反向、軌道平面散佈到 ±90°。
+  weaveVariety: 0.55,
+  // 水滴碰到造型時有多沾黏（乘在黏度上）。原本是寫死的 0.15，等於把這個引擎
+  // 最強的 metaball 融合關掉、水滴永遠是清晰的球；開高會讓水滴貼上玻璃表面、
+  // 拉出液橋再脫離。0.15 維持舊外觀。
+  weaveCling: 0.15,
   // 形狀變形（見 motions/morph.js）。四段時間軸「定格 A → 變形 → 定格 B → 變形回」，
   // morphHold 是單邊定格佔循環的比例，剩下的對半分給兩趟變形。
   morphHold: 0.28,
@@ -670,6 +681,9 @@ const fmt = {
   weaveSizeMax: v => 'x' + v.toFixed(2),
   weaveDriftAmount: v => 'x' + v.toFixed(2),
   weaveDriftSpeed: v => 'x' + v.toFixed(0),
+  weaveOrbit: v => v === 0 ? '原地飄浮' : Math.round(v * 100) + '%',
+  weaveVariety: v => v === 0 ? '整齊同向' : Math.round(v * 100) + '%',
+  weaveCling: v => v === 0 ? '完全不沾' : Math.round(v * 100) + '%',
   morphHold: v => (v * P.loopDuration).toFixed(1) + 's',
   morphStagger: v => v === 0 ? '全體同時' : Math.round(v * 100) + '%',
   morphWaveAngle: v => v.toFixed(0) + '°',
@@ -1769,7 +1783,7 @@ function updateDropUniforms(t) {
       radiusFactor = 1 + splitBeat.anticipation * 0.01
         + breakaway * 0.006 + followThrough * 0.004;
     } else if (P.motion === 'weave') {
-      weaveDropPosition(i, phase, formationPosNow);
+      weaveDropPosition(i, phase, layoutCount, formationPosNow);
       x = formationPosNow.x;
       y = formationPosNow.y;
       z = formationPosNow.z;
@@ -1980,13 +1994,18 @@ function updateDropUniforms(t) {
   // 一條水柱。0.4 是兩者都還能看的折衷，再細調交給「黏度」滑桿。
   // 果凍的水滴是貼在造型表面的點綴，跟穿梭環繞一樣該保持清楚的球體輪廓，
   // 不該跟造型融成一坨黏液。
-  const mergeScale = P.motion === 'weave' || jelly
-    ? 0.15
-    : melting
-      ? 0.4
-      : shatter
-        ? 1 + (0.15 - 1) * shatter.flight
-        : 1;
+  // 穿梭環繞的沾黏程度改由滑桿決定（原本跟果凍共用寫死的 0.15）：這個模式的
+  // 水滴要能貼上玻璃、拉出液橋，就不能永遠把融合關到底。果凍維持 0.15——它的
+  // 水滴是貼在表面的點綴，融成一坨就沒有點綴可言。
+  const mergeScale = P.motion === 'weave'
+    ? Math.max(0.02, P.weaveCling)
+    : jelly
+      ? 0.15
+      : melting
+        ? 0.4
+        : shatter
+          ? 1 + (0.15 - 1) * shatter.flight
+          : 1;
   if (uniforms) uniforms.uViscosity.value = effectiveViscosity * mergeScale;
   if (uniforms) {
     uniforms.uShapeProgress.value = formationShapeProgress;

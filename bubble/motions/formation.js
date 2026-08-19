@@ -1,5 +1,5 @@
 'use strict';
-import { smoothstepCPU } from './util.js?v=svg-shape-75';
+import { smoothstepCPU } from './util.js?v=svg-shape-76';
 
 // 這個模組同時服務兩個模式：形狀匯聚（完整的 gather → hold → release 時間軸）
 // 與穿梭環繞（只借用自由飛行軌道的手法，不吸收水滴）。兩者共用 freeOrbitPosition
@@ -183,8 +183,11 @@ function formationCutFront(amount) {
 //
 // 方向只取 ±1、諧波仍然只用整數倍，所以 phase=0/1 的位置與速度依舊完全相同 ——
 // 循環接縫不會跳（跟 weaveDropPosition 是同一條限制）。
-function freeOrbitPosition(a, anchor, orbit, h2, h3, tune, out) {
-  const variety = Math.max(0, Math.min(1, P.formationVariety));
+// varietyAmount 讓呼叫端決定用哪一根「多樣性」滑桿：形狀匯聚吃 formationVariety、
+// 穿梭環繞吃 weaveVariety。不寫死成 P.formationVariety，是因為那樣等於讓匯聚那根
+// 滑桿偷偷控制另一個模式。
+function freeOrbitPosition(a, anchor, orbit, h2, h3, tune, out, varietyAmount = P.formationVariety) {
+  const variety = Math.max(0, Math.min(1, varietyAmount));
   // h3 < variety/2 的那些反向繞行：variety=0 時沒有任何一顆反向，=1 時約半數。
   const spin = a * (h3 < variety * 0.5 ? -1 : 1);
   const radial = 1 + (h2 - 0.5) * variety * 0.6;
@@ -243,19 +246,42 @@ function formationDropPosition(i, phase, count, out) {
   return formationArcLift(freeX, freeY, freeZ, tx, ty, tz, amount, out);
 }
 
-// 穿梭環繞：每顆水滴分到一個表面錨點當「家」，然後用整數諧波的 sin/cos
-// 組合（跟 formationDropPosition 的自由段同一手法）在家的附近小幅飄浮，
-// 不精確衝向任何目標點——參考的泡泡影片裡，泡泡是懸浮在原地輕輕晃動、
-// 大小各異，不是沿明確路徑移動。整數諧波保證 phase=0/1 時位置與速度完全
-// 相同，循環接縫不會跳；h1/h2/h3 錯開每顆水滴的頻率相位，才不會一起同步晃。
-function weaveDropPosition(i, phase, out) {
+// 造型的外接半徑（錨點離原點最遠的距離）。繞行軌道要照造型大小走，寫死的話
+// 寬扁的文字外框會被一個圓形軌道整個罩住、水滴永遠離造型很遠。錨點換形狀時是
+// 整個陣列換掉，比對物件本身就夠當快取 key。
+let radiusPool = null, shapeRadius = 1;
+function weaveShapeRadius(pool) {
+  if (radiusPool !== pool) {
+    let r = 0;
+    for (const p of pool) r = Math.max(r, Math.hypot(p.x, p.y, p.z));
+    radiusPool = pool;
+    shapeRadius = Math.max(0.35, r);
+  }
+  return shapeRadius;
+}
+
+// 穿梭環繞：水滴繞著造型跑，繞到背面時會被玻璃折射過去——這個模式的名字承諾的
+// 就是這件事。
+//
+// 舊版不是這樣：每顆水滴分到一個表面錨點當「家」，然後一整個循環都只在家附近
+// 原地晃（幅度約 0.14~0.26），沒有任何位移軌跡。六顆還共用同一條 sin/cos 式子、
+// 只差相位，於是畫的是同一個小李薩如圖形。讀起來是「六顆球在不動的造型旁邊
+// 抖」，眼睛沒有東西可以追。
+//
+// 現在改成在「原地飄浮」與「繞行造型」之間插值，由 weaveOrbit 控制：0 完全等於
+// 舊行為（想退回去隨時可以），1 是繞一整圈。兩條路徑都是整數諧波、同一個週期，
+// 所以插值出來仍然滿足 phase=0/1 位置與速度完全相同，循環接縫不會跳。
+//
+// 繞行段直接用 freeOrbitPosition——那條式子已經處理好接縫、反向繞行與軌道平面
+// 傾斜（傾斜正是水滴會跑到造型前後的原因），沒有理由再寫一份。
+function weaveDropPosition(i, phase, count, out) {
   const surface = weaveAnchors();
   const pool = surface.length ? surface : anchors();
   if (!pool.length) return out.set(0, 0, 0);
   const { h1, h2, h3 } = dropSeeds[i];
   const home = pool[Math.floor(h2 * pool.length) % pool.length];
   // 速度只能用整數倍率：sin(k·phase·2π) 對整數 k 而言在 phase=0/1 仍完全同值，
-  // 换成非整數會在循環接縫留下跳變。
+  // 换成非整數會在循環接縫留下跳變。繞行與飄浮共用同一個倍率，兩者才同週期。
   const speed = Math.max(1, Math.round(P.weaveDriftSpeed));
   const a = phase * TAU * speed;
   const driftScale = (0.14 + h1 * 0.12) * P.weaveDriftAmount;
@@ -264,7 +290,20 @@ function weaveDropPosition(i, phase, out) {
   const wy = Math.sin(a * 2 + h2 * TAU) * driftScale * 0.8
     + Math.sin(a * 3 + h1 * TAU) * driftScale * 0.3;
   const wz = Math.sin(a + h3 * TAU) * driftScale * 0.6;
-  return out.set(home.x + wx, home.y + wy, home.z + wz);
+  const orbitAmount = Math.max(0, Math.min(1, P.weaveOrbit));
+  if (orbitAmount <= 0) return out.set(home.x + wx, home.y + wy, home.z + wz);
+  // 半徑跨在造型外接半徑上下：偏小的那些會從造型的凹處與筆畫之間穿過去（「穿梭」），
+  // 偏大的在外圍繞（「環繞」）。起始角依索引均分，六顆才不會擠成一團。
+  const orbit = weaveShapeRadius(pool) * (0.78 + h2 * 0.62);
+  const anchor = i * TAU / Math.max(1, count) + h1 * 1.4;
+  const ring = freeOrbitPosition(
+    a, anchor, orbit, h2, h3, MICRO_ORBIT_TUNE, orbitScratch, P.weaveVariety,
+  );
+  return out.set(
+    (home.x + (ring.x - home.x) * orbitAmount) + wx,
+    (home.y + (ring.y - home.y) * orbitAmount) + wy,
+    (home.z + (ring.z - home.z) * orbitAmount) + wz,
+  );
 }
 
   return {
