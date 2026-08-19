@@ -233,7 +233,6 @@ uniform int   uTransparentBackground;
 //（見 mainImage 末段）
 uniform float uMembraneOverWhite;
 uniform vec3  uBgColor;
-uniform float uBrightBgAssist;
 uniform float uEnvRefraction;
 uniform float uReflect;
 uniform float uTransmission;
@@ -1175,9 +1174,18 @@ void main(){
   float trueBgLum = bgLum;
   if (universalGlass) bgLum = 0.0;
   float brightBg = smoothstep(0.45, 0.90, bgLum);
-  // 灰底維持原本美術模型；只有純色畫布接近白色時才啟用保色補償。
-  // 開關只控制合成方式，不覆寫任何材質或色散參數。
-  float whiteBackdrop = uBrightBgAssist * (1.0 - float(uBgMode))
+  // 灰底維持原本美術模型；只有純色畫布接近白色時才做保色補償。
+  //
+  // 這裡原本還乘一個「亮底保色」開關，已移除：它在唯一預設材質（通用玻璃）下
+  // 恆為無效 —— 上一行就把 bgLum 歸零了，smoothstep(0.82, 0.97, 0) 是 0，乘什麼
+  // 都還是 0。而 UI 的啟用條件又剛好相反（只在非液態薄膜時可按，也就是只在它
+  // 無效的那個材質上可按），所以那顆開關在任何可達的設定下都碰不到畫面。
+  //
+  // 移除後等於「永遠開啟」，與移除前的預設狀態完全一致（該參數預設為 true，
+  // 液態薄膜下 UI 只是停用、並不會把值改掉）。順帶修掉一個殘留狀態的坑：先在
+  // 通用玻璃把它關掉、再切到液態薄膜，那個 false 會跟著生效並悄悄改掉薄膜的
+  // 外觀，而此時滑桿是灰的、使用者無從得知。
+  float whiteBackdrop = (1.0 - float(uBgMode))
     * smoothstep(0.82, 0.97, bgLum);
   vec3 darkComposite = mix(universalGlass ? vec3(0.0) : bg.rgb,
     material.darkColor, material.darkAlpha);

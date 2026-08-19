@@ -2,25 +2,25 @@
 import * as THREE from 'three';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
-} from './shape-field.js?v=svg-shape-73';
+} from './shape-field.js?v=svg-shape-74';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
   MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
   MORPH_TARGET_SVG_NAME, makeMorphTargetSvgFile,
   MORPH_TARGET_SOLID_NAME, buildMorphTargetSolid,
-} from './default-shapes.js?v=svg-shape-73';
+} from './default-shapes.js?v=svg-shape-74';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-73';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-73';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-73';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-73';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-73';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-73';
-import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-73';
-import createJellyMotion from './motions/jelly.js?v=svg-shape-73';
+} from './motions/registry.js?v=svg-shape-74';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-74';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-74';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-74';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-74';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-74';
+import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-74';
+import createJellyMotion from './motions/jelly.js?v=svg-shape-74';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -315,7 +315,6 @@ const LEGACY_SELECT_VALUES = {
 };
 const TOGGLE_DEFAULTS = {
   edgeDropsEnabled: false,
-  brightBgAssist: true,
   filmEnabled: false,
   dispersionEnabled: true,
   rayDispersionEnabled: true,
@@ -461,7 +460,6 @@ const SPECTRAL_CAUSTIC_DEFAULTS = [
 // 布林 uniform，而是把 uEdgeDropCount 歸零，這樣關閉液滴時仍保留邊緣圓角
 // （圓角半徑由獨立的 uShapeEdgeBevel 控制，見 svgShapeDistance 的 smin 半徑）。
 const TOGGLES = {
-  brightBgAssist: 'uBrightBgAssist',
   filmEnabled: 'uFilmEnabled',
   dispersionEnabled: 'uDispersionEnabled',
   rayDispersionEnabled: 'uRayDispersionEnabled',
@@ -2409,7 +2407,6 @@ function initGL() {
     uMembraneReflectionColor: { value: new THREE.Color(P.membraneReflectionColor) },
     uMembraneCardColor: { value: new THREE.Color(P.membraneCardColor) },
     uMembraneShadeColor: { value: new THREE.Color(P.membraneShadeColor) },
-    uBrightBgAssist: { value: P.brightBgAssist ? 1 : 0 },
     uEnvRefraction: { value: P.envRefraction },
     uReflect:    { value: P.reflect },
     uTransmission: { value: P.transmission },
@@ -3022,7 +3019,6 @@ function updateUIState() {
   const bgc = document.getElementById('bgColor');
   const materialStyle = document.getElementById('materialStyle');
   const membraneOption = materialStyle.querySelector('option[value="membrane"]');
-  const brightBgAssist = document.getElementById('brightBgAssist');
   bgc.disabled = !colorBackground;
   bgc.closest('.row').style.opacity = colorBackground ? 1 : 0.4;
   // 液態薄膜的合成是專為純白畫布設計（見 shaders.js 對應段落的白底假設）。
@@ -3048,10 +3044,6 @@ function updateUIState() {
     document.getElementById(key).disabled = !membraneMaterial;
     document.getElementById(key + 'Row').style.display = membraneMaterial ? '' : 'none';
   }
-  // 液態薄膜本身就是前後表面透射模型，不讀取通用玻璃專用的亮底補償。
-  const brightAssistUsable = colorBackground && !membraneMaterial;
-  brightBgAssist.disabled = !brightAssistUsable;
-  brightBgAssist.closest('.row').style.opacity = brightAssistUsable ? 1 : 0.4;
   document.body.style.background = colorBackground ? P.bgColor : '#000';
   // 輪廓液滴的模式閘門（形狀場 + SVG 擠出）走 data-gate；這裡只剩它自己的主
   // 開關。主開關關閉時只停掉會移動的液滴，「邊緣水滴」因為同時決定擠出邊緣的
