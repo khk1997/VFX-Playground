@@ -2,25 +2,25 @@
 import * as THREE from 'three';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
-} from './shape-field.js?v=svg-shape-74';
+} from './shape-field.js?v=svg-shape-75';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
   MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
   MORPH_TARGET_SVG_NAME, makeMorphTargetSvgFile,
   MORPH_TARGET_SOLID_NAME, buildMorphTargetSolid,
-} from './default-shapes.js?v=svg-shape-74';
+} from './default-shapes.js?v=svg-shape-75';
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-74';
-import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-74';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-74';
-import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-74';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-74';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-74';
-import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-74';
-import createJellyMotion from './motions/jelly.js?v=svg-shape-74';
+} from './motions/registry.js?v=svg-shape-75';
+import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-75';
+import createShatterMotion from './motions/shatter.js?v=svg-shape-75';
+import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-75';
+import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-75';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-75';
+import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-75';
+import createJellyMotion from './motions/jelly.js?v=svg-shape-75';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -38,7 +38,12 @@ const GLASS_HDRI_LABEL = 'photo_studio2_london_hall_1k.hdr';
 const MEMBRANE_HDRI_URL = new URL('./assets/christmas_photo_studio_04_1k.hdr', import.meta.url).href;
 const MEMBRANE_HDRI_LABEL = 'christmas_photo_studio_04_1k.hdr';
 const MAX_DROPS = 12;
-const MAX_MICRO_DROPS = 20;
+// 必須跟 shaders.js 的 MAX_MICRO 一致（那邊是 GLSL 的迴圈上界，改一邊就對不上）。
+// 48 是為了細長的造型（例如筆畫細、鋪得又寬的文字外框）：20 顆微滴攤在那種形狀上
+// 稀到讀不出「水滴在組成這個字」。march 迴圈是 `m >= uMicroCount` 動態跳出，所以
+// 這個上界只影響著色器的展開大小，實際成本跟著滑桿的值走——預設仍是 14，拉高
+// 才付錢。
+const MAX_MICRO_DROPS = 48;
 const MAX_EDGE_DROPS = 8;
 const MAX_NEGATIVE_DROPS = 4;
 
@@ -166,6 +171,44 @@ const DEFAULTS = {              // 數值滑桿
   // 匯聚前自由飛行段的軌跡多樣性：0 = 全體同方向、同軌道平面（舊行為），
   // 1 = 約半數反向繞行、軌道平面散佈到 ±90°。
   formationVariety: 0.35,
+  // 疊在成型波前的空間順序之上的隨機參差：0 = 完全照波前掃描的順序抵達，
+  // 調高則愈來愈多水滴提早／延後脫隊。波前關閉時這個值改為控制舊的 h3 亂數
+  // 錯開幅度（1 = 舊預設）。
+  formationJitter: 0.35,
+  // 微滴飛向目標途中的膨脹包絡：0 = 純粹由小長大，無膨脹；數值愈高，飛行中段
+  // 愈明顯先脹大再收回原尺寸，模擬液體被擠聚時的張力感。兩端（尚未出發／已
+  // 抵達）恆為 1，不影響定格時的最終外形。
+  formationSwell: 0.18,
+  // 匯聚/散開途中朝造型外側鼓起的弧線高度（同一套手法搬自 morph.js 的
+  // morphArc）：0 = 直線飛向目標（舊行為），數值愈高，水滴愈像先被推擠鼓起
+  // 再拉進造型，而不是憑空飄過去。兩端（自由飄浮／已定格）恆為 0。
+  formationArc: 0.3,
+  // 成型方式（見 motions/formation.js 的「成型波前」與 shaders.js 的 dissolveField）。
+  // 這是形狀變形那組「消失方式」的反向版本：morph 是波掃過的地方消失，這裡是波
+  // 掃過的地方才長出來，而且水滴的抵達順序跟波前讀同一把尺，所以形體是從水滴
+  // 落定的地方長出來的，不是各自淡入。
+  //   formationFrontOn  總開關。關掉退回舊的全域等距侵蝕（水滴照 h3 亂數抵達）。
+  //   formationStagger  波前錯開：水滴的抵達時間依它在掃描軸上的位置差開多少。
+  //                     0 = 全體同時抵達（波前退化成沒有寬度），愈高波掃得愈長。
+  //   formationFront    波前形狀：0 平面掃描、1 從中心放射、2 螺旋。
+  //   formationSpiral   螺旋的纏繞強度，只有 formationFront === 2 時有意義。
+  //   formationWaveAngle 掃描方向（度，XY 平面）。
+  //   formationNoise/formationNoiseScale  亂流：有機的參差邊緣。
+  //   formationCell/formationCellScale    晶格：整塊整塊浮現的碎裂感。
+  //   formationNeck/formationNeckWidth    前緣收頸：剛長出來的前緣先薄、往後補厚。
+  //   formationCutBlend 切口本身的軟硬。0 是刀切。
+  // （總開關 formationFrontOn 是布林，放在 TOGGLE_DEFAULTS 那邊。）
+  formationStagger: 0.72,
+  formationFront: 0,
+  formationSpiral: 1,
+  formationWaveAngle: 125,
+  formationNoise: 0.45,
+  formationNoiseScale: 1.5,
+  formationCell: 0,
+  formationCellScale: 4,
+  formationNeck: 0.09,
+  formationNeckWidth: 0.55,
+  formationCutBlend: 0.08,
   // 穿梭環繞：每顆水滴的大小在這個範圍內隨機決定（乘在「水滴大小」滑桿上），
   // 上下限拉開才會看起來「好幾顆大小不一」，而不是差不多大的一團。
   weaveSizeMin: 0.1,
@@ -333,6 +376,9 @@ const TOGGLE_DEFAULTS = {
   // 純粹是「這幀要不要算造型剛體動態」的開關，沒有對應 uniform——關閉時
   // shapeRigidMotion 直接回傳 null，各處的 applyShapeRigid 就地退化成恆等變換。
   shapeMotionOn: false,
+  // 形狀匯聚的成型波前總開關（見 motions/formation.js 的「成型波前」）。關閉時
+  // 退回舊的全域等距侵蝕，水滴也改回照 h3 亂數錯開抵達。
+  formationFrontOn: true,
 };
 const COLOR_DEFAULTS  = {
   bgColor: '#000000',
@@ -482,6 +528,10 @@ const TOGGLES = {
   dollyEnabled: () => {},
   // 同理：這顆開關只被 shapeRigidMotion 每幀直接讀，不對應任何 uniform。
   shapeMotionOn: () => {},
+  // 成型波前也一樣：uFormationCut 是每幀跟著波前位置一起送的（見
+  // updateDropUniforms），不是這裡寫一次就固定的布林 uniform——關掉的當下還要
+  // 把 uShapeCut 那組還原成其他模式看得懂的值。
+  formationFrontOn: () => {},
 };
 
 const DISPERSION_TOGGLE_KEYS = ['dispersionEnabled', 'rayDispersionEnabled', 'spectralCausticEnabled'];
@@ -602,6 +652,20 @@ const fmt = {
   microCount: v => v.toFixed(0),
   holdBreath: v => v === 0 ? '凍結' : '±' + Math.round(v * 100) + '%',
   formationVariety: v => v === 0 ? '整齊同向' : Math.round(v * 100) + '%',
+  formationJitter: v => v === 0 ? '同步匯聚' : Math.round(v * 100) + '%',
+  formationSwell: v => v === 0 ? '無膨脹' : '±' + Math.round(v * 100) + '%',
+  formationArc: v => v === 0 ? '直線' : v.toFixed(2),
+  formationStagger: v => v === 0 ? '同時抵達' : Math.round(v * 100) + '%',
+  formationFront: v => ['平面掃描', '從中心放射', '螺旋'][Math.round(v)] || '平面掃描',
+  formationSpiral: v => v.toFixed(2),
+  formationWaveAngle: v => v.toFixed(0) + '°',
+  formationNoise: v => v === 0 ? '關閉' : v.toFixed(2),
+  formationNoiseScale: v => 'x' + v.toFixed(1),
+  formationCell: v => v === 0 ? '關閉' : v.toFixed(2),
+  formationCellScale: v => 'x' + v.toFixed(1),
+  formationNeck: v => v === 0 ? '關閉' : v.toFixed(3),
+  formationNeckWidth: v => v.toFixed(2),
+  formationCutBlend: v => v === 0 ? '刀切' : v.toFixed(3),
   weaveSizeMin: v => 'x' + v.toFixed(2),
   weaveSizeMax: v => 'x' + v.toFixed(2),
   weaveDriftAmount: v => 'x' + v.toFixed(2),
@@ -793,6 +857,32 @@ function rebuildShapeAAnchors() {
     scalePoints(shapeCavityBase, P.shapeAScale), MAX_NEGATIVE_DROPS,
   );
   rebuildWeaveAnchorSets();
+  rebuildFormationEdgeScale();
+}
+
+// 成型波前的「邊緣擾動」尺度。
+//
+// 亂流參差、晶格碎法、前緣收頸這三項都是世界單位的絕對量，而它們全都是拿來
+// 擾動／侵蝕形狀邊緣的——一旦幅度超過形狀本身的粗細，就不再是「邊緣參差」而是
+// 整段筆畫憑空消失或亂閃。內建問號那類造型有 65% 的取樣點在內部（離邊界超過
+// 0.056），撐得住 0.45 的亂流；但細筆畫的文字外框有 98% 的點都貼在邊界上，
+// 同一組數值等於把材料整個吃掉。
+//
+// 所以用「有多少比例的取樣點不是表面點」當這顆造型的厚實度，把三項一起等比
+// 縮下來。三項必須共用同一個係數：CPU 這邊的波前餘裕與水滴出發參差也讀同一個
+// 幅度，各縮各的會讓實體與水滴脫鉤。
+//
+// 0.58 這個除數是量出來的：內建問號的內部點比例是 0.582，星形 0.600、冰塊更高，
+// 三顆都因此落在 1.0（維持既有外觀，不動已經調好的手感）；只有比它們更薄的造型
+// 才會被縮下來——實測細筆畫文字外框只有 0.016，係數約 0.03。
+const EDGE_SCALE_REFERENCE = 0.58;
+let formationEdgeScale = 1;
+function rebuildFormationEdgeScale() {
+  // 用完整的候選點集合，不是挑過的錨點：厚實度是這顆造型本身的性質，而挑錨點的
+  // 最遠點取樣偏好邊界與極端位置，用它量會系統性地偏薄。
+  if (!shapeTargets.length) { formationEdgeScale = 1; return; }
+  const interior = shapeTargets.filter(p => !p.surface).length / shapeTargets.length;
+  formationEdgeScale = Math.max(0, Math.min(1, interior / EDGE_SCALE_REFERENCE));
 }
 // 穿梭環繞的路徑點：只取 formationAnchors 裡標記為表面的錨點。每顆水滴分到
 // 一個表面點當「家」，在旁邊小幅度飄浮晃動，而不是精確衝向某個目標點——
@@ -1240,11 +1330,16 @@ const {
 // 錨點陣列在匯入新形狀時會整個換掉，所以用 getter 傳入而不是傳陣列本身。
 const {
   holdBreathScale, formationAmount, formationFidelityAmount, formationReleaseAmount,
-  freeOrbitPosition, formationDropPosition, weaveDropPosition,
+  freeOrbitPosition, formationDropPosition, formationArcLift, weaveDropPosition,
+  formationLead, formationLocalAmount, formationCutFront,
 } = createFormationMotion(P, {
   dropSeeds,
   anchors: () => formationAnchors,
   weaveAnchors: () => weaveSurfaceAnchors,
+  // 成型波前的掃描範圍用密集的微滴錨點量，不用主滴那組：主滴只有幾顆，取出來
+  // 的投影範圍會比形狀本身窄一大截，波前掃到頭時邊角還沒長出來。
+  frontAnchors: () => (microFormationAnchors.length ? microFormationAnchors : formationAnchors),
+  edgeScale: () => formationEdgeScale,
 });
 
 // 融化：底部滴落。錨點同樣用 getter，換形狀或調取樣範圍後才拿得到新的那組。
@@ -1285,6 +1380,10 @@ function applyShapeRigid(x, y, z, out) {
 
 // 微滴的自由軌道在 updateMicroDrops 直接呼叫 freeOrbitPosition，需要自己的暫存向量。
 const freeOrbitVec = new THREE.Vector3();
+// 微滴的弧線隆起（formationArcLift）也在 updateMicroDrops 直接呼叫，不能跟主滴
+// 迴圈共用 formationPosNow——理由跟 formation.js 的 orbitScratch 註解一樣：共用
+// 同一顆在巢狀呼叫時會互相覆寫。
+const microArcVec = new THREE.Vector3();
 
 // 融化每顆水滴這一幀的形狀（拉長／頸／彈動）。主滴迴圈算出來，下面的形變迴圈
 // 讀取——那個迴圈拿不到位置迴圈的區域變數，所以在這裡接一手。
@@ -1395,17 +1494,41 @@ function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false) {
     const orbit = P.spread * (1.15 + h2 * 0.75);
     const free = freeOrbitPosition(a, anchor, orbit, h2, h3, MICRO_ORBIT_TUNE, freeOrbitVec);
     const freeX = free.x, freeY = free.y, freeZ = free.z;
-    // 錯開抵達時間，讓形狀像被液滴逐區域填滿，而不是所有粒子同步縮放。
-    const arriveStart = 0.04 + h3 * 0.30;
-    const arriveEnd = 0.62 + h3 * 0.20;
-    const local = smoothstepCPU(amount, arriveStart, arriveEnd);
-    const eased = local * local * (3 - 2 * local);
     const target = microFormationAnchors[i % microFormationAnchors.length];
-    const insetScale = 1 - fidelityAbsorb * 0.20;
+    // 抵達時機。波前開啟時順序由目標位置在掃描場上的投影決定（實體的波前是從
+    // 同一條式子反解出來的，所以兩者咬合）；關閉時退回舊的 h3 亂數錯開，
+    // formationJitter 在那條路徑上是錯開幅度的乘數。
+    const local = P.formationFrontOn
+      ? formationLocalAmount(amount, formationLead(target.x, target.y, i))
+      : smoothstepCPU(
+        amount,
+        0.04 + h3 * 0.30 * P.formationJitter,
+        0.62 + h3 * 0.20 * P.formationJitter,
+      );
+    const eased = local * local * (3 - 2 * local);
+    // 飛行途中的膨脹包絡：0（尚未出發）與 1（已抵達）兩端恆為 1，中段依
+    // formationSwell 脹大，模擬液體被推聚時先鼓起再收束的張力感。
+    const swell = 1 + P.formationSwell * Math.sin(Math.PI * local);
+    // 吸收（水滴讓位給實體）。波前開啟時必須逐顆算：全域的 fidelityAbsorb 是
+    // 一條跟位置無關的曲線，波前先掃到的那區水滴會在自己早就該併進實體之後
+    // 還留在原地，變成貼在成形處的一圈球。取兩者較大值，散開段仍由全域那條
+    // 把所有水滴放回來。
+    const absorb = P.formationFrontOn
+      ? Math.max(fidelityAbsorb, smoothstepCPU(local, 0.74, 1))
+      : fidelityAbsorb;
+    const insetScale = 1 - absorb * 0.20;
+    microArcVec.set(
+      freeX + (target.x - freeX) * eased,
+      freeY + (target.y - freeY) * eased,
+      freeZ + (target.z - freeZ) * eased,
+    );
+    // 用逐顆水滴的 local（已含抵達時間錯開）而不是全域 amount，弧線隆起才會
+    // 跟著同一批水滴的出發/抵達時機錯開，不是整群同時鼓起。
+    formationArcLift(freeX, freeY, freeZ, target.x, target.y, target.z, local, microArcVec);
     applyShapeRigid(
-      (freeX + (target.x - freeX) * eased) * insetScale,
-      (freeY + (target.y - freeY) * eased) * insetScale,
-      (freeZ + (target.z - freeZ) * eased) * insetScale,
+      microArcVec.x * insetScale,
+      microArcVec.y * insetScale,
+      microArcVec.z * insetScale,
       shapeRigidVec,
     );
     microDropData[o] = shapeRigidVec.x;
@@ -1416,12 +1539,19 @@ function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false) {
     // 半徑與位置共用相同 local，因此不會再出現「先縮掉、模型才淡入」。
     const freeRadius = targetRadius * (0.52 + h2 * 0.16);
     microDropData[o + 3] = (freeRadius + (targetRadius - freeRadius) * eased)
-      * (1 - fidelityAbsorb);
+      * swell
+      * (1 - absorb);
     const axis = target.axis || formationPosNow.set(1, 0, 0);
     microShapeData[o] = axis.x;
     microShapeData[o + 1] = axis.y;
     microShapeData[o + 2] = axis.z;
-    microShapeData[o + 3] = 1 + ((target.stretch || 1) - 1) * eased;
+    // 拉伸要晚於位置/半徑到位，不能跟 eased 同步：eased 走到一半時水滴還在
+    // 半路飄、半徑也還沒縮定，若這時就套一半拉伸，會看起來像「一顆浮在
+    // 空中的橢球正同時縮小又被拉長」——不像正在組成形狀，像單顆水滴在
+    // 變形。拉伸延到 eased 後段才起步，讀成「水滴先落定、才順著輪廓被
+    // 拉開」，跟旁邊還沒到位的圓滴區隔開來。
+    const stretchT = smoothstepCPU(eased, 0.55, 1);
+    microShapeData[o + 3] = 1 + ((target.stretch || 1) - 1) * stretchT;
   }
   if (microDropTexture) microDropTexture.needsUpdate = true;
   if (microShapeTexture) microShapeTexture.needsUpdate = true;
@@ -1569,12 +1699,19 @@ function updateDropUniforms(t) {
       : shatter
         ? shatterShapeAmount(shatter)
         : isFormationMotion(P.motion)
-          // 回程使用同一個體積交接進度：模型從第一幀開始退、水滴同步長回。
-          // 舊版先維持完整模型、再集中侵蝕，會形成「模型上冒球後突然塌掉」。
-          ? releasingShape
-            // 在水滴完全散開前清掉最後的模型核心，避免循環尾端留下 SDF 碎片。
-            ? 1 - smoothstepCPU(releaseTransfer, 0.0, 0.84)
-            : smoothstepCPU(amount, 0.42, 0.96)
+          // 成型波前開啟時，「哪裡看得到形狀」整個交給波前（uShapeCut），這條
+          // 全域進度只剩兩個責任：把等距侵蝕在一開始就退場（否則會跟波前互相
+          // 蓋住，變成兩層各自的成形），以及維持兩端為 0——uShapeProgress 還
+          // 兼任 geometryWobble 的插值權重（見 shaders.js），突然跳成 1 會讓
+          // 自由飛行段的水滴晃動整片變樣。
+          ? P.formationFrontOn
+            ? smoothstepCPU(amount, 0.01, 0.22)
+            // 回程使用同一個體積交接進度：模型從第一幀開始退、水滴同步長回。
+            // 舊版先維持完整模型、再集中侵蝕，會形成「模型上冒球後突然塌掉」。
+            : releasingShape
+              // 在水滴完全散開前清掉最後的模型核心，避免循環尾端留下 SDF 碎片。
+              ? 1 - smoothstepCPU(releaseTransfer, 0.0, 0.84)
+              : smoothstepCPU(amount, 0.42, 0.96)
           : 0;
   // 模型已大致長成後，讓可見水滴在目標體積內連續被 SDF 吸收。
   // 最後輪廓只剩匯入模型場；吸收在模型完成前不啟動，避免「水滴先縮、模型才出現」。
@@ -1725,14 +1862,25 @@ function updateDropUniforms(t) {
       const toHint = (back ? pair?.a : pair?.b)?.radiusHint || P.radius * 0.58;
       dropData[i].set(x, y, z, (fromHint + (toHint - fromHint) * t) * radiusFactor);
     } else if (isFormationMotion(P.motion)) {
-      const targetRadius = formationAnchors[i % Math.max(1, formationAnchors.length)]?.radiusHint
-        || P.radius * 0.58;
-      const settle = smoothstepCPU(formationAmount(phase), 0.12, 0.88);
+      const anchorTarget = formationAnchors[i % Math.max(1, formationAnchors.length)];
+      const targetRadius = anchorTarget?.radiusHint || P.radius * 0.58;
+      // 主滴跟微滴讀同一套抵達順序與同一套吸收（見 updateMicroDrops）：波前開啟
+      // 時主滴若還照全域曲線走，就會用另一條時間軸浮在早已成形的區域上。
+      const localAmount = P.formationFrontOn && anchorTarget
+        ? formationLocalAmount(
+          formationAmount(phase),
+          formationLead(anchorTarget.x, anchorTarget.y, i),
+        )
+        : formationAmount(phase);
+      const settle = smoothstepCPU(localAmount, 0.12, 0.88);
+      const absorb = P.formationFrontOn && anchorTarget
+        ? Math.max(fidelityAbsorb, smoothstepCPU(localAmount, 0.74, 1))
+        : fidelityAbsorb;
       dropData[i].set(
         x,
         y,
         z,
-        (freeRadius + (targetRadius - freeRadius) * settle) * (1 - fidelityAbsorb),
+        (freeRadius + (targetRadius - freeRadius) * settle) * (1 - absorb),
       );
     } else {
       dropData[i].set(x, y, z, freeRadius);
@@ -1881,6 +2029,29 @@ function updateDropUniforms(t) {
       // 否則其餘模式會繼續讀到打包過的圖。
       if (shapeField?.texture) uniforms.uShapeTex.value = shapeField.texture;
       uniforms.uShapeMorph.value = 0;
+    }
+    // 形狀匯聚的成型波前。跟 morph 共用 uShapeCut／uMorphBreak／uMorphNecking／
+    // uShapeCutBlend 這組 uniform，所以要在 morphSolid 那個分支之後才寫——同一
+    // 幀不可能兩個模式都成立，但這幾顆 uniform 平時是被「滑桿 key → u+首字大寫」
+    // 那條自動對應塞成 morph 的值的，這裡要蓋掉它們。
+    const formationCut = isFormationMotion(P.motion) && shapeField && P.formationFrontOn;
+    uniforms.uFormationCut.value = formationCut ? 1 : 0;
+    if (formationCut) {
+      const front = formationCutFront(amount);
+      // z 與 w 給同一個值：只有一道波前，而 dissolveField 的擾動加速帶是拿
+      // 「離 z 或 w 較近的那個」在算的（見 shaders.js），兩個都指同一條線，
+      // 帶子才會正好罩在這道波前上。
+      uniforms.uShapeCut.value.set(front.nx, front.ny, front.front, front.front);
+      uniforms.uShapeCutBlend.value = P.formationCutBlend;
+      uniforms.uMorphFront.value = P.formationFront;
+      uniforms.uMorphSpiral.value = P.formationSpiral;
+      // 三項邊緣擾動一律乘上 formationEdgeScale，跟 formation.js 的 breakAmount
+      // 讀同一個係數——實體的擾動幅度與水滴的出發參差必須同步縮，否則兩者脫鉤。
+      const es = formationEdgeScale;
+      uniforms.uMorphBreak.value.set(
+        P.formationNoise * es, P.formationNoiseScale, P.formationCell * es, P.formationCellScale,
+      );
+      uniforms.uMorphNecking.value.set(P.formationNeck * es, P.formationNeckWidth);
     }
     // 半徑已連續收至零後才停止 shader 迴圈；切換當下幾何場完全相同。
     const fidelityComplete = fidelityAbsorb > 0.9999;
@@ -2464,6 +2635,8 @@ function initGL() {
     // 0 是關閉，其餘模式一律維持 0，走原本的單一形狀路徑。
     uShapeMorph: { value: 0 },
     uShapeCut: { value: new THREE.Vector4(1, 0, 0, 0) },
+    // 形狀匯聚的成型波前開關（見 shaders.js 的 uFormationCut）。
+    uFormationCut: { value: 0 },
     uShapeCutBlend: { value: 0.08 },
     // 消失方式。uMorphBreak 與 uMorphNecking 各自把兩個滑桿打包成一個 uniform，
     // 因為它們一定成對使用（幅度沒開時尺度沒有意義），拆開只是多兩個 uniform。
@@ -3682,7 +3855,9 @@ function applyExportCamera(time, width, height, fov, scale, settings = null) {
   const loopAngle = phase01 * Math.PI * 2;
   const autoYaw = (Math.sin(loopAngle) * 0.85 + Math.sin(loopAngle * 2 + 0.6) * 0.15) * P.spin * 0.6;
   const autoPitch = Math.sin(loopAngle + 1.1) * P.spin * 0.14;
-  const dolly = 1
+  // 兩段推軌都要跟即時預覽讀同一顆開關（見 render loop 裡的同名計算）。這裡原本
+  // 完全沒看 dollyEnabled，於是關掉前後拉伸之後，預覽不推、匯出的影片卻仍然推。
+  const dolly = !P.dollyEnabled ? 1 : 1
     - 0.05 * Math.exp(-Math.pow((phase01 - 0.80) / 0.10, 2))
     - 0.03 * Math.exp(-Math.pow((phase01 - 0.24) / 0.08, 2));
   rotM4.makeRotationY(rot.y + autoYaw);
@@ -3694,7 +3869,7 @@ function applyExportCamera(time, width, height, fov, scale, settings = null) {
 
   const frameGatherEnd = Math.max(0.15, P.gatherDuration);
   const frameHoldEnd = Math.min(0.94, frameGatherEnd + P.shapeHold);
-  const formationFocus = isFormationMotion(P.motion) && shapeField
+  const formationFocus = P.dollyEnabled && isFormationMotion(P.motion) && shapeField
     ? (phase01 > frameHoldEnd)
       ? formationFidelityAmount(phase01)
       : smoothstepCPU(formationAmount(phase01), 0.42, 0.92)
@@ -3989,9 +4164,13 @@ function frame(now) {
 
   // 匯聚完成時讓鏡頭跟著液滴群緩慢推近。模型距離場本身比自由漂浮軌道緊湊，
   // 若維持同一鏡距，外圍小滴剛收回時主體會顯得突然縮小。
+  //
+  // 這一段也歸「前後拉伸」管。它本來沒有開關，於是關掉前後拉伸之後鏡頭仍然會在
+  // 成形時推近 30%（畫面上的造型等於放大 43%），看起來就是「成型的瞬間整個東西
+  // 突然變大」——而且找不到地方關。上面那段敘事推軌只有 3~5%，這一段才是主因。
   const frameGatherEnd = Math.max(0.15, P.gatherDuration);
   const frameHoldEnd = Math.min(0.94, frameGatherEnd + P.shapeHold);
-  const formationFocus = isFormationMotion(P.motion) && shapeField
+  const formationFocus = P.dollyEnabled && isFormationMotion(P.motion) && shapeField
     ? (phase01 > frameHoldEnd)
       ? formationFidelityAmount(phase01)
       : smoothstepCPU(formationAmount(phase01), 0.42, 0.92)

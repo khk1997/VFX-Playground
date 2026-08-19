@@ -36,7 +36,7 @@ export const MOTIONS = {
     count: 2,
     radius: 0.4,
     loopDuration: 12,
-    dolly: true,
+    dolly: false,
   },
   formation: {
     label: '形狀匯聚 Formation',
@@ -48,7 +48,7 @@ export const MOTIONS = {
     // 依賴外部形狀的模式改用較小的滴徑，吸附進外形時顆粒感更細。
     radius: 0.25,
     loopDuration: 12,
-    dolly: true,
+    dolly: false,
     svgDemo: 'question',
   },
   weave: {
@@ -60,7 +60,7 @@ export const MOTIONS = {
     count: 6,
     radius: 0.25,
     loopDuration: 12,
-    dolly: true,
+    dolly: false,
     svgDemo: 'question',
   },
   melt: {
@@ -151,7 +151,7 @@ export const MOTIONS = {
     radius: 0.25,
     // 四段時長預設 1.1 / 0.5 / 0.4 / 2.0 合計正好 4 秒，面板才顯示得出實際秒數。
     loopDuration: 4,
-    dolly: true,
+    dolly: false,
     svgDemo: 'question',
   },
 };

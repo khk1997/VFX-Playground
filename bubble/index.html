@@ -56,6 +56,22 @@
     <div class="modeBlock" data-gate="formation">
     <div class="row" id="holdBreathRow"><label>定格呼吸</label><input type="range" id="holdBreath" min="0" max="0.2" step="0.005" value="0.05"><span class="val" id="holdBreath_v"></span></div>
     <div class="row" id="formationVarietyRow"><label>軌跡多樣性</label><input type="range" id="formationVariety" min="0" max="1" step="0.01" value="0.35"><span class="val" id="formationVariety_v"></span></div>
+    <div class="row" id="formationJitterRow"><label>抵達時間錯開</label><input type="range" id="formationJitter" min="0" max="1" step="0.01" value="0.35"><span class="val" id="formationJitter_v"></span></div>
+    <div class="row" id="formationSwellRow"><label>飛行膨脹</label><input type="range" id="formationSwell" min="0" max="0.6" step="0.01" value="0.18"><span class="val" id="formationSwell_v"></span></div>
+    <div class="row" id="formationArcRow"><label>弧線隆起</label><input type="range" id="formationArc" min="0" max="0.8" step="0.01" value="0.3"><span class="val" id="formationArc_v"></span></div>
+    <div class="effectSubhead">成型方式 Formation Front</div>
+    <div class="row toggleRow"><label>成型波前</label><input type="checkbox" id="formationFrontOn" checked><span class="switchTrack" aria-hidden="true"></span><span class="val" id="formationFrontOn_v">開啟</span></div>
+    <div class="row" id="formationStaggerRow"><label>波前錯開</label><input type="range" id="formationStagger" min="0" max="0.9" step="0.01" value="0.72"><span class="val" id="formationStagger_v"></span></div>
+    <div class="row" id="formationFrontRow"><label>波前形狀</label><input type="range" id="formationFront" min="0" max="2" step="1" value="0"><span class="val" id="formationFront_v"></span></div>
+    <div class="row" id="formationSpiralRow"><label>螺旋纏繞</label><input type="range" id="formationSpiral" min="-1" max="1" step="0.01" value="1"><span class="val" id="formationSpiral_v"></span></div>
+    <div class="row" id="formationWaveAngleRow"><label>波掃方向</label><input type="range" id="formationWaveAngle" min="0" max="360" step="5" value="125"><span class="val" id="formationWaveAngle_v"></span></div>
+    <div class="row" id="formationNoiseRow"><label>亂流參差</label><input type="range" id="formationNoise" min="0" max="1.2" step="0.01" value="0.45"><span class="val" id="formationNoise_v"></span></div>
+    <div class="row" id="formationNoiseScaleRow"><label>亂流密度</label><input type="range" id="formationNoiseScale" min="0.2" max="6" step="0.1" value="1.5"><span class="val" id="formationNoiseScale_v"></span></div>
+    <div class="row" id="formationCellRow"><label>晶格碎法</label><input type="range" id="formationCell" min="0" max="1.2" step="0.01" value="0"><span class="val" id="formationCell_v"></span></div>
+    <div class="row" id="formationCellScaleRow"><label>晶格尺度</label><input type="range" id="formationCellScale" min="0.5" max="12" step="0.1" value="4"><span class="val" id="formationCellScale_v"></span></div>
+    <div class="row" id="formationNeckRow"><label>前緣收頸</label><input type="range" id="formationNeck" min="0" max="0.12" step="0.002" value="0.09"><span class="val" id="formationNeck_v"></span></div>
+    <div class="row" id="formationNeckWidthRow"><label>收頸範圍</label><input type="range" id="formationNeckWidth" min="0.05" max="1.2" step="0.01" value="0.55"><span class="val" id="formationNeckWidth_v"></span></div>
+    <div class="row" id="formationCutBlendRow"><label>切口軟硬</label><input type="range" id="formationCutBlend" min="0" max="0.2" step="0.005" value="0.08"><span class="val" id="formationCutBlend_v"></span></div>
     </div>
     <div class="modeBlock" data-gate="weave">
     <div class="row" id="weaveSizeMinRow"><label>大小差異下限</label><input type="range" id="weaveSizeMin" min="0.1" max="2" step="0.01" value="0.1"><span class="val" id="weaveSizeMin_v"></span></div>
@@ -154,7 +170,7 @@
       <div data-gate="formation" class="row timelineRow"><label>完成停留</label><input type="range" id="shapeHold" min="0.05" max="0.45" step="0.01" value="0.45"><span class="val" id="shapeHold_v"></span></div>
       <div data-gate="formation" id="timelineSummary" class="note timelineRow"></div>
       <div class="effectSubhead">外形細節</div>
-      <div data-gate="!weave !jelly" class="row" id="microCountRow"><label>輪廓細節滴</label><input type="range" id="microCount" min="8" max="20" step="1" value="14"><span class="val" id="microCount_v"></span></div>
+      <div data-gate="!weave !jelly" class="row" id="microCountRow"><label>輪廓細節滴</label><input type="range" id="microCount" min="8" max="48" step="1" value="14"><span class="val" id="microCount_v"></span></div>
       <div data-gate="svg" class="row"><label>形狀厚度</label><input type="range" id="shapeDepth" min="0.05" max="0.8" step="0.01" value="0.1"><span class="val" id="shapeDepth_v"></span></div>
       <div data-gate="svg" class="row"><label>邊緣圓角</label><input type="range" id="shapeEdgeBevel" min="0" max="0.15" step="0.001" value="0.025"><span class="val" id="shapeEdgeBevel_v"></span></div>
       <div class="row"><label>邊緣液化</label><input type="range" id="shapeSoftness" min="0" max="0.25" step="0.005" value="0"><span class="val" id="shapeSoftness_v"></span></div>
@@ -318,7 +334,7 @@
     <div class="row"><label>水平視角</label><input type="range" id="cameraRotationY" min="-180" max="180" step="0.1" value="29.8"><span class="val" id="cameraRotationY_v"></span></div>
     <div class="row"><label>垂直視角</label><input type="range" id="cameraRotationX" min="-90" max="90" step="0.1" value="9.7"><span class="val" id="cameraRotationX_v"></span></div>
     <div class="row"><label>環繞幅度</label><input type="range" id="spin" min="0" max="1" step="0.01" value="0.08"><span class="val" id="spin_v"></span></div>
-    <div class="row toggleRow"><label>前後拉伸</label><input type="checkbox" id="dollyEnabled" checked><span class="switchTrack" aria-hidden="true"></span><span class="val" id="dollyEnabled_v">開啟</span></div>
+    <div class="row toggleRow"><label>前後拉伸</label><input type="checkbox" id="dollyEnabled"><span class="switchTrack" aria-hidden="true"></span><span class="val" id="dollyEnabled_v">關閉</span></div>
   </details>
 
   <details class="group">
@@ -441,6 +457,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=universal-dbg83"></script>
+<script type="module" src="./bubble.js?v=universal-dbg84"></script>
 </body>
 </html>

@@ -454,9 +454,28 @@ export async function svgToField(file, { size = 512, supersample = 3 } = {}) {
     const edgeDropSets = Array.from({ length: 8 }, (_, i) =>
       selectSvgEdgeDroplets(field, size, `${text}\nedge-distribution:${i}`));
     const targets = [];
-    // 以固定的世界空間密度取樣，讓候選點數不隨解析度暴增
-    // （160² 的雜湊步長換算後約等於 5px 網格；此處沿用同樣的世界間距）。
-    const step = Math.max(1, Math.round(size / 32));
+    // 候選點的取樣步距。
+    //
+    // 舊版是固定的世界空間密度（size/32，512² 時是 16px ≈ 0.094 世界單位）。對
+    // 內建問號那種厚實造型剛好，但它撐不住細筆畫：文字外框的筆寬大約就是
+    // 0.11 世界單位，跟步距同一個量級——網格等於在對筆畫做欠取樣，整段筆畫可能
+    // 一個候選點都沒落到，後面挑錨點時那一段就是空的。
+    //
+    // 改成看形狀實際蓋掉多少面積來反推步距，讓候選點數穩定落在 TARGET 附近：
+    // 佔滿畫面的胖造型維持原本的疏密，細長鋪開的造型自動加密。候選點總數有上限，
+    // 所以下游挑錨點的成本不會跟著形狀暴增。
+    //
+    // 只會比舊版密、不會更疏（上界仍夾在 size/32），避免任何造型的取樣反而退步。
+    const TARGET_CANDIDATES = 600;
+    let interiorPixels = 0;
+    for (let i = 0; i < size * size; i++) if (field[i] < 0) interiorPixels++;
+    const step = Math.max(
+      1,
+      Math.min(
+        Math.round(size / 32),
+        Math.round(Math.sqrt(Math.max(1, interiorPixels) / TARGET_CANDIDATES)),
+      ),
+    );
     for (let y = 0; y < size; y += step) for (let x = 0; x < size; x += step) {
       const i = x + y * size;
       if (field[i] >= 0) continue;

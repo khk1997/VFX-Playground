@@ -111,6 +111,9 @@ uniform float uShapeMorph;
 // 已經在飛了，後面的還沒動。舊形狀跟著出發波前被削掉、新形狀跟著抵達波前
 // 長出來，實體與水滴才會咬合成同一道波，而不是三件各走各的事。
 uniform vec4  uShapeCut;
+// 形狀匯聚的成型波前開關。跟 uShapeMorph 分開：那個是「場上有兩顆形狀要交接」，
+// 這個是「場上只有一顆形狀，被一道波前逐步放出來」，共用切削式子但不是同一件事。
+uniform float uFormationCut;
 // 切口本身的軟硬。0 是刀切。
 uniform float uShapeCutBlend;
 // 波前形狀：0 平面掃描、1 從中心放射、2 螺旋。
@@ -265,7 +268,9 @@ uniform int   uHasEnv;
 #include <cube_uv_reflection_fragment>
 
 const int   MAXN = 12;
-const int   MAX_MICRO = 20;
+// 跟 bubble.js 的 MAX_MICRO_DROPS 綁死。下面的迴圈在 m >= uMicroCount 時動態跳出，
+// 所以拉高這個值只是讓著色器能容納更多微滴，不會讓沒用到的那些也付出取樣成本。
+const int   MAX_MICRO = 48;
 const int   MAX_NEGATIVE = 4;
 const float PI   = 3.14159265359;
 const float TAU  = 6.28318530718;
@@ -740,6 +745,24 @@ float mapScene(vec3 p, bool smoothShape){
       detailD = (uShapeType == 1
         ? svgShapeDistance(shapePA, smoothShape, 0)
         : volumeShapeDistance(shapePA, 0)) * uShapeScale * uShapeAScale;
+      // 形狀匯聚的成型波前：跟上面那組消失波前共用同一個 dissolveField、同一組
+      // 擾動與收頸 uniform，差別只有兩點——只有一道波前（沒有第二顆形狀要交接），
+      // 而且方向相反：morph 保留波前「之後」的舊形狀，這裡保留波前「之前」掃過
+      // 的區域，也就是掃到哪裡才長到哪裡。
+      if (uFormationCut > 0.5) {
+        float field = dissolveField(p);
+        // 收頸在這裡的身分也跟著反過來：morph 是斷開前先變薄，這裡是剛長出來
+        // 的前緣還很薄、往後才補足厚度——同樣是液體在表面張力下的樣子，只是
+        // 一個在收、一個在長。
+        float behind = uShapeCut.w - field;
+        if (uMorphNecking.x > 0.0001) {
+          float w = max(0.0001, uMorphNecking.y);
+          detailD += uMorphNecking.x * (1.0 - smoothstep(0.0, w, behind));
+        }
+        // 半空間的距離場：只保留 field < uShapeCut.w 的那一側。smooth-max
+        // （-smin 的對偶）取交集，uShapeCutBlend 控制切口本身的軟硬。
+        detailD = -smin(-detailD, -(field - uShapeCut.w), max(0.0001, uShapeCutBlend));
+      }
     }
     float growth = smoothstep(0.0, 1.0, uShapeProgress);
     // 已抵達水滴附近先成形，遠處隨全域進度稍晚跟上；這是幾何侵蝕，
