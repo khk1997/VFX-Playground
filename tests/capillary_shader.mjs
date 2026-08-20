@@ -25,12 +25,28 @@ assert.match(FRAG, /movingA\s*=\s*phase \* TAU \* uExtendedParams\.z/,
   'speed zero and negative values must reach the shader unchanged');
 assert.match(FRAG, /textureGain/,
   'procedural textures must normalize their visual amplitude');
-assert.match(FRAG, /capillaryValueNoiseDirectionalLoop/,
-  'directional noise must use a straight periodic translation instead of a circular orbit');
-assert.match(FRAG, /capillaryCellularDirectionalLoop/,
-  'directional Voronoi must use a straight periodic translation instead of a circular orbit');
-assert.match(FRAG, /directionalTravel\s*=\s*phase \* uExtendedParams\.z \* directionalPeriod/,
-  'directional procedural textures must travel by whole repeat periods for seamless looping');
+assert.match(FRAG, /capillaryValueNoiseFieldLoop/,
+  'noise must translate periodically along every selected wave field');
+assert.match(FRAG, /capillaryCellularFieldLoop/,
+  'Voronoi must translate periodically along every selected wave field');
+assert.match(FRAG, /fieldTravel\s*=\s*phase \* uExtendedParams\.z \* fieldPeriod/,
+  'procedural textures must travel by whole repeat periods for seamless looping');
+assert.match(FRAG, /float along = dot\(p, direction\);/,
+  'directional warp must retain the coordinate along the requested XYZ direction');
+assert.match(FRAG, /float across = dot\(p, acrossAxis\);/,
+  'directional warp must retain its first transverse coordinate');
+assert.match(FRAG, /float depth = dot\(p, secondAxis\);/,
+  'directional warp must retain its second transverse coordinate for 3D GLB surfaces');
+assert.match(FRAG, /float field = directionalField \? along \+ directionalWarp : radius;/,
+  'Wave must apply 3D transverse distortion to its forward phase coordinate');
+assert.match(FRAG, /float travelPhase = movingA - field \* density \* TAU;/,
+  'all analytic textures must derive motion from one wave-field phase');
+assert.match(FRAG, /float ramp = fract\(field \* density - movingA \/ TAU\);/,
+  'Gradient must follow radial and spiral fields instead of a Cartesian texture axis');
+assert.doesNotMatch(FRAG, /\+ movingA\) \* 0\.28/,
+  'Gabor must not contain a secondary wave travelling in the opposite direction');
+assert.doesNotMatch(FRAG, /patternP \* density \* 1\.(?:15|35) \+ vec2\(cos\(movingA\)/,
+  'Noise and Voronoi must not orbit in radial or spiral modes');
 assert.match(FRAG, /capillarySurfaceOffset\(shapePA\)/,
   'wave mapping must use shape A object-space coordinates');
 assert.doesNotMatch(FRAG, /capillarySurfaceOffset\(shapeP\)/,
