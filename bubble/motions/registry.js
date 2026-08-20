@@ -154,6 +154,40 @@ export const MOTIONS = {
     dolly: false,
     svgDemo: 'question',
   },
+  capillary: {
+    label: '毛細波 Capillary Wave', uniform: 7, usesShapeField: true, gate: 'capillary',
+    // 毛細波只作用在 SVG／GLB 距離場本體，不生成主滴、微滴或輪廓液滴。
+    count: 0, radius: 0.24, loopDuration: 6, dolly: false,
+    params: [
+      { key: 'capillaryHeight', label: '波浪高度', min: 0, max: 0.8, step: 0.01, value: 0.28 },
+      { key: 'capillaryCrestSoftness', label: '波峰過渡', min: 0, max: 1, step: 0.01, value: 0.35 },
+      { key: 'capillaryRings', label: '環波密度', min: 1, max: 8, step: 1, value: 4 },
+      { key: 'capillarySpeed', label: '傳播速度', min: -4, max: 4, step: 1, value: 2 },
+      {
+        key: 'capillaryField', label: '波場類型', type: 'select', value: 0,
+        options: [
+          { value: 0, label: '同心放射' },
+          { value: 1, label: '定向推進' },
+          { value: 2, label: '螺旋擴散' },
+        ],
+      },
+      {
+        key: 'capillaryTexture', label: '程序紋理', type: 'select', value: 0,
+        options: [
+          { value: 0, label: 'Wave' },
+          { value: 1, label: 'Noise' },
+          { value: 2, label: 'Voronoi' },
+          { value: 3, label: 'Gabor' },
+          { value: 4, label: 'Gradient' },
+          { value: 5, label: 'Magic' },
+        ],
+      },
+      { key: 'capillaryDirectionX', label: '波向 X', min: -1, max: 1, step: 0.05, value: 0 },
+      { key: 'capillaryDirectionY', label: '波向 Y', min: -1, max: 1, step: 0.05, value: 0 },
+      { key: 'capillaryDirectionZ', label: '波向 Z', min: -1, max: 1, step: 0.05, value: 1 },
+      { key: 'capillaryWarp', label: '紋理扭曲', min: 0, max: 1, step: 0.01, value: 0.18 },
+    ],
+  },
 };
 
 const entries = Object.entries(MOTIONS);
@@ -167,6 +201,10 @@ export const MOTION_DEFAULT_DOLLY = pick('dolly');
 export const MOTION_SVG_DEMO = pick('svgDemo');
 export const MOTION_OVERRIDES = pick('overrides');
 export const MOTION_KEYS = Object.keys(MOTIONS);
+export const MOTION_PARAMS = Object.fromEntries(entries.map(([key, motion]) => [key, motion.params || []]));
+export const MOTION_PARAM_DEFAULTS = Object.fromEntries(
+  entries.flatMap(([, motion]) => (motion.params || []).map(param => [param.key, param.value])),
+);
 
 export const usesShapeField = motion => Boolean(MOTIONS[motion]?.usesShapeField);
 

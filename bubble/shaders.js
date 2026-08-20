@@ -101,6 +101,10 @@ uniform float uSatelliteBlend; // 衛星滴與頸部的融合度：成形時高�
 uniform vec4  uBounds;         // xyz：包圍球中心，w：半徑
 uniform int   uShapeType;      // 0 無, 1 SVG 擠出, 2 GLB/GLTF 體積
 uniform float uShapeProgress;
+uniform int   uExtendedMotion;
+uniform vec4  uExtendedParams;
+uniform vec4  uCapillaryStyle; // x 波場、y 程序紋理、z 波峰過渡、w 保留
+uniform vec3  uCapillaryDirection;
 uniform float uFidelityAbsorb;
 uniform float uShapeSwell;
 // 形狀變形：0 = 關閉（其餘模式一律走原本的單一形狀路徑，一格都不變），
@@ -608,6 +612,130 @@ float dissolveField(vec3 p){
   return base;
 }
 
+// 毛細波共用的程序紋理。最後只回傳表面距離偏移，不搬動距離場取樣座標；
+// 這能避免高密度螺旋把座標映射折回中心，讓 SVG／GLB 縮成皺褶。
+float capillaryValueNoise(vec2 p){
+  vec2 cell = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  float a = hash11(dot(cell, vec2(127.1, 311.7)));
+  float b = hash11(dot(cell + vec2(1.0, 0.0), vec2(127.1, 311.7)));
+  float c = hash11(dot(cell + vec2(0.0, 1.0), vec2(127.1, 311.7)));
+  float d = hash11(dot(cell + vec2(1.0), vec2(127.1, 311.7)));
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// 四鄰點的低成本 cellular 場。完整 3×3 Voronoi 每次距離場取樣要跑九次雜湊，
+// 對 raymarch 太重；這個版本保留細胞聚散的讀感，成本控制在四個點。
+float capillaryCellular(vec2 p){
+  vec2 cell = floor(p);
+  vec2 f = fract(p);
+  float nearest = 10.0;
+  for (int y = 0; y <= 1; y++) {
+    for (int x = 0; x <= 1; x++) {
+      vec2 corner = vec2(float(x), float(y));
+      float h = hash11(dot(cell + corner, vec2(127.1, 311.7)));
+      vec2 site = corner + vec2(h, fract(h * 43.75)) * 0.72 + 0.14;
+      nearest = min(nearest, length(f - site));
+    }
+  }
+  return 1.0 - smoothstep(0.05, 0.78, nearest) * 2.0;
+}
+
+float capillarySurfaceOffset(vec3 p){
+  if (uExtendedMotion != 7) return 0.0;
+  float phase = fract(uTime / max(0.001, uLoopDuration));
+  // 整數速度維持循環無縫；0 靜止，負值沿同一條路徑反向播放。
+  float movingA = phase * TAU * uExtendedParams.z;
+  float density = max(0.25, uExtendedParams.y);
+  float directionLength = length(uCapillaryDirection);
+  vec3 direction = directionLength > 0.001
+    ? uCapillaryDirection / directionLength
+    : vec3(0.0, 0.0, 1.0);
+  vec3 reference = abs(direction.z) < 0.95 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+  vec3 acrossAxis = normalize(cross(reference, direction));
+  vec3 secondAxis = normalize(cross(direction, acrossAxis));
+  bool directionalField = uCapillaryStyle.x > 0.5 && uCapillaryStyle.x < 1.5;
+
+  vec2 textureP = directionalField
+    ? vec2(dot(p, direction), dot(p, acrossAxis))
+    : vec2(dot(p, acrossAxis), dot(p, secondAxis));
+  // 只扭曲程序紋理座標，不扭曲造型 SDF 座標；循環相位仍在 phase 0/1 無縫銜接。
+  textureP += vec2(
+    sin(textureP.y * density * 2.1 + movingA),
+    cos(textureP.x * density * 1.7 - movingA)
+  ) * uExtendedParams.w * 0.10;
+
+  float radius = length(textureP);
+  float spiralCore = 1.0;
+  float field = directionalField ? textureP.x : radius;
+  vec2 patternP = textureP;
+  if (directionalField) {
+    patternP = vec2(field, textureP.y);
+  } else if (uCapillaryStyle.x >= 1.5) {
+    // 以半徑驅動連續旋轉，整個平面都沒有 atan 的 -PI/+PI 接縫；核心旋轉量
+    // 自然歸零，SVG 與 GLB 中心不再出現放射狀裂口。
+    spiralCore = smoothstep(0.08, 0.30, radius);
+    float twistA = radius * density * 0.90 * spiralCore;
+    float twistC = cos(twistA);
+    float twistS = sin(twistA);
+    vec2 spiralP = mat2(twistC, -twistS, twistS, twistC) * textureP;
+    field = radius + spiralP.x * 0.22 * spiralCore;
+    patternP = spiralP;
+  }
+
+  float textureType = uCapillaryStyle.y;
+  float wave;
+  float textureGain = 1.0;
+  if (textureType < 0.5) {
+    // Blender Wave：規則、可讀性最強的基準波。
+    wave = sin(movingA - field * density * TAU);
+  } else if (textureType < 1.5) {
+    // Blender Noise：以平滑 value noise 近似，循環位移沿單位圓走一圈。
+    vec2 flow = vec2(cos(movingA), sin(movingA)) * 1.25;
+    wave = capillaryValueNoise(patternP * density * 1.35 + flow) * 2.0 - 1.0;
+    textureGain = 1.35;
+  } else if (textureType < 2.5) {
+    // Blender Voronoi：細胞狀凸凹，同樣沿封閉圓形軌跡流動。
+    vec2 flow = vec2(cos(movingA), sin(movingA)) * 0.85;
+    wave = capillaryCellular(patternP * density * 1.15 + flow);
+    textureGain = 1.10;
+  } else if (textureType < 3.5) {
+    // Blender Gabor：有主方向的窄頻波束，再疊一條斜向次波避免過度機械。
+    float along = patternP.x;
+    float across = patternP.y;
+    wave = sin(along * density * TAU - movingA) * 0.72
+      + sin((along * 0.62 + across * 0.78) * density * TAU + movingA) * 0.28;
+    textureGain = 1.15;
+  } else if (textureType < 4.5) {
+    // Blender Gradient：三角形漸層往指定方向推進，比正弦更像柔和折線波。
+    float ramp = fract(patternP.x * density - movingA / TAU);
+    wave = 1.0 - abs(ramp * 2.0 - 1.0) * 2.0;
+  } else {
+    // Blender Magic：多軸三角函式干涉，產生連續但難以預測的液態花紋。
+    wave = sin(patternP.x * density * 3.1 + movingA)
+      * cos(patternP.y * density * 2.7 - movingA)
+      + sin((patternP.x + patternP.y) * density * 1.9 - movingA * 2.0) * 0.45;
+    wave /= 1.45;
+    textureGain = 1.25;
+  }
+  // 各程序函式的原始對比不同；校準後，同一個波高在切換紋理時維持接近的隆起量。
+  wave = clamp(wave * textureGain, -1.0, 1.0);
+  float coreAmplitude = uCapillaryStyle.x >= 1.5 ? mix(0.25, 1.0, spiralCore) : 1.0;
+  float requestedAmplitude = uExtendedParams.x * 0.16;
+  // 正弦波最大斜率約為 amplitude × density × TAU。限制這個乘積可避免使用者
+  // 同時拉高波高與密度時產生針狀鋸齒；一般設定低於上限，不會被壓縮。
+  float slopeSafeAmplitude = 2.4 / max(TAU, density * TAU);
+  float amplitude = min(requestedAmplitude, slopeSafeAmplitude);
+  // 原物體永遠是不可侵蝕的基底。過渡值把隆起起點向負半波展寬，類似 Blender
+  // ColorRamp 的黑白色標拉開；0% 保留俐落波峰，100% 形成最寬的柔和肩部。
+  float crestSoftness = clamp(uCapillaryStyle.z, 0.0, 1.0);
+  float crestStart = -crestSoftness * 0.85;
+  float crestInput = clamp((wave - crestStart) / (1.0 - crestStart), 0.0, 1.0);
+  float basePreservingCrest = smoothstep(0.0, 1.0, crestInput);
+  return basePreservingCrest * amplitude * coreAmplitude;
+}
+
 float mapScene(vec3 p, bool smoothShape){
   float d = 1e9;
   // 吸收時半徑歸零並不足以消除 smooth-min：零半徑點落在模型表面時
@@ -764,6 +892,8 @@ float mapScene(vec3 p, bool smoothShape){
         detailD = -smin(-detailD, -(field - uShapeCut.w), max(0.0001, uShapeCutBlend));
       }
     }
+    // 以 signed-distance 偏移形成表面波，不再把多個取樣座標擠向螺旋中心。
+    detailD -= capillarySurfaceOffset(shapePA) * uShapeScale * uShapeAScale;
     float growth = smoothstep(0.0, 1.0, uShapeProgress);
     // 已抵達水滴附近先成形，遠處隨全域進度稍晚跟上；這是幾何侵蝕，
     // 不是透明淡入，因此水滴與模型輪廓之間始終有實際液橋。

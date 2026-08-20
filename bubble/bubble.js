@@ -12,8 +12,9 @@ import {
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
-  MOTION_OVERRIDES, MOTION_KEYS, usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-76';
+  MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
+  usesShapeField, motionGates,
+} from './motions/registry.js?v=svg-shape-85';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
@@ -21,6 +22,9 @@ import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-s
 import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-76';
 import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-76';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
+import {
+  createExtendedMotionRuntime, effectiveCapillaryHeight, isExtendedMotion,
+} from './motions/extended/index.js?v=extended-motions-4';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 
@@ -49,6 +53,7 @@ const MAX_NEGATIVE_DROPS = 4;
 
 /* ===== 參數 ===== */
 const DEFAULTS = {              // 數值滑桿
+  ...MOTION_PARAM_DEFAULTS,
   thickness: 250,
   thickVar: 400,
   noiseScale: 0.8,
@@ -403,6 +408,7 @@ const COLOR_DEFAULTS  = {
   membraneShadeColor: '#85b8e6',
 };
 const P = { ...DEFAULTS, ...SELECT_DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS };
+const extendedMotions = createExtendedMotionRuntime(P);
 
 // 材質切換不是同一組滑桿換 shader 分支：通用玻璃與液態薄膜各自保留一份
 // HDRI／材質狀態。離開時記住使用者微調，回來時恢復；第一次進入薄膜則使用
@@ -582,6 +588,20 @@ const fmt = {
   wobble: v => v.toFixed(3),
   wobbleScale: v => 'x' + v.toFixed(1),
   wobbleSpeed: v => 'x' + v.toFixed(2),
+  capillaryHeight: v => {
+    const effective = effectiveCapillaryHeight(v, P.capillaryRings);
+    return effective < v - 0.005
+      ? `${v.toFixed(2)}→${effective.toFixed(2)}`
+      : v.toFixed(2);
+  },
+  capillarySpeed: v => v === 0
+    ? '靜止'
+    : `${v < 0 ? '反向' : '正向'}×${Math.abs(v).toFixed(0)}`,
+  capillaryDirectionX: v => v.toFixed(2),
+  capillaryDirectionY: v => v.toFixed(2),
+  capillaryDirectionZ: v => v.toFixed(2),
+  capillaryCrestSoftness: v => Math.round(v * 100) + '%',
+  capillaryWarp: v => Math.round(v * 100) + '%',
   patternSpeed: v => 'x' + v.toFixed(2),
   dispersion: v => Math.round(v * 100) + '%',
   dispersionSeparation: v => 'x' + v.toFixed(2),
@@ -742,6 +762,11 @@ const fmt = {
   jellyTwist: v => v === 0 ? '不扭轉' : v.toFixed(0) + '°',
 };
 
+function refreshCapillaryHeightReadout() {
+  const value = document.getElementById('capillaryHeight_v');
+  if (value) value.textContent = fmt.capillaryHeight(P.capillaryHeight);
+}
+
 // 崩解噴濺的四段時長是正規化的相對權重，所以動任何一段，其他三段實際佔的秒數
 // 都會跟著變 —— 讀數必須一起重畫，不能只更新被拖動的那一個。
 const SHATTER_TIMELINE_KEYS = ['shatterRest', 'shatterChargeTime', 'shatterFlight', 'shatterReform'];
@@ -767,7 +792,7 @@ function refreshLoopScaledReadouts() {
   refreshShatterTimelineReadouts();
 }
 
-import { VERT, FRAG } from './shaders.js?v=universal-40';
+import { VERT, FRAG } from './shaders.js?v=universal-48';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -797,6 +822,37 @@ const tmpZ = new THREE.Matrix4();
 const dropData = Array.from({ length: MAX_DROPS }, () => new THREE.Vector4());
 const dropShapeData = Array.from({ length: MAX_DROPS }, () => new THREE.Vector4(1, 0, 0, 1));
 const dropPhysicsData = Array.from({ length: MAX_DROPS }, () => new THREE.Vector4());
+// 新增模式共用的暫存輸出。各模式模組只寫純數值，不依賴 THREE 或場景狀態；
+// 主迴圈在單一分支讀取，移除某模式時不必再修改這段。
+const extendedMotionState = Array.from({ length: MAX_DROPS }, () => ({
+  x: 0, y: 0, z: 0, radiusFactor: 1, shape: null,
+}));
+const extendedShapeContext = {
+  anchors: [], surfaceAnchors: [], center: { x: 0, y: 0, z: 0 }, radius: 1,
+};
+
+function syncExtendedShapeContext() {
+  extendedShapeContext.anchors = formationAnchors;
+  extendedShapeContext.surfaceAnchors = weaveSurfaceAnchors;
+  const pool = formationAnchors.length ? formationAnchors : weaveSurfaceAnchors;
+  if (!pool.length) {
+    extendedShapeContext.center.x = 0;
+    extendedShapeContext.center.y = 0;
+    extendedShapeContext.center.z = 0;
+    extendedShapeContext.radius = 1;
+    return;
+  }
+  let x = 0, y = 0, z = 0;
+  for (const point of pool) { x += point.x; y += point.y; z += point.z; }
+  x /= pool.length; y /= pool.length; z /= pool.length;
+  extendedShapeContext.center.x = x;
+  extendedShapeContext.center.y = y;
+  extendedShapeContext.center.z = z;
+  let radius = 0.1;
+  for (const point of pool) radius = Math.max(radius,
+    Math.hypot(point.x - x, point.y - y, point.z - z));
+  extendedShapeContext.radius = radius;
+}
 const previousDropPositions = Array.from({ length: MAX_DROPS }, () => new THREE.Vector3());
 const dropBounds = new THREE.Vector4(0, 0, 0, 1);
 const elasticEvent = new THREE.Vector2(0, 0);
@@ -1578,7 +1634,7 @@ function updateNegativeDrops(phase, fidelityAbsorb = 0) {
   // 融化的形狀始終完整，空腔自然也要一直在，不隨任何包絡消長。
   // 果凍的實體同樣全程都在（uShapeProgress 恆為 1），空腔要一直在，否則有真
   // 孔洞的模型（例如環形 GLB）會被填實。
-  const amount = P.motion === 'melt' || P.motion === 'jelly'
+  const amount = P.motion === 'melt' || P.motion === 'jelly' || isExtendedMotion(P.motion)
     ? 1
     // 形狀變形不顯示距離場實體（uShapeProgress 為 0），空腔沒有母體可挖，留著
     // 只會變成幾顆漂在水滴群裡的隱形挖洞球，把輪廓咬掉幾塊。
@@ -1660,7 +1716,10 @@ function updateDropUniforms(t) {
   // 水滴數量可以是 0（例如崩解噴濺只想要微滴碎片、穿梭環繞只想留形狀本身）。
   // count 本身允許 0，交給 uCount 讓 shader 直接跳過主滴迴圈；但凡是拿它當
   // 除數或版面基準的地方一律改用 layoutCount，否則 0 會變成 Infinity／NaN。
-  const count = Math.max(0, Math.min(MAX_DROPS, Math.round(P.count)));
+  // 毛細波是純形狀場模式。即使舊參數檔還保存著 count > 0，也不允許主滴重新出現。
+  const count = P.motion === 'capillary'
+    ? 0
+    : Math.max(0, Math.min(MAX_DROPS, Math.round(P.count)));
   const layoutCount = Math.max(1, count);
   const tau = Math.PI * 2;
   const phase = fract(t / Math.max(0.001, P.loopDuration));
@@ -1695,6 +1754,8 @@ function updateDropUniforms(t) {
   const melting = P.motion === 'melt';
   const morphing = P.motion === 'morph';
   const jelly = P.motion === 'jelly';
+  const extended = isExtendedMotion(P.motion);
+  if (extended) syncExtendedShapeContext();
   if (melting) rebuildMeltAnchors();
   if (morphing) { ensureMorphTarget(); rebuildMorphPairs(); }
   // 實體變形要有雙通道貼圖才成立；沒有就只剩水滴（見 rebuildMorphPackedTexture）。
@@ -1708,7 +1769,7 @@ function updateDropUniforms(t) {
     // 形狀變形的實體同樣永遠滿值：它不靠淡入淡出交接，兩顆形狀是被兩道波前
     // 各自削掉／放出來的（見 shaders.js 的 uShapeCut），整個循環都該全力顯示。
     // 果凍的形狀從頭到尾完整，只是在晃——完全不參與任何體積交接。
-    : P.motion === 'weave' || melting || morphSolid || jelly
+    : P.motion === 'weave' || melting || morphSolid || jelly || extended
       ? 1
       : shatter
         ? shatterShapeAmount(shatter)
@@ -1750,7 +1811,7 @@ function updateDropUniforms(t) {
     // 融化也是一次出現很多顆各自獨立的水滴，同樣需要這套正規化。
     // 形狀變形同樣是「一次出現很多顆」：水滴群就是整個畫面，沒有正規化的話
     // 排成形狀的那一刻整組會黏成一大團，輪廓完全糊掉。
-    : isFormationMotion(P.motion) || P.motion === 'shatter' || melting || morphing
+    : isFormationMotion(P.motion) || P.motion === 'shatter' || melting || morphing || extended
       // smooth-min 連續合併很多顆時會累積膨脹；依數量正規化融合半徑，
       // 讓 12–16 顆仍只在真正接觸處形成液橋，不把整組擴成巨大距離場。
       ? Math.max(0.10, 0.42 / Math.sqrt(layoutCount))
@@ -1824,6 +1885,14 @@ function updateDropUniforms(t) {
       const pool = weaveSurfaceAnchors.length ? weaveSurfaceAnchors : formationAnchors;
       const home = pool.length ? pool[Math.floor(h2 * pool.length) % pool.length] : null;
       if (home) { x = home.x; y = home.y; z = home.z; }
+    } else if (extended) {
+      const state = extendedMotions.sample(
+        P.motion, i, phase, layoutCount, dropSeeds[i], extendedShapeContext, extendedMotionState[i],
+      );
+      if (state) {
+        x = state.x; y = state.y; z = state.z;
+        radiusFactor = state.radiusFactor;
+      }
     } else if (isFormationMotion(P.motion)) {
       const formation = amount;
       formationDropPosition(i, phase, layoutCount, formationPosNow);
@@ -1839,7 +1908,7 @@ function updateDropUniforms(t) {
     // 水滴自己排出來，大小不一的下沉量會讓靜止的形狀邊緣參差不齊。
     // 果凍同樣排除：它的水滴要正好貼在實體的表面錨點上，被推低一截就會在輪廓旁
     // 浮出一圈對不上的球。
-    if (!melting && !morphing && !jelly) {
+    if (!melting && !morphing && !jelly && !extended) {
       y -= P.gravity * P.spread * 0.045 * Math.pow(radius, 1.35);
     }
     if (isFormationMotion(P.motion)) {
@@ -1999,6 +2068,8 @@ function updateDropUniforms(t) {
   // 水滴是貼在表面的點綴，融成一坨就沒有點綴可言。
   const mergeScale = P.motion === 'weave'
     ? Math.max(0.02, P.weaveCling)
+    : extended
+      ? 0.34
     : jelly
       ? 0.15
       : melting
@@ -2008,6 +2079,23 @@ function updateDropUniforms(t) {
           : 1;
   if (uniforms) uniforms.uViscosity.value = effectiveViscosity * mergeScale;
   if (uniforms) {
+    // 同樣封住舊參數檔可能保存的輪廓液滴與一般水滴噪聲；切離毛細波後會立即
+    // 從 P 恢復原模式各自記憶的值。
+    uniforms.uEdgeDropCount.value = P.motion === 'capillary'
+      ? 0 : (P.edgeDropsEnabled ? activeEdgeDrops.length : 0);
+    uniforms.uWobble.value = P.motion === 'capillary' ? 0 : P.wobble;
+    uniforms.uExtendedMotion.value = extended ? MOTION_UNIFORM_MAP[P.motion] : 0;
+    const extendedParams = uniforms.uExtendedParams.value;
+    if (P.motion === 'capillary') {
+      extendedParams.set(P.capillaryHeight, P.capillaryRings, P.capillarySpeed, P.capillaryWarp);
+      uniforms.uCapillaryStyle.value.set(
+        Math.round(P.capillaryField), Math.round(P.capillaryTexture), P.capillaryCrestSoftness, 0,
+      );
+      uniforms.uCapillaryDirection.value.set(
+        P.capillaryDirectionX, P.capillaryDirectionY, P.capillaryDirectionZ,
+      );
+    }
+    else extendedParams.set(0, 0, 0, 0);
     uniforms.uShapeProgress.value = formationShapeProgress;
     uniforms.uFidelityAbsorb.value = fidelityAbsorb;
     uniforms.uShapeSwell.value = shatter ? shatter.swell : 0;
@@ -2027,7 +2115,7 @@ function updateDropUniforms(t) {
     // 形狀變形也關掉，理由跟融化同一條：實體恆為滿值，contactLead 只剩副作用
     // ——影響半徑遠大於水滴本身，飛過去的水滴會像幾把刨刀掃過兩顆形狀的表面。
     // 果凍同理：它的實體恆為滿值，沒有「正在成形」可言。
-    uniforms.uContactLead.value = (shatter || melting || morphSolid || jelly) ? 0 : 1;
+    uniforms.uContactLead.value = (shatter || melting || morphSolid || jelly || extended) ? 0 : 1;
     if (morphSolid) {
       uniforms.uShapeTex.value = morphPackedTexture;
       uniforms.uShapeMorph.value = morphCut.mode;
@@ -2229,6 +2317,16 @@ function updateDropUniforms(t) {
     }
     dropShapeData[i].set(ax, ay, az, stretch);
     dropPhysicsData[i].set(flatten, shapeOscillation, tip, blendWeight);
+    if (extended) {
+      const authored = extendedMotionState[i].shape;
+      if (authored) {
+        const axis = authored.axis || [1, 0, 0];
+        const length = Math.max(0.0001, Math.hypot(axis[0], axis[1], axis[2]));
+        dropShapeData[i].set(axis[0] / length, axis[1] / length, axis[2] / length,
+          Math.max(0.38, authored.stretch ?? 1));
+        dropPhysicsData[i].set(authored.flatten || 0, 0, authored.tip || 0, authored.blend ?? 1);
+      }
+    }
   }
   for (let i = count; i < MAX_DROPS; i++) {
     dropShapeData[i].set(1, 0, 0, 1);
@@ -2647,6 +2745,12 @@ function initGL() {
     uHasEnv:     { value: 0 },
     uShapeType: { value: SELECTS.shapeSource.map[P.shapeSource] },
     uShapeProgress: { value: 0 },
+    // 可插拔形狀互動模式：模式編號、專屬參數與三軸波向。SVG 與 GLB 共用同一個
+    // 表面距離偏移，所以兩種匯入來源行為一致。
+    uExtendedMotion: { value: 0 },
+    uExtendedParams: { value: new THREE.Vector4() },
+    uCapillaryStyle: { value: new THREE.Vector4() },
+    uCapillaryDirection: { value: new THREE.Vector3(0, 0, 1) },
     uFidelityAbsorb: { value: 0 },
     // 崩解噴濺的蓄力膨脹量（等距擴張形狀距離場）；其他模式恆為 0。
     uShapeSwell: { value: 0 },
@@ -2961,8 +3065,51 @@ function switchMaterialProfile(previousStyle, nextStyle) {
   if (inited) loadMaterialEnvironment(nextStyle);
 }
 
+// 模式專屬控制項由 registry 的 metadata 建立。這讓模式檔、註冊資料與 UI 保持
+// 一一對應；刪除 registry 條目後不會留下失效控制項，也不必手動維護 HTML。
+function buildExtendedMotionControls() {
+  const host = document.getElementById('extendedMotionControls');
+  if (!host || host.childElementCount) return;
+  for (const [motion, params] of Object.entries(MOTION_PARAMS)) {
+    if (!params.length) continue;
+    const block = document.createElement('div');
+    block.className = 'modeBlock';
+    block.dataset.gate = motion;
+    for (const param of params) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.id = `${param.key}Row`;
+      const label = document.createElement('label');
+      label.htmlFor = param.key;
+      label.textContent = param.label;
+      const control = document.createElement(param.type === 'select' ? 'select' : 'input');
+      control.id = param.key;
+      if (param.type === 'select') {
+        for (const optionSpec of param.options) {
+          const option = document.createElement('option');
+          option.value = String(optionSpec.value);
+          option.textContent = optionSpec.label;
+          control.append(option);
+        }
+      } else {
+        control.type = 'range';
+        control.min = String(param.min);
+        control.max = String(param.max);
+        control.step = String(param.step);
+      }
+      control.value = String(param.value);
+      const value = document.createElement('span');
+      value.className = 'val';
+      if (param.type !== 'select') value.id = `${param.key}_v`;
+      row.append(label, control, value);
+      block.append(row);
+    }
+    host.append(block);
+  }
+}
+
 function bindControls() {
-  // 數值滑桿
+  // 數值型控制項（滑桿與以數字作為 option value 的下拉選單）
   for (const key of Object.keys(DEFAULTS)) {
     const el = document.getElementById(key);
     const valEl = document.getElementById(key + '_v');
@@ -2978,6 +3125,7 @@ function bindControls() {
       if (key === 'shapeAScale') scheduleShapeAScaleRebuild();
       if (key === 'shapeBScale') scheduleShapeBScaleRebuild();
       if (valEl) valEl.textContent = (fmt[key] || (v => +v.toFixed(2)))(P[key]);
+      if (key === 'capillaryRings') refreshCapillaryHeightReadout();
       if (uniforms && uniforms[uName]) uniforms[uName].value = (key === 'count') ? Math.round(P[key]) : P[key];
       if (SHATTER_TIMELINE_KEYS.includes(key)) refreshShatterTimelineReadouts();
       if (key === 'gatherDuration' || key === 'shapeHold' || key === 'loopDuration') {
@@ -3010,6 +3158,10 @@ function bindControls() {
         switchMaterialProfile(previousValue, P[key]);
       }
       if (key === 'motion' && previousMotion !== P.motion) {
+        // 毛細波只允許形狀場本體。舊的自動保存／參數檔可能還記著早期版本的
+        // count=12；除了渲染端強制歸零，這裡也把模式記憶清成 0，避免隱藏欄位
+        // 繼續被匯出成看似有效的水滴設定。
+        if (P.motion === 'capillary') motionMemory.count.capillary = 0;
         // 每個按模式記憶的參數：先把舊模式剛才的值存回去，再把新模式記得的值
         // 寫回控制項並觸發它自己的 input/change，讓 uniform、顯示文字、
         // applyEdgeDropDistribution 之類的副作用照常跑一次，不必在這裡重複。
@@ -4244,6 +4396,7 @@ function frame(now) {
   updateExportCameraPreview();
 }
 
+buildExtendedMotionControls();
 bindControls();
 
 // 參數組合匯出/匯入。預覽模式要呈現正規預設值，不套用個人的自動保存狀態。

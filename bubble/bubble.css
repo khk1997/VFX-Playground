@@ -268,6 +268,8 @@
     font: 12px inherit; cursor: pointer;
   }
   .row .val { flex: 0 0 46px; text-align: right; font-size: 11px; color: #9fb8ff; font-variant-numeric: tabular-nums; }
+  #capillaryHeightRow .val { flex-basis: 72px; }
+  #capillarySpeedRow .val { flex-basis: 64px; }
   .stopRow label { flex: 0 0 34px; font-size: 11px; color: #97a6c6; }
   .stopRow input[type=color] { flex: 0 0 40px; min-width: 40px; }
   .stopRow input[type=range] { flex: 1 1 70px; }
