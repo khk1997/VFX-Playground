@@ -126,7 +126,7 @@ export const MOTIONS = {
     // 造型本身就是全部的戲：水滴預設不出場。使用者想加幾顆點綴仍然可以調高，
     // 那些水滴會貼在表面錨點上跟著果凍一起晃（見 bubble.js 的 jelly 分支）。
     count: 0,
-    radius: 0.25,
+    radius: 0.24,
     // 戳一下、晃幾下、平息——這個節奏要短才有彈性感，12 秒會變成慢動作。
     loopDuration: 4,
     // 果凍是原地晃動，鏡頭推軌會跟形變混在一起，分不清是誰在動。
@@ -134,8 +134,17 @@ export const MOTIONS = {
     svgDemo: 'question',
     // 厚實圓潤才像一塊果凍；薄片擠出被壓扁時看起來是紙在抖，不是膠體在晃。
     overrides: {
-      shapeDepth: 0.3,
-      shapeEdgeBevel: 0.13,
+      shapeDepth: 0.14,
+      shapeEdgeBevel: 0.051,
+      materialStyle: 'universal',
+      rayBeamIntensity: 13.5,
+      rayBeamSeparation: 0.065,
+      rayBeamChroma: 1.3,
+      rayBeamZoom: 5,
+      spectralCausticEnabled: false,
+      cameraDistance: 3.7,
+      cameraRotationX: 9.4,
+      cameraRotationY: 27.9,
     },
   },
   shatter: {
@@ -157,14 +166,26 @@ export const MOTIONS = {
   capillary: {
     label: '毛細波 Capillary Wave', uniform: 7, usesShapeField: true, gate: 'capillary',
     // 毛細波只作用在 SVG／GLB 距離場本體，不生成主滴、微滴或輪廓液滴。
-    count: 0, radius: 0.24, loopDuration: 6, dolly: false,
+    count: 0, radius: 0.24, loopDuration: 4, dolly: false,
+    overrides: {
+      shapeEdgeBevel: 0.051,
+      materialStyle: 'universal',
+      rayBeamIntensity: 13.5,
+      rayBeamSeparation: 0.065,
+      rayBeamChroma: 1.3,
+      rayBeamZoom: 5,
+      spectralCausticEnabled: false,
+      cameraDistance: 3.7,
+      cameraRotationX: 9.4,
+      cameraRotationY: 27.9,
+    },
     params: [
-      { key: 'capillaryHeight', label: '波浪高度', min: 0, max: 0.8, step: 0.01, value: 0.28 },
-      { key: 'capillaryCrestSoftness', label: '波峰過渡', min: 0, max: 1, step: 0.01, value: 0.35 },
-      { key: 'capillaryRings', label: '環波密度', min: 1, max: 8, step: 1, value: 4 },
+      { key: 'capillaryHeight', label: '波浪高度', min: 0, max: 0.8, step: 0.01, value: 0.09 },
+      { key: 'capillaryCrestSoftness', label: '波峰過渡', min: 0, max: 1, step: 0.01, value: 1 },
+      { key: 'capillaryRings', label: '環波密度', min: 1, max: 8, step: 1, value: 3 },
       { key: 'capillarySpeed', label: '傳播速度', min: -4, max: 4, step: 1, value: 2 },
       {
-        key: 'capillaryField', label: '波場類型', type: 'select', value: 0,
+        key: 'capillaryField', label: '波場類型', type: 'select', value: 1,
         options: [
           { value: 0, label: '同心放射' },
           { value: 1, label: '定向推進' },
@@ -182,9 +203,9 @@ export const MOTIONS = {
           { value: 5, label: 'Magic' },
         ],
       },
-      { key: 'capillaryDirectionX', label: '波向 X', min: -1, max: 1, step: 0.05, value: 0 },
-      { key: 'capillaryDirectionY', label: '波向 Y', min: -1, max: 1, step: 0.05, value: 0 },
-      { key: 'capillaryDirectionZ', label: '波向 Z', min: -1, max: 1, step: 0.05, value: 1 },
+      { key: 'capillaryDirectionX', label: '波向 X', min: -1, max: 1, step: 0.05, value: 0.4 },
+      { key: 'capillaryDirectionY', label: '波向 Y', min: -1, max: 1, step: 0.05, value: 0.5 },
+      { key: 'capillaryDirectionZ', label: '波向 Z', min: -1, max: 1, step: 0.05, value: 0 },
       { key: 'capillaryWarp', label: '紋理扭曲', min: 0, max: 1, step: 0.01, value: 0.18 },
     ],
   },

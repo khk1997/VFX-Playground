@@ -192,9 +192,6 @@ uniform float uRayBeamSeparation;
 // 打燈圖樣（見 prismBeamField）：換一種圖樣等於換一盞棚燈的形狀，座標與所有
 // 遮罩都共用，只有「亮度怎麼分布在方向球上」不同。
 uniform int uRayBeamPattern;
-// 三點棚燈的燈具直徑。只有「三點棚燈」用得到（其他圖樣是鋪滿方向球的圖案，
-// 沒有「一顆燈」這回事），面板會依圖樣收起這一列。
-uniform float uRayBeamLightSize;
 uniform float uRayBeamZoom;
 uniform float uRayBeamRings;
 uniform float uRayBeamSpeed;
@@ -1070,23 +1067,6 @@ vec3 prismBeamCoord(vec3 viewDir, vec3 exitDir){
   return vec3(q, radius);
 }
 
-// 三點棚燈用的兩個小工具。
-//
-// 燈位寫在「方位等距投影」的平面上（見 prismBeamCoord）：半徑 = 與放射方向的
-// 夾角，角度 = 繞著它的方位角。所以 (0,0) 就是主燈打過來的方向本身。
-vec2 prismLampPos(float radius, float angle){
-  return radius * vec2(cos(angle), sin(angle));
-}
-
-// 一顆有直徑的燈：實心的燈面加一圈掉下去的光暈。edge 是燈面的邊緣柔化程度，
-// 由「光點銳利」給 —— 調高是硬光（清楚的燈框），調低是柔光罩。
-float prismLamp(vec2 pos, vec2 center, float radius, float edge){
-  float d = length(pos - center) / max(radius, 0.01);
-  float disc = smoothstep(1.0, 1.0 - edge, d);
-  float halo = 0.35 / (1.0 + d * d * 20.0);
-  return disc + halo;
-}
-
 // 回傳三通道各自的光芒強度（未上色，RGB 之間的差異本身就是色散）。
 //
 // 一共五種打燈圖樣，共用同一組座標、同一組遮罩與同一個相位，差別只在「亮度
@@ -1175,41 +1155,6 @@ vec3 prismBeamField(vec2 q, float radius){
     }
     falloff = 0.35 + r * 0.9;
     gain = 0.65;
-  } else if (uRayBeamPattern == 5) {
-    // 三點棚燈：主燈 + 補燈 + 輪廓燈。這一種跟前面四種本質不同 —— 前面是鋪滿
-    // 整個方向球的圖案，這裡是三顆有位置、有直徑的燈具，所以主控項是「燈具
-    // 直徑」，而「環紋 / 分支數」在這裡沒有意義（面板會把那一列收起來）。
-    //
-    // 燈位用未縮放的極座標算。q 已經被「光芒尺度」乘過，直接拿來會讓燈距與
-    // 燈徑被縮放兩次。
-    vec2 pos = vec2(cos(theta), sin(theta)) * r;
-    // 「光芒尺度」在這裡的意義換成整組燈架的張開程度：6（預設值）= 原尺寸，
-    // 調大 = 燈架收攏靠近主燈，調小 = 三顆燈拉開。
-    float rig = 6.0 / max(0.05, uRayBeamZoom);
-    // 流動速度 = 燈架繞著放射方向旋轉。相位推進 1 剛好轉一整圈，循環無縫。
-    float spin = phase * TAU;
-    // 滑桿 1.0 = 半徑約 63°（一整面天幕光），0.02 = 幾乎是點光源。
-    float size = max(0.02, uRayBeamLightSize) * 0.35 * rig;
-    // 邊緣柔化：銳利度調高 = 硬光（看得到燈框），調低 = 柔光罩。
-    float edge = mix(0.95, 0.12, clamp(uRayBeamGlow, 0.0, 1.0));
-    // 三點打光的相對位置：主燈就在放射方向上；補燈斜側約 43°、比主燈暗一半；
-    // 輪廓燈拉到約 90°（側逆光），最小但相對亮。角度刻意沒有拉到真正的背光位，
-    // 那裡幾乎落在造型折射不到的半球，三顆燈得都在同一次取樣裡看得到才算數。
-    vec2 keyPos = prismLampPos(0.0, 0.0);
-    vec2 fillPos = prismLampPos(0.24 * rig, spin + 2.4);
-    vec2 rimPos = prismLampPos(0.5 * rig, spin - 0.7);
-    for (int i = 0; i < 3; i++) {
-      float z = float(i) * uRayBeamSeparation;
-      // 色散：三個通道各自把取樣點往外推一點，等同軸向色差 —— 燈的邊緣帶彩虹
-      // 邊，而不是整顆燈變成一個顏色。
-      vec2 sp = pos * (1.0 + z * 0.35);
-      beams[i] = prismLamp(sp, keyPos, size, edge)
-        + prismLamp(sp, fillPos, size * 0.8, edge) * 0.45
-        + prismLamp(sp, rimPos, size * 0.45, edge) * 0.7;
-    }
-    // 三顆燈自己就帶著位置與衰減，再乘中心衰減會把補燈與輪廓燈壓掉。
-    falloff = 1.0;
-    gain = 1.5;
   } else {
     // 晶格光針（預設）：切格 + 到格心的反距離，亮點沿格線拖出十字光芒。
     vec2 drift = vec2(phase, 0.0);

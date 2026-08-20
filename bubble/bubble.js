@@ -14,7 +14,7 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-85';
+} from './motions/registry.js?v=svg-shape-88';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
@@ -71,8 +71,6 @@ const DEFAULTS = {              // 數值滑桿
   // 色散的來源：三個顏色通道取樣同一個圖樣時的相位差。這是整個效果的靈魂，
   // 0 = 三通道同步（純白光束，完全沒有彩虹）。
   rayBeamSeparation: 0.04,
-  // 三點棚燈的燈具直徑（其他圖樣用不到，面板會收起來）。
-  rayBeamLightSize: 0.3,
   // 圖樣的尺度與同心環密度。
   rayBeamZoom: 6,
   rayBeamRings: 0.5,
@@ -91,8 +89,7 @@ const DEFAULTS = {              // 數值滑桿
   // 折射後的出射方向（造型變成真正的透鏡）。
   rayBeamRefract: 1,
   // 兩個遮罩，寫法與虛擬光譜焦散一致：0 = 完全不限制。
-  // Fresnel 把光芒往邊緣集中（跟內部的 lensing 同一個軸，見 shaders.js 的說明），
-  // 預設 0 是刻意的 —— 開了會抵銷「光束穿過整塊玻璃」那個手感。
+  // Fresnel 把光芒往邊緣集中（跟內部的 lensing 同一個軸，見 shaders.js 的說明）。
   rayBeamFresnelMask: 0.33,
   // Noise 把規則的極座標晶格打散成參差斑塊，是這兩者裡比較有感的一個。
   rayBeamNoiseMask: 1,
@@ -473,15 +470,21 @@ const MOBILE_CAMERA_DISTANCE_DEFAULT = 4.3;
 if (mobileRenderQuery.matches && !PREVIEW) P.cameraDistance = MOBILE_CAMERA_DISTANCE_DEFAULT;
 // 按動態模式各自記憶的參數：使用者在某個模式下調過的值會被保留，切回來時
 // 恢復。count/radius/loopDuration/dolly 每個模式的初始值天生就不同，直接來自
-// registry.js 各自的一張表；SHAPE_APPEARANCE_KEYS 這幾個原本是全域共用一份
-// DEFAULTS/TOGGLE_DEFAULTS，只有某個模式的 overrides 有列到才不一樣（目前只有
-// 融化），沒列到的模式沿用共用預設，不必五個模式各抄一次同樣的數字。
-const SHAPE_APPEARANCE_KEYS = [
+// registry.js 各自的一張表；MOTION_SCOPED_KEYS 這些控制原本是全域共用一份
+// DEFAULTS/TOGGLE_DEFAULTS，只有某個模式的 overrides 有列到才使用特別預設。
+// 因此毛細波的鏡頭與光束設定不會在切換後汙染其他動態模式。
+const MOTION_SCOPED_KEYS = [
   'shapeDepth', 'shapeEdgeBevel', 'edgeDropsEnabled',
   'shapeLiquid', 'shapeLiquidPosition', 'shapeLiquidSize', 'shapeLiquidSpeed',
+  'rayBeamIntensity', 'rayBeamSeparation', 'rayBeamChroma', 'rayBeamZoom',
+  'spectralCausticEnabled',
+  'cameraDistance', 'cameraRotationX', 'cameraRotationY',
+  'materialStyle',
 ];
 function motionDefaultsFor(key) {
-  const base = key in DEFAULTS ? DEFAULTS[key] : TOGGLE_DEFAULTS[key];
+  const base = key in DEFAULTS ? DEFAULTS[key]
+    : key in TOGGLE_DEFAULTS ? TOGGLE_DEFAULTS[key]
+      : SELECT_DEFAULTS[key];
   return Object.fromEntries(MOTION_KEYS.map(m => [m, MOTION_OVERRIDES[m]?.[key] ?? base]));
 }
 function buildMotionMemory() {
@@ -490,7 +493,7 @@ function buildMotionMemory() {
     radius: { ...MOTION_DEFAULT_RADIUS },
     loopDuration: { ...MOTION_DEFAULT_LOOP_DURATION },
     dollyEnabled: { ...MOTION_DEFAULT_DOLLY },
-    ...Object.fromEntries(SHAPE_APPEARANCE_KEYS.map(k => [k, motionDefaultsFor(k)])),
+    ...Object.fromEntries(MOTION_SCOPED_KEYS.map(k => [k, motionDefaultsFor(k)])),
   };
 }
 let motionMemory = buildMotionMemory();
@@ -511,7 +514,7 @@ const SELECTS = {
   colorMode: { uniform: 'uColorMode', map: { spectral: 0, ramp: 1 } },
   rayBeamPattern: {
     uniform: 'uRayBeamPattern',
-    map: { grid: 0, starburst: 1, ring: 2, softbox: 3, window: 4, threePoint: 5 },
+    map: { grid: 0, starburst: 1, ring: 2, softbox: 3, window: 4 },
   },
   motion:    { uniform: 'uMotion',    map: MOTION_UNIFORM_MAP },
   shapeSource: { uniform: 'uShapeType', map: { svg: 1, gltf: 2 } },
@@ -609,7 +612,6 @@ const fmt = {
   causticSharpness: v => Math.round(v * 100) + '%',
   rayBeamIntensity: v => v === 0 ? '關閉' : 'x' + v.toFixed(2),
   rayBeamSeparation: v => v === 0 ? '無色散' : v.toFixed(3),
-  rayBeamLightSize: v => Math.round(v * 100) + '%',
   rayBeamZoom: v => 'x' + v.toFixed(2),
   rayBeamRings: v => v.toFixed(1),
   rayBeamSpeed: v => {
@@ -792,7 +794,7 @@ function refreshLoopScaledReadouts() {
   refreshShatterTimelineReadouts();
 }
 
-import { VERT, FRAG } from './shaders.js?v=universal-48';
+import { VERT, FRAG } from './shaders.js?v=universal-61';
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -2675,7 +2677,6 @@ function initGL() {
     uRayBeamIntensity: { value: P.rayBeamIntensity },
     uRayBeamSeparation: { value: P.rayBeamSeparation },
     uRayBeamPattern: { value: SELECTS.rayBeamPattern.map[P.rayBeamPattern] },
-    uRayBeamLightSize: { value: P.rayBeamLightSize },
     uRayBeamZoom: { value: P.rayBeamZoom },
     uRayBeamRings: { value: P.rayBeamRings },
     uRayBeamSpeed: { value: P.rayBeamSpeed },
@@ -3173,7 +3174,9 @@ function bindControls() {
             memEl.dispatchEvent(new Event('change', { bubbles: true }));
           } else {
             memEl.value = motionMemory[memKey][P.motion];
-            memEl.dispatchEvent(new Event('input', { bubbles: true }));
+            memEl.dispatchEvent(new Event(
+              memEl.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true },
+            ));
           }
         }
         previousDropT = null;
@@ -3418,11 +3421,6 @@ function updateUIState() {
     switchMaterialProfile(previousStyle, 'universal');
     if (uniforms) uniforms.uMaterialStyle.value = SELECTS.materialStyle.map.universal;
   }
-  // 稜光光芒的兩根圖樣專屬滑桿：三點棚燈用燈具直徑、其餘四種用環紋 / 分支數，
-  // 彼此互斥（見 shaders.js 的 prismBeamField），所以直接依圖樣互換那一列。
-  const threePointBeams = P.rayBeamPattern === 'threePoint';
-  document.getElementById('rayBeamLightSizeRow').style.display = threePointBeams ? '' : 'none';
-  document.getElementById('rayBeamRingsRow').style.display = threePointBeams ? 'none' : '';
   const membraneMaterial = P.materialStyle === 'membrane';
   const membraneDepth = document.getElementById('membraneDepth');
   membraneDepth.disabled = !membraneMaterial;

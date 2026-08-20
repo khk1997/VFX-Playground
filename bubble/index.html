@@ -239,12 +239,11 @@
       <summary><h4>色散 Dispersion</h4><span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="dispersionMaster"><span class="switchTrack" aria-hidden="true"></span></span></summary>
       <div class="effectBlock effectBlock--physical" id="rayDispersionGroup">
         <div class="effectTitle"><span>RAY</span> 模擬色散<span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="rayDispersionEnabled" checked><span class="switchTrack" aria-hidden="true"></span></span></div>
-        <div class="row"><label>打燈圖樣</label><select id="rayBeamPattern"><option value="grid" selected>晶格光針</option><option value="starburst">放射星芒</option><option value="ring">同心光環</option><option value="softbox">條狀棚燈</option><option value="window">窗光格柵</option><option value="threePoint">三點棚燈</option></select><span class="val"></span></div>
+        <div class="row"><label>打燈圖樣</label><select id="rayBeamPattern"><option value="grid" selected>晶格光針</option><option value="starburst">放射星芒</option><option value="ring">同心光環</option><option value="softbox">條狀棚燈</option><option value="window">窗光格柵</option></select><span class="val"></span></div>
         <div class="row"><label>光芒強度</label><input type="range" id="rayBeamIntensity" min="0" max="32" step="0.05" value="4"><span class="val" id="rayBeamIntensity_v"></span></div>
         <div class="row"><label>色散分離</label><input type="range" id="rayBeamSeparation" min="0" max="0.4" step="0.005" value="0.04"><span class="val" id="rayBeamSeparation_v"></span></div>
         <div class="row"><label>彩度</label><input type="range" id="rayBeamChroma" min="0" max="3" step="0.05" value="1.5"><span class="val" id="rayBeamChroma_v"></span></div>
         <div class="effectSubhead">光芒圖樣</div>
-        <div class="row" id="rayBeamLightSizeRow"><label>燈具直徑</label><input type="range" id="rayBeamLightSize" min="0.02" max="1" step="0.01" value="0.3"><span class="val" id="rayBeamLightSize_v"></span></div>
         <div class="row"><label>光芒尺度</label><input type="range" id="rayBeamZoom" min="1" max="30" step="0.5" value="6"><span class="val" id="rayBeamZoom_v"></span></div>
         <div class="row" id="rayBeamRingsRow"><label>環紋 / 分支數</label><input type="range" id="rayBeamRings" min="0.5" max="16" step="0.5" value="0.5"><span class="val" id="rayBeamRings_v"></span></div>
         <div class="row"><label>光點銳利</label><input type="range" id="rayBeamGlow" min="0" max="1" step="0.01" value="1"><span class="val" id="rayBeamGlow_v"></span></div>
@@ -463,6 +462,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=universal-dbg97"></script>
+<script type="module" src="./bubble.js?v=universal-dbg100"></script>
 </body>
 </html>

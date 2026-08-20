@@ -49,6 +49,40 @@ assert.deepEqual(
 assert.equal(paramByKey.capillarySpeed.min, -4);
 assert.equal(paramByKey.capillarySpeed.max, 4);
 assert.equal(paramByKey.capillarySpeed.step, 1);
+assert.equal(MOTIONS.capillary.loopDuration, 4);
+assert.equal(paramByKey.capillaryHeight.value, 0.09);
+assert.equal(paramByKey.capillaryCrestSoftness.value, 1);
+assert.equal(paramByKey.capillaryRings.value, 3);
+assert.equal(paramByKey.capillaryField.value, 1);
+assert.equal(paramByKey.capillaryDirectionX.value, 0.4);
+assert.equal(paramByKey.capillaryDirectionY.value, 0.5);
+assert.equal(paramByKey.capillaryDirectionZ.value, 0);
+assert.deepEqual(MOTIONS.capillary.overrides, {
+  shapeEdgeBevel: 0.051,
+  materialStyle: 'universal',
+  rayBeamIntensity: 13.5,
+  rayBeamSeparation: 0.065,
+  rayBeamChroma: 1.3,
+  rayBeamZoom: 5,
+  spectralCausticEnabled: false,
+  cameraDistance: 3.7,
+  cameraRotationX: 9.4,
+  cameraRotationY: 27.9,
+});
+assert.equal(MOTIONS.jelly.radius, 0.24);
+assert.deepEqual(MOTIONS.jelly.overrides, {
+  shapeDepth: 0.14,
+  shapeEdgeBevel: 0.051,
+  materialStyle: 'universal',
+  rayBeamIntensity: 13.5,
+  rayBeamSeparation: 0.065,
+  rayBeamChroma: 1.3,
+  rayBeamZoom: 5,
+  spectralCausticEnabled: false,
+  cameraDistance: 3.7,
+  cameraRotationX: 9.4,
+  cameraRotationY: 27.9,
+});
 assert.equal(effectiveCapillaryHeight(0.8, 8).toFixed(3), '0.298');
 assert.equal(effectiveCapillaryHeight(0.28, 4), 0.28);
 
