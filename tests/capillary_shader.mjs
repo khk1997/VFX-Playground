@@ -25,6 +25,12 @@ assert.match(FRAG, /movingA\s*=\s*phase \* TAU \* uExtendedParams\.z/,
   'speed zero and negative values must reach the shader unchanged');
 assert.match(FRAG, /textureGain/,
   'procedural textures must normalize their visual amplitude');
+assert.match(FRAG, /capillaryValueNoiseDirectionalLoop/,
+  'directional noise must use a straight periodic translation instead of a circular orbit');
+assert.match(FRAG, /capillaryCellularDirectionalLoop/,
+  'directional Voronoi must use a straight periodic translation instead of a circular orbit');
+assert.match(FRAG, /directionalTravel\s*=\s*phase \* uExtendedParams\.z \* directionalPeriod/,
+  'directional procedural textures must travel by whole repeat periods for seamless looping');
 assert.match(FRAG, /capillarySurfaceOffset\(shapePA\)/,
   'wave mapping must use shape A object-space coordinates');
 assert.doesNotMatch(FRAG, /capillarySurfaceOffset\(shapeP\)/,

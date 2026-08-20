@@ -639,6 +639,38 @@ float capillaryCellular(vec2 p){
   return 1.0 - smoothstep(0.05, 0.78, nearest) * 2.0;
 }
 
+// 定向模式不能用 cos/sin 繞圓來換取循環。把前進軸的晶格索引做週期化後，
+// 紋理可以永遠沿 +x 直線平移；每個 loop 移動整數個 period，首尾取樣完全相同。
+float capillaryValueNoiseDirectionalLoop(vec2 p, float period){
+  vec2 cell = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  float x0 = mod(cell.x, period);
+  float x1 = mod(cell.x + 1.0, period);
+  float a = hash11(dot(vec2(x0, cell.y), vec2(127.1, 311.7)));
+  float b = hash11(dot(vec2(x1, cell.y), vec2(127.1, 311.7)));
+  float c = hash11(dot(vec2(x0, cell.y + 1.0), vec2(127.1, 311.7)));
+  float d = hash11(dot(vec2(x1, cell.y + 1.0), vec2(127.1, 311.7)));
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+float capillaryCellularDirectionalLoop(vec2 p, float period){
+  vec2 cell = floor(p);
+  vec2 f = fract(p);
+  float nearest = 10.0;
+  for (int y = -1; y <= 1; y++) {
+    for (int x = -1; x <= 1; x++) {
+      vec2 offset = vec2(float(x), float(y));
+      vec2 sourceCell = cell + offset;
+      vec2 hashCell = vec2(mod(sourceCell.x, period), sourceCell.y);
+      float h = hash11(dot(hashCell, vec2(127.1, 311.7)));
+      vec2 site = offset + vec2(h, fract(h * 43.75)) * 0.72 + 0.14;
+      nearest = min(nearest, length(f - site));
+    }
+  }
+  return 1.0 - smoothstep(0.05, 0.78, nearest) * 2.0;
+}
+
 float capillarySurfaceOffset(vec3 p){
   if (uExtendedMotion != 7) return 0.0;
   float phase = fract(uTime / max(0.001, uLoopDuration));
@@ -657,11 +689,16 @@ float capillarySurfaceOffset(vec3 p){
   vec2 textureP = directionalField
     ? vec2(dot(p, direction), dot(p, acrossAxis))
     : vec2(dot(p, acrossAxis), dot(p, secondAxis));
-  // 只扭曲程序紋理座標，不扭曲造型 SDF 座標；循環相位仍在 phase 0/1 無縫銜接。
-  textureP += vec2(
-    sin(textureP.y * density * 2.1 + movingA),
-    cos(textureP.x * density * 1.7 - movingA)
-  ) * uExtendedParams.w * 0.10;
+  // 只扭曲程序紋理座標，不扭曲造型 SDF 座標。定向模式的前進座標必須保持
+  // 單調，所以只做靜態的橫向擾動；其餘波場仍可使用原本的循環動態扭曲。
+  if (directionalField) {
+    textureP.y += sin(textureP.x * density * 2.1) * uExtendedParams.w * 0.10;
+  } else {
+    textureP += vec2(
+      sin(textureP.y * density * 2.1 + movingA),
+      cos(textureP.x * density * 1.7 - movingA)
+    ) * uExtendedParams.w * 0.10;
+  }
 
   float radius = length(textureP);
   float spiralCore = 1.0;
@@ -684,18 +721,28 @@ float capillarySurfaceOffset(vec3 p){
   float textureType = uCapillaryStyle.y;
   float wave;
   float textureGain = 1.0;
+  float directionalPeriod = max(2.0, floor(density * 3.0 + 0.5));
+  float directionalTravel = phase * uExtendedParams.z * directionalPeriod;
   if (textureType < 0.5) {
     // Blender Wave：規則、可讀性最強的基準波。
     wave = sin(movingA - field * density * TAU);
   } else if (textureType < 1.5) {
-    // Blender Noise：以平滑 value noise 近似，循環位移沿單位圓走一圈。
-    vec2 flow = vec2(cos(movingA), sin(movingA)) * 1.25;
-    wave = capillaryValueNoise(patternP * density * 1.35 + flow) * 2.0 - 1.0;
+    // 定向 Noise 沿前進軸直線移動；其他波場仍沿封閉路徑取樣以維持循環。
+    vec2 noiseP = patternP * density * 1.35;
+    wave = directionalField
+      ? capillaryValueNoiseDirectionalLoop(
+          noiseP - vec2(directionalTravel, 0.0), directionalPeriod
+        ) * 2.0 - 1.0
+      : capillaryValueNoise(noiseP + vec2(cos(movingA), sin(movingA)) * 1.25) * 2.0 - 1.0;
     textureGain = 1.35;
   } else if (textureType < 2.5) {
-    // Blender Voronoi：細胞狀凸凹，同樣沿封閉圓形軌跡流動。
-    vec2 flow = vec2(cos(movingA), sin(movingA)) * 0.85;
-    wave = capillaryCellular(patternP * density * 1.15 + flow);
+    // 定向 Voronoi 同樣只做直線平移，不再出現反向或轉彎。
+    vec2 cellularP = patternP * density * 1.15;
+    wave = directionalField
+      ? capillaryCellularDirectionalLoop(
+          cellularP - vec2(directionalTravel, 0.0), directionalPeriod
+        )
+      : capillaryCellular(cellularP + vec2(cos(movingA), sin(movingA)) * 0.85);
     textureGain = 1.10;
   } else if (textureType < 3.5) {
     // Blender Gabor：有主方向的窄頻波束，再疊一條斜向次波避免過度機械。
