@@ -48,6 +48,9 @@ if (PREVIEW) document.documentElement.classList.add('preview-mode');
 //   compileonly  只建立 renderer 並編譯 program，不算繪全螢幕影格
 //   minshader    編譯期排除造型場／毛細波／微滴三大區塊（見 shaderFeatures）
 //   minshader2   minshader 再加上：主滴迴圈上限 12→4、稜光光芒只留預設晶格圖樣
+//   lowcompileloops  minshader2 再加上：主 raymarch 展開上限 88→16、內部折射 28→8。
+//                    純二分診斷探針 —— 步數不足畫面會破，只用來確認 ANGLE 是否
+//                    卡在 loop expansion，不會套用到正式版。
 const DIAG = (() => {
   const raw = new URLSearchParams(location.search).get('diag');
   const set = new Set((raw || '').split(',').map(s => s.trim()).filter(Boolean));
@@ -61,6 +64,7 @@ const DIAG = (() => {
     compileonly: set.has('compileonly'),
     minshader: set.has('minshader'),
     minshader2: set.has('minshader2'),
+    lowcompileloops: set.has('lowcompileloops'),
   };
 })();
 if (DIAG.any) console.info('[bubble diag] 啟用:', DIAG.list.join(', '));
@@ -856,7 +860,7 @@ function refreshLoopScaledReadouts() {
   refreshShatterTimelineReadouts();
 }
 
-import { VERT, FRAG } from './shaders.js?v=variant-2';
+import { VERT, FRAG } from './shaders.js?v=variant-3';
 
 // 這一份 shader 要編譯哪些功能。回傳的物件直接交給 ShaderMaterial.defines，
 // Three.js 會在 fragment shader 前面注入對應的 #define，GLSL 那邊用 #ifdef
@@ -876,7 +880,9 @@ function shaderFeatures() {
   // minshader2 = minshader + 兩項編譯期收斂（見下方 slim2 的使用處）。
   // minshader 在 Windows ANGLE 上還是跨不過編譯門檻（實測與 compileonly 體感相同），
   // 所以再往下砍固定迴圈上限與分支數，但一樣不碰任何數學。
-  const slim2 = DIAG.minshader2;
+  // lowcompileloops 以 minshader2 為基底再往下砍兩個硬編碼的展開上限。
+  const probe = DIAG.lowcompileloops;
+  const slim2 = DIAG.minshader2 || probe;
   // 三大區塊的實際需求（見 motions/registry.js 的 usesShapeField 與
   // updateMicroDrops 的 activeCount）：
   //   造型場   只有 formation/weave/shatter/melt/morph/jelly/capillary 要
@@ -895,6 +901,13 @@ function shaderFeatures() {
   // 主滴迴圈上限。uniform 陣列仍是 [12]，這裡只縮迴圈展開次數；
   // preview 的分裂模式實際只有 2 顆主滴，4 已經留了餘裕。
   if (slim2) defines.MAX_DROPS_COMPILE = 4;
+  // 編譯期展開上限。刻意不動 uMaxSteps —— 這裡砍的是「ANGLE 要展開幾次」，
+  // 執行期的步數決策完全沒變（見 resolveMaxSteps）。步數不足畫面會破，這是
+  // 這個探針的預期結果。
+  if (probe) {
+    defines.MAX_MARCH_COMPILE = 16;
+    defines.MAX_INTERIOR_COMPILE = 8;
+  }
   return defines;
 }
 
@@ -4075,9 +4088,16 @@ window.__bubbleDiagReport = function () {
       defines: mesh && mesh.material ? mesh.material.defines : '(未初始化)',
       // 實際送進編譯器的 fragment shader 行數（Three.js 前置的 header 不算）
       FRAG行數: FRAG.split('\n').length,
-      主滴迴圈編譯期上限: (() => {
+      編譯期迴圈上限: (() => {
         const d = mesh && mesh.material ? mesh.material.defines : null;
-        return d && d.MAX_DROPS_COMPILE !== undefined ? d.MAX_DROPS_COMPILE : 12;
+        const pick = (k, dflt) => (d && d[k] !== undefined ? d[k] : dflt);
+        return {
+          主滴MAXN: pick('MAX_DROPS_COMPILE', 12),
+          主raymarch展開: pick('MAX_MARCH_COMPILE', 88),
+          內部折射展開: pick('MAX_INTERIOR_COMPILE', 28),
+          微滴MAX_MICRO: (d && d.FEATURE_MICRO_DROPS === false) ? '整個迴圈已移除' : 48,
+          負形MAX_NEGATIVE: 4,
+        };
       })(),
       編譯後生效行數: (() => {
         const d = mesh && mesh.material ? mesh.material.defines : null;

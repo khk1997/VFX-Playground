@@ -276,6 +276,16 @@ uniform int   uHasEnv;
 #define MAX_DROPS_COMPILE 12
 #endif
 const int   MAXN = MAX_DROPS_COMPILE;
+// 主 raymarch 迴圈與內部折射追蹤的「編譯期展開上限」。這兩個字面值跟執行期的
+// uMaxSteps 是兩回事：uMaxSteps 只讓迴圈提早 break，而 ANGLE 仍必須為字面值那麼
+//多次展開產生 HLSL。降低它們會讓步數不足、畫面破掉，所以只用於編譯規模的診斷探針，
+// 未指定時維持原本的 88 / 28。
+#ifndef MAX_MARCH_COMPILE
+#define MAX_MARCH_COMPILE 88
+#endif
+#ifndef MAX_INTERIOR_COMPILE
+#define MAX_INTERIOR_COMPILE 28
+#endif
 // 跟 bubble.js 的 MAX_MICRO_DROPS 綁死。下面的迴圈在 m >= uMicroCount 時動態跳出，
 // 所以拉高這個值只是讓著色器能容納更多微滴，不會讓沒用到的那些也付出取樣成本。
 const int   MAX_MICRO = 48;
@@ -1049,7 +1059,7 @@ bool traceExitSurface(
   bool found = false;
   vec3 q = entryPoint + insideDir * travel;
 
-  for (int i = 0; i < 28; i++) {
+  for (int i = 0; i < MAX_INTERIOR_COMPILE; i++) {
     q = entryPoint + insideDir * travel;
     float d = mapScene(q);
     if (travel > 0.025 && d > -0.0009) {
@@ -1449,7 +1459,7 @@ void main(){
 
   float t = max(0.0, -qb - qh);
   bool hit = false;
-  for (int i = 0; i < 88; i++){
+  for (int i = 0; i < MAX_MARCH_COMPILE; i++){
     if (i >= uMaxSteps) break;
     vec3 p = ro + rd * t;
     float d = mapScene(p);
