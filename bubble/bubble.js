@@ -55,6 +55,9 @@ if (PREVIEW) document.documentElement.classList.add('preview-mode');
 //                fbm 只在 main 裡呼叫一次。不含 fbmFast、不進 mapScene。
 //                用來把「snoise 展開 4 次」與「進 raymarch 呼叫鏈」分開量：
 //                probe-snoise（單次呼叫）已確認秒開，所以這一步只增加倍數。
+//   probe-noise-mapscene-N  跟 probe-noise-mapscene 完全相同，只把 march 展開上限
+//                換成 N（1~88，例如 probe-noise-mapscene-88）。用來二分找出 ANGLE
+//                的臨界點：snoise 展開份數 ≈ (N + 4) × 2。
 //   probe-noise-mapscene  以 compilerbaseline 為基底，加回 snoise + fbmFast，且把
 //                fbmFast 放進 mapScene —— 也就是進入 raymarch 呼叫鏈。這是正式版
 //                geometry wobble 的實際路徑。probe-snoise（1 次）與 probe-fbm
@@ -90,6 +93,15 @@ const DIAG = (() => {
     probeSnoise: set.has('probe-snoise'),
     probeFbm: set.has('probe-fbm'),
     probeNoiseMapscene: set.has('probe-noise-mapscene'),
+    // probe-noise-mapscene-N：跟上面那個完全相同，只是把 MAX_MARCH_COMPILE 換成 N。
+    // 做成參數化是為了二分：16 / 32 / 64 / 88 都直接可用，不必每個值改一次程式碼。
+    probeMarchBound: (() => {
+      for (const t of set) {
+        const m = t.match(/^probe-noise-mapscene-(\d+)$/);
+        if (m) return Math.max(1, Math.min(88, Number(m[1])));
+      }
+      return 0;
+    })(),
   };
 })();
 if (DIAG.any) console.info('[bubble diag] 啟用:', DIAG.list.join(', '));
@@ -905,7 +917,7 @@ import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=baseline-3';
 // 這樣「baseline → +A → +B」每一步的差異就只有一個功能，不會混進別的變因。
 function usesBaselineShader() {
   return DIAG.compilerbaseline || DIAG.probeNoise || DIAG.probeSnoise
-    || DIAG.probeFbm || DIAG.probeNoiseMapscene;
+    || DIAG.probeFbm || DIAG.probeNoiseMapscene || DIAG.probeMarchBound > 0;
 }
 
 function shaderFeatures() {
@@ -926,10 +938,12 @@ function shaderFeatures() {
       d.NEED_FBM = '';                // 含那個 for (i < 4) 的 4 octave 迴圈
       d.CALL_FBM_MAIN = '';           // 只在 main 呼叫一次，不進 mapScene
     }
-    if (DIAG.probeNoiseMapscene) {
+    if (DIAG.probeNoiseMapscene || DIAG.probeMarchBound > 0) {
       d.NEED_SNOISE = '';
       d.NEED_FBMFAST = '';            // fbmFast 本身沒有迴圈，是兩次展開的 snoise
       d.CALL_FBMFAST_MAPSCENE = '';   // 進 mapScene → 在 raymarch 呼叫鏈內
+      // 只有這一項不同：march 展開上限。其餘條件與 probe-noise-mapscene 完全一致。
+      if (DIAG.probeMarchBound > 0) d.MAX_MARCH_COMPILE = DIAG.probeMarchBound;
     }
     if (DIAG.probeNoise) {
       d.NEED_SNOISE = '';
@@ -4192,6 +4206,8 @@ window.__bubbleDiagReport = function () {
           + (DIAG.probeSnoise ? ' + snoise' : '')
           + (DIAG.probeFbm ? ' + snoise/fbm' : '')
           + (DIAG.probeNoiseMapscene ? ' + snoise/fbmFast@mapScene' : '')
+          + (DIAG.probeMarchBound > 0
+            ? ' + snoise/fbmFast@mapScene, march=' + DIAG.probeMarchBound : '')
           + (DIAG.probeNoise ? ' + snoise/fbm/fbmFast' : '')
           + '）'
         : 'FRAG（正式）',
@@ -4213,6 +4229,15 @@ window.__bubbleDiagReport = function () {
         const march = d.MAX_MARCH_COMPILE !== undefined ? Number(d.MAX_MARCH_COMPILE) : 88;
         const normalTaps = 4;
         return { march, calcNormal取樣: normalTaps, 合計: march + normalTaps };
+      })(),
+      // snoise 展開份數估算：mapScene 的呼叫次數 × mapScene 內部的 snoise 份數。
+      snoise展開份數估算: (() => {
+        const d = (mesh && mesh.material) ? mesh.material.defines || {} : {};
+        const march = d.MAX_MARCH_COMPILE !== undefined ? Number(d.MAX_MARCH_COMPILE) : 88;
+        const perMapScene = d.CALL_FBMFAST_MAPSCENE !== undefined ? 2 : 0;
+        if (!perMapScene) return '(noise 不在 mapScene 內)';
+        return { mapScene呼叫次數: march + 4, 每次snoise份數: perMapScene,
+                 合計: (march + 4) * perMapScene };
       })(),
       是否在raymarch呼叫鏈內: (() => {
         const i = effective.findIndex(l => /^float\s+mapScene\s*\(/.test(l));
