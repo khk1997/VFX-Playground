@@ -55,6 +55,12 @@ if (PREVIEW) document.documentElement.classList.add('preview-mode');
 //                fbm 只在 main 裡呼叫一次。不含 fbmFast、不進 mapScene。
 //                用來把「snoise 展開 4 次」與「進 raymarch 呼叫鏈」分開量：
 //                probe-snoise（單次呼叫）已確認秒開，所以這一步只增加倍數。
+//   probe-noise-mapscene  以 compilerbaseline 為基底，加回 snoise + fbmFast，且把
+//                fbmFast 放進 mapScene —— 也就是進入 raymarch 呼叫鏈。這是正式版
+//                geometry wobble 的實際路徑。probe-snoise（1 次）與 probe-fbm
+//                （4 次展開）都秒開，所以這一步隔離的是「被 mapScene 的呼叫者
+//                重複 inline」這個變因：main 裡 4 步 march 加 calcNormal 的 4 次
+//                取樣，等於 mapScene 被呼叫 8 次，而每次裡面有 2 份 snoise。
 //   probe-noise  以 compilerbaseline 為基底，只加回 snoise / fbm / fbmFast
 //                （沿用正式 shader 同一份 NOISE_GLSL）與最小呼叫路徑。
 //   compilerbaseline  換成一支獨立的最小 fragment shader（見 shaders.js 的
@@ -83,6 +89,7 @@ const DIAG = (() => {
     probeNoise: set.has('probe-noise'),
     probeSnoise: set.has('probe-snoise'),
     probeFbm: set.has('probe-fbm'),
+    probeNoiseMapscene: set.has('probe-noise-mapscene'),
   };
 })();
 if (DIAG.any) console.info('[bubble diag] 啟用:', DIAG.list.join(', '));
@@ -897,7 +904,8 @@ import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=baseline-3';
 // 基線與所有 probe 都共用 FRAG_BASELINE 那支最小 shader，差別只在 PROBE_* 開關。
 // 這樣「baseline → +A → +B」每一步的差異就只有一個功能，不會混進別的變因。
 function usesBaselineShader() {
-  return DIAG.compilerbaseline || DIAG.probeNoise || DIAG.probeSnoise || DIAG.probeFbm;
+  return DIAG.compilerbaseline || DIAG.probeNoise || DIAG.probeSnoise
+    || DIAG.probeFbm || DIAG.probeNoiseMapscene;
 }
 
 function shaderFeatures() {
@@ -917,6 +925,11 @@ function shaderFeatures() {
       d.NEED_SNOISE = '';
       d.NEED_FBM = '';                // 含那個 for (i < 4) 的 4 octave 迴圈
       d.CALL_FBM_MAIN = '';           // 只在 main 呼叫一次，不進 mapScene
+    }
+    if (DIAG.probeNoiseMapscene) {
+      d.NEED_SNOISE = '';
+      d.NEED_FBMFAST = '';            // fbmFast 本身沒有迴圈，是兩次展開的 snoise
+      d.CALL_FBMFAST_MAPSCENE = '';   // 進 mapScene → 在 raymarch 呼叫鏈內
     }
     if (DIAG.probeNoise) {
       d.NEED_SNOISE = '';
@@ -4178,6 +4191,7 @@ window.__bubbleDiagReport = function () {
         ? 'FRAG_BASELINE（最小 shader'
           + (DIAG.probeSnoise ? ' + snoise' : '')
           + (DIAG.probeFbm ? ' + snoise/fbm' : '')
+          + (DIAG.probeNoiseMapscene ? ' + snoise/fbmFast@mapScene' : '')
           + (DIAG.probeNoise ? ' + snoise/fbm/fbmFast' : '')
           + '）'
         : 'FRAG（正式）',
@@ -4192,6 +4206,14 @@ window.__bubbleDiagReport = function () {
         - (effectiveSrc.match(/float\s+snoise\s*\(/g) || []).length,
       // 是否位於 raymarch 呼叫鏈內：mapScene 會被 march 迴圈重複呼叫，
       // 所以 noise 若出現在 mapScene 內就等於被乘上迴圈次數。
+      // inline 展開量估算：mapScene 被 main 呼叫幾次（march 迴圈上限 + calcNormal
+      // 的取樣數）× mapScene 內部的 snoise 份數。這是 HLSL 編譯器實際要處理的規模。
+      mapScene被呼叫次數: (() => {
+        const d = (mesh && mesh.material) ? mesh.material.defines || {} : {};
+        const march = d.MAX_MARCH_COMPILE !== undefined ? Number(d.MAX_MARCH_COMPILE) : 88;
+        const normalTaps = 4;
+        return { march, calcNormal取樣: normalTaps, 合計: march + normalTaps };
+      })(),
       是否在raymarch呼叫鏈內: (() => {
         const i = effective.findIndex(l => /^float\s+mapScene\s*\(/.test(l));
         if (i < 0) return false;
