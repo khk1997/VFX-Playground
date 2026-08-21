@@ -46,6 +46,7 @@ if (PREVIEW) document.documentElement.classList.add('preview-mode');
 //   nodispersion 關掉色散／稜光／光譜焦散三個既有開關
 //   static       初始化完成後只算繪一幀，不啟動 RAF 迴圈
 //   compileonly  只建立 renderer 並編譯 program，不算繪全螢幕影格
+//   minshader    編譯期排除造型場／毛細波／微滴三大區塊（見 shaderFeatures）
 const DIAG = (() => {
   const raw = new URLSearchParams(location.search).get('diag');
   const set = new Set((raw || '').split(',').map(s => s.trim()).filter(Boolean));
@@ -57,6 +58,7 @@ const DIAG = (() => {
     nodispersion: set.has('nodispersion'),
     static: set.has('static'),
     compileonly: set.has('compileonly'),
+    minshader: set.has('minshader'),
   };
 })();
 if (DIAG.any) console.info('[bubble diag] 啟用:', DIAG.list.join(', '));
@@ -852,7 +854,36 @@ function refreshLoopScaledReadouts() {
   refreshShatterTimelineReadouts();
 }
 
-import { VERT, FRAG } from './shaders.js?v=universal-64';
+import { VERT, FRAG } from './shaders.js?v=variant-1';
+
+// 這一份 shader 要編譯哪些功能。回傳的物件直接交給 ShaderMaterial.defines，
+// Three.js 會在 fragment shader 前面注入對應的 #define，GLSL 那邊用 #ifdef
+// 把整個區塊在「編譯期」移除 —— 不是 runtime 的 uniform 分支，ANGLE 翻成 HLSL
+// 時那些程式碼根本不存在。
+//
+// 為什麼需要這個：Windows Chrome 走 ANGLE，GLSL 要先翻成 HLSL 再編譯成 D3D
+// bytecode，而 HLSL 編譯器對大型巢狀迴圈會嘗試積極展開。這支 fragment shader
+// 有 2200 行、主 raymarch 迴圈上限 88 次、而 mapScene 內部還有四層迴圈（其中
+// 微滴那層 48 次且含 texture2D），編譯本身就會讓整個瀏覽器無回應（實測
+// ?diag=compileonly 直接卡死，完整版也一樣）。
+//
+// 目前只有 ?diag=minshader 會走精簡組合，其餘情況一律編譯完整功能 ——
+// 完整版不永久移除任何功能。日後要做「依模式編譯 variant + program cache」時，
+// 這個函式就是唯一的決策點：把判斷條件從 DIAG.minshader 換成當前模式需要什麼。
+function shaderFeatures() {
+  // 三大區塊的實際需求（見 motions/registry.js 的 usesShapeField 與
+  // updateMicroDrops 的 activeCount）：
+  //   造型場   只有 formation/weave/shatter/melt/morph/jelly/capillary 要
+  //   毛細波   只有 capillary 要（注意：分裂的彈性回彈波紋 capillaryWave 不在此列，
+  //            那是另一個函式，任何模式都可能用到，不受這個開關影響）
+  //   微滴     只有 formation/shatter/melt/morph 要
+  const slim = DIAG.minshader;
+  return {
+    FEATURE_SHAPE_FIELD: slim ? false : '',
+    FEATURE_CAPILLARY: slim ? false : '',
+    FEATURE_MICRO_DROPS: slim ? false : '',
+  };
+}
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
@@ -2931,6 +2962,7 @@ function initGL() {
   const geo = new THREE.PlaneGeometry(2, 2);
   const mat = new THREE.ShaderMaterial({
     uniforms, vertexShader: VERT, fragmentShader: FRAG,
+    defines: shaderFeatures(),
     depthTest: false, depthWrite: false,
   });
   // 讓 Three.js 依 PMREM atlas 尺寸注入 CubeUV shader 常數。
@@ -4025,6 +4057,24 @@ window.__bubbleDiagReport = function () {
       } : '(未初始化)',
       每像素SDF評估_最壞: (mapSceneCalls * innerMax).toLocaleString(),
       每像素SDF評估_目前參數: (mapSceneCalls * innerActual).toLocaleString(),
+    },
+    shaderVariant: {
+      defines: mesh && mesh.material ? mesh.material.defines : '(未初始化)',
+      // 實際送進編譯器的 fragment shader 行數（Three.js 前置的 header 不算）
+      FRAG行數: FRAG.split('\n').length,
+      編譯後生效行數: (() => {
+        const d = mesh && mesh.material ? mesh.material.defines : null;
+        if (!d) return '(未初始化)';
+        const on = k => d[k] !== false && d[k] !== undefined;
+        let keep = 0, depth = 0, skipping = [];
+        for (const line of FRAG.split('\n')) {
+          const m = line.match(/^#ifdef\s+(\w+)/);
+          if (m) { depth++; if (!on(m[1])) skipping.push(depth); continue; }
+          if (/^#endif/.test(line)) { skipping = skipping.filter(x => x !== depth); depth--; continue; }
+          if (!skipping.length) keep++;
+        }
+        return keep;
+      })(),
     },
     shader特性: {
       巢狀迴圈: '是（raymarch 迴圈內呼叫 mapScene，mapScene 內部還有 4 層迴圈）',

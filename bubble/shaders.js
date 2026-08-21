@@ -384,6 +384,7 @@ float dropletDistance(vec3 p, int i){
   return (length(q) - uDrops[i].w) * conservativeScale;
 }
 
+#ifdef FEATURE_MICRO_DROPS
 float microDropletDistance(vec3 p, vec4 sphere, vec4 shape){
   vec3 local = p - sphere.xyz;
   vec3 axis = normalize(shape.xyz + vec3(0.00001));
@@ -395,6 +396,9 @@ float microDropletDistance(vec3 p, vec4 sphere, vec4 shape){
   return (length(q) - sphere.w) * transverse;
 }
 
+#endif // FEATURE_MICRO_DROPS
+
+#ifdef FEATURE_SHAPE_FIELD
 float decodeShape(float v){ return (v - 0.5) * 48.0; }
 // 硬體雙線性只有 C0 連續：梯度在每條 texel 邊界跳一次，格內近似常數。
 // 擠出側壁的法線完全等於這個 xy 梯度，而 edge 不隨 z 變化，於是每格 texel
@@ -519,6 +523,8 @@ float volumeShapeDistance(vec3 p, int ch){
   return edge + length(outside) * voxelSize;
 }
 
+#endif // FEATURE_SHAPE_FIELD
+
 // 分離後由接觸極點向外傳播的局部毛細波；只處理主要水滴對 0/1。
 float capillaryWave(vec3 p, int i){
   vec3 center = uDrops[i].xyz;
@@ -556,6 +562,7 @@ float capillaryWave(vec3 p, int i){
 //              這是碎裂鏡頭的讀感來源，糊掉就只是另一種噪聲了。
 //
 // 每個 march step 只算一次（兩顆形狀共用），所以成本與形狀數無關。
+#ifdef FEATURE_SHAPE_FIELD
 float voronoiCellValue(vec2 p){
   vec2 cell = floor(p);
   vec2 f = fract(p);
@@ -609,8 +616,11 @@ float dissolveField(vec3 p){
   return base;
 }
 
+#endif // FEATURE_SHAPE_FIELD
+
 // 毛細波共用的程序紋理。最後只回傳表面距離偏移，不搬動距離場取樣座標；
 // 這能避免高密度螺旋把座標映射折回中心，讓 SVG／GLB 縮成皺褶。
+#ifdef FEATURE_CAPILLARY
 float capillaryValueNoise(vec2 p){
   vec2 cell = floor(p);
   vec2 f = fract(p);
@@ -785,6 +795,7 @@ float capillarySurfaceOffset(vec3 p){
   float basePreservingCrest = smoothstep(0.0, 1.0, crestInput);
   return basePreservingCrest * amplitude * coreAmplitude;
 }
+#endif // FEATURE_CAPILLARY
 
 float mapScene(vec3 p, bool smoothShape){
   float d = 1e9;
@@ -830,6 +841,7 @@ float mapScene(vec3 p, bool smoothShape){
   }
   // 大量形狀微滴由資料紋理提供，突破 uniform array 的數量限制。
   // 它們先真正填滿目標體積，模型 SDF 只在最後階段補足細節。
+#ifdef FEATURE_MICRO_DROPS
   for (int m = 0; m < MAX_MICRO; m++) {
     if (m >= uMicroCount) break;
     vec4 micro = texture2D(uMicroDrops, vec2((float(m) + 0.5) / 20.0, 0.5));
@@ -842,6 +854,7 @@ float mapScene(vec3 p, bool smoothShape){
       }
     }
   }
+#endif // FEATURE_MICRO_DROPS
   float negativeD = 1e9;
   for (int n = 0; n < MAX_NEGATIVE; n++) {
     if (n >= uNegativeCount) break;
@@ -860,6 +873,7 @@ float mapScene(vec3 p, bool smoothShape){
       max(0.0001, max(0.018, uMicroBlend * 0.55) * dropletBlendFade)
     );
   }
+#ifdef FEATURE_SHAPE_FIELD
   if (uShapeProgress > 0.0001) {
     // uShapeTex 在 GLB 模式儲存的是匯入時烘焙的高密度 Metaball 場，
     // 不是原模型距離場。以等距侵蝕讓每個細節球核逐步長大，避免 alpha 淡入。
@@ -943,7 +957,9 @@ float mapScene(vec3 p, bool smoothShape){
       }
     }
     // 以 signed-distance 偏移形成表面波，不再把多個取樣座標擠向螺旋中心。
+#ifdef FEATURE_CAPILLARY
     detailD -= capillarySurfaceOffset(shapePA) * uShapeScale * uShapeAScale;
+#endif
     float growth = smoothstep(0.0, 1.0, uShapeProgress);
     // 已抵達水滴附近先成形，遠處隨全域進度稍晚跟上；這是幾何侵蝕，
     // 不是透明淡入，因此水滴與模型輪廓之間始終有實際液橋。
@@ -962,6 +978,7 @@ float mapScene(vec3 p, bool smoothShape){
       max(0.0001, max(0.018, uMicroBlend * localGrowth) * dropletBlendFade)
     );
   }
+#endif // FEATURE_SHAPE_FIELD
   // 最大位移遠小於 0.25；遠離表面時略過 noise，不影響射線接近表面的安全性。
   float geometryWobble = uWobble * mix(1.0, 0.10, uShapeProgress);
   if (geometryWobble > 0.001 && d < 0.25) {
