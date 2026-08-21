@@ -47,6 +47,7 @@ if (PREVIEW) document.documentElement.classList.add('preview-mode');
 //   static       初始化完成後只算繪一幀，不啟動 RAF 迴圈
 //   compileonly  只建立 renderer 並編譯 program，不算繪全螢幕影格
 //   minshader    編譯期排除造型場／毛細波／微滴三大區塊（見 shaderFeatures）
+//   minshader2   minshader 再加上：主滴迴圈上限 12→4、稜光光芒只留預設晶格圖樣
 const DIAG = (() => {
   const raw = new URLSearchParams(location.search).get('diag');
   const set = new Set((raw || '').split(',').map(s => s.trim()).filter(Boolean));
@@ -59,6 +60,7 @@ const DIAG = (() => {
     static: set.has('static'),
     compileonly: set.has('compileonly'),
     minshader: set.has('minshader'),
+    minshader2: set.has('minshader2'),
   };
 })();
 if (DIAG.any) console.info('[bubble diag] 啟用:', DIAG.list.join(', '));
@@ -854,7 +856,7 @@ function refreshLoopScaledReadouts() {
   refreshShatterTimelineReadouts();
 }
 
-import { VERT, FRAG } from './shaders.js?v=variant-1';
+import { VERT, FRAG } from './shaders.js?v=variant-2';
 
 // 這一份 shader 要編譯哪些功能。回傳的物件直接交給 ShaderMaterial.defines，
 // Three.js 會在 fragment shader 前面注入對應的 #define，GLSL 那邊用 #ifdef
@@ -871,18 +873,29 @@ import { VERT, FRAG } from './shaders.js?v=variant-1';
 // 完整版不永久移除任何功能。日後要做「依模式編譯 variant + program cache」時，
 // 這個函式就是唯一的決策點：把判斷條件從 DIAG.minshader 換成當前模式需要什麼。
 function shaderFeatures() {
+  // minshader2 = minshader + 兩項編譯期收斂（見下方 slim2 的使用處）。
+  // minshader 在 Windows ANGLE 上還是跨不過編譯門檻（實測與 compileonly 體感相同），
+  // 所以再往下砍固定迴圈上限與分支數，但一樣不碰任何數學。
+  const slim2 = DIAG.minshader2;
   // 三大區塊的實際需求（見 motions/registry.js 的 usesShapeField 與
   // updateMicroDrops 的 activeCount）：
   //   造型場   只有 formation/weave/shatter/melt/morph/jelly/capillary 要
   //   毛細波   只有 capillary 要（注意：分裂的彈性回彈波紋 capillaryWave 不在此列，
   //            那是另一個函式，任何模式都可能用到，不受這個開關影響）
   //   微滴     只有 formation/shatter/melt/morph 要
-  const slim = DIAG.minshader;
-  return {
+  const slim = DIAG.minshader || slim2;
+  const defines = {
     FEATURE_SHAPE_FIELD: slim ? false : '',
     FEATURE_CAPILLARY: slim ? false : '',
     FEATURE_MICRO_DROPS: slim ? false : '',
+    // 五種稜光圖樣裡 preview 只用預設的晶格（uRayBeamPattern = 0）。
+    // 關掉之後另外四種連同各自的 3 次迴圈在編譯期消失。
+    FEATURE_BEAM_PATTERNS: slim2 ? false : '',
   };
+  // 主滴迴圈上限。uniform 陣列仍是 [12]，這裡只縮迴圈展開次數；
+  // preview 的分裂模式實際只有 2 顆主滴，4 已經留了餘裕。
+  if (slim2) defines.MAX_DROPS_COMPILE = 4;
+  return defines;
 }
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
@@ -4062,6 +4075,10 @@ window.__bubbleDiagReport = function () {
       defines: mesh && mesh.material ? mesh.material.defines : '(未初始化)',
       // 實際送進編譯器的 fragment shader 行數（Three.js 前置的 header 不算）
       FRAG行數: FRAG.split('\n').length,
+      主滴迴圈編譯期上限: (() => {
+        const d = mesh && mesh.material ? mesh.material.defines : null;
+        return d && d.MAX_DROPS_COMPILE !== undefined ? d.MAX_DROPS_COMPILE : 12;
+      })(),
       編譯後生效行數: (() => {
         const d = mesh && mesh.material ? mesh.material.defines : null;
         if (!d) return '(未初始化)';

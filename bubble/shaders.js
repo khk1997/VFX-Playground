@@ -268,7 +268,14 @@ uniform int   uHasEnv;
 
 #include <cube_uv_reflection_fragment>
 
-const int   MAXN = 12;
+// 主滴迴圈的上限。uniform 陣列固定宣告成 [12]（見上方），這個常數只決定
+// 「迴圈要展開幾次」。ANGLE 翻成 HLSL 時會嘗試展開這個迴圈，而迴圈體裡是
+// dropletDistance + smin，展開 12 次的成本遠高於 4 次；preview 實際只用 2 顆。
+// 由 ShaderMaterial.defines 覆寫，未指定時維持原本的 12。
+#ifndef MAX_DROPS_COMPILE
+#define MAX_DROPS_COMPILE 12
+#endif
+const int   MAXN = MAX_DROPS_COMPILE;
 // 跟 bubble.js 的 MAX_MICRO_DROPS 綁死。下面的迴圈在 m >= uMicroCount 時動態跳出，
 // 所以拉高這個值只是讓著色器能容納更多微滴，不會讓沒用到的那些也付出取樣成本。
 const int   MAX_MICRO = 48;
@@ -1179,6 +1186,10 @@ vec3 prismBeamField(vec2 q, float radius){
   // 切換圖樣時整體亮度會跳。
   float gain = 1.0;
 
+// 五種圖樣裡 preview 只用到預設的晶格（uRayBeamPattern = 0），其餘四種各含一個
+// 3 次迴圈。未定義 FEATURE_BEAM_PATTERNS 時整條 if/else 鏈消失，只留下最後那個
+// 晶格區塊本身（GLSL 允許裸的 block）。
+#ifdef FEATURE_BEAM_PATTERNS
   if (uRayBeamPattern == 1) {
     // 放射星芒：一圈等角的光刺，像鏡頭前的星光鏡或一盞裸燈的繞射芒。
     // 分支數必須取整數，否則 theta 繞回 ±π 時接縫會裂開。
@@ -1225,7 +1236,9 @@ vec3 prismBeamField(vec2 q, float radius){
     }
     falloff = 0.35 + r * 0.9;
     gain = 0.65;
-  } else {
+  } else
+#endif // FEATURE_BEAM_PATTERNS
+  {
     // 晶格光針（預設）：切格 + 到格心的反距離，亮點沿格線拖出十字光芒。
     vec2 drift = vec2(phase, 0.0);
     for (int i = 0; i < 3; i++) {
