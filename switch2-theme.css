@@ -55,7 +55,7 @@ body:has(#rail) {
   background:
     linear-gradient(180deg, rgba(7,8,10,.28) 0%, rgba(7,8,10,.12) 42%, rgba(7,8,10,.5) 100%),
     linear-gradient(90deg, rgba(7,8,10,.16), transparent 44%, rgba(7,8,10,.05)),
-    url("image/main_banner2.png") 58% center / cover no-repeat;
+    url("image/main_banner2.webp") 58% center / cover no-repeat;
 }
 #bg .bg-theme-layer {
   position: absolute;
