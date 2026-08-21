@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bubble Shader 編譯矩陣診斷</title>
+<style>
+  :root {
+    --bg: #0b0c0f; --fg: #e6e9f0; --dim: #8a93a6; --line: #1e2230;
+    --ok: #4ade80; --slow: #fbbf24; --bad: #f87171; --run: #60a5fa;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px; background: var(--bg); color: var(--fg);
+    font: 14px/1.6 -apple-system, "Segoe UI", "Noto Sans TC", sans-serif;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; letter-spacing: .5px; }
+  .sub { color: var(--dim); font-size: 13px; margin-bottom: 20px; }
+  .bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  button {
+    background: #1a1f2e; color: var(--fg); border: 1px solid var(--line);
+    border-radius: 6px; padding: 7px 14px; font: inherit; cursor: pointer;
+  }
+  button:hover { background: #232a3c; }
+  button.primary { background: #1d4ed8; border-color: #2563eb; }
+  button:disabled { opacity: .45; cursor: default; }
+  #status {
+    padding: 10px 14px; border: 1px solid var(--line); border-radius: 6px;
+    background: #10141d; margin-bottom: 16px; font-variant-numeric: tabular-nums;
+  }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--dim); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .6px; }
+  td.num { text-align: right; }
+  tr.running { background: rgba(96,165,250,.10); }
+  .s-ok { color: var(--ok); } .s-slow { color: var(--slow); }
+  .s-bad { color: var(--bad); } .s-run { color: var(--run); }
+  .note { color: var(--dim); font-size: 12px; }
+  #frameHost { position: fixed; left: -10000px; top: 0; width: 900px; height: 600px; }
+  #frameHost iframe { width: 900px; height: 600px; border: 0; }
+  code { background: #161b26; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  details { margin-top: 20px; }
+  summary { cursor: pointer; color: var(--dim); }
+</style>
+</head>
+<body>
+
+<h1>Bubble Shader 編譯矩陣診斷</h1>
+<div class="sub">
+  自動逐一測試 shader 變體的 cold compile 時間。每個 probe 用獨立 iframe、獨立
+  shaderRun，測完立即銷毀。若某個 probe 讓瀏覽器卡死，重新開這一頁會自動跳過它繼續。
+</div>
+
+<div class="bar">
+  <button id="run" class="primary">開始 / 繼續</button>
+  <button id="reset">清除結果重新開始</button>
+  <button id="copy">複製結果</button>
+</div>
+
+<div id="status">待機中。</div>
+
+<table>
+  <thead>
+    <tr>
+      <th>#</th><th>Probe</th><th>說明</th>
+      <th class="num">shaderRun</th>
+      <th class="num">編譯 (ms)</th>
+      <th class="num">第一幀 (ms)</th>
+      <th class="num">輪詢</th>
+      <th>結果</th>
+    </tr>
+  </thead>
+  <tbody id="rows"></tbody>
+</table>
+
+<details>
+  <summary>這一頁在測什麼、怎麼判讀</summary>
+  <div class="note" style="margin-top:10px">
+    <p><b>三個階段</b></p>
+    <p>
+      1. <b>最小 shader 階梯</b>：從只有球體 SDF 的 baseline 開始，一次加一個 noise 相關
+      區塊，找出成本從哪裡開始跳升。
+    </p>
+    <p>
+      2. <b>march 上限二分</b>：如果 march=88 失敗而 march=4 正常，自動在兩者之間二分，
+      逼出 ANGLE 的臨界展開量。這個軸已經參數化（<code>probe-noise-mapscene-N</code>），
+      所以能自動生成子 probe。
+    </p>
+    <p>
+      3. <b>正式 shader 階梯</b>：從砍掉最多功能的 minshader 一路加回到完整版，看正式
+      shader 的成本落在哪一段。
+    </p>
+    <p><b>為什麼每個 probe 都要換 shaderRun</b>：同一份 shader 原始碼第二次編譯會命中
+      驅動的 bytecode 快取，量到的就不是 cold compile。shaderRun 會注入一個整數字面值
+      到 shader 裡（乘上恆為 0 的 uniform，畫面不變），讓每次的原始碼都不同。</p>
+    <p><b>TIMEOUT 與 CRASHED 的差別</b>：TIMEOUT 是 iframe 還活著但 5 秒內沒回報完成；
+      CRASHED 是這一頁在測那個 probe 時整個瀏覽器掛掉、重開後才發現。後者是更嚴重的訊號。</p>
+  </div>
+</details>
+
+<div id="frameHost" aria-hidden="true"></div>
+
+<script>
+'use strict';
+
+// ===== 測試矩陣 =====
+//
+// 這一頁的存在理由：手動一條一條開 URL 太慢，而且每次都得自己記得換 shaderRun
+// （忘記換就會命中已編譯好的快取，量到的數字沒有意義）。更麻煩的是某些 probe 會
+// 讓整個瀏覽器卡死，手動測到那裡就斷了，得自己記住測到哪、下次從哪繼續。
+//
+// 所以進度寫在 localStorage：載入這一頁時如果發現上次有 probe 停在 running，就知道
+// 那個 probe 把瀏覽器弄死了，標成 CRASHED 然後跳過它繼續。
+
+const STORE_KEY = 'vfx:shader-matrix:v1';
+const PAGE_PATH = '../bubble/index.html';
+const TIMEOUT_MS = 5000;      // 單一 probe 的等待上限
+const GAP_MS = 400;           // probe 之間的間隔，讓上一個 WebGL context 有時間釋放
+const POLL_MS = 100;          // 向 iframe 詢問結果的間隔
+
+// 第一階段：最小 shader 階梯。每一步只加一個東西。
+const LADDER_MINIMAL = [
+  ['compilerbaseline',        '基線：只有球體 SDF，無 noise'],
+  ['probe-snoise',            '+ snoise 本體（main 內呼叫 1 次）'],
+  ['probe-fbm',              '+ fbm 的 4 octave 迴圈（main 內）'],
+  ['probe-noise-mapscene',   '+ fbmFast 進 mapScene（march 4 → 約 16 份）'],
+  ['probe-noise-mapscene-88','同上但 march 88（約 184 份）'],
+];
+
+// 第三階段：正式 shader 階梯，從砍最多到完整。
+const LADDER_PRODUCTION = [
+  ['minshader',        '正式 shader − 造型場/毛細波/微滴'],
+  ['minshader2',       '再 − 光芒圖樣，主滴迴圈 12→4'],
+  ['lowcompileloops',  '再 − march 88→16、內部折射 28→8'],
+  ['compileonly',      '完整正式 shader（無任何裁切）'],
+];
+
+const PROBE_LABELS = new Map([...LADDER_MINIMAL, ...LADDER_PRODUCTION]);
+
+// ===== 狀態 =====
+
+function freshState() {
+  return {
+    // shaderRun 只增不減，跨重開也不重複 —— 重複就會命中快取。
+    runCounter: 9000 + Math.floor(Math.random() * 1000),
+    results: [],
+    done: false,
+  };
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return freshState();
+    const s = JSON.parse(raw);
+    if (!s || !Array.isArray(s.results)) return freshState();
+    return s;
+  } catch (_) { return freshState(); }
+}
+
+function saveState() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (_) {}
+}
+
+let state = loadState();
+let running = false;
+
+// 上次有 probe 停在 running → 那個 probe 讓瀏覽器掛掉了。
+(function recoverCrashed() {
+  let recovered = 0;
+  for (const r of state.results) {
+    if (r.status === 'running') { r.status = 'crashed'; recovered++; }
+  }
+  if (recovered) saveState();
+})();
+
+// ===== 下一步要測什麼 =====
+//
+// 回傳 null 代表全部測完。這個函式是純粹依現有結果推導的，所以重開頁面後
+// 也會接在正確的位置繼續。
+function planNext() {
+  const byId = new Map(state.results.map(r => [r.probe, r]));
+  const settled = id => {
+    const r = byId.get(id);
+    return r && r.status !== 'running';
+  };
+  const ok = id => {
+    const r = byId.get(id);
+    return r && r.status === 'ok';
+  };
+
+  // 階段 1：最小 shader 階梯
+  for (const [id, label] of LADDER_MINIMAL) {
+    if (!settled(id)) return { probe: id, label, phase: '最小 shader 階梯' };
+  }
+
+  // 階段 2：march 上限二分。
+  // 只有在「march 4 正常、march 88 不正常」時才有臨界點可找。
+  const lowOk = ok('probe-noise-mapscene');
+  const highOk = ok('probe-noise-mapscene-88');
+  if (lowOk && !highOk) {
+    let lo = 4;    // 已知可以
+    let hi = 88;   // 已知不行
+    for (const r of state.results) {
+      const m = r.probe.match(/^probe-noise-mapscene-(\d+)$/);
+      if (!m || r.status === 'running') continue;
+      const n = Number(m[1]);
+      if (r.status === 'ok') { if (n > lo) lo = n; }
+      else if (n < hi) hi = n;
+    }
+    if (hi - lo > 4) {
+      const mid = Math.round((lo + hi) / 2);
+      const id = 'probe-noise-mapscene-' + mid;
+      if (!settled(id)) {
+        return {
+          probe: id,
+          label: 'march ' + mid + '（約 ' + ((mid + 4) * 2) + ' 份 snoise）｜二分 ' + lo + '–' + hi,
+          phase: 'march 上限二分',
+        };
+      }
+    }
+  }
+
+  // 階段 3：正式 shader 階梯
+  for (const [id, label] of LADDER_PRODUCTION) {
+    if (!settled(id)) return { probe: id, label, phase: '正式 shader 階梯' };
+  }
+
+  return null;
+}
+
+// ===== 單一 probe =====
+
+function probeUrl(probe, shaderRun) {
+  // diagTiming=1 走非阻塞的 COMPLETION_STATUS_KHR 輪詢；shaderRun 讓每次都是 cold。
+  return PAGE_PATH + '?diag=' + encodeURIComponent(probe)
+    + '&diagTiming=1&shaderRun=' + shaderRun;
+}
+
+function runProbe(entry) {
+  return new Promise(resolve => {
+    const shaderRun = ++state.runCounter;
+    const record = {
+      probe: entry.probe,
+      label: entry.label,
+      phase: entry.phase,
+      shaderRun,
+      compileMs: null,
+      firstFrameMs: null,
+      polls: null,
+      status: 'running',      // 先寫 running 再載入 —— 卡死時重開才知道是誰
+      note: '',
+    };
+    state.results.push(record);
+    saveState();
+    render();
+
+    const host = document.getElementById('frameHost');
+    const frame = document.createElement('iframe');
+    frame.setAttribute('title', entry.probe);
+    host.appendChild(frame);
+
+    let finished = false;
+    let pollTimer = 0;
+    const started = performance.now();
+
+    const cleanup = () => {
+      clearTimeout(pollTimer);
+      // 先導到 about:blank 再移除，讓 WebGL context 有機會被釋放，
+      // 否則連續測十幾個很容易撞到瀏覽器的 context 上限。
+      try { frame.src = 'about:blank'; } catch (_) {}
+      setTimeout(() => { try { frame.remove(); } catch (_) {} }, 50);
+    };
+
+    const settle = (status, note) => {
+      if (finished) return;
+      finished = true;
+      record.status = status;
+      if (note) record.note = note;
+      saveState();
+      render();
+      cleanup();
+      resolve();
+    };
+
+    const poll = () => {
+      if (finished) return;
+      if (performance.now() - started > TIMEOUT_MS) {
+        settle('timeout', String(TIMEOUT_MS) + 'ms 內未回報完成');
+        return;
+      }
+      let t = null;
+      try {
+        const win = frame.contentWindow;
+        if (win && typeof win.__bubbleDiagReport === 'function') {
+          t = win.__bubbleDiagReport().coldCompile量測;
+        }
+      } catch (e) {
+        // 同源下不該發生；真的發生就記下來而不是靜靜重試
+        settle('error', '讀取結果失敗：' + e.message);
+        return;
+      }
+
+      if (t && t.parallelCompile支援 === false) {
+        settle('error', '此環境不支援 KHR_parallel_shader_compile');
+        return;
+      }
+      if (t && t.program建立到編譯完成ms !== null) {
+        record.compileMs = t.program建立到編譯完成ms;
+        record.firstFrameMs = t.第一幀render耗時ms;
+        record.polls = t.輪詢次數;
+        settle(t.狀態 === '編譯完成' ? 'ok' : 'error', t.狀態 || '');
+        return;
+      }
+      pollTimer = setTimeout(poll, POLL_MS);
+    };
+
+    frame.src = probeUrl(entry.probe, shaderRun);
+    pollTimer = setTimeout(poll, POLL_MS);
+  });
+}
+
+// ===== 主流程 =====
+
+async function runAll() {
+  if (running) return;
+  running = true;
+  document.getElementById('run').disabled = true;
+
+  while (true) {
+    const next = planNext();
+    if (!next) break;
+    setStatus('正在測 ' + next.probe + '（' + next.phase + '）…');
+    await runProbe(next);
+    await new Promise(r => setTimeout(r, GAP_MS));
+  }
+
+  state.done = true;
+  saveState();
+  running = false;
+  document.getElementById('run').disabled = false;
+  render();
+  setStatus('全部完成，共 ' + state.results.length + ' 個 probe。');
+}
+
+// ===== 畫面 =====
+
+function setStatus(text) {
+  document.getElementById('status').textContent = text;
+}
+
+function statusCell(r) {
+  const map = {
+    ok: ['s-ok', 'OK'],
+    timeout: ['s-bad', 'TIMEOUT'],
+    error: ['s-bad', 'ERROR'],
+    crashed: ['s-bad', 'CRASHED（瀏覽器掛掉）'],
+    running: ['s-run', '測試中…'],
+  };
+  const [cls, text] = map[r.status] || ['', r.status];
+  // 慢但沒失敗的也標出來 —— 那正是門檻附近的訊號
+  const slow = r.status === 'ok' && r.compileMs !== null && r.compileMs >= 1000;
+  return '<span class="' + (slow ? 's-slow' : cls) + '">'
+    + (slow ? 'OK（偏慢）' : text) + '</span>'
+    + (r.note ? '<div class="note">' + r.note + '</div>' : '');
+}
+
+function render() {
+  const tbody = document.getElementById('rows');
+  tbody.innerHTML = state.results.map((r, i) => {
+    const label = r.label || PROBE_LABELS.get(r.probe) || '';
+    return '<tr' + (r.status === 'running' ? ' class="running"' : '') + '>'
+      + '<td>' + (i + 1) + '</td>'
+      + '<td><code>' + r.probe + '</code></td>'
+      + '<td class="note">' + label + '</td>'
+      + '<td class="num">' + r.shaderRun + '</td>'
+      + '<td class="num">' + (r.compileMs === null ? '—' : r.compileMs) + '</td>'
+      + '<td class="num">' + (r.firstFrameMs === null ? '—' : r.firstFrameMs) + '</td>'
+      + '<td class="num">' + (r.polls === null ? '—' : r.polls) + '</td>'
+      + '<td>' + statusCell(r) + '</td>'
+      + '</tr>';
+  }).join('');
+}
+
+function resultsAsText() {
+  const w = [4, 30, 10, 12, 12, 7, 12];
+  const pad = (s, n) => String(s).padEnd(n);
+  const lines = [
+    pad('#', w[0]) + pad('probe', w[1]) + pad('run', w[2])
+      + pad('compile(ms)', w[3]) + pad('frame(ms)', w[4]) + pad('polls', w[5]) + 'status',
+  ];
+  state.results.forEach((r, i) => {
+    lines.push(pad(i + 1, w[0]) + pad(r.probe, w[1]) + pad(r.shaderRun, w[2])
+      + pad(r.compileMs === null ? '-' : r.compileMs, w[3])
+      + pad(r.firstFrameMs === null ? '-' : r.firstFrameMs, w[4])
+      + pad(r.polls === null ? '-' : r.polls, w[5])
+      + r.status + (r.note ? ' — ' + r.note : ''));
+  });
+  return lines.join('\n');
+}
+
+document.getElementById('run').addEventListener('click', runAll);
+
+document.getElementById('reset').addEventListener('click', () => {
+  if (!confirm('清除所有已測結果，從頭開始？')) return;
+  state = freshState();
+  saveState();
+  render();
+  setStatus('已清除，可以重新開始。');
+});
+
+document.getElementById('copy').addEventListener('click', async () => {
+  const text = resultsAsText();
+  try {
+    await navigator.clipboard.writeText(text);
+    setStatus('結果已複製到剪貼簿。');
+  } catch (_) {
+    // 剪貼簿被擋就退回讓使用者自己選取
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:40vh;z-index:9';
+    document.body.appendChild(ta);
+    ta.select();
+    setStatus('剪貼簿不可用，請手動複製上方文字框後關閉它。');
+    ta.addEventListener('blur', () => ta.remove());
+  }
+});
+
+render();
+if (state.results.some(r => r.status === 'crashed')) {
+  setStatus('偵測到上次有 probe 讓瀏覽器掛掉（已標記 CRASHED）。按「開始 / 繼續」會跳過它往下測。');
+} else if (state.results.length && !state.done) {
+  setStatus('已有 ' + state.results.length + ' 筆結果，按「開始 / 繼續」接著測。');
+} else if (state.done) {
+  setStatus('上次已全部測完。要重測請先清除結果。');
+}
+</script>
+</body>
+</html>
