@@ -48,6 +48,9 @@ if (PREVIEW) document.documentElement.classList.add('preview-mode');
 //   compileonly  只建立 renderer 並編譯 program，不算繪全螢幕影格
 //   minshader    編譯期排除造型場／毛細波／微滴三大區塊（見 shaderFeatures）
 //   minshader2   minshader 再加上：主滴迴圈上限 12→4、稜光光芒只留預設晶格圖樣
+//   probe-snoise  以 compilerbaseline 為基底，只加回 snoise 本體（含 mod289 /
+//                permute / taylorInvSqrt），在 main 裡呼叫一次。不含 fbm、
+//                不含 fbmFast、不進 mapScene —— 所以不在 raymarch 呼叫鏈內。
 //   probe-noise  以 compilerbaseline 為基底，只加回 snoise / fbm / fbmFast
 //                （沿用正式 shader 同一份 NOISE_GLSL）與最小呼叫路徑。
 //   compilerbaseline  換成一支獨立的最小 fragment shader（見 shaders.js 的
@@ -74,6 +77,7 @@ const DIAG = (() => {
     lowcompileloops: set.has('lowcompileloops'),
     compilerbaseline: set.has('compilerbaseline'),
     probeNoise: set.has('probe-noise'),
+    probeSnoise: set.has('probe-snoise'),
   };
 })();
 if (DIAG.any) console.info('[bubble diag] 啟用:', DIAG.list.join(', '));
@@ -869,7 +873,7 @@ function refreshLoopScaledReadouts() {
   refreshShatterTimelineReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=baseline-2';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=baseline-3';
 
 // 這一份 shader 要編譯哪些功能。回傳的物件直接交給 ShaderMaterial.defines，
 // Three.js 會在 fragment shader 前面注入對應的 #define，GLSL 那邊用 #ifdef
@@ -888,7 +892,7 @@ import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=baseline-2';
 // 基線與所有 probe 都共用 FRAG_BASELINE 那支最小 shader，差別只在 PROBE_* 開關。
 // 這樣「baseline → +A → +B」每一步的差異就只有一個功能，不會混進別的變因。
 function usesBaselineShader() {
-  return DIAG.compilerbaseline || DIAG.probeNoise;
+  return DIAG.compilerbaseline || DIAG.probeNoise || DIAG.probeSnoise;
 }
 
 function shaderFeatures() {
@@ -898,7 +902,19 @@ function shaderFeatures() {
   // 基線與 probe 系列都用 FRAG_BASELINE，只吃這兩個上限加上各自的 PROBE_* 開關。
   if (usesBaselineShader()) {
     const d = { MAX_MARCH_COMPILE: 4, MAX_DROPS_COMPILE: 2 };
-    if (DIAG.probeNoise) d.PROBE_NOISE = '';
+    // 每個 probe 明確列出它要哪幾段 GLSL 與哪一個呼叫點，不依賴編譯器的
+    // dead-strip 行為來界定範圍。
+    if (DIAG.probeSnoise) {
+      d.NEED_SNOISE = '';
+      d.CALL_SNOISE_MAIN = '';        // 在 main 呼叫一次，不進 mapScene
+    }
+    if (DIAG.probeNoise) {
+      d.NEED_SNOISE = '';
+      d.NEED_FBM = '';
+      d.NEED_FBMFAST = '';
+      d.CALL_FBMFAST_MAPSCENE = '';   // 進 mapScene（＝在 raymarch 呼叫鏈內）
+      d.CALL_FBM_MAIN = '';
+    }
     return d;
   }
   // lowcompileloops 以 minshader2 為基底再往下砍兩個硬編碼的展開上限。
@@ -4149,13 +4165,34 @@ window.__bubbleDiagReport = function () {
     },
     shaderVariant: {
       使用的shader: usesBaselineShader()
-        ? 'FRAG_BASELINE（最小 shader' + (DIAG.probeNoise ? ' + PROBE_NOISE' : '') + '）'
+        ? 'FRAG_BASELINE（最小 shader'
+          + (DIAG.probeSnoise ? ' + snoise' : '')
+          + (DIAG.probeNoise ? ' + snoise/fbm/fbmFast' : '')
+          + '）'
         : 'FRAG（正式）',
       defines: mesh && mesh.material ? mesh.material.defines : '(未初始化)',
       有效行數: effective.length,
       'mapScene有效行數': fnLines('mapScene'),
       'main有效行數': fnLines('main'),
       剩餘固定迴圈: loops,
+      loop數: loops.length,
+      // snoise 的呼叫次數（原始碼中的呼叫點，不是執行次數）
+      snoise呼叫數: (effectiveSrc.match(/snoise\s*\(/g) || []).length
+        - (effectiveSrc.match(/float\s+snoise\s*\(/g) || []).length,
+      // 是否位於 raymarch 呼叫鏈內：mapScene 會被 march 迴圈重複呼叫，
+      // 所以 noise 若出現在 mapScene 內就等於被乘上迴圈次數。
+      是否在raymarch呼叫鏈內: (() => {
+        const i = effective.findIndex(l => /^float\s+mapScene\s*\(/.test(l));
+        if (i < 0) return false;
+        let depth = 0;
+        for (let j = i; j < effective.length; j++) {
+          depth += (effective[j].match(/\{/g) || []).length;
+          depth -= (effective[j].match(/\}/g) || []).length;
+          if (/snoise\s*\(|fbm\s*\(|fbmFast\s*\(/.test(effective[j]) && j > i) return true;
+          if (depth === 0 && j > i) break;
+        }
+        return false;
+      })(),
       仍存在的構造: {
         'snoise/fbm/fbmFast': has('snoise|fbmFast|\\bfbm\\('),
         'texture lookup': has('texture2D|texture\\s*\\('),
