@@ -3992,7 +3992,8 @@ window.__bubbleDiagReport = function () {
   };
   const innerMax = inner.主滴迴圈上限 + inner.衛星滴迴圈 + inner.微滴迴圈上限 + inner.負形迴圈上限;
   const innerActual = Math.round(uniforms ? uniforms.uCount.value : 0) + 3
-    + Math.round(uniforms ? uniforms.uMicroCount.value : 0) + 4;
+    + Math.round(uniforms ? uniforms.uMicroCount.value : 0)
+    + Math.round(uniforms ? uniforms.uNegativeCount.value : 0);
   const r = {
     模式: { preview: PREVIEW, diag: DIAG.list, motion: P.motion },
     尺寸: {
@@ -4012,6 +4013,16 @@ window.__bubbleDiagReport = function () {
       mapScene內層迴圈上限: inner,
       內層上限合計: innerMax,
       內層實際跑幾次: innerActual,
+      內層各項實際值: uniforms ? {
+        uCount: uniforms.uCount.value,
+        uMicroCount: uniforms.uMicroCount.value,
+        uNegativeCount: uniforms.uNegativeCount.value,
+        uShapeProgress: uniforms.uShapeProgress.value,
+        uShapeType: uniforms.uShapeType.value,
+        uExtendedMotion: uniforms.uExtendedMotion.value,
+        uMaterialStyle: uniforms.uMaterialStyle.value,
+        uRayBeamPattern: uniforms.uRayBeamPattern.value,
+      } : '(未初始化)',
       每像素SDF評估_最壞: (mapSceneCalls * innerMax).toLocaleString(),
       每像素SDF評估_目前參數: (mapSceneCalls * innerActual).toLocaleString(),
     },
@@ -4072,8 +4083,15 @@ function syncLoop() {
     if (DIAG.static) {
       if (!diagOnceDone) {
         diagOnceDone = true;
-        uniforms.uMaxSteps.value = resolveMaxSteps();
-        renderer.render(scene, camera);
+        // 完整走一次 frame()，而不是只呼叫 renderer.render()。
+        // 理由：每幀的 uniform 更新（updateDropUniforms）就在 frame() 裡，跳過它
+        // 算出來的那一幀帶著初始化殘值 —— 例如 uMicroCount 會停在面板滑桿同步進去
+        // 的 14，而 split 模式實際上該是 0（syncPanelToUniforms 在 initGL 裡跑在
+        // updateDropUniforms 之後，兩者都寫同一顆 uniform）。那樣量到的成本不具代表性。
+        // frame() 開頭會自己排下一次，這裡算完立刻取消，只留這一幀。
+        last = performance.now();
+        frame(performance.now());
+        if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
         console.info('[bubble diag] static: 已算繪 1 幀，不啟動 RAF 迴圈');
       }
       return;
