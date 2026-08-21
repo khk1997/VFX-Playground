@@ -2329,3 +2329,93 @@ void main(){
 `;
 
 export { VERT, FRAG };
+
+// ===== 編譯器基線探針（?diag=compilerbaseline）=====
+//
+// 這不是 Bubble 的簡化版，而是一支獨立的最小 fragment shader，只為了回答一個問題：
+// 在完全相同的 Three.js / WebGL2 / ShaderMaterial / renderer / camera / scene /
+// 全螢幕算繪架構下，Windows Chrome 的 ANGLE 到不到得了「能正常快速編譯」的狀態。
+//
+// 之所以另外寫一支而不是在正式 shader 上再包幾十個 #ifdef：要排除的東西多到幾乎
+// 沒有原本的程式碼會留下，那樣的 #ifdef 密度既難驗證也容易誤刪，而且會動到正式
+// shader。獨立一支可以保證正式 shader 完全沒被觸碰。
+//
+// 刻意完全不含：
+//   procedural noise（snoise / fbm / fbmFast）、內部折射追蹤、薄膜干涉、色散、
+//   OPD、光譜、稜光光芒、衛星滴、負形場、微滴、造型距離場（SVG/GLB）、毛細波、
+//   geometry wobble、背景合成、環境反射、任何 sampler / texture lookup。
+//
+// 只剩：相機射線 → 極短 raymarch → 命中 → 四面體法線 → Lambert → 輸出。
+// 畫面只會是一兩顆藍色的球，很醜，這是預期的。
+const FRAG_BASELINE = `
+precision highp float;
+varying vec2 vUv;
+
+uniform vec2  uResolution;
+uniform mat3  uRot;
+uniform float uCameraDistance;
+uniform float uTanHalfFov;
+uniform float uCompositionOffsetX;
+uniform float uCompositionOffsetY;
+uniform vec4  uDrops[12];
+uniform int   uCount;
+
+// 兩個上限都是編譯期常數（由 ShaderMaterial.defines 覆寫），不是 runtime uniform。
+#ifndef MAX_MARCH_COMPILE
+#define MAX_MARCH_COMPILE 4
+#endif
+#ifndef MAX_DROPS_COMPILE
+#define MAX_DROPS_COMPILE 2
+#endif
+
+float smin(float a, float b, float k){
+  float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+  return mix(b, a, h) - k * h * (1.0 - h);
+}
+
+// 只有球體 SDF 與 smooth union，沒有形變、沒有 noise、沒有取樣。
+float mapScene(vec3 p){
+  float d = 1e9;
+  for (int i = 0; i < MAX_DROPS_COMPILE; i++){
+    if (i >= uCount) break;
+    d = smin(d, length(p - uDrops[i].xyz) - uDrops[i].w, 0.35);
+  }
+  return d;
+}
+
+vec3 calcNormal(vec3 p){
+  const vec2 k = vec2(1.0, -1.0);
+  float h = 0.002;
+  return normalize(
+    k.xyy * mapScene(p + k.xyy * h) +
+    k.yyx * mapScene(p + k.yyx * h) +
+    k.yxy * mapScene(p + k.yxy * h) +
+    k.xxx * mapScene(p + k.xxx * h));
+}
+
+void main(){
+  vec2 uv = (vUv * 2.0 - 1.0);
+  uv.x *= uResolution.x / uResolution.y;
+  uv += vec2(uCompositionOffsetX, uCompositionOffsetY);
+
+  vec3 ro = uRot * vec3(0.0, 0.0, uCameraDistance);
+  vec3 rd = uRot * normalize(vec3(uv * uTanHalfFov, -1.0));
+
+  float t = 0.0;
+  bool hit = false;
+  for (int i = 0; i < MAX_MARCH_COMPILE; i++){
+    float d = mapScene(ro + rd * t);
+    if (d < 0.001){ hit = true; break; }
+    t += d;
+    if (t > 12.0) break;
+  }
+
+  if (!hit){ gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
+
+  vec3 N = calcNormal(ro + rd * t);
+  float lambert = max(0.0, dot(N, normalize(vec3(0.4, 0.7, 0.6))));
+  gl_FragColor = vec4(vec3(0.15, 0.35, 0.7) * (0.15 + 0.85 * lambert), 1.0);
+}
+`;
+
+export { FRAG_BASELINE };

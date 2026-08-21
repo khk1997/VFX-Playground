@@ -48,6 +48,11 @@ if (PREVIEW) document.documentElement.classList.add('preview-mode');
 //   compileonly  只建立 renderer 並編譯 program，不算繪全螢幕影格
 //   minshader    編譯期排除造型場／毛細波／微滴三大區塊（見 shaderFeatures）
 //   minshader2   minshader 再加上：主滴迴圈上限 12→4、稜光光芒只留預設晶格圖樣
+//   compilerbaseline  換成一支獨立的最小 fragment shader（見 shaders.js 的
+//                    FRAG_BASELINE）。同一套 Three.js / WebGL2 / ShaderMaterial /
+//                    renderer / camera / scene / 全螢幕算繪架構，但 GLSL 只剩
+//                    「相機射線 → 4 步 raymarch → 法線 → Lambert」。畫面只有一兩顆
+//                    藍球，用來確認 ANGLE 在這個架構下到不到得了「能正常編譯」。
 //   lowcompileloops  minshader2 再加上：主 raymarch 展開上限 88→16、內部折射 28→8。
 //                    純二分診斷探針 —— 步數不足畫面會破，只用來確認 ANGLE 是否
 //                    卡在 loop expansion，不會套用到正式版。
@@ -65,6 +70,7 @@ const DIAG = (() => {
     minshader: set.has('minshader'),
     minshader2: set.has('minshader2'),
     lowcompileloops: set.has('lowcompileloops'),
+    compilerbaseline: set.has('compilerbaseline'),
   };
 })();
 if (DIAG.any) console.info('[bubble diag] 啟用:', DIAG.list.join(', '));
@@ -860,7 +866,7 @@ function refreshLoopScaledReadouts() {
   refreshShatterTimelineReadouts();
 }
 
-import { VERT, FRAG } from './shaders.js?v=variant-3';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=baseline-1';
 
 // 這一份 shader 要編譯哪些功能。回傳的物件直接交給 ShaderMaterial.defines，
 // Three.js 會在 fragment shader 前面注入對應的 #define，GLSL 那邊用 #ifdef
@@ -880,6 +886,10 @@ function shaderFeatures() {
   // minshader2 = minshader + 兩項編譯期收斂（見下方 slim2 的使用處）。
   // minshader 在 Windows ANGLE 上還是跨不過編譯門檻（實測與 compileonly 體感相同），
   // 所以再往下砍固定迴圈上限與分支數，但一樣不碰任何數學。
+  // 基線探針：那支 shader 裡沒有任何 FEATURE_* 的 #ifdef，只吃這兩個上限。
+  if (DIAG.compilerbaseline) {
+    return { MAX_MARCH_COMPILE: 4, MAX_DROPS_COMPILE: 2 };
+  }
   // lowcompileloops 以 minshader2 為基底再往下砍兩個硬編碼的展開上限。
   const probe = DIAG.lowcompileloops;
   const slim2 = DIAG.minshader2 || probe;
@@ -2987,7 +2997,11 @@ function initGL() {
 
   const geo = new THREE.PlaneGeometry(2, 2);
   const mat = new THREE.ShaderMaterial({
-    uniforms, vertexShader: VERT, fragmentShader: FRAG,
+    uniforms,
+    vertexShader: VERT,
+    // 基線探針換成獨立的最小 shader；其餘一切（renderer、camera、scene、uniforms、
+    // 全螢幕 mesh、PMREM 環境貼圖）都維持原樣，這樣測到的才是 GLSL 本身。
+    fragmentShader: DIAG.compilerbaseline ? FRAG_BASELINE : FRAG,
     defines: shaderFeatures(),
     depthTest: false, depthWrite: false,
   });
@@ -4034,6 +4048,44 @@ function updatePausedCameraRotation() {
 // 帶 ?diag= 時初始化完成後也會自動印一次。純讀取，不改變任何狀態。
 window.__bubbleDiagReport = function () {
   const gl = renderer && renderer.getContext ? renderer.getContext() : null;
+  // 目前這支 material 實際使用的 fragment shader 原始碼
+  const activeFrag = DIAG.compilerbaseline ? FRAG_BASELINE : FRAG;
+  // 依 defines 做前處理，得出真正送進編譯器的內容
+  const preprocess = src => {
+    const d = (mesh && mesh.material) ? mesh.material.defines || {} : {};
+    const isOn = k => d[k] !== false && d[k] !== undefined;
+    const out = [];
+    let depth = 0; let skip = [];
+    for (const line of src.split('\n')) {
+      let m = line.match(/^\s*#ifdef\s+(\w+)/);
+      if (m) { depth++; if (!isOn(m[1])) skip.push(depth); continue; }
+      m = line.match(/^\s*#ifndef\s+(\w+)/);
+      if (m) { depth++; if (isOn(m[1])) skip.push(depth); continue; }
+      if (/^\s*#endif/.test(line)) { skip = skip.filter(x => x !== depth); depth--; continue; }
+      if (!skip.length) out.push(line);
+    }
+    return out;
+  };
+  const effective = preprocess(activeFrag);
+  const effectiveSrc = effective.join('\n');
+  // 取某個函式在「前處理後」的行數
+  const fnLines = name => {
+    const i = effective.findIndex(l => new RegExp('^[A-Za-z_][\\w]*\\s+' + name + '\\s*\\(').test(l));
+    if (i < 0) return '(不存在)';
+    let depth = 0, n = 0;
+    for (let j = i; j < effective.length; j++) {
+      n++;
+      depth += (effective[j].match(/\{/g) || []).length;
+      depth -= (effective[j].match(/\}/g) || []).length;
+      if (depth === 0 && j > i) break;
+    }
+    return n;
+  };
+  const has = re => new RegExp(re).test(effectiveSrc);
+  const loops = effective
+    .map((l, i) => ({ l: l.trim(), i }))
+    .filter(x => /^for\s*\(/.test(x.l))
+    .map(x => x.l.replace(/\s*\{\s*$/, ''));
   const cssW = canvas.clientWidth, cssH = canvas.clientHeight;
   const steps = uniforms ? uniforms.uMaxSteps.value : null;
   // 每像素的 mapScene 呼叫次數：主 raymarch 迴圈 + 法線差分 + 內部折射追蹤。
@@ -4085,10 +4137,30 @@ window.__bubbleDiagReport = function () {
       每像素SDF評估_目前參數: (mapSceneCalls * innerActual).toLocaleString(),
     },
     shaderVariant: {
+      使用的shader: DIAG.compilerbaseline ? 'FRAG_BASELINE（獨立最小 shader）' : 'FRAG（正式）',
       defines: mesh && mesh.material ? mesh.material.defines : '(未初始化)',
+      有效行數: effective.length,
+      'mapScene有效行數': fnLines('mapScene'),
+      'main有效行數': fnLines('main'),
+      剩餘固定迴圈: loops,
+      仍存在的構造: {
+        'snoise/fbm/fbmFast': has('snoise|fbmFast|\\bfbm\\('),
+        'texture lookup': has('texture2D|texture\\s*\\('),
+        'sampler 宣告': has('uniform\\s+sampler'),
+        '內部折射 traceExitSurface': has('traceExitSurface'),
+        '薄膜 thinFilm': has('thinFilm'),
+        '色散/OPD/光譜': has('Dispersion|artisticDispersionOPD|visibleSpectrum|sampleFilmInterference'),
+        '稜光光芒 prismBeam': has('prismBeamField|prismBeamCoord'),
+        '衛星滴': has('uSatellites'),
+        '負形場': has('uNegativeDrops'),
+        '造型距離場': has('svgShapeDistance|volumeShapeDistance'),
+        'geometry wobble': has('geometryWobble'),
+        '環境反射/背景合成': has('sampleReflection|backgroundSample'),
+      },
       // 實際送進編譯器的 fragment shader 行數（Three.js 前置的 header 不算）
-      FRAG行數: FRAG.split('\n').length,
-      編譯期迴圈上限: (() => {
+      // 下面幾項只描述正式 FRAG；基線探針用的是另一支 shader，列出來會誤導。
+      正式FRAG行數: DIAG.compilerbaseline ? '(不適用：目前用 FRAG_BASELINE)' : FRAG.split('\n').length,
+      編譯期迴圈上限: DIAG.compilerbaseline ? '(不適用：見上方剩餘固定迴圈)' : (() => {
         const d = mesh && mesh.material ? mesh.material.defines : null;
         const pick = (k, dflt) => (d && d[k] !== undefined ? d[k] : dflt);
         return {
@@ -4099,7 +4171,7 @@ window.__bubbleDiagReport = function () {
           負形MAX_NEGATIVE: 4,
         };
       })(),
-      編譯後生效行數: (() => {
+      編譯後生效行數: DIAG.compilerbaseline ? '(不適用：見上方有效行數)' : (() => {
         const d = mesh && mesh.material ? mesh.material.defines : null;
         if (!d) return '(未初始化)';
         const on = k => d[k] !== false && d[k] !== undefined;
