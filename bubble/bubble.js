@@ -88,6 +88,14 @@ const SHADER_RUN = (() => {
   return Number.isFinite(n) ? Math.round(n) : null;
 })();
 
+// ?diagTiming=1 —— 計時工具，跟 shaderRun 完全獨立。
+//
+// 拆開的理由：計時用的 forceProgramLink() 會查詢 LINK_STATUS，那會強迫驅動「同步」
+// 完成連結。Windows 上 three.js 通常走 KHR_parallel_shader_compile 把編譯丟到背景
+// 執行緒，而這個查詢會把它變成主執行緒阻塞 —— 也就是說計時工具本身就可能把
+// 「背景慢慢編」變成「畫面卡住」。必須能單獨關掉它才分得出是誰造成的。
+const DIAG_TIMING = new URLSearchParams(location.search).get('diagTiming') === '1';
+
 const DIAG = (() => {
   const raw = new URLSearchParams(location.search).get('diag');
   const set = new Set((raw || '').split(',').map(s => s.trim()).filter(Boolean));
@@ -911,7 +919,7 @@ function refreshLoopScaledReadouts() {
   refreshShatterTimelineReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=baseline-4';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=baseline-5';
 
 // cold compile 的時間量測。
 //
@@ -946,7 +954,7 @@ function forceProgramLink() {
 
 // 量一段區間的耗時。fn 跑完後強制連結完成，再記錄。
 function diagMeasure(key, fn) {
-  if (!DIAG.any) return fn();
+  if (!DIAG_TIMING) return fn();
   const t0 = performance.now();
   const out = fn();
   forceProgramLink();
@@ -1016,7 +1024,7 @@ function shaderFeatures() {
       d.CALL_FBMFAST_MAPSCENE = '';   // 進 mapScene（＝在 raymarch 呼叫鏈內）
       d.CALL_FBM_MAIN = '';
     }
-    return d;
+    return withRun(d);
   }
   // lowcompileloops 以 minshader2 為基底再往下砍兩個硬編碼的展開上限。
   const probe = DIAG.lowcompileloops;
@@ -3096,6 +3104,9 @@ function initGL() {
     uShapeAScale: { value: 1 },
     uShapeBScale: { value: 1 },
     // 造型剛體動態（見 motions/shapeRigid.js）。未啟用時維持單位變換。
+    // cache-bust 用（見 shaders.js 的 SHADER_RUN）。永遠是 0，只是讓
+    // float(SHADER_RUN) * uShaderSalt 這個乘法無法在編譯期被折掉。
+    uShaderSalt: { value: 0 },
     uShapeRigidRot: { value: new THREE.Matrix3() },
     uShapeRigidOffset: { value: new THREE.Vector3() },
     uShapeRigidScale: { value: new THREE.Vector3(1, 1, 1) },
@@ -3146,13 +3157,13 @@ function initGL() {
   if (!PREVIEW) bindPointer();
   syncPanelToUniforms();
   loadMaterialEnvironment(P.materialStyle);
-  if (DIAG.any) {
+  if (DIAG_TIMING) {
     forceProgramLink();
     diagTiming.shaderRun = SHADER_RUN;
     diagTiming.initGL耗時ms = Math.round((performance.now() - initGLStart) * 10) / 10;
     console.info('[bubble diag] initGL耗時ms = ' + diagTiming.initGL耗時ms + 'ms');
-    requestAnimationFrame(() => window.__bubbleDiagReport());
   }
+  if (DIAG.any) requestAnimationFrame(() => window.__bubbleDiagReport());
 }
 
 function resize() {
@@ -4243,6 +4254,9 @@ window.__bubbleDiagReport = function () {
     模式: { preview: PREVIEW, diag: DIAG.list, motion: P.motion },
     coldCompile量測: {
       shaderRun: SHADER_RUN === null ? '(未指定 → 可能命中已暖好的 shader cache)' : SHADER_RUN,
+      計時工具: DIAG_TIMING
+        ? '啟用（會查詢 LINK_STATUS 強制同步連結，本身就可能造成主執行緒阻塞）'
+        : '未啟用（?diagTiming=1 才開）',
       ...diagTiming,
           說明: '各段的區間耗時（非距起點偏移）；每段結束前查詢 LINK_STATUS 強制'
         + '編譯／連結完成。不用 gl.finish —— 那會等到合成器 tick，量到的與 shader 規模無關。',
@@ -4983,7 +4997,7 @@ function frame(now) {
   uniforms.uTime.value = simT;
   syncEdgeDropMotion(simT);
   uniforms.uMaxSteps.value = resolveMaxSteps();
-  if (DIAG.any && diagTiming.第一幀耗時ms === null) {
+  if (DIAG_TIMING && diagTiming.第一幀耗時ms === null) {
     diagMeasure('第一幀耗時ms', () => renderer.render(scene, camera));
   } else {
     renderer.render(scene, camera);

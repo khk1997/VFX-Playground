@@ -87,18 +87,21 @@ uniform float uCompositionOffsetY;
 uniform int   uMaxSteps;
 
 // ===== shader cache 破壞用的 salt（?shaderRun=N）=====
-// 目的：強迫每次都是 cold compile。單純注入一個「沒被用到」的 #define 不夠 ——
-// ANGLE 翻出來的 HLSL 可能完全相同，於是仍然命中驅動的 bytecode 快取。所以這裡讓
-// SHADER_RUN 真的參與一次運算，不同 N 會產生不同的常數字面值，翻譯後的 HLSL 也就
-//必然不同。
+// 目的：強迫每次都是 cold compile。
 //
-// 1e-30 這個量級遠低於任何可見門檻（乘上 N 也只有 1e-28 級），對畫面與 SDF 的
-// epsilon（0.001）都沒有影響。未定義 SHADER_RUN 時整段不存在。
-#ifdef SHADER_RUN
-const float SHADER_RUN_SALT = float(SHADER_RUN) * 1e-30;
-#else
-const float SHADER_RUN_SALT = 0.0;
-#endif
+// 這裡的難點是一組互相拉扯的要求：要讓驅動的 D3D bytecode 快取 miss，翻譯出來的
+// HLSL 就必須不同；但又不能改變畫面或動到熱路徑的數值。
+//
+// 做法：讓「整數字面值」出現在 HLSL 裡，但把它乘上一個恆為 0 的 uniform。
+//   * float(SHADER_RUN) 是編譯期字面值 → 不同 N 產生不同的 HLSL → 快取必然 miss
+//   * uShaderSalt 恆為 0，而且是 uniform，編譯器無法在前端把整式折掉
+//   * 乘積在執行期恆為 0.0（正常浮點零，不是 denormal）→ 畫面完全不變
+//
+// 前一版用 float(SHADER_RUN) * 1e-30 並加在 raymarch 的起始 t 上，那是錯的：
+// 1e-30 雖然還在 float 的正規範圍內，但那種量級容易踩到 D3D 編譯器的
+// denormal / flush-to-zero 特殊路徑，而且它直接動到了 raymarch 的數值。
+// 現在改成只加在「背景色」上 —— 那在 SDF 與 raymarch 之外。
+uniform float uShaderSalt;   // 一律為 0，只是為了讓上面的乘法無法被折掉
 
 uniform int   uCount;
 uniform float uViscosity;
@@ -1462,6 +1465,10 @@ void main(){
   vec3 rd = uRot * normalize(vec3(uv * tanHalfFov, -1.0));
 
   vec4 bg = backgroundSample(rd);
+#ifdef SHADER_RUN
+  // cache-bust：恆為 0，不影響畫面。放在這裡是因為它在 SDF 與 raymarch 之外。
+  bg.rgb += vec3(float(SHADER_RUN) * uShaderSalt);
+#endif
   float dispersionStrength = uDispersion * uDispersionEnabled;
 
   // 僅追蹤真正穿過物件包圍球的射線；色散發生在透明材質內部，不生成
@@ -1475,7 +1482,7 @@ void main(){
   float tEnd = -qb + qh;
   if (tEnd < 0.0){ gl_FragColor = bg; return; }
 
-  float t = max(0.0, -qb - qh) + SHADER_RUN_SALT;
+  float t = max(0.0, -qb - qh);
   bool hit = false;
   for (int i = 0; i < MAX_MARCH_COMPILE; i++){
     if (i >= uMaxSteps) break;
@@ -2417,19 +2424,9 @@ vec3 loopNoiseOffset(float speed){
 #endif
 
 
-// ===== shader cache 破壞用的 salt（?shaderRun=N）=====
-// 目的：強迫每次都是 cold compile。單純注入一個「沒被用到」的 #define 不夠 ——
-// ANGLE 翻出來的 HLSL 可能完全相同，於是仍然命中驅動的 bytecode 快取。所以這裡讓
-// SHADER_RUN 真的參與一次運算，不同 N 會產生不同的常數字面值，翻譯後的 HLSL 也就
-//必然不同。
-//
-// 1e-30 這個量級遠低於任何可見門檻（乘上 N 也只有 1e-28 級），對畫面與 SDF 的
-// epsilon（0.001）都沒有影響。未定義 SHADER_RUN 時整段不存在。
-#ifdef SHADER_RUN
-const float SHADER_RUN_SALT = float(SHADER_RUN) * 1e-30;
-#else
-const float SHADER_RUN_SALT = 0.0;
-#endif
+// shader cache 破壞用的 salt（?shaderRun=N）。原理見正式 shader 那一段的註解：
+// 整數字面值 × 恆為 0 的 uniform，讓 HLSL 不同但執行期恆為 0。
+uniform float uShaderSalt;
 
 float smin(float a, float b, float k){
   float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
@@ -2469,7 +2466,7 @@ void main(){
   vec3 ro = uRot * vec3(0.0, 0.0, uCameraDistance);
   vec3 rd = uRot * normalize(vec3(uv * uTanHalfFov, -1.0));
 
-  float t = SHADER_RUN_SALT;
+  float t = 0.0;
   bool hit = false;
   for (int i = 0; i < MAX_MARCH_COMPILE; i++){
     float d = mapScene(ro + rd * t);
@@ -2493,7 +2490,11 @@ void main(){
 #ifdef CALL_FBM_MAIN
   lambert *= 0.9 + 0.1 * fbm(N * 2.0);
 #endif
-  gl_FragColor = vec4(vec3(0.15, 0.35, 0.7) * (0.15 + 0.85 * lambert), 1.0);
+  vec3 outColor = vec3(0.15, 0.35, 0.7) * (0.15 + 0.85 * lambert);
+#ifdef SHADER_RUN
+  outColor += vec3(float(SHADER_RUN) * uShaderSalt);   // 恆為 0
+#endif
+  gl_FragColor = vec4(outColor, 1.0);
 }
 `;
 
