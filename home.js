@@ -12,7 +12,11 @@ const nextBtn = document.getElementById('nextBtn');
 const selectionIndexEl = document.getElementById('selectionIndex');
 const selectionCategoryEl = document.getElementById('selectionCategory');
 const selectionDescriptionEl = document.getElementById('selectionDescription');
-const initialEffectIndex = Math.max(0, EFFECTS.findIndex(fx => fx.href === 'bubble/index.html'));
+// 首屏預設停在清單第一個特效（櫻花，Canvas 2D）。原本刻意跳到 bubble，但那是
+// 整份清單裡最重的場景（Three.js + GLSL raymarching / metaball），把它放在首屏
+// 等於首頁一載入就要編譯著色器並開始 raymarching，首屏互動與 Lighthouse 都被它
+// 拖住。要看 bubble 往右切兩三張就到，不必用首屏的預算去換。
+const initialEffectIndex = 0;
 let active = initialEffectIndex;
 let position = EFFECTS.length + initialEffectIndex;
 let motionTimer = null;
@@ -26,6 +30,36 @@ const mobilePreviewQuery = window.matchMedia('(max-width: 760px)');
 const primedMobilePreviews = new WeakSet();
 const mobilePreviewPauseTimers = new WeakMap();
 let previewUseTick = 0;
+
+// 目前允許載入的距離。初次進站是 0 —— 只有正中央那張真的建立 iframe。
+//
+// 每個 preview iframe 都是一個獨立的 document + 一個 Canvas/WebGL context，
+// 一開頁就掛三到五個，首屏得同時付出多份 shader 編譯、多份 RAF 迴圈與多份
+// GPU 記憶體；這也是 PageSpeed 常常直接吐 "LHR failed to render" 的原因
+// （trace 太大 / 記憶體不足）。鄰近卡片不是不載，而是延後到使用者真的開始
+// 切換之後才載，見 scheduleNeighborPreload。
+let previewLoadDistance = 0;
+const neighborLoadDistance = () => (mobilePreviewQuery.matches ? 1 : 2);
+let neighborPreloadHandle = 0;
+
+// 使用者切過卡片之後，才把鄰近卡片預熱起來。
+//
+// 走 requestIdleCallback 而不是直接載：預載絕對不能跟 active 卡片的首次渲染
+// 搶主執行緒，否則第一次切換時中央那張會先白一下才畫出來。idle 沒來就用
+// timeout 兜底（Safari 沒有 requestIdleCallback）。
+// 只需要抬升一次；之後 updatePreviewPlayback 自然就會照新的距離預熱鄰居，
+// 讓後續切換不會有等待感。
+function scheduleNeighborPreload() {
+  if (previewLoadDistance >= neighborLoadDistance() || neighborPreloadHandle) return;
+  const run = () => {
+    neighborPreloadHandle = 0;
+    previewLoadDistance = neighborLoadDistance();
+    updatePreviewPlayback();
+  };
+  neighborPreloadHandle = ('requestIdleCallback' in window)
+    ? requestIdleCallback(run, { timeout: 600 })
+    : setTimeout(run, 300);
+}
 
 /* ===== WebAudio 合成音效（Switch 風的嗶啵聲，不用音檔） ===== */
 let audioCtx = null;
@@ -186,7 +220,9 @@ function ensurePreviewLoaded(index) {
     frame.width = PREVIEW_W;
     frame.height = PREVIEW_H;
     frame.tabIndex = -1;
-    frame.loading = 'eager';
+    // 動態 mount 的 iframe 不需要再強制 eager；active 卡片就在視埠正中央，
+    // lazy 對它是立即載入，而距離較遠的預熱卡片則自然延後到接近視埠才載。
+    frame.loading = 'lazy';
     frame.setAttribute('scrolling', 'no');
     frame.setAttribute('aria-hidden', 'true');
     frame.style.transform = `scale(${220 / PREVIEW_W})`;
@@ -224,10 +260,11 @@ function trimPreviewCache(protectedIndices) {
     .forEach(item => unloadPreview(item.frame, item.index));
 }
 
-/* 手機只載入中心與左右卡片；桌面保留較寬的預熱範圍與 LRU 緩存。 */
+/* 載入範圍由 previewLoadDistance 決定：初次進站是 0（只有 active），使用者切過
+   卡片後才擴大到手機 1 / 桌面 2。cache 與 LRU 淘汰邏輯不變。 */
 function updatePreviewPlayback() {
   const protectedIndices = new Set();
-  const loadDistance = mobilePreviewQuery.matches ? 1 : 2;
+  const loadDistance = previewLoadDistance;
   previewSources.forEach((src, i) => {
     if (!src) return;
     const distance = Math.abs(i - position);
@@ -342,6 +379,8 @@ function setActive(i, silent, direct = false, instant = false) {
   updateSelectionUI(instant);
   centerActive(instant);
   updatePreviewPlayback();
+  // 使用者開始切換了，才把鄰近卡片排進預載（idle 時才真的建立 iframe）。
+  scheduleNeighborPreload();
 }
 
 /* 進場轉場：卡片放大 + 其他元素淡出，再跳頁 */
@@ -375,8 +414,20 @@ window.addEventListener('touchend', (e) => {
   touchX = null;
 }, { passive: true });
 
-window.addEventListener('resize', centerActive);
-mobilePreviewQuery.addEventListener('change', updatePreviewPlayback);
+// resize 用 RAF 併批。centerActive 會連續讀 offsetLeft / offsetWidth / clientWidth
+// 再寫 transform，等於每個 resize 事件都強制一次同步重排；拖視窗邊框時這種事件
+// 一秒可以來幾十次。併到下一個動畫框只做一次，視覺結果完全相同（使用者看到的
+// 仍是放手時的最終位置），但省掉中間所有的重排。
+let resizeRaf = 0;
+window.addEventListener('resize', () => {
+  if (resizeRaf) return;
+  resizeRaf = requestAnimationFrame(() => { resizeRaf = 0; centerActive(); });
+});
+mobilePreviewQuery.addEventListener('change', () => {
+  // 已經抬升過就跟著新的斷點換算；還沒抬升（首屏）就維持只載 active。
+  if (previewLoadDistance > 0) previewLoadDistance = neighborLoadDistance();
+  updatePreviewPlayback();
+});
 /* iframe 載入完成後再同步一次播放狀態（load 前 postMessage 會沒人聽） */
 iframesReady();
 function iframesReady() {

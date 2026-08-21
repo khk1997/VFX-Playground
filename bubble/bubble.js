@@ -2915,7 +2915,7 @@ function initGL() {
   updateDropUniforms(0);
   resize();
   window.addEventListener('resize', resize);
-  bindPointer();
+  if (!PREVIEW) bindPointer();
   syncPanelToUniforms();
   loadMaterialEnvironment(P.materialStyle);
 }
@@ -2984,11 +2984,13 @@ function markInteraction() {
 //
 // 留下的：input/change 涵蓋所有控制項；click 涵蓋按鈕（播放暫停、匯入、快捷
 // 暫存），捲動不會產生 click 所以不會誤觸。
-for (const type of ['input', 'change', 'click']) {
-  window.addEventListener(type, markInteraction, { passive: true, capture: true });
+if (!PREVIEW) {
+  for (const type of ['input', 'change', 'click']) {
+    window.addEventListener(type, markInteraction, { passive: true, capture: true });
+  }
+  window.addEventListener('focus', () => { windowFocused = true; markInteraction(); });
+  window.addEventListener('blur', () => { windowFocused = false; });
 }
-window.addEventListener('focus', () => { windowFocused = true; markInteraction(); });
-window.addEventListener('blur', () => { windowFocused = false; });
 
 // 回傳「這一幀該不該跳過」。拖曳中與輸出中一律不節流：前者是最需要即時回饋的
 // 時候，後者根本不是給人看的（逐幀離線算繪，跳幀會漏影格）。
@@ -3232,7 +3234,7 @@ function bindControls() {
       requestPausedRender();
     };
     el.value = P[key];
-    if (!el._bound) { el.addEventListener('input', update); el._bound = true; }
+    if (!PREVIEW && !el._bound) { el.addEventListener('input', update); el._bound = true; }
     update();
   }
   // 下拉選單
@@ -3286,7 +3288,7 @@ function bindControls() {
       requestPausedRender();
     };
     el.value = P[key];
-    if (!el._bound) { el.addEventListener('change', update); el._bound = true; }
+    if (!PREVIEW && !el._bound) { el.addEventListener('change', update); el._bound = true; }
     update();
   }
   // 材質功能開關
@@ -3307,14 +3309,14 @@ function bindControls() {
     // 讓使用者點標籤也能切換，而不必精準命中 34px 的滑軌。
     if (label) label.htmlFor = key;
     const track = el.nextElementSibling;
-    if (track && !track._bound) {
+    if (!PREVIEW && track && !track._bound) {
       track.addEventListener('click', () => {
         el.checked = !el.checked;
         el.dispatchEvent(new Event('change', { bubbles: true }));
       });
       track._bound = true;
     }
-    if (!el._bound) { el.addEventListener('change', update); el._bound = true; }
+    if (!PREVIEW && !el._bound) { el.addEventListener('change', update); el._bound = true; }
     update();
   }
   // 色散總開關：只是一個總閘，不動 ART／RAY／LIGHT 各自的開關狀態——關閉時
@@ -3322,7 +3324,7 @@ function bindControls() {
   const dispersionMaster = document.getElementById('dispersionMaster');
   const dispersionMasterTrack = dispersionMaster.nextElementSibling;
   dispersionMaster.checked = dispersionMasterOn;
-  if (dispersionMasterTrack && !dispersionMasterTrack._bound) {
+  if (!PREVIEW && dispersionMasterTrack && !dispersionMasterTrack._bound) {
     dispersionMasterTrack.addEventListener('click', () => {
       dispersionMasterOn = !dispersionMasterOn;
       dispersionMaster.checked = dispersionMasterOn;
@@ -3347,7 +3349,7 @@ function bindControls() {
       requestPausedRender();
     };
     el.value = P[key];
-    if (!el._bound) { el.addEventListener('input', update); el._bound = true; }
+    if (!PREVIEW && !el._bound) { el.addEventListener('input', update); el._bound = true; }
     update();
   }
   bindSpectralCausticColors();
@@ -3358,7 +3360,7 @@ function bindControls() {
 function bindSpectralCausticColors() {
   for (let i = 0; i < SPECTRAL_CAUSTIC_DEFAULTS.length; i++) {
     const el = document.getElementById('spectralCausticCol' + i);
-    if (!el._bound) {
+    if (!PREVIEW && !el._bound) {
       el.addEventListener('input', () => {
         buildSpectralCausticLUT();
         requestPausedRender();
@@ -3387,7 +3389,7 @@ function bindRamp() {
   const rc = document.getElementById('rampCount');
   const rcv = document.getElementById('rampCount_v');
   const onCount = () => { rcv.textContent = Math.round(parseFloat(rc.value)).toFixed(0); updateRampRows(); buildRampLUT(); updateUIState(); };
-  if (!rc._bound) { rc.addEventListener('input', onCount); rc._bound = true; }
+  if (!PREVIEW && !rc._bound) { rc.addEventListener('input', onCount); rc._bound = true; }
   onCount();
   for (let i = 0; i < STOP_MAX; i++) {
     const col = document.getElementById('stopCol' + i);
@@ -3398,8 +3400,8 @@ function bindRamp() {
     buildRampLUT();
     requestPausedRender();
   };
-    if (!col._bound) { col.addEventListener('input', upd); col._bound = true; }
-    if (!pos._bound) { pos.addEventListener('input', upd); pos._bound = true; }
+    if (!PREVIEW && !col._bound) { col.addEventListener('input', upd); col._bound = true; }
+    if (!PREVIEW && !pos._bound) { pos.addEventListener('input', upd); pos._bound = true; }
     upd();
   }
 }
@@ -4568,5 +4570,4 @@ if (!PREVIEW) {
 }
 
 syncLoop();
-if (!PREVIEW) syncLoop();
 if (!PREVIEW) exportEvent('prism-export-ready', { loopDuration: P.loopDuration });

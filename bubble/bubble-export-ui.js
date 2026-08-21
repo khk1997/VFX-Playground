@@ -1,6 +1,12 @@
 (() => {
   'use strict';
 
+  // 首頁的預覽 iframe 只是個展示用的 renderer，沒有匯出流程可走（匯出按鈕與
+  // 對話框都被 CSS 隱藏，也不可能被點到）。這支檔案原本仍會在每個預覽 iframe
+  // 裡跑完整初始化——查完所有對話框元素、掛上一整組 listener 與 matchMedia，
+  // 全是白付的。整支直接退出。
+  if (new URLSearchParams(location.search).has('preview')) return;
+
   const dialog = document.getElementById('exportDialog');
   const trigger = document.getElementById('exportBtn');
   if (!dialog || !trigger) return;
