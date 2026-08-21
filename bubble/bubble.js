@@ -22,6 +22,7 @@ import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-s
 import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-76';
 import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-76';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
+import createHopMotion from './motions/hop.js?v=svg-shape-76';
 import {
   createExtendedMotionRuntime, effectiveCapillaryHeight, isExtendedMotion,
 } from './motions/extended/index.js?v=extended-motions-4';
@@ -268,8 +269,22 @@ const DEFAULTS = {              // 數值滑桿
   jellyBounces: 3,
   jellyAmount: 0.22,
   jellyDamping: 2.4,
-  // 每次戳擊附帶的扭轉／側傾（度）。刻意小，主角是擠壓拉伸。
-  jellyTwist: 7,
+  // 每次戳擊附帶的扭轉／側傾（度）。刻意小，主角是擠壓拉伸。預設不扭轉。
+  jellyTwist: 0,
+  // 落地彈跳（見 motions/hop.js）。果凍底下的第二條分支（jellyStyle === 'bounce'），
+  // 經典落球彈跳：一圈裡跳 hopCount 次，一次比一次矮（每次乘上 hopDecay），最後
+  // 貼地歸零、接回下一圈的第一跳。起跳負責位移與速度拉伸，果凍只在每次落地被
+  // 撞出餘震——是「驅動」而不是「疊加」，所以這條路上果凍不跑自己的戳擊節奏。
+  // 原地戳擊那條分支完全不碰這組參數。
+  hopCount: 1,
+  hopHeight: 0.6,
+  hopDecay: 0.55,
+  // 重力有多重（見 hop.js 的 arcLift）。2 = 真實的等加速度重力（拋物線）；
+  // 調高＝頂點滯空更久、撞地更快更重；調低＝飄浮感。
+  hopGravity: 3.5,
+  hopAnticipation: 0.4,
+  hopStretch: 0.25,
+  hopSway: 0,
   // 融化（見 motions/melt.js）。滴落間隔要隨機、又要能無縫循環，靠的是「每顆水滴
   // 一個循環滴整數次」：頻率與相位偏移各自由雜湊決定，看起來雜亂，phase=0/1 卻同值。
   // 滴落頻率是每個循環的基準滴數，節奏差異讓各顆在這個基準上下錯開。
@@ -363,6 +378,7 @@ const SELECT_DEFAULTS = {
   motion: 'split',
   shapeSource: 'svg',
   shapeQuality: 'balanced',
+  jellyStyle: 'bounce',
   // 稜光光芒的打燈圖樣（見 shaders.js 的 prismBeamField）。grid 是原本唯一的
   // 那一種，其餘四種共用同一組座標與遮罩，只換亮度在方向球上的分布。
   rayBeamPattern: 'grid',
@@ -520,6 +536,14 @@ const SELECTS = {
   shapeSource: { uniform: 'uShapeType', map: { svg: 1, gltf: 2 } },
   // 僅控制下一次 GLB 烘焙尺寸，沒有對應 shader uniform。
   shapeQuality: { uniform: '', map: { performance: 48, balanced: 80, high: 128 } },
+  // 果凍底下的兩條分支。同樣沒有 shader uniform——差別純粹在 CPU 這邊走哪一條
+  // 變換（見 updateDropUniforms 的 jelly 分支）。
+  //
+  // 之所以要分成兩種而不是「起跳高度調 0 就等於原地果凍」：兩者搶的是同一份
+  // 造型變換，混在一起時參數會互相蓋掉——戳擊節奏由落地時機決定，「戳擊次數」
+  // 就變成一條調了沒反應的死滑桿；而落地衝擊必須先壓扁、原地戳擊卻是先鼓起，
+  // 同一組波形沒辦法同時是兩種極性。分支之後各自的參數才都是有效的。
+  jellyStyle: { uniform: '', map: { poke: 0, bounce: 1 } },
 };
 const COLORS = {
   bgColor: 'uBgColor',
@@ -762,6 +786,13 @@ const fmt = {
   jellyAmount: v => v === 0 ? '關閉' : Math.round(v * 100) + '%',
   jellyDamping: v => v.toFixed(1),
   jellyTwist: v => v === 0 ? '不扭轉' : v.toFixed(0) + '°',
+  hopCount: v => Math.round(v) + ' 跳/循環',
+  hopHeight: v => v === 0 ? '不彈跳' : Math.round(v * 100) + '%',
+  hopDecay: v => v === 1 ? '不衰減' : '每跳 x' + v.toFixed(2),
+  hopGravity: v => v.toFixed(1) + (Math.abs(v - 2) < 0.05 ? '（真實重力）' : v < 2 ? '（飄浮）' : '（沉重）'),
+  hopAnticipation: v => v === 0 ? '不蓄力' : Math.round(v * 100) + '%',
+  hopStretch: v => v === 0 ? '不拉伸' : Math.round(v * 100) + '%',
+  hopSway: v => v === 0 ? '不側移' : Math.round(v * 100) + '%',
 };
 
 function refreshCapillaryHeightReadout() {
@@ -976,6 +1007,23 @@ function rebuildMeltAnchors() {
   meltBottomAnchors = selectBottomAnchors(
     shapeTargets, MAX_DROPS, P.meltBand, Math.round(P.meltSeed),
   );
+}
+
+// 造型底部的 Y（本地座標）。起跳彈跳的擠壓拉伸要以「腳踩的那條地面」為支點，
+// 不是以造型中心——中心支點會讓壓扁時整顆往上縮、底部離地，看起來是懸空的球
+// 在自己變形，而不是撞在地上被壓扁。取樣點是烘焙好的，換形狀才需要重算，所以
+// 跟滴落點一樣用 shapeFieldSerial 當快取 key。
+let shapeBottomY = 0;
+let shapeBottomKey = null;
+function shapeBottom() {
+  const key = `${shapeFieldSerial}`;
+  if (key !== shapeBottomKey) {
+    shapeBottomKey = key;
+    let minY = 0;
+    for (const p of shapeTargets) if (p.y < minY) minY = p.y;
+    shapeBottomY = minY;
+  }
+  return shapeBottomY;
 }
 
 // 形狀變形的配對表：每顆水滴在形狀 A 的位置 → 在形狀 B 的位置（見 morph.js 的
@@ -1430,6 +1478,11 @@ const { shapeRigidMotion } = createShapeRigidMotion(P);
 // shapeRigidMotion 同一種形狀的變換物件，所以下面那條「歐拉角 → 旋轉矩陣」的
 // 通用轉換兩者共用。
 const { jellyTransform } = createJellyMotion(P);
+// 落地彈跳：果凍的另一條分支（jellyStyle === 'bounce'），走自己的蓄力／拋物線／
+// 速度拉伸。它跟果凍不是疊加而是「驅動」——每次落地把撞擊的時機與力道交給
+// jellyTransform（見 hop.js 的 driveIndex/driveE/driveStrength），果凍在這條路上
+// 不跑自己的戳擊節奏。兩條分支互斥，見 updateDropUniforms 的 jelly 分支。
+const { hopTransform } = createHopMotion(P);
 let shapeRigidNow = null;
 const shapeRigidVec = new THREE.Vector3();
 // 旋轉現在是任意軸（XYZ 各自振幅），用歐拉角組出一個 3x3 旋轉矩陣，比逐軸
@@ -1444,8 +1497,9 @@ const shapeRigidRot = new THREE.Matrix3();
 // 會分家。未啟用時（shapeRigidNow 為 null）就是恆等變換。
 function applyShapeRigid(x, y, z, out) {
   if (!shapeRigidNow) return out.set(x, y, z);
-  const { rotation, offsetY, scaleX, scaleY, scaleZ } = shapeRigidNow;
+  const { rotation, offsetX, offsetY, scaleX, scaleY, scaleZ } = shapeRigidNow;
   out.set(x * scaleX, y * scaleY, z * scaleZ).applyMatrix3(rotation);
+  out.x += offsetX || 0;
   out.y += offsetY;
   return out;
 }
@@ -1732,9 +1786,45 @@ function updateDropUniforms(t) {
   // 果凍走自己那條阻尼彈簧，不疊「造型動態」那組週期性旋轉／呼吸：兩者都在改
   // 同一份變換，疊起來會看不出哪一下是被戳的。果凍的形變本身就是這個模式的
   // 全部內容，讓它獨佔這個通道。
-  shapeRigidNow = P.motion === 'jelly'
-    ? jellyTransform(phase)
-    : usesShapeField(P.motion) ? shapeRigidMotion(phase) : null;
+  if (P.motion === 'jelly' && P.jellyStyle === 'bounce') {
+    // 落地彈跳：起跳的拋物線負責位移與速度拉伸，果凍只在每次落地被撞出餘震
+    // （見 hop.js 的 driveIndex／driveE／driveStrength）。這條路上果凍不跑自己
+    // 的戳擊節奏，「戳擊次數」在面板上是關掉的。
+    const hop = hopTransform(phase);
+    const jelly = hop && jellyTransform(phase, {
+      index: hop.driveIndex, e: hop.driveE, strength: hop.driveStrength,
+    });
+    if (!hop) {
+      shapeRigidNow = null;
+    } else {
+      const scaleY = (jelly ? jelly.scaleY : 1) * hop.scaleY;
+      // 支點補正：applyShapeRigid（跟 shader 的 shapeP）是以原點為支點縮放的，
+      // 所以壓扁時底部會跟著往上縮、離地。把底部縮掉的那段補回來，腳底就黏在
+      // 同一條地面上，看起來才是「撞到地面被壓扁」而不是「懸空自己變形」。
+      //   縮放後底部落在 B·scaleY，要回到 B，需要平移 B·(1 - scaleY)。
+      // groundAnchor 控制補多少：貼地時全補、騰空時不補（見 hop.js）。
+      //
+      // 果凍自己那段手調的下沉（jelly.js 的 offsetY）在這條路上不用——那是原地
+      // 戳擊沒有地面概念時的近似值，這裡有真正的幾何支點補正，兩者不該疊加。
+      const anchored = shapeBottom() * (1 - scaleY) * hop.groundAnchor;
+      shapeRigidNow = {
+        angleX: jelly ? jelly.angleX : 0,
+        angleY: jelly ? jelly.angleY : 0,
+        angleZ: jelly ? jelly.angleZ : 0,
+        offsetX: hop.offsetX,
+        offsetY: hop.offsetY + anchored,
+        scaleX: (jelly ? jelly.scaleX : 1) * hop.scaleX,
+        scaleY,
+        scaleZ: (jelly ? jelly.scaleZ : 1) * hop.scaleZ,
+      };
+    }
+  } else if (P.motion === 'jelly') {
+    // 原地戳擊：完全是改動前的那條路，一個字都沒動——既有的參數組合檔載進來
+    // 外觀必須一模一樣。
+    shapeRigidNow = jellyTransform(phase);
+  } else {
+    shapeRigidNow = usesShapeField(P.motion) ? shapeRigidMotion(phase) : null;
+  }
   if (shapeRigidNow) {
     shapeRigidEuler.set(shapeRigidNow.angleX, shapeRigidNow.angleY, shapeRigidNow.angleZ, 'XYZ');
     shapeRigidRot.setFromMatrix4(shapeRigidMat4.makeRotationFromEuler(shapeRigidEuler));
@@ -2104,7 +2194,11 @@ function updateDropUniforms(t) {
     uniforms.uShapeScale.value = 1 + holdBreathScale(phase);
     if (shapeRigidNow) uniforms.uShapeRigidRot.value.copy(shapeRigidNow.rotation);
     else uniforms.uShapeRigidRot.value.identity();
-    uniforms.uShapeRigidOffsetY.value = shapeRigidNow ? shapeRigidNow.offsetY : 0;
+    uniforms.uShapeRigidOffset.value.set(
+      shapeRigidNow ? (shapeRigidNow.offsetX || 0) : 0,
+      shapeRigidNow ? shapeRigidNow.offsetY : 0,
+      0,
+    );
     uniforms.uShapeRigidScale.value.set(
       shapeRigidNow ? shapeRigidNow.scaleX : 1,
       shapeRigidNow ? shapeRigidNow.scaleY : 1,
@@ -2780,7 +2874,7 @@ function initGL() {
     uShapeBScale: { value: 1 },
     // 造型剛體動態（見 motions/shapeRigid.js）。未啟用時維持單位變換。
     uShapeRigidRot: { value: new THREE.Matrix3() },
-    uShapeRigidOffsetY: { value: 0 },
+    uShapeRigidOffset: { value: new THREE.Vector3() },
     uShapeRigidScale: { value: new THREE.Vector3(1, 1, 1) },
     // contactLead（形狀在已抵達水滴附近先成形）是形狀匯聚專用的邏輯。崩解噴濺
     // 是它的反向過程，同一條規則會變成「形狀黏著碎片不肯消失、碎片之間先溶掉」，
@@ -3333,6 +3427,10 @@ const GATES = {
   ...motionGates(() => P.motion),
   svg:       () => P.shapeSource === 'svg',
   glb:       () => P.shapeSource !== 'svg',
+  // 果凍的兩條分支。跟 motion 的 gate 一樣用巢狀疊加：這兩個只宣告分支條件，
+  // 「必須是果凍模式」那半由祖先的 data-gate="jelly" 自動疊上。
+  jellyPoke:   () => P.jellyStyle === 'poke',
+  jellyBounce: () => P.jellyStyle === 'bounce',
 };
 
 function gateOpen(spec) {

@@ -133,11 +133,31 @@
     <div class="row" id="morphCellScaleRow"><label>碎塊大小</label><input type="range" id="morphCellScale" min="1" max="12" step="0.5" value="4"><span class="val" id="morphCellScale_v"></span></div>
     </div>
     <div class="modeBlock" data-gate="jelly">
-    <div class="row" id="jellyPokesRow"><label>戳擊次數</label><input type="range" id="jellyPokes" min="1" max="6" step="1" value="2"><span class="val" id="jellyPokes_v"></span></div>
+    <!-- 果凍的兩條分支。它們搶的是同一份造型變換，混在一起時參數會互相蓋掉
+         （落地衝擊要先壓扁、原地戳擊卻是先鼓起，同一組波形沒法同時是兩種極性；
+         戳擊節奏若由落地時機決定，「戳擊次數」就變成調了沒反應的死滑桿），
+         所以分成兩種各自完整的玩法，而不是靠「高度調 0」互相關掉。 -->
+    <div class="row"><label>果凍類型</label><select id="jellyStyle">
+      <option value="bounce">落地彈跳 Bounce</option>
+      <option value="poke">原地戳擊 Poke</option>
+    </select><span class="val"></span></div>
+    <!-- 只有原地戳擊自己排節奏；落地彈跳的節奏來自每一次落地。 -->
+    <div class="row" data-gate="jellyPoke" id="jellyPokesRow"><label>戳擊次數</label><input type="range" id="jellyPokes" min="1" max="6" step="1" value="2"><span class="val" id="jellyPokes_v"></span></div>
+    <!-- 以下四條是「果凍這塊膠體怎麼晃」，兩種分支共用。 -->
     <div class="row" id="jellyAmountRow"><label>彈性幅度</label><input type="range" id="jellyAmount" min="0" max="0.6" step="0.01" value="0.22"><span class="val" id="jellyAmount_v"></span></div>
     <div class="row" id="jellyBouncesRow"><label>回彈次數</label><input type="range" id="jellyBounces" min="1" max="8" step="1" value="3"><span class="val" id="jellyBounces_v"></span></div>
     <div class="row" id="jellyDampingRow"><label>阻尼衰減</label><input type="range" id="jellyDamping" min="0" max="8" step="0.1" value="2.4"><span class="val" id="jellyDamping_v"></span></div>
-    <div class="row" id="jellyTwistRow"><label>扭轉幅度</label><input type="range" id="jellyTwist" min="0" max="25" step="1" value="7"><span class="val" id="jellyTwist_v"></span></div>
+    <div class="row" id="jellyTwistRow"><label>扭轉幅度</label><input type="range" id="jellyTwist" min="0" max="25" step="1" value="0"><span class="val" id="jellyTwist_v"></span></div>
+    <div data-gate="jellyBounce" id="hopGroup">
+      <div class="effectSubhead">彈跳軌跡 Bounce Arc</div>
+      <div class="row" id="hopHeightRow"><label>彈跳高度</label><input type="range" id="hopHeight" min="0" max="0.6" step="0.01" value="0.6"><span class="val" id="hopHeight_v"></span></div>
+      <div class="row" id="hopCountRow"><label>每循環跳幾次</label><input type="range" id="hopCount" min="1" max="6" step="1" value="1"><span class="val" id="hopCount_v"></span></div>
+      <div class="row" id="hopDecayRow"><label>每跳衰減</label><input type="range" id="hopDecay" min="0.1" max="1" step="0.01" value="0.55"><span class="val" id="hopDecay_v"></span></div>
+      <div class="row" id="hopGravityRow"><label>墜落力道</label><input type="range" id="hopGravity" min="1.2" max="4" step="0.1" value="3.5"><span class="val" id="hopGravity_v"></span></div>
+      <div class="row" id="hopAnticipationRow"><label>起跳前蓄力</label><input type="range" id="hopAnticipation" min="0" max="0.4" step="0.01" value="0.4"><span class="val" id="hopAnticipation_v"></span></div>
+      <div class="row" id="hopStretchRow"><label>空中拉伸</label><input type="range" id="hopStretch" min="0" max="0.4" step="0.01" value="0.25"><span class="val" id="hopStretch_v"></span></div>
+      <div class="row" id="hopSwayRow"><label>左右漂移</label><input type="range" id="hopSway" min="0" max="0.3" step="0.01" value="0"><span class="val" id="hopSway_v"></span></div>
+    </div>
     </div>
     <div id="extendedMotionControls"></div>
     <div data-gate="split" class="row" id="flowSpeedRow"><label>動態張力</label><input type="range" id="flowSpeed" min="0" max="1.5" step="0.01" value="0.47"><span class="val" id="flowSpeed_v"></span></div>

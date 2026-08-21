@@ -151,7 +151,7 @@ uniform float uShapeBScale;
 // transpose()，但 vec3 * mat3 本來就定義成 transpose(mat3) * vec3，直接拿同一顆
 // 旋轉矩陣做「向量乘矩陣」即是反旋轉，不必另外傳一份轉置矩陣。
 uniform mat3  uShapeRigidRot;
-uniform float uShapeRigidOffsetY;
+uniform vec3  uShapeRigidOffset;
 uniform vec3  uShapeRigidScale;
 uniform float uContactLead;
 uniform float uShapeDepth;
@@ -867,7 +867,7 @@ float mapScene(vec3 p, bool smoothShape){
     // 座標，這裡要反過來——先減平移、再反旋轉、再反縮放——才能把 ray march
     // 的世界座標點換回造型原本定義的本地座標。未啟用時旋轉矩陣是單位矩陣、
     // scale 為單位值，等價於原本的 p / uShapeScale。
-    vec3 rigidP = vec3(p.x, p.y - uShapeRigidOffsetY, p.z);
+    vec3 rigidP = p - uShapeRigidOffset;
     vec3 unrotatedP = rigidP * uShapeRigidRot;
     vec3 shapeP = (unrotatedP / uShapeRigidScale) / uShapeScale;
     // 形狀 A/B 各自的獨立倍率再疊一層，跟 uShapeScale 是同一種均勻縮放，只是

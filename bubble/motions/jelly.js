@@ -26,23 +26,41 @@ export default function createJellyMotion(P) {
     return v - Math.floor(v);
   };
 
-  function jellyTransform(phase) {
+  // drive：外部（見 motions/hop.js）驅動戳擊的時機，落地那一刻直接觸發這裡
+  // 的戳擊，而不是果凍自己按 phase 均分出一個跟起跳節奏對不上的戳擊次數。
+  // 不給就走原來的獨立節奏（純果凍模式，沒疊起跳）。
+  function jellyTransform(phase, drive) {
     const amp = Math.max(0, P.jellyAmount);
     if (amp <= 0) return null;
-    // 戳擊次數必須是整數，否則最後一次會被循環接縫切斷在晃動中途。
-    const pokes = Math.max(1, Math.round(P.jellyPokes));
     const bounces = Math.max(1, Math.round(P.jellyBounces));
     const decay = Math.max(0, P.jellyDamping);
 
-    // 這一次戳擊是第幾發、以及距離它過了多久（e ∈ [0, 1)）。
-    const scaled = phase * pokes;
-    const index = Math.floor(scaled);
-    const e = scaled - index;
+    let index, e;
+    // 撞擊的極性與力道。落地是「從上方砸到地面」，第一下一定是壓扁（scaleY < 1）
+    // 才對；原本的正向波形第一下是鼓起，套到落地上就變成「一碰到地面就往上拉長」
+    // ——那是這版落地看起來怪的另一個主因。純果凍的戳擊沒有指定方向，維持原本
+    // 的正向，既有的參數組合外觀才不會變。
+    let polarity = 1;
+    let strength = 1;
+    if (drive) {
+      index = drive.index;
+      e = drive.e;
+      strength = drive.strength;
+      polarity = -1;
+      // 沒撞到就沒有餘震（例如從蓄力彈出去的第一次起跳）。
+      if (strength <= 0) return null;
+    } else {
+      // 戳擊次數必須是整數，否則最後一次會被循環接縫切斷在晃動中途。
+      const pokes = Math.max(1, Math.round(P.jellyPokes));
+      const scaled = phase * pokes;
+      index = Math.floor(scaled);
+      e = scaled - index;
+    }
 
     // 阻尼包絡。(1 - e) 那一項是循環接縫的保險：純指數衰減永遠不會真的到 0，
     // 阻尼調低時晃動會拖過接縫，接上下一次戳擊時就跳一下。
     const env = Math.exp(-decay * e) * (1 - e);
-    const wobble = env * Math.sin(bounces * Math.PI * 2 * e);
+    const wobble = polarity * strength * env * Math.sin(bounces * Math.PI * 2 * e);
 
     // 垂直擠壓拉伸是「果凍被戳」最好讀的一項：往下壓扁時橫向鼓出去，回彈時
     // 反過來。XZ 收放取 Y 的 0.45 倍而不是等量，讓體積看起來大致守恆但仍留
