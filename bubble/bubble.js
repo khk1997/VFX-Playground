@@ -36,6 +36,31 @@ patchEnvMapResolution();
 const PREVIEW = new URLSearchParams(location.search).has('preview');
 if (PREVIEW) document.documentElement.classList.add('preview-mode');
 
+// ===== 診斷開關（?diag=…，可用逗號組合，例如 ?diag=lowres,lowsteps）=====
+// 純粹為了在 Windows Chrome 上逐項 A/B 找出 bubble 卡頓的來源。沒有帶 diag
+// 參數時每一個旗標都是 false，正常行為完全不變 —— 下面所有使用處都是
+// 「if (DIAG.xxx)」的形式，不會改動既有的計算。
+//
+//   lowres       強制 drawing buffer DPR = 1（CSS 尺寸不變）
+//   lowsteps     只把 raymarch 主迴圈步數壓到 32
+//   nodispersion 關掉色散／稜光／光譜焦散三個既有開關
+//   static       初始化完成後只算繪一幀，不啟動 RAF 迴圈
+//   compileonly  只建立 renderer 並編譯 program，不算繪全螢幕影格
+const DIAG = (() => {
+  const raw = new URLSearchParams(location.search).get('diag');
+  const set = new Set((raw || '').split(',').map(s => s.trim()).filter(Boolean));
+  return {
+    any: set.size > 0,
+    list: [...set],
+    lowres: set.has('lowres'),
+    lowsteps: set.has('lowsteps'),
+    nodispersion: set.has('nodispersion'),
+    static: set.has('static'),
+    compileonly: set.has('compileonly'),
+  };
+})();
+if (DIAG.any) console.info('[bubble diag] 啟用:', DIAG.list.join(', '));
+
 const canvas = document.getElementById('stage');
 const mobileRenderQuery = window.matchMedia('(max-width: 760px)');
 const GLASS_HDRI_URL = new URL('./assets/photo_studio2_london_hall_1k.hdr', import.meta.url).href;
@@ -582,7 +607,9 @@ const DISPERSION_TOGGLE_KEYS = ['dispersionEnabled', 'rayDispersionEnabled', 'sp
 // 色散總開關：純粹是一個總閘，關閉時三個效果一律停用，但不動它們各自的
 // 開關狀態；重新打開總開關後，各效果回到自己原本開/關的樣子。不隨參數組合
 // 存檔，只是面板互動的捷徑，所以是一個獨立於 P 的暫時狀態。
-let dispersionMasterOn = true;
+// 診斷 nodispersion 直接把總閘關掉：applyToggle 已經用它 gate 這三個效果，
+// 等同面板上關掉「色散」總開關，是程式本來就支援的狀態。
+let dispersionMasterOn = !DIAG.nodispersion;
 
 function applyToggle(key) {
   const target = TOGGLES[key];
@@ -831,13 +858,13 @@ import { VERT, FRAG } from './shaders.js?v=universal-64';
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
 let pmremGenerator = null, pmremTarget = null;
 let inited = false;
-const maxRenderDpr = PREVIEW ? 1 : mobileRenderQuery.matches
+const maxRenderDpr = DIAG.lowres ? 1 : PREVIEW ? 1 : mobileRenderQuery.matches
   ? Math.min(window.devicePixelRatio || 1, 1.5)
   : Math.min(window.devicePixelRatio || 1, 2);
 // 拖曳時的解析度。fragment 成本與像素面積成線性（實測 1/12 像素 → 1/8.5 幀時），
 // 所以這個下限是互動流暢度最大的單一槓桿：舊版桌面只從 2.0 降到 1.75，像素僅少
 // 23%；降到 1.25 後只剩 39%。放手後會立刻回到 maxRenderDpr。
-const minRenderDpr = PREVIEW ? 1 : Math.min(maxRenderDpr, 1.25);
+const minRenderDpr = DIAG.lowres ? 1 : PREVIEW ? 1 : Math.min(maxRenderDpr, 1.25);
 let qualityDpr = maxRenderDpr;
 let qualitySteps = PREVIEW ? 56 : mobileRenderQuery.matches ? 64 : 88;
 let qualitySampleStarted = performance.now();
@@ -2918,6 +2945,7 @@ function initGL() {
   if (!PREVIEW) bindPointer();
   syncPanelToUniforms();
   loadMaterialEnvironment(P.materialStyle);
+  if (DIAG.any) requestAnimationFrame(() => window.__bubbleDiagReport());
 }
 
 function resize() {
@@ -2934,6 +2962,8 @@ function resize() {
 // frame() 覆寫掉，等於死碼；而 frame() 的 formation 分支又漏看了 dragging，
 // 於是 Formation 模式拖曳時完全沒有降級。現在只有這一個決策點。
 function resolveMaxSteps() {
+  // 診斷：只壓 raymarch 主迴圈步數，其他視覺設定一概不動。
+  if (DIAG.lowsteps) return 32;
   // 多水滴 + 形狀場會增加每一步的取樣成本；60 步仍足以覆蓋保守包圍球，
   // 並避免高 DPR 桌面在 Formation 模式失去即時預覽能力。
   if (usesShapeField(P.motion)) return Math.min(qualitySteps, dragging ? 48 : 60);
@@ -3942,11 +3972,112 @@ function updatePausedCameraRotation() {
   rotM4.multiply(tmpZ);
   uniforms.uRot.value.setFromMatrix4(rotM4);
 }
+// 診斷用的現況報告。任何時候都可以在 console 呼叫 __bubbleDiagReport()，
+// 帶 ?diag= 時初始化完成後也會自動印一次。純讀取，不改變任何狀態。
+window.__bubbleDiagReport = function () {
+  const gl = renderer && renderer.getContext ? renderer.getContext() : null;
+  const cssW = canvas.clientWidth, cssH = canvas.clientHeight;
+  const steps = uniforms ? uniforms.uMaxSteps.value : null;
+  // 每像素的 mapScene 呼叫次數：主 raymarch 迴圈 + 法線差分 + 內部折射追蹤。
+  // 法線在 SVG 造型路徑是分軸中央差分（6 次），其餘是四面體（4 次）。
+  const normalTaps = (uniforms && uniforms.uShapeType.value === 1 && uniforms.uShapeProgress.value > 0.001) ? 6 : 4;
+  const INTERIOR_STEPS = 28;
+  const mapSceneCalls = (steps || 0) + normalTaps + INTERIOR_STEPS;
+  // 每次 mapScene 內部的迴圈上限（GLSL 端的編譯期常數，執行期靠 break 提早跳出）
+  const inner = {
+    主滴迴圈上限: MAX_DROPS,          // GLSL: MAXN = 12
+    衛星滴迴圈: 3,                    // GLSL: for (s = 0; s < 3)
+    微滴迴圈上限: MAX_MICRO_DROPS,    // GLSL: MAX_MICRO = 48（含 texture2D 取樣）
+    負形迴圈上限: 4,                  // GLSL: MAX_NEGATIVE = 4
+  };
+  const innerMax = inner.主滴迴圈上限 + inner.衛星滴迴圈 + inner.微滴迴圈上限 + inner.負形迴圈上限;
+  const innerActual = Math.round(uniforms ? uniforms.uCount.value : 0) + 3
+    + Math.round(uniforms ? uniforms.uMicroCount.value : 0) + 4;
+  const r = {
+    模式: { preview: PREVIEW, diag: DIAG.list, motion: P.motion },
+    尺寸: {
+      CSS: cssW + ' x ' + cssH,
+      drawingBuffer: gl ? gl.drawingBufferWidth + ' x ' + gl.drawingBufferHeight : '(未初始化)',
+      canvas屬性: canvas.width + ' x ' + canvas.height,
+      'window.devicePixelRatio': window.devicePixelRatio,
+      'renderer.getPixelRatio()': renderer ? renderer.getPixelRatio() : '(未初始化)',
+      像素數: gl ? (gl.drawingBufferWidth * gl.drawingBufferHeight).toLocaleString() : '(未初始化)',
+    },
+    raymarch: {
+      'uMaxSteps(本幀)': steps,
+      主迴圈硬上限: 88,
+      法線差分次數: normalTaps,
+      內部折射追蹤步數: INTERIOR_STEPS,
+      每像素mapScene次數: mapSceneCalls,
+      mapScene內層迴圈上限: inner,
+      內層上限合計: innerMax,
+      內層實際跑幾次: innerActual,
+      每像素SDF評估_最壞: (mapSceneCalls * innerMax).toLocaleString(),
+      每像素SDF評估_目前參數: (mapSceneCalls * innerActual).toLocaleString(),
+    },
+    shader特性: {
+      巢狀迴圈: '是（raymarch 迴圈內呼叫 mapScene，mapScene 內部還有 4 層迴圈）',
+      迴圈上限由uniform動態控制: '是（for i<88 內 if (i >= uMaxSteps) break）',
+      大的固定迴圈常數: 'MAX_MICRO=48（內含 texture2D）、主迴圈 88、內部追蹤 28',
+      discard: '無',
+      precision: 'highp float',
+      WebGL版本: gl ? (gl instanceof WebGL2RenderingContext ? 'WebGL2' : 'WebGL1') : '(未初始化)',
+      antialias: gl ? !!gl.getContextAttributes().antialias : '(未初始化)',
+    },
+    render管線: {
+      已編譯program數: renderer ? renderer.info.programs.length : '(未初始化)',
+      // 注意：three.js 的 info.render 每次 render() 都會重置，而 initGL() 裡的
+      // PMREM 環境貼圖本來就會算繪幾個小 quad（材質必需）。所以這個數字不能用來
+      // 判斷「全螢幕 raymarch 有沒有跑」——compileonly 的差別在於它從不對主 mesh
+      // 送出全螢幕 draw call，而不是完全沒有任何 draw call。
+      最後一次render的drawCall數: renderer ? renderer.info.render.calls : '(未初始化)',
+      pass數: 1,
+      framebuffer: '正常算繪直接畫到 canvas；WebGLRenderTarget 只用於匯出',
+      postprocessing: '無',
+      環境貼圖: 'PMREM 一次性產生（換材質/HDRI 時才重算）',
+    },
+    色散: {
+      色散總閘: dispersionMasterOn,
+      'uDispersionEnabled': uniforms ? uniforms.uDispersionEnabled.value : null,
+      'uRayDispersionEnabled': uniforms ? uniforms.uRayDispersionEnabled.value : null,
+      'uSpectralCausticEnabled': uniforms ? uniforms.uSpectralCausticEnabled.value : null,
+      取樣方式: '不是多次 raymarch，而是同一條光線上的 RGB 三通道相位/OPD 位移（稜光圖樣為 3 次迴圈的程序化雜訊）',
+    },
+  };
+  console.log('[bubble diag] 現況報告', r);
+  return r;
+};
+
+// 診斷 static / compileonly 只該執行一次；用一個旗標擋掉後續的 syncLoop 呼叫
+// （visibilitychange、postMessage 都會再叫一次）。
+let diagOnceDone = false;
+
 function syncLoop() {
   if (isPaused()) {
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
   } else {
     if (!inited) initGL();
+    // 診斷：這兩個模式都不啟動 RAF 迴圈，用來把「初始化／編譯成本」與
+    // 「持續算繪成本」分開。initGL() 已經跑完（renderer、scene、shader、
+    // uniform、resize、環境貼圖都就緒），差別只在後面做到哪一步。
+    if (DIAG.compileonly) {
+      if (!diagOnceDone) {
+        diagOnceDone = true;
+        // 只把 program 編譯／連結起來，不送出全螢幕 draw call。
+        renderer.compile(scene, camera);
+        console.info('[bubble diag] compileonly: program 已編譯／連結，未算繪全螢幕影格');
+      }
+      return;
+    }
+    if (DIAG.static) {
+      if (!diagOnceDone) {
+        diagOnceDone = true;
+        uniforms.uMaxSteps.value = resolveMaxSteps();
+        renderer.render(scene, camera);
+        console.info('[bubble diag] static: 已算繪 1 幀，不啟動 RAF 迴圈');
+      }
+      return;
+    }
     if (!rafId) { last = performance.now(); rafId = requestAnimationFrame(frame); }
   }
 }
