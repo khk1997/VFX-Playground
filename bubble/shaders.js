@@ -86,6 +86,20 @@ uniform float uCompositionOffsetX;
 uniform float uCompositionOffsetY;
 uniform int   uMaxSteps;
 
+// ===== shader cache 破壞用的 salt（?shaderRun=N）=====
+// 目的：強迫每次都是 cold compile。單純注入一個「沒被用到」的 #define 不夠 ——
+// ANGLE 翻出來的 HLSL 可能完全相同，於是仍然命中驅動的 bytecode 快取。所以這裡讓
+// SHADER_RUN 真的參與一次運算，不同 N 會產生不同的常數字面值，翻譯後的 HLSL 也就
+//必然不同。
+//
+// 1e-30 這個量級遠低於任何可見門檻（乘上 N 也只有 1e-28 級），對畫面與 SDF 的
+// epsilon（0.001）都沒有影響。未定義 SHADER_RUN 時整段不存在。
+#ifdef SHADER_RUN
+const float SHADER_RUN_SALT = float(SHADER_RUN) * 1e-30;
+#else
+const float SHADER_RUN_SALT = 0.0;
+#endif
+
 uniform int   uCount;
 uniform float uViscosity;
 uniform float uWobble;
@@ -1461,7 +1475,7 @@ void main(){
   float tEnd = -qb + qh;
   if (tEnd < 0.0){ gl_FragColor = bg; return; }
 
-  float t = max(0.0, -qb - qh);
+  float t = max(0.0, -qb - qh) + SHADER_RUN_SALT;
   bool hit = false;
   for (int i = 0; i < MAX_MARCH_COMPILE; i++){
     if (i >= uMaxSteps) break;
@@ -2402,6 +2416,21 @@ vec3 loopNoiseOffset(float speed){
 }
 #endif
 
+
+// ===== shader cache 破壞用的 salt（?shaderRun=N）=====
+// 目的：強迫每次都是 cold compile。單純注入一個「沒被用到」的 #define 不夠 ——
+// ANGLE 翻出來的 HLSL 可能完全相同，於是仍然命中驅動的 bytecode 快取。所以這裡讓
+// SHADER_RUN 真的參與一次運算，不同 N 會產生不同的常數字面值，翻譯後的 HLSL 也就
+//必然不同。
+//
+// 1e-30 這個量級遠低於任何可見門檻（乘上 N 也只有 1e-28 級），對畫面與 SDF 的
+// epsilon（0.001）都沒有影響。未定義 SHADER_RUN 時整段不存在。
+#ifdef SHADER_RUN
+const float SHADER_RUN_SALT = float(SHADER_RUN) * 1e-30;
+#else
+const float SHADER_RUN_SALT = 0.0;
+#endif
+
 float smin(float a, float b, float k){
   float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
   return mix(b, a, h) - k * h * (1.0 - h);
@@ -2440,7 +2469,7 @@ void main(){
   vec3 ro = uRot * vec3(0.0, 0.0, uCameraDistance);
   vec3 rd = uRot * normalize(vec3(uv * uTanHalfFov, -1.0));
 
-  float t = 0.0;
+  float t = SHADER_RUN_SALT;
   bool hit = false;
   for (int i = 0; i < MAX_MARCH_COMPILE; i++){
     float d = mapScene(ro + rd * t);

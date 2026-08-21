@@ -74,6 +74,20 @@ if (PREVIEW) document.documentElement.classList.add('preview-mode');
 //   lowcompileloops  minshader2 再加上：主 raymarch 展開上限 88→16、內部折射 28→8。
 //                    純二分診斷探針 —— 步數不足畫面會破，只用來確認 ANGLE 是否
 //                    卡在 loop expansion，不會套用到正式版。
+// ?shaderRun=N —— 純粹用來強迫 cold compile。N 會注入成 SHADER_RUN define，
+// 而 shader 裡讓它真的參與一次運算（見 shaders.js 的 SHADER_RUN_SALT），所以不同 N
+// 會產生不同的 GLSL 原始碼、不同的 Three.js program cache key、也不同的翻譯結果，
+// 驅動的 shader bytecode 快取必然 miss。
+//
+// 這件事是必要的：先前那一系列 probe 的「秒開 / 卡死」結論其實混進了快取暖機的影響
+// —— 同一個 URL 重測時已經不是 cold compile 了。
+const SHADER_RUN = (() => {
+  const raw = new URLSearchParams(location.search).get('shaderRun');
+  if (raw === null) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.round(n) : null;
+})();
+
 const DIAG = (() => {
   const raw = new URLSearchParams(location.search).get('diag');
   const set = new Set((raw || '').split(',').map(s => s.trim()).filter(Boolean));
@@ -897,7 +911,52 @@ function refreshLoopScaledReadouts() {
   refreshShatterTimelineReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=baseline-3';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=baseline-4';
+
+// cold compile 的時間量測。
+//
+// 量的是「各段的耗時」而不是「距某個起點的偏移」—— 偏移會把觸發時機混進來。
+// 實測踩到過：initGL 其實在載入時就經由 requestPausedRender 跑掉了，而 static 那一幀
+// 要等 syncLoop 被觸發，兩者之間的空檔會被算成編譯時間（本機量到 9.8 秒，其實是
+// 測試工具的往返延遲，跟 shader 完全無關）。改量區間耗時就沒有這個問題。
+//
+// 每段結束前都查詢 LINK_STATUS 強制編譯／連結完成（見 forceProgramLink）。
+const diagTiming = {
+  shaderRun: null,
+  initGL耗時ms: null,
+  compile耗時ms: null,
+  第一幀耗時ms: null,
+};
+
+// 強制 shader 編譯／連結真正完成。
+//
+// 不用 gl.finish()：實測那是錯的工具，在未被合成的分頁裡它會等到合成器某個 tick，
+// 量出來的跟 shader 規模無關（64 行的 baseline 比 184 份 snoise 的 probe 還久）。
+// LINK_STATUS 是同步的 GL 查詢，驅動必須先把連結做完才能回答，逼出的正是編譯＋連結
+// 這段成本，而且不牽涉 present／合成。
+function forceProgramLink() {
+  try {
+    const gl = renderer.getContext();
+    for (const wrapper of renderer.info.programs || []) {
+      const glProgram = wrapper.program || wrapper;
+      if (glProgram) gl.getProgramParameter(glProgram, gl.LINK_STATUS);
+    }
+  } catch (_) {}
+}
+
+// 量一段區間的耗時。fn 跑完後強制連結完成，再記錄。
+function diagMeasure(key, fn) {
+  if (!DIAG.any) return fn();
+  const t0 = performance.now();
+  const out = fn();
+  forceProgramLink();
+  const ms = Math.round((performance.now() - t0) * 10) / 10;
+  diagTiming[key] = ms;
+  diagTiming.shaderRun = SHADER_RUN;
+  console.info('[bubble diag] ' + key + ' = ' + ms + 'ms'
+    + (SHADER_RUN !== null ? '（shaderRun=' + SHADER_RUN + '，cold）' : '（未帶 shaderRun，可能命中快取）'));
+  return out;
+}
 
 // 這一份 shader 要編譯哪些功能。回傳的物件直接交給 ShaderMaterial.defines，
 // Three.js 會在 fragment shader 前面注入對應的 #define，GLSL 那邊用 #ifdef
@@ -924,6 +983,11 @@ function shaderFeatures() {
   // minshader2 = minshader + 兩項編譯期收斂（見下方 slim2 的使用處）。
   // minshader 在 Windows ANGLE 上還是跨不過編譯門檻（實測與 compileonly 體感相同），
   // 所以再往下砍固定迴圈上限與分支數，但一樣不碰任何數學。
+  // shaderRun 兩條路都要注入，否則測不到正式 shader 變體的 cold compile。
+  const withRun = d => {
+    if (SHADER_RUN !== null) d.SHADER_RUN = SHADER_RUN;
+    return d;
+  };
   // 基線與 probe 系列都用 FRAG_BASELINE，只吃這兩個上限加上各自的 PROBE_* 開關。
   if (usesBaselineShader()) {
     const d = { MAX_MARCH_COMPILE: 4, MAX_DROPS_COMPILE: 2 };
@@ -982,7 +1046,7 @@ function shaderFeatures() {
     defines.MAX_MARCH_COMPILE = 16;
     defines.MAX_INTERIOR_COMPILE = 8;
   }
-  return defines;
+  return withRun(defines);
 }
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
@@ -2877,6 +2941,7 @@ function makeSpectralCausticTexture() {
 function initGL() {
   if (inited) return;
   inited = true;
+  const initGLStart = performance.now();
 
   // 全螢幕 shader 本身沒有多邊形鋸齒，關閉 MSAA 可省下額外 framebuffer 成本。
   renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false });
@@ -3081,7 +3146,13 @@ function initGL() {
   if (!PREVIEW) bindPointer();
   syncPanelToUniforms();
   loadMaterialEnvironment(P.materialStyle);
-  if (DIAG.any) requestAnimationFrame(() => window.__bubbleDiagReport());
+  if (DIAG.any) {
+    forceProgramLink();
+    diagTiming.shaderRun = SHADER_RUN;
+    diagTiming.initGL耗時ms = Math.round((performance.now() - initGLStart) * 10) / 10;
+    console.info('[bubble diag] initGL耗時ms = ' + diagTiming.initGL耗時ms + 'ms');
+    requestAnimationFrame(() => window.__bubbleDiagReport());
+  }
 }
 
 function resize() {
@@ -4170,6 +4241,12 @@ window.__bubbleDiagReport = function () {
     + Math.round(uniforms ? uniforms.uNegativeCount.value : 0);
   const r = {
     模式: { preview: PREVIEW, diag: DIAG.list, motion: P.motion },
+    coldCompile量測: {
+      shaderRun: SHADER_RUN === null ? '(未指定 → 可能命中已暖好的 shader cache)' : SHADER_RUN,
+      ...diagTiming,
+          說明: '各段的區間耗時（非距起點偏移）；每段結束前查詢 LINK_STATUS 強制'
+        + '編譯／連結完成。不用 gl.finish —— 那會等到合成器 tick，量到的與 shader 規模無關。',
+    },
     尺寸: {
       CSS: cssW + ' x ' + cssH,
       drawingBuffer: gl ? gl.drawingBufferWidth + ' x ' + gl.drawingBufferHeight : '(未初始化)',
@@ -4342,7 +4419,7 @@ function syncLoop() {
       if (!diagOnceDone) {
         diagOnceDone = true;
         // 只把 program 編譯／連結起來，不送出全螢幕 draw call。
-        renderer.compile(scene, camera);
+        diagMeasure('compile耗時ms', () => renderer.compile(scene, camera));
         console.info('[bubble diag] compileonly: program 已編譯／連結，未算繪全螢幕影格');
       }
       return;
@@ -4357,7 +4434,7 @@ function syncLoop() {
         // updateDropUniforms 之後，兩者都寫同一顆 uniform）。那樣量到的成本不具代表性。
         // frame() 開頭會自己排下一次，這裡算完立刻取消，只留這一幀。
         last = performance.now();
-        frame(performance.now());
+        diagMeasure('第一幀耗時ms', () => frame(performance.now()));
         if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
         console.info('[bubble diag] static: 已算繪 1 幀，不啟動 RAF 迴圈');
       }
@@ -4906,7 +4983,13 @@ function frame(now) {
   uniforms.uTime.value = simT;
   syncEdgeDropMotion(simT);
   uniforms.uMaxSteps.value = resolveMaxSteps();
-  renderer.render(scene, camera);
+  if (DIAG.any && diagTiming.第一幀耗時ms === null) {
+    diagMeasure('第一幀耗時ms', () => renderer.render(scene, camera));
+  } else {
+    renderer.render(scene, camera);
+  }
+  // 只在第一幀標記一次；之後 diagTiming.第一幀完成ms 已有值就不再量。
+
   updateExportCameraPreview();
 }
 
