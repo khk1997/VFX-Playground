@@ -51,6 +51,10 @@ if (PREVIEW) document.documentElement.classList.add('preview-mode');
 //   probe-snoise  以 compilerbaseline 為基底，只加回 snoise 本體（含 mod289 /
 //                permute / taylorInvSqrt），在 main 裡呼叫一次。不含 fbm、
 //                不含 fbmFast、不進 mapScene —— 所以不在 raymarch 呼叫鏈內。
+//   probe-fbm    以 compilerbaseline 為基底，加回 snoise + fbm（含它那 4 次迴圈），
+//                fbm 只在 main 裡呼叫一次。不含 fbmFast、不進 mapScene。
+//                用來把「snoise 展開 4 次」與「進 raymarch 呼叫鏈」分開量：
+//                probe-snoise（單次呼叫）已確認秒開，所以這一步只增加倍數。
 //   probe-noise  以 compilerbaseline 為基底，只加回 snoise / fbm / fbmFast
 //                （沿用正式 shader 同一份 NOISE_GLSL）與最小呼叫路徑。
 //   compilerbaseline  換成一支獨立的最小 fragment shader（見 shaders.js 的
@@ -78,6 +82,7 @@ const DIAG = (() => {
     compilerbaseline: set.has('compilerbaseline'),
     probeNoise: set.has('probe-noise'),
     probeSnoise: set.has('probe-snoise'),
+    probeFbm: set.has('probe-fbm'),
   };
 })();
 if (DIAG.any) console.info('[bubble diag] 啟用:', DIAG.list.join(', '));
@@ -892,7 +897,7 @@ import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=baseline-3';
 // 基線與所有 probe 都共用 FRAG_BASELINE 那支最小 shader，差別只在 PROBE_* 開關。
 // 這樣「baseline → +A → +B」每一步的差異就只有一個功能，不會混進別的變因。
 function usesBaselineShader() {
-  return DIAG.compilerbaseline || DIAG.probeNoise || DIAG.probeSnoise;
+  return DIAG.compilerbaseline || DIAG.probeNoise || DIAG.probeSnoise || DIAG.probeFbm;
 }
 
 function shaderFeatures() {
@@ -907,6 +912,11 @@ function shaderFeatures() {
     if (DIAG.probeSnoise) {
       d.NEED_SNOISE = '';
       d.CALL_SNOISE_MAIN = '';        // 在 main 呼叫一次，不進 mapScene
+    }
+    if (DIAG.probeFbm) {
+      d.NEED_SNOISE = '';
+      d.NEED_FBM = '';                // 含那個 for (i < 4) 的 4 octave 迴圈
+      d.CALL_FBM_MAIN = '';           // 只在 main 呼叫一次，不進 mapScene
     }
     if (DIAG.probeNoise) {
       d.NEED_SNOISE = '';
@@ -4167,6 +4177,7 @@ window.__bubbleDiagReport = function () {
       使用的shader: usesBaselineShader()
         ? 'FRAG_BASELINE（最小 shader'
           + (DIAG.probeSnoise ? ' + snoise' : '')
+          + (DIAG.probeFbm ? ' + snoise/fbm' : '')
           + (DIAG.probeNoise ? ' + snoise/fbm/fbmFast' : '')
           + '）'
         : 'FRAG（正式）',
