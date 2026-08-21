@@ -42,6 +42,19 @@ let previewLoadDistance = 0;
 const neighborLoadDistance = () => (mobilePreviewQuery.matches ? 1 : 2);
 let neighborPreloadHandle = 0;
 
+// ===== 暫時性診斷開關（A/B 用，不是最終行為）=====
+// Windows Chrome 實測：停在 Sakura 十秒完全正常，但「第一次切換卡片」之後整個
+// 瀏覽器嚴重卡頓，且不限定切到哪一個特效。第一次切換剛好就是 scheduleNeighborPreload
+// 抬升載入距離的時機——那一刻會一口氣多建立最多四個 preview iframe（桌面距離 2），
+// 每個都是獨立的 document + Canvas/WebGL context。這個開關把變因收斂成
+// 「任何時間 DOM 裡最多只有 1 個 preview iframe」，用來確認卡頓是否來自並存的
+// preview 數量。
+//
+// 打開時：完全停用鄰近預載（previewLoadDistance 恆為 0），且 cache 上限 = 1，
+// 所以切換卡片時上一個 iframe 會在同一個同步區塊內立刻被移除。
+// 還原方式：把這個常數改成 false（其餘邏輯都保持原樣，沒有被刪掉）。
+const DIAG_SINGLE_PREVIEW = true;
+
 // 使用者切過卡片之後，才把鄰近卡片預熱起來。
 //
 // 走 requestIdleCallback 而不是直接載：預載絕對不能跟 active 卡片的首次渲染
@@ -50,6 +63,7 @@ let neighborPreloadHandle = 0;
 // 只需要抬升一次；之後 updatePreviewPlayback 自然就會照新的距離預熱鄰居，
 // 讓後續切換不會有等待感。
 function scheduleNeighborPreload() {
+  if (DIAG_SINGLE_PREVIEW) return;   // 診斷中：不預載任何鄰居
   if (previewLoadDistance >= neighborLoadDistance() || neighborPreloadHandle) return;
   const run = () => {
     neighborPreloadHandle = 0;
@@ -250,7 +264,7 @@ function trimPreviewCache(protectedIndices) {
   const loaded = iframes
     .map((frame, index) => ({ frame, index }))
     .filter(item => item.frame && item.frame.dataset.loaded === '1');
-  const cacheLimit = mobilePreviewQuery.matches ? 3 : 5;
+  const cacheLimit = DIAG_SINGLE_PREVIEW ? 1 : (mobilePreviewQuery.matches ? 3 : 5);
   if (loaded.length <= cacheLimit) return;
 
   loaded
@@ -425,7 +439,7 @@ window.addEventListener('resize', () => {
 });
 mobilePreviewQuery.addEventListener('change', () => {
   // 已經抬升過就跟著新的斷點換算；還沒抬升（首屏）就維持只載 active。
-  if (previewLoadDistance > 0) previewLoadDistance = neighborLoadDistance();
+  if (!DIAG_SINGLE_PREVIEW && previewLoadDistance > 0) previewLoadDistance = neighborLoadDistance();
   updatePreviewPlayback();
 });
 /* iframe 載入完成後再同步一次播放狀態（load 前 postMessage 會沒人聽） */
