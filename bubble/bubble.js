@@ -90,10 +90,9 @@ const SHADER_RUN = (() => {
 
 // ?diagTiming=1 —— 計時工具，跟 shaderRun 完全獨立。
 //
-// 拆開的理由：計時用的 forceProgramLink() 會查詢 LINK_STATUS，那會強迫驅動「同步」
-// 完成連結。Windows 上 three.js 通常走 KHR_parallel_shader_compile 把編譯丟到背景
-// 執行緒，而這個查詢會把它變成主執行緒阻塞 —— 也就是說計時工具本身就可能把
-// 「背景慢慢編」變成「畫面卡住」。必須能單獨關掉它才分得出是誰造成的。
+// 拆開是必要的，而且已經證實有意義：舊版計時用同步的 LINK_STATUS 查詢逼連結完成，
+// Windows 實測 shaderRun=2100/2101 帶 diagTiming 就卡死、2200/2201 不帶就正常 ——
+// 卡頓來自量測工具而不是 shader。現在計時改成非阻塞輪詢（見 startDiagTiming）。
 const DIAG_TIMING = new URLSearchParams(location.search).get('diagTiming') === '1';
 
 const DIAG = (() => {
@@ -921,49 +920,96 @@ function refreshLoopScaledReadouts() {
 
 import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=baseline-5';
 
-// cold compile 的時間量測。
+// cold compile 的時間量測（?diagTiming=1）。
 //
-// 量的是「各段的耗時」而不是「距某個起點的偏移」—— 偏移會把觸發時機混進來。
-// 實測踩到過：initGL 其實在載入時就經由 requestPausedRender 跑掉了，而 static 那一幀
-// 要等 syncLoop 被觸發，兩者之間的空檔會被算成編譯時間（本機量到 9.8 秒，其實是
-// 測試工具的往返延遲，跟 shader 完全無關）。改量區間耗時就沒有這個問題。
+// 絕對不做任何會強迫同步的查詢。前一版用 gl.getProgramParameter(p, LINK_STATUS)
+// 逼連結完成，Windows 實測那會直接讓 Chrome 卡住 —— 它把 three.js 交給
+// KHR_parallel_shader_compile 在背景做的編譯，硬拉回主執行緒等待。同一個 URL 只要
+// 不帶 diagTiming 就完全正常、帶了就卡，所以卡頓是量測工具造成的，不是 shader。
 //
-// 每段結束前都查詢 LINK_STATUS 強制編譯／連結完成（見 forceProgramLink）。
+// 改用 KHR_parallel_shader_compile 的 COMPLETION_STATUS_KHR：那個查詢會立刻回傳
+// 布林值（還沒編完就是 false），不阻塞。用 rAF 輪詢直到全部為 true，記錄牆鐘時間。
 const diagTiming = {
   shaderRun: null,
-  initGL耗時ms: null,
-  compile耗時ms: null,
-  第一幀耗時ms: null,
+  parallelCompile支援: null,
+  program建立到編譯完成ms: null,
+  輪詢次數: null,
+  第一幀render耗時ms: null,
+  狀態: null,
 };
 
-// 強制 shader 編譯／連結真正完成。
+let diagTimingStarted = false;
+
+// 非阻塞地等所有 program 編譯完成，然後才量第一幀。
 //
-// 不用 gl.finish()：實測那是錯的工具，在未被合成的分頁裡它會等到合成器某個 tick，
-// 量出來的跟 shader 規模無關（64 行的 baseline 比 184 份 snoise 的 probe 還久）。
-// LINK_STATUS 是同步的 GL 查詢，驅動必須先把連結做完才能回答，逼出的正是編譯＋連結
-// 這段成本，而且不牽涉 present／合成。
-function forceProgramLink() {
-  try {
-    const gl = renderer.getContext();
+// 順序刻意是「先 compile、輪詢到完成、才 render」：如果直接 render，three.js 內部
+// 會在真正要畫之前自己把 program 準備好，那段等待就混進第一幀的時間裡，兩者分不開。
+function startDiagTiming(onDone) {
+  if (diagTimingStarted) { onDone(); return; }
+  diagTimingStarted = true;
+
+  const gl = renderer.getContext();
+  let ext = null;
+  try { ext = gl.getExtension('KHR_parallel_shader_compile'); } catch (_) {}
+  diagTiming.shaderRun = SHADER_RUN;
+  diagTiming.parallelCompile支援 = !!ext;
+
+  if (!ext) {
+    // 沒有這個擴充就無法在不阻塞的前提下知道「編完了沒」。刻意不退回同步查詢
+    // —— 那正是造成卡頓的東西。
+    diagTiming.狀態 = '此環境不支援 KHR_parallel_shader_compile，略過非阻塞量測';
+    console.warn('[bubble diag] ' + diagTiming.狀態);
+    if (DIAG.any) window.__bubbleDiagReport();
+    onDone();
+    return;
+  }
+
+  const t0 = performance.now();
+  // compile() 只建立 program 並送出 linkProgram，不等待結果。
+  renderer.compile(scene, camera);
+
+  let polls = 0;
+  // 用 setTimeout 而不是 rAF 輪詢：rAF 在頁面不可見／未被合成時會被瀏覽器整體暫停，
+  // 那樣輪詢永遠不會執行、量測就卡在 null（本機實測踩到）。setTimeout 不受影響，
+  // 而且一樣不阻塞主執行緒。
+  const POLL_INTERVAL_MS = 4;
+  const POLL_LIMIT = 15000;   // 約 60 秒的保險，避免無限輪詢
+
+  const check = () => {
+    polls++;
+    let pending = 0;
     for (const wrapper of renderer.info.programs || []) {
       const glProgram = wrapper.program || wrapper;
-      if (glProgram) gl.getProgramParameter(glProgram, gl.LINK_STATUS);
+      if (!glProgram) continue;
+      // 非阻塞：還沒編完就回 false，不會等 driver
+      if (!gl.getProgramParameter(glProgram, ext.COMPLETION_STATUS_KHR)) pending++;
     }
-  } catch (_) {}
-}
 
-// 量一段區間的耗時。fn 跑完後強制連結完成，再記錄。
-function diagMeasure(key, fn) {
-  if (!DIAG_TIMING) return fn();
-  const t0 = performance.now();
-  const out = fn();
-  forceProgramLink();
-  const ms = Math.round((performance.now() - t0) * 10) / 10;
-  diagTiming[key] = ms;
-  diagTiming.shaderRun = SHADER_RUN;
-  console.info('[bubble diag] ' + key + ' = ' + ms + 'ms'
-    + (SHADER_RUN !== null ? '（shaderRun=' + SHADER_RUN + '，cold）' : '（未帶 shaderRun，可能命中快取）'));
-  return out;
+    if (pending > 0 && polls < POLL_LIMIT) {
+      setTimeout(check, POLL_INTERVAL_MS);
+      return;
+    }
+
+    diagTiming.program建立到編譯完成ms = Math.round((performance.now() - t0) * 10) / 10;
+    diagTiming.輪詢次數 = polls;
+    diagTiming.狀態 = pending > 0
+      ? '輪詢超過上限仍未完成（' + pending + ' 個 program 未回報完成）'
+      : '編譯完成';
+    console.info('[bubble diag] program建立到編譯完成 = '
+      + diagTiming.program建立到編譯完成ms + 'ms（輪詢 ' + polls + ' 次，'
+      + (SHADER_RUN !== null ? 'shaderRun=' + SHADER_RUN + '，cold' : '未帶 shaderRun，可能命中快取') + '）');
+
+    // 編譯確定完成之後才量第一幀，兩段才分得開
+    const t1 = performance.now();
+    renderer.render(scene, camera);
+    diagTiming.第一幀render耗時ms = Math.round((performance.now() - t1) * 10) / 10;
+    console.info('[bubble diag] 第一幀render耗時 = ' + diagTiming.第一幀render耗時ms + 'ms');
+
+    if (DIAG.any) window.__bubbleDiagReport();
+    onDone();
+  };
+
+  setTimeout(check, 0);
 }
 
 // 這一份 shader 要編譯哪些功能。回傳的物件直接交給 ShaderMaterial.defines，
@@ -2949,7 +2995,6 @@ function makeSpectralCausticTexture() {
 function initGL() {
   if (inited) return;
   inited = true;
-  const initGLStart = performance.now();
 
   // 全螢幕 shader 本身沒有多邊形鋸齒，關閉 MSAA 可省下額外 framebuffer 成本。
   renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false });
@@ -3157,13 +3202,7 @@ function initGL() {
   if (!PREVIEW) bindPointer();
   syncPanelToUniforms();
   loadMaterialEnvironment(P.materialStyle);
-  if (DIAG_TIMING) {
-    forceProgramLink();
-    diagTiming.shaderRun = SHADER_RUN;
-    diagTiming.initGL耗時ms = Math.round((performance.now() - initGLStart) * 10) / 10;
-    console.info('[bubble diag] initGL耗時ms = ' + diagTiming.initGL耗時ms + 'ms');
-  }
-  if (DIAG.any) requestAnimationFrame(() => window.__bubbleDiagReport());
+  if (DIAG.any && !DIAG_TIMING) requestAnimationFrame(() => window.__bubbleDiagReport());
 }
 
 function resize() {
@@ -4255,11 +4294,12 @@ window.__bubbleDiagReport = function () {
     coldCompile量測: {
       shaderRun: SHADER_RUN === null ? '(未指定 → 可能命中已暖好的 shader cache)' : SHADER_RUN,
       計時工具: DIAG_TIMING
-        ? '啟用（會查詢 LINK_STATUS 強制同步連結，本身就可能造成主執行緒阻塞）'
+        ? '啟用（KHR_parallel_shader_compile 非阻塞輪詢）'
         : '未啟用（?diagTiming=1 才開）',
       ...diagTiming,
-          說明: '各段的區間耗時（非距起點偏移）；每段結束前查詢 LINK_STATUS 強制'
-        + '編譯／連結完成。不用 gl.finish —— 那會等到合成器 tick，量到的與 shader 規模無關。',
+          說明: 'program建立到編譯完成 = 從 renderer.compile() 到 COMPLETION_STATUS_KHR'
+        + ' 全部為 true 的牆鐘時間（rAF 輪詢，不阻塞主執行緒）；第一幀 render 在編譯'
+        + '確定完成之後才量，所以兩段是分開的。不使用任何同步查詢。',
     },
     尺寸: {
       CSS: cssW + ' x ' + cssH,
@@ -4426,6 +4466,18 @@ function syncLoop() {
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
   } else {
     if (!inited) initGL();
+    // 計時模式：先跑非阻塞的編譯輪詢，量到數字之後才交回原本的流程。
+    // 它自己會 compile + render 一次，所以完成後 compileonly / static 都已經有畫面。
+    if (DIAG_TIMING && !diagTimingStarted) {
+      startDiagTiming(() => {
+        // 量完之後：static / compileonly 就停在這裡，其餘模式照常啟動迴圈。
+        if (!DIAG.static && !DIAG.compileonly && !rafId && !isPaused()) {
+          last = performance.now();
+          rafId = requestAnimationFrame(frame);
+        }
+      });
+      return;
+    }
     // 診斷：這兩個模式都不啟動 RAF 迴圈，用來把「初始化／編譯成本」與
     // 「持續算繪成本」分開。initGL() 已經跑完（renderer、scene、shader、
     // uniform、resize、環境貼圖都就緒），差別只在後面做到哪一步。
@@ -4433,7 +4485,7 @@ function syncLoop() {
       if (!diagOnceDone) {
         diagOnceDone = true;
         // 只把 program 編譯／連結起來，不送出全螢幕 draw call。
-        diagMeasure('compile耗時ms', () => renderer.compile(scene, camera));
+        renderer.compile(scene, camera);
         console.info('[bubble diag] compileonly: program 已編譯／連結，未算繪全螢幕影格');
       }
       return;
@@ -4448,7 +4500,7 @@ function syncLoop() {
         // updateDropUniforms 之後，兩者都寫同一顆 uniform）。那樣量到的成本不具代表性。
         // frame() 開頭會自己排下一次，這裡算完立刻取消，只留這一幀。
         last = performance.now();
-        diagMeasure('第一幀耗時ms', () => frame(performance.now()));
+        frame(performance.now());
         if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
         console.info('[bubble diag] static: 已算繪 1 幀，不啟動 RAF 迴圈');
       }
@@ -4997,11 +5049,7 @@ function frame(now) {
   uniforms.uTime.value = simT;
   syncEdgeDropMotion(simT);
   uniforms.uMaxSteps.value = resolveMaxSteps();
-  if (DIAG_TIMING && diagTiming.第一幀耗時ms === null) {
-    diagMeasure('第一幀耗時ms', () => renderer.render(scene, camera));
-  } else {
-    renderer.render(scene, camera);
-  }
+  renderer.render(scene, camera);
   // 只在第一幀標記一次；之後 diagTiming.第一幀完成ms 已有值就不再量。
 
   updateExportCameraPreview();
