@@ -48,6 +48,8 @@ if (PREVIEW) document.documentElement.classList.add('preview-mode');
 //   compileonly  只建立 renderer 並編譯 program，不算繪全螢幕影格
 //   minshader    編譯期排除造型場／毛細波／微滴三大區塊（見 shaderFeatures）
 //   minshader2   minshader 再加上：主滴迴圈上限 12→4、稜光光芒只留預設晶格圖樣
+//   probe-noise  以 compilerbaseline 為基底，只加回 snoise / fbm / fbmFast
+//                （沿用正式 shader 同一份 NOISE_GLSL）與最小呼叫路徑。
 //   compilerbaseline  換成一支獨立的最小 fragment shader（見 shaders.js 的
 //                    FRAG_BASELINE）。同一套 Three.js / WebGL2 / ShaderMaterial /
 //                    renderer / camera / scene / 全螢幕算繪架構，但 GLSL 只剩
@@ -71,6 +73,7 @@ const DIAG = (() => {
     minshader2: set.has('minshader2'),
     lowcompileloops: set.has('lowcompileloops'),
     compilerbaseline: set.has('compilerbaseline'),
+    probeNoise: set.has('probe-noise'),
   };
 })();
 if (DIAG.any) console.info('[bubble diag] 啟用:', DIAG.list.join(', '));
@@ -866,7 +869,7 @@ function refreshLoopScaledReadouts() {
   refreshShatterTimelineReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=baseline-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=baseline-2';
 
 // 這一份 shader 要編譯哪些功能。回傳的物件直接交給 ShaderMaterial.defines，
 // Three.js 會在 fragment shader 前面注入對應的 #define，GLSL 那邊用 #ifdef
@@ -882,13 +885,21 @@ import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=baseline-1';
 // 目前只有 ?diag=minshader 會走精簡組合，其餘情況一律編譯完整功能 ——
 // 完整版不永久移除任何功能。日後要做「依模式編譯 variant + program cache」時，
 // 這個函式就是唯一的決策點：把判斷條件從 DIAG.minshader 換成當前模式需要什麼。
+// 基線與所有 probe 都共用 FRAG_BASELINE 那支最小 shader，差別只在 PROBE_* 開關。
+// 這樣「baseline → +A → +B」每一步的差異就只有一個功能，不會混進別的變因。
+function usesBaselineShader() {
+  return DIAG.compilerbaseline || DIAG.probeNoise;
+}
+
 function shaderFeatures() {
   // minshader2 = minshader + 兩項編譯期收斂（見下方 slim2 的使用處）。
   // minshader 在 Windows ANGLE 上還是跨不過編譯門檻（實測與 compileonly 體感相同），
   // 所以再往下砍固定迴圈上限與分支數，但一樣不碰任何數學。
-  // 基線探針：那支 shader 裡沒有任何 FEATURE_* 的 #ifdef，只吃這兩個上限。
-  if (DIAG.compilerbaseline) {
-    return { MAX_MARCH_COMPILE: 4, MAX_DROPS_COMPILE: 2 };
+  // 基線與 probe 系列都用 FRAG_BASELINE，只吃這兩個上限加上各自的 PROBE_* 開關。
+  if (usesBaselineShader()) {
+    const d = { MAX_MARCH_COMPILE: 4, MAX_DROPS_COMPILE: 2 };
+    if (DIAG.probeNoise) d.PROBE_NOISE = '';
+    return d;
   }
   // lowcompileloops 以 minshader2 為基底再往下砍兩個硬編碼的展開上限。
   const probe = DIAG.lowcompileloops;
@@ -3001,7 +3012,7 @@ function initGL() {
     vertexShader: VERT,
     // 基線探針換成獨立的最小 shader；其餘一切（renderer、camera、scene、uniforms、
     // 全螢幕 mesh、PMREM 環境貼圖）都維持原樣，這樣測到的才是 GLSL 本身。
-    fragmentShader: DIAG.compilerbaseline ? FRAG_BASELINE : FRAG,
+    fragmentShader: usesBaselineShader() ? FRAG_BASELINE : FRAG,
     defines: shaderFeatures(),
     depthTest: false, depthWrite: false,
   });
@@ -4049,7 +4060,7 @@ function updatePausedCameraRotation() {
 window.__bubbleDiagReport = function () {
   const gl = renderer && renderer.getContext ? renderer.getContext() : null;
   // 目前這支 material 實際使用的 fragment shader 原始碼
-  const activeFrag = DIAG.compilerbaseline ? FRAG_BASELINE : FRAG;
+  const activeFrag = usesBaselineShader() ? FRAG_BASELINE : FRAG;
   // 依 defines 做前處理，得出真正送進編譯器的內容
   const preprocess = src => {
     const d = (mesh && mesh.material) ? mesh.material.defines || {} : {};
@@ -4137,7 +4148,9 @@ window.__bubbleDiagReport = function () {
       每像素SDF評估_目前參數: (mapSceneCalls * innerActual).toLocaleString(),
     },
     shaderVariant: {
-      使用的shader: DIAG.compilerbaseline ? 'FRAG_BASELINE（獨立最小 shader）' : 'FRAG（正式）',
+      使用的shader: usesBaselineShader()
+        ? 'FRAG_BASELINE（最小 shader' + (DIAG.probeNoise ? ' + PROBE_NOISE' : '') + '）'
+        : 'FRAG（正式）',
       defines: mesh && mesh.material ? mesh.material.defines : '(未初始化)',
       有效行數: effective.length,
       'mapScene有效行數': fnLines('mapScene'),
@@ -4159,8 +4172,8 @@ window.__bubbleDiagReport = function () {
       },
       // 實際送進編譯器的 fragment shader 行數（Three.js 前置的 header 不算）
       // 下面幾項只描述正式 FRAG；基線探針用的是另一支 shader，列出來會誤導。
-      正式FRAG行數: DIAG.compilerbaseline ? '(不適用：目前用 FRAG_BASELINE)' : FRAG.split('\n').length,
-      編譯期迴圈上限: DIAG.compilerbaseline ? '(不適用：見上方剩餘固定迴圈)' : (() => {
+      正式FRAG行數: usesBaselineShader() ? '(不適用：目前用 FRAG_BASELINE)' : FRAG.split('\n').length,
+      編譯期迴圈上限: usesBaselineShader() ? '(不適用：見上方剩餘固定迴圈)' : (() => {
         const d = mesh && mesh.material ? mesh.material.defines : null;
         const pick = (k, dflt) => (d && d[k] !== undefined ? d[k] : dflt);
         return {
@@ -4171,7 +4184,7 @@ window.__bubbleDiagReport = function () {
           負形MAX_NEGATIVE: 4,
         };
       })(),
-      編譯後生效行數: DIAG.compilerbaseline ? '(不適用：見上方有效行數)' : (() => {
+      編譯後生效行數: usesBaselineShader() ? '(不適用：見上方有效行數)' : (() => {
         const d = mesh && mesh.material ? mesh.material.defines : null;
         if (!d) return '(未初始化)';
         const on = k => d[k] !== false && d[k] !== undefined;

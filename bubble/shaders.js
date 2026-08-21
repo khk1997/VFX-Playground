@@ -2360,12 +2360,34 @@ uniform float uCompositionOffsetY;
 uniform vec4  uDrops[12];
 uniform int   uCount;
 
+#ifdef PROBE_NOISE
+// 對應正式 shader 的 geometry wobble 與 loopNoiseOffset 所需
+uniform float uTime;
+uniform float uLoopDuration;
+uniform float uWobble;
+uniform float uWobbleScale;
+uniform float uWobbleSpeed;
+#endif
+
 // 兩個上限都是編譯期常數（由 ShaderMaterial.defines 覆寫），不是 runtime uniform。
 #ifndef MAX_MARCH_COMPILE
 #define MAX_MARCH_COMPILE 4
 #endif
 #ifndef MAX_DROPS_COMPILE
 #define MAX_DROPS_COMPILE 2
+#endif
+
+#ifdef PROBE_NOISE
+// 直接沿用正式 shader 的同一份 NOISE_GLSL（mod289 / permute / taylorInvSqrt /
+// snoise / fbm / fbmFast），逐字元相同 —— 重寫一份等價的 noise 測不出原本那份的
+// 編譯行為，診斷就失去意義。
+const float TAU = 6.28318530718;
+${NOISE_GLSL}
+// 正式 shader 裡 fbmFast 的取樣座標會加上這個循環位移，一併帶進來。
+vec3 loopNoiseOffset(float speed){
+  float phase = TAU * uTime / max(uLoopDuration, 0.001);
+  return vec3(cos(phase), sin(phase), sin(phase * 2.0)) * speed;
+}
 #endif
 
 float smin(float a, float b, float k){
@@ -2380,6 +2402,11 @@ float mapScene(vec3 p){
     if (i >= uCount) break;
     d = smin(d, length(p - uDrops[i].xyz) - uDrops[i].w, 0.35);
   }
+#ifdef PROBE_NOISE
+  // 對應正式 shader mapScene 尾端那一行 geometry wobble。呼叫點刻意放在這裡：
+  // mapScene 是被 raymarch 迴圈重複呼叫的，noise 的展開成本會被乘上迴圈次數。
+  d += fbmFast(p * uWobbleScale + loopNoiseOffset(uWobbleSpeed)) * uWobble * 0.25;
+#endif
   return d;
 }
 
@@ -2414,6 +2441,12 @@ void main(){
 
   vec3 N = calcNormal(ro + rd * t);
   float lambert = max(0.0, dot(N, normalize(vec3(0.4, 0.7, 0.6))));
+#ifdef PROBE_NOISE
+  // 正式 shader 的薄膜上色用的是完整 4 octave 的 fbm（不是 fbmFast）。這裡呼叫
+  // 一次，確保 fbm 那個 4 次迴圈不會被編譯器當成死碼移除 —— 否則這個 probe
+  // 就沒有真的測到它。
+  lambert *= 0.9 + 0.1 * fbm(N * 2.0);
+#endif
   gl_FragColor = vec4(vec3(0.15, 0.35, 0.7) * (0.15 + 0.85 * lambert), 1.0);
 }
 `;
