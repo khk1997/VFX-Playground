@@ -1,1 +1,5 @@
 .DS_Store
+
+# 本機為了檢視 three.js 原始碼而裝的相依套件；專案本身沒有 package.json，
+# 也不從 npm 建置（執行時是走 index.html 的 importmap 從 CDN 載入 three）。
+node_modules/
