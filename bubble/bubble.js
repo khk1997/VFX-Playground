@@ -210,6 +210,9 @@ const DIAG = (() => {
     // 驗證用：編進所有功能，等同變體特化之前的萬能 shader（見 shaderFeatures）。
     allFeatures: set.has('allfeatures'),
     probeLoopNormalTaps: set.has('probe-loop-normal-taps'),
+    // 反向探針：把 SVG 分軸差分的六個 tap 換回展開式，用來證明迴圈化沒有改變數學
+    // （見 shaders.js 的 PROBE_UNROLLED_SVG_TAPS）。
+    probeUnrolledSvgTaps: set.has('probe-unrolled-svg-taps'),
     probeMapscenePlain: set.has('probe-mapscene-plain'),
     probeMapsceneSplit: set.has('probe-mapscene-split'),
     probeModeNone: set.has('probe-mode-none'),
@@ -1166,7 +1169,8 @@ function runDiagTiming(onDone) {
     mesh.material = mat;
     activeVariantKey = key;
   }
-  initialCompileDone = true;   // 計時模式自己負責首編，之後的切換交回 syncShaderVariant
+  // 計時模式自己負責首編，之後的切換交回 syncShaderVariant（含補做被擋下的那一次）。
+  markInitialCompileDone();
 
   const gl = renderer.getContext();
   let ext = null;
@@ -1381,6 +1385,30 @@ function waitForEnvSettled() {
 // 首次算繪前的背景預編譯。只做一次，結果快取成 promise。
 let initialCompilePromise = null;
 let initialCompileDone = false;
+// 首編的起算時刻與實測耗時。耗時是背景預熱要不要做的依據（見 prewarmSkipReason），
+// 起算時刻則是「準備中」提示的計秒基準（見 shaderStateNote）。
+let initialCompileStartedAt = null;
+let initialCompileMs = null;
+// 首編進行中被擋下來的變體切換。
+//
+// 只用一個布林而不是佇列是刻意的：syncShaderVariant() 每次都重新讀當下的
+// variantState()，所以「補做一次」自然就等於「用最新狀態補做」。窗口內連切五個模式
+// 也只會編最後那一個需要的變體，中間那些過期的根本不會被排進來。
+let pendingVariantSync = false;
+
+// 首編完成。旗標與補做綁在一起，避免哪天多一條設定旗標的路徑又忘了補做 ——
+// 這個 regression 的成因正是「設了旗標但沒有人補做」。
+function markInitialCompileDone() {
+  initialCompileDone = true;
+  if (pendingVariantSync) {
+    pendingVariantSync = false;
+    syncShaderVariant();
+  }
+  updateShaderState();
+  // 稍微延後再開始背景預熱，讓首幀先順順地畫出來。預熱本身不阻塞主執行緒
+  // （這是它的前提條件之一），但排在首幀之後開始還是比較穩。
+  setTimeout(prewarmVariants, 1200);
+}
 function ensureInitialCompile() {
   if (initialCompilePromise) return initialCompilePromise;
   initialCompilePromise = waitForEnvSettled().then(() => {
@@ -1399,29 +1427,35 @@ function ensureInitialCompile() {
         + '（未編譯的 ' + activeVariantKey + ' 已丟棄）');
       activeVariantKey = key;
     }
-    const t0 = performance.now();
+    initialCompileStartedAt = performance.now();
+    updateShaderState();
     return (renderer.compileAsync
       ? renderer.compileAsync(scene, camera)
       : Promise.resolve())
       .then(() => {
+        // 這個數字是背景預熱的判斷依據：慢才值得預熱（見 prewarmSkipReason）。
+        initialCompileMs = performance.now() - initialCompileStartedAt;
         console.info('[bubble variant] 首次 program 背景編譯完成 '
-          + Math.round(performance.now() - t0) + 'ms（主執行緒未被阻塞）key=' + key);
+          + Math.round(initialCompileMs) + 'ms（主執行緒未被阻塞）key=' + key);
       });
   }).catch(err => {
     // 失敗也要放行：讓 three.js 走原本的同步路徑，畫面該出來還是要出來。
     console.warn('[bubble variant] 背景預編譯失敗，退回同步路徑：' + err.message);
   }).then(() => {
-    initialCompileDone = true;
+    // 首編完成的當下才重新看狀態：窗口內被擋下來的切換在這裡一次補做，
+    // 而且用的是「現在」的狀態，不是被擋當下的狀態。
+    markInitialCompileDone();
   });
   return initialCompilePromise;
 }
 
-function buildVariantMaterial() {
+// V 可以傳入，用來蓋出「別的模式」那一支材質（背景預熱要用；見 prewarmVariants）。
+function buildVariantMaterial(V = variantState()) {
   const mat = new THREE.ShaderMaterial({
     uniforms,                       // 所有變體共用同一組 uniform 物件
     vertexShader: VERT,
     fragmentShader: usesBaselineShader() ? FRAG_BASELINE : FRAG,
-    defines: shaderFeatures(),
+    defines: shaderFeatures(V),
     depthTest: false, depthWrite: false,
   });
   mat.envMap = pmremTarget.texture;
@@ -1435,12 +1469,37 @@ function buildVariantMaterial() {
 // 一整輪診斷才避開的主執行緒阻塞又加回來。所以新變體一律先在離屏 scene 上用
 // compileAsync 預編譯，resolve 之後才換上去；這段期間畫面繼續用舊變體算繪，
 // 不會黑掉也不需要 loading UI。
+// 變體切換一律延到這一輪事件處理跑完才決定。
+//
+// 原因：切一次動態模式會連帶還原一整組「按模式各自記憶」的參數（見 motionMemory），
+// 而每一個控制項的處理都會各自呼叫進來一次。同步處理的話，中間那些過渡狀態也會各自
+// 發動一次背景編譯 —— 實測切到毛細波時，中途的「毛細波＋光譜焦散開」組合就被真的編了
+// 一支，那是三十秒的 fxc 工作，而它從頭到尾沒有任何一幀會用到；而且 WebGL 沒有取消
+// 編譯的手段，發出去就只能等它跑完。
+//
+// 合併之後只看最後那個狀態。這是安全的，因為 syncShaderVariantNow() 每次都重新讀當下
+// 的 variantState()，本來就沒有「把每一次都做一遍」的語意 —— 跟 pendingVariantSync
+// 用一個布林而不是佇列是同一個道理。
+let variantSyncScheduled = false;
 function syncShaderVariant() {
+  if (variantSyncScheduled) return;
+  variantSyncScheduled = true;
+  setTimeout(() => {
+    variantSyncScheduled = false;
+    syncShaderVariantNow();
+  }, 0);
+}
+
+function syncShaderVariantNow() {
   if (!inited || !mesh) return;
-  // 首支 variant 還沒定案前一律不動作。這一段是「冷載入只編一次」的關鍵：
-  // HDRI 載入完成會呼叫進來，若此時就去編有 env 的那一支，就會與 ensureInitialCompile
-  // 之後要編的那一支重複。ensureInitialCompile 本來就會讀當下最新狀態，交給它就好。
-  if (!initialCompileDone) return;
+  // 首支 variant 還沒定案前不立刻開新編譯 —— 那會把「冷載入只編一次」又打回原形。
+  // 但也不能就這樣丟掉：記下來，等首編 resolve 時由 markInitialCompileDone() 用當下
+  // 最新的狀態補做一次。
+  //
+  // 少了這個 pending，窗口內（env 已就緒、首編仍在跑，正式頁約 8 秒）的任何變體變更
+  // 都會被永久吞掉 —— 例如切到需要造型場的模式時，造型資料照常載入，但編出來的
+  // shader 沒有 FEATURE_SHAPE_FIELD，於是預設造型永遠不顯示，而且不會自行恢復。
+  if (!initialCompileDone) { pendingVariantSync = true; return; }
   const key = variantKey();
   if (key === activeVariantKey) return;
 
@@ -1449,6 +1508,7 @@ function syncShaderVariant() {
     const t0 = performance.now();
     mesh.material = cached;
     activeVariantKey = key;
+    updateShaderState();
     variantStats.命中++;
     variantStats.最後一次切換ms = Math.round((performance.now() - t0) * 10) / 10;
     variantStats.最後一次是命中 = true;
@@ -1460,17 +1520,47 @@ function syncShaderVariant() {
   if (variantSwapInFlight === key) return;   // 已經在背景編這一支了
   variantSwapInFlight = key;
   const t0 = performance.now();
+  // 背景編譯的計時。變體切換用的是 compileAsync，不會經過 startDiagTiming 那條
+  // 量測路徑，所以「這一支編了多久／有沒有編完」在報告裡本來是看不到的 ——
+  // 而 shape 類 variant 正好卡在這裡。一併記下開始當下的 context 遺失次數，
+  // 才分得出「編很久」與「編到 GPU driver 逾時重置」。
+  variantStats.進行中 = {
+    key,
+    開始於ms: Math.round(t0),
+    已經過ms: 0,
+    開始時contextLost: glTimeline.contextLost次數,
+    狀態: '編譯中',
+  };
+  updateShaderState();
   const next = buildVariantMaterial();
   const stage = new THREE.Scene();
   const stageMesh = new THREE.Mesh(mesh.geometry, next);
   stageMesh.frustumCulled = false;
   stage.add(stageMesh);
 
+  // 這一支的「進行中」紀錄該收掉了。
+  //
+  // 一定要走這條路而不是直接在成功那一段清掉：finish() 有兩條提早 return（目標已經換
+  // 人、鍵已經變了），舊版在那兩條路上把 variantStats.進行中 留著不清。那時它只是診斷
+  // 欄位所以看不出來，但現在「準備中」提示與外部的就緒判斷都讀它 —— 留著就會永遠顯示
+  // 「編譯中」。實測踩過：切到毛細波時 motionMemory 的還原會連帶觸發好幾次
+  // syncShaderVariant，中間那幾支正好走的就是這兩條提早 return。
+  const clearInFlight = () => {
+    if (variantStats.進行中 && variantStats.進行中.key === key) variantStats.進行中 = null;
+    updateShaderState();
+  };
   const finish = () => {
     // 期間使用者可能又切到別的組合；只有還是同一個目標才換上去。
-    if (variantSwapInFlight !== key) { try { next.dispose(); } catch (_) {} return; }
+    if (variantSwapInFlight !== key) { try { next.dispose(); } catch (_) {} clearInFlight(); return; }
     variantSwapInFlight = null;
-    if (variantKey() !== key) { try { next.dispose(); } catch (_) {} syncShaderVariant(); return; }
+    if (variantKey() !== key) {
+      try { next.dispose(); } catch (_) {}
+      clearInFlight();
+      // 這裡是「編好的那一支已經過期」的補做，直接走立即版：狀態已經定案了，
+      // 再延一輪只是讓正確的那一支更晚開始編。
+      syncShaderVariantNow();
+      return;
+    }
     variantCache.set(key, next);
     mesh.material = next;
     activeVariantKey = key;
@@ -1478,8 +1568,18 @@ function syncShaderVariant() {
     variantStats.未命中++;
     variantStats.最後一次切換ms = Math.round((performance.now() - t0) * 10) / 10;
     variantStats.最後一次是命中 = false;
+    const lostDuring = glTimeline.contextLost次數
+      - (variantStats.進行中 ? variantStats.進行中.開始時contextLost : 0);
+    variantStats.進行中 = null;
+    variantStats.最後一次編譯 = {
+      key,
+      耗時ms: variantStats.最後一次切換ms,
+      期間contextLost: lostDuring,
+    };
+    updateShaderState();
     console.info('[bubble variant] 新編 ' + key
-      + '（' + variantStats.最後一次切換ms + 'ms，背景編譯）');
+      + '（' + variantStats.最後一次切換ms + 'ms，背景編譯'
+      + (lostDuring ? '，期間 context 遺失 ' + lostDuring + ' 次' : '') + '）');
   };
 
   const compiled = renderer.compileAsync
@@ -1487,9 +1587,183 @@ function syncShaderVariant() {
     : Promise.resolve(renderer.compile(stage, camera));
   compiled.then(finish).catch(err => {
     variantSwapInFlight = null;
+    // 一樣要認鍵：這個 catch 可能是一支早就過期的編譯回來的，不能把後面那支
+    // 正在進行的紀錄清掉（見 clearInFlight 的說明）。
+    if (variantStats.進行中 && variantStats.進行中.key === key) {
+      variantStats.進行中.狀態 = '失敗：' + err.message;
+      variantStats.最後一次編譯 = {
+        key,
+        耗時ms: Math.round(performance.now() - t0),
+        期間contextLost: glTimeline.contextLost次數 - variantStats.進行中.開始時contextLost,
+        結果: '失敗：' + err.message,
+      };
+      variantStats.進行中 = null;
+    }
+    updateShaderState();
     console.error('[bubble variant] 預編譯失敗 ' + key + '：' + err.message);
     try { next.dispose(); } catch (_) {}
   });
+}
+
+// ===== 背景預熱 =====
+//
+// 為什麼要有這個：Windows 預設的 ANGLE D3D11 後端用 fxc 編一支造型變體要數十秒
+// （本機實測 formation 34s、morph 55s，七個造型模式合計 154s），而 Chrome 的 D3D
+// bytecode 快取是跟著 profile 持久的 —— 同一支第二次只要 2 秒。也就是說這個成本
+// 本質上是「每個組合一次」，不是「每次切換一次」。既然如此，就不該讓使用者在切模式
+// 的當下才付：首編落地之後在背景把各模式會用到的那幾支依序編掉，等使用者真的切過去
+// 就是快取命中。
+//
+// 為什麼是「有條件」而不是一律預熱 —— 這件事只在「編譯慢，而且慢在背景」才划算：
+//   * macOS 的 ANGLE Metal 與 Windows 的 ANGLE Vulkan 後端本來就是個位數秒
+//     （實測 Vulkan 七個模式合計 20s），預熱等於白燒 GPU。
+//   * 更關鍵的是 Vulkan 後端沒有 KHR_parallel_shader_compile，three.js 的 compileAsync
+//     在那裡會退回同步路徑 —— 預熱會把主執行緒一支一支地扣住，那比不預熱糟得多。
+// 所以兩個條件都要成立才做：擴充在（＝真的非阻塞），而且首編實測真的慢。這樣同一份
+// 程式碼在三種環境下都會做對的事，不必判斷平台，也不會在未來的新後端上猜錯。
+const PREWARM_MOTIONS = ['formation', 'melt', 'morph', 'weave', 'shatter', 'jelly', 'capillary'];
+// 首編超過這個時間才值得預熱。個位數秒的環境多編幾支只是浪費。
+const PREWARM_MIN_COMPILE_MS = 4000;
+const prewarmStats = {
+  狀態: '未啟動', 已備妥: 0, 本來就有: 0, 失敗: 0,
+  進行中: null, 待編清單: [], 總耗時ms: 0,
+};
+
+// 回傳「不做的理由」，null 表示該做。
+function prewarmSkipReason() {
+  if (PREVIEW) return '預覽模式不預熱';
+  if (DIAG.any || FORCE_FEATURES.length || SHADER_RUN !== null) {
+    return '診斷模式不預熱（會污染 cold compile 量測與 GPU 的 shader 快取）';
+  }
+  if (mobileRenderQuery.matches) return '行動裝置不預熱（耗電，而且那邊的編譯器本來就快）';
+  if (!renderer || !renderer.compileAsync || !mesh) return 'renderer 尚未就緒';
+  let parallel = false;
+  try { parallel = !!renderer.getContext().getExtension('KHR_parallel_shader_compile'); } catch (_) {}
+  if (!parallel) return '沒有 KHR_parallel_shader_compile，預熱會阻塞主執行緒';
+  if (initialCompileMs === null) return '首編耗時未知';
+  if (initialCompileMs < PREWARM_MIN_COMPILE_MS) {
+    return '首編只花 ' + Math.round(initialCompileMs) + 'ms，這個環境不需要預熱';
+  }
+  return null;
+}
+
+function prewarmVariants() {
+  if (prewarmStats.狀態 !== '未啟動') return;
+  const skip = prewarmSkipReason();
+  if (skip) {
+    prewarmStats.狀態 = '略過：' + skip;
+    console.info('[bubble prewarm] ' + skip);
+    return;
+  }
+  prewarmStats.狀態 = '進行中';
+  const targets = [];
+  const seen = new Set([activeVariantKey]);
+  for (const motion of PREWARM_MOTIONS) {
+    const V = variantState(motion);
+    const key = variantKey(V);
+    // 一支會被多個模式共用（例如融化與崩解噴濺的旗標組合完全相同），只編一次。
+    if (seen.has(key) || variantCache.has(key)) continue;
+    seen.add(key);
+    targets.push({ motion, key, V });
+  }
+  prewarmStats.待編清單 = targets.map(t => t.motion + ' → ' + t.key);
+  console.info('[bubble prewarm] 開始背景預熱 ' + targets.length + ' 支：'
+    + prewarmStats.待編清單.join('、'));
+  const t0All = performance.now();
+  (async () => {
+    for (const t of targets) {
+      // 使用者的操作永遠優先。同時丟兩支給驅動只會讓使用者正在等的那一支更慢，
+      // 所以正在為使用者編的時候就讓路。
+      while (variantSwapInFlight) await new Promise(r => setTimeout(r, 400));
+      if (variantCache.has(t.key)) { prewarmStats.本來就有++; continue; }
+      const t0 = performance.now();
+      prewarmStats.進行中 = { motion: t.motion, key: t.key, 開始於ms: Math.round(t0) };
+      updateShaderState();
+      const mat = buildVariantMaterial(t.V);
+      const stage = new THREE.Scene();
+      const stageMesh = new THREE.Mesh(mesh.geometry, mat);
+      stageMesh.frustumCulled = false;
+      stage.add(stageMesh);
+      try {
+        await renderer.compileAsync(stage, camera);
+      } catch (err) {
+        prewarmStats.失敗++;
+        prewarmStats.進行中 = null;
+        try { mat.dispose(); } catch (_) {}
+        console.warn('[bubble prewarm] ' + t.key + ' 預熱失敗：' + err.message);
+        continue;
+      }
+      prewarmStats.進行中 = null;
+      // 這段時間使用者可能已經自己切過去、把同一支編好了。
+      if (variantCache.has(t.key)) {
+        try { mat.dispose(); } catch (_) {}
+        prewarmStats.本來就有++;
+        continue;
+      }
+      variantCache.set(t.key, mat);
+      evictVariantsIfNeeded();
+      prewarmStats.已備妥++;
+      console.info('[bubble prewarm] ' + t.motion + ' ' + t.key + ' 已備妥（'
+        + Math.round(performance.now() - t0) + 'ms，背景編譯）');
+    }
+    prewarmStats.總耗時ms = Math.round(performance.now() - t0All);
+    prewarmStats.狀態 = '完成';
+    prewarmStats.進行中 = null;
+    updateShaderState();
+    console.info('[bubble prewarm] 完成：新編 ' + prewarmStats.已備妥 + ' 支，共 '
+      + prewarmStats.總耗時ms + 'ms');
+  })();
+}
+
+// ===== 「正在準備 shader」的提示 =====
+//
+// 存在的理由：在慢的後端上切到造型模式之後，數十秒內畫面完全不會變，而在這之前
+// 頁面上沒有任何訊號 —— 使用者只會覺得壞了。這一段不改變任何算繪行為，只是把已經
+// 在 variantStats / prewarmStats 裡的狀態顯示出來。
+//
+// 只有等超過 SHADER_STATE_DELAY_MS 才顯示。快的後端（macOS Metal、Windows Vulkan）
+// 這個等待只有一兩秒，閃一下反而吵。
+const SHADER_STATE_DELAY_MS = 1500;
+let shaderStateTicker = 0;
+
+// 回傳 { 級別, 文字 }，沒有要顯示的東西就回 null。
+function shaderStateNote() {
+  // 使用者此刻正在等的那一支。兩種情況：切模式切在首編窗口內（等首編），或是
+  // 一般的變體切換（等 syncShaderVariant 那一支）。
+  const 等變體 = !!variantSwapInFlight && variantSwapInFlight === variantKey();
+  const 等首編 = !initialCompileDone && !!initialCompilePromise;
+  const 開始於 = 等變體 && variantStats.進行中 ? variantStats.進行中.開始於ms
+    : 等首編 ? initialCompileStartedAt : null;
+  if ((等變體 || 等首編) && 開始於 !== null) {
+    const 已等ms = performance.now() - 開始於;
+    if (已等ms < SHADER_STATE_DELAY_MS) return null;
+    // 使用者正在等 → 亮一點。這是「你現在看不到造型是因為這個」的訊息。
+    return { 級別: 'waiting', 文字: 'shader 首次編譯中 ' + Math.round(已等ms / 1000) + 's'
+      + ' —— 頁面可正常操作，編好會自動顯示。同一個組合只需要編這一次。' };
+  }
+  if (prewarmStats.進行中) {
+    const 全部 = prewarmStats.待編清單.length;
+    const 第幾 = prewarmStats.已備妥 + prewarmStats.本來就有 + prewarmStats.失敗 + 1;
+    // 使用者沒有在等 → 維持一般說明字的亮度，只是交代背景在忙什麼。
+    return { 級別: 'busy',
+      文字: '背景預先編譯其他動態模式的 shader（' + 第幾 + '/' + 全部 + '）—— 可正常使用' };
+  }
+  return null;
+}
+
+function updateShaderState() {
+  const el = document.getElementById('shaderState');
+  if (!el) return;
+  const state = shaderStateNote();
+  el.textContent = state ? state.文字 : '';
+  el.hidden = !state;
+  el.classList.toggle('busy', state ? state.級別 === 'busy' : false);
+  el.classList.toggle('waiting', state ? state.級別 === 'waiting' : false);
+  // 有事情在跑就每半秒刷一次秒數；跑完把 timer 收掉，不留背景輪詢。
+  const 忙 = !!variantSwapInFlight || !!prewarmStats.進行中
+    || (!initialCompileDone && !!initialCompilePromise);
+  if (忙 && !shaderStateTicker) shaderStateTicker = setInterval(updateShaderState, 500);
+  if (!忙 && shaderStateTicker) { clearInterval(shaderStateTicker); shaderStateTicker = 0; }
 }
 
 // ===== 變體狀態 =====
@@ -1501,27 +1775,49 @@ function syncShaderVariant() {
 // 收進來的都是會大幅改變 control flow / call graph 的東西。數值滑桿（厚度、IOR、
 // 粗糙度、各種強度）一律不收 —— 它們只改變數字，不改變要編譯什麼，收進來只會造成
 // 變體爆炸。
-function variantState() {
-  const shapeField = usesShapeField(P.motion);
+// motion 可以覆寫，用來問「如果切到某個模式，那一刻會需要哪一支變體」。背景預熱就是
+// 靠它算出還沒編過的那幾支的鍵與 defines（見 prewarmVariants）。
+function variantState(motion = P.motion) {
+  // 有幾個變體軸是「按模式各自記憶」的（見 motionMemory）：問別的模式時必須讀那個
+  // 模式記住的值，不是當下這個模式的值。少了這一層，預熱會編出永遠不會被命中的鍵
+  // —— 例如果凍記住的是「光譜焦散關閉」，拿當下的值去算就會編錯一支。
+  const scoped = key => (motion === P.motion ? P[key] : motionMemory[key][motion]);
+  const shapeField = usesShapeField(motion);
   // 造型型別：面板的「形狀來源」。SVG 的 6-tap 法線只有在造型場真的編進來、
   // 而且型別是 SVG 時才可能被走到（uShapeType == 1 且 uShapeProgress > 0.001）。
   // 只看型別不看進度是刻意的：uShapeProgress 是動畫值，收進鍵裡會讓造型成形過程中
   // 不斷切換變體。所以 SVG 模式兩條法線路徑都編，維持原本的數學。
   const svgNormals = shapeField && P.shapeSource === 'svg';
+  // 兩顆形狀交接（形狀變形）與成型波前（形狀匯聚）：mapScene 裡兩塊互斥的分支，
+  // 各自的 runtime 開關只有自己那個模式會設起來。兩者共用 dissolveField，所以
+  // 那個函式（含 3x3 Voronoi）只要有一邊要就得編。
+  //
+  // 這兩項必須進變體鍵：少了它們，形狀匯聚與形狀變形的其他旗標組合完全相同
+  // （都是造型場＋微滴＋負形），會在快取裡撞成同一個鍵卻對應兩份不同的 defines。
+  const shapeMorph = shapeField && motion === 'morph';
+  const formationCut = shapeField && isFormationMotion(motion) && P.formationFrontOn;
   return {
     // --- 幾何 ---
     shapeField,
     svgNormals,
-    capillaryTexture: P.motion === 'capillary',
+    // 造型距離場的來源。面板的「形狀來源」二選一，另一支在這個變體裡是死碼
+    // （見 shaders.js 的 shapeDistance）。svgNormals 與 shapeSvg 條件相同但意義
+    // 不同：一個決定法線路徑，一個決定距離場來源，所以分開列。
+    shapeSvg: svgNormals,
+    shapeVolume: shapeField && P.shapeSource !== 'svg',
+    shapeMorph,
+    formationCut,
+    dissolveField: shapeMorph || formationCut,
+    capillaryTexture: motion === 'capillary',
     // 微滴的實際條件與 updateMicroDrops 的 activeCount 完全一致：四種模式之一，
     // 而且造型場真的在（微滴的 anchors 也來自匯入的造型）。
     microDrops: shapeField
-      && (isFormationMotion(P.motion) || P.motion === 'shatter'
-        || P.motion === 'melt' || P.motion === 'morph'),
+      && (isFormationMotion(motion) || motion === 'shatter'
+        || motion === 'melt' || motion === 'morph'),
     // 衛星滴與毛細回彈波只在分裂的 pinch-off 產生（見 bubble.js 寫入 satelliteDrops
     // 與 elasticEvent 的地方，其餘模式一律歸零）。
-    satellites: P.motion === 'split',
-    capillaryWave: P.motion === 'split',
+    satellites: motion === 'split',
+    capillaryWave: motion === 'split',
     // 負形（空腔）是造型的一部分：anchors 由 shapeCavityBase 產生，沒有匯入造型
     // 就永遠是空陣列。
     negativeField: shapeField,
@@ -1531,10 +1827,10 @@ function variantState() {
     // 的 FEATURE_THIN_FILM 說明）。
     thinFilm: !!P.filmEnabled,
     // 液態薄膜材質：只有 uMaterialStyle === 1 才走那個分支。
-    liquidFilm: P.materialStyle === 'membrane',
+    liquidFilm: scoped('materialStyle') === 'membrane',
     dispersion: !!P.dispersionEnabled,
     prismBeam: !!P.rayDispersionEnabled,
-    spectralCaustics: !!P.spectralCausticEnabled,
+    spectralCaustics: !!scoped('spectralCausticEnabled'),
     // 稜光的另外四種圖樣：只有選了非預設圖樣才需要。
     beamPatterns: P.rayBeamPattern !== 'grid',
     // 環境／PMREM 取樣。HDRI 載入前是 0，載入後變 1 —— 這是少數會在執行期改變的軸，
@@ -1548,22 +1844,27 @@ function variantState() {
 // 診斷覆寫必須進鍵裡：它們會改變 shaderFeatures() 產生的 defines，但不改變
 // variantState()。少了這一段，同一個鍵會對應到兩支不同的 shader，快取就會拿錯東西
 // （實測踩過：context 遺失後重建，拿到的是別組 defines 的材質）。
+//
+// dissolveField 刻意不佔一個字元：它恆等於 shapeMorph || formationCut，也就是
+// R 與 T 兩個字元的函數，不會有「鍵相同但 defines 不同」的情形。
 function variantKey(v = variantState()) {
   const flag = (on, ch) => (on ? ch : '-');
   const diagSalt = DIAG.any || FORCE_FEATURES.length
     ? '.d[' + DIAG.list.join('+') + (FORCE_FEATURES.length ? '|' + FORCE_FEATURES.join('+') : '') + ']'
     : '';
   return [
-    'g' + flag(v.shapeField, 'S') + flag(v.svgNormals, 'V') + flag(v.capillaryTexture, 'C')
+    'g' + flag(v.shapeField, 'S') + flag(v.svgNormals, 'V') + flag(v.shapeVolume, 'G')
+      + flag(v.capillaryTexture, 'C')
       + flag(v.microDrops, 'M') + flag(v.satellites, 'A') + flag(v.capillaryWave, 'W')
-      + flag(v.negativeField, 'N'),
+      + flag(v.negativeField, 'N') + flag(v.shapeMorph, 'R') + flag(v.formationCut, 'T'),
     'o' + flag(v.thinFilm, 'F') + flag(v.liquidFilm, 'L') + flag(v.dispersion, 'D')
       + flag(v.prismBeam, 'P') + flag(v.spectralCaustics, 'K') + flag(v.beamPatterns, 'B')
       + flag(v.envPmrem, 'E'),
   ].join('.') + diagSalt;
 }
 
-function shaderFeatures() {
+// V 可以傳入，用來為「別的模式」算 defines（背景預熱要用；見 prewarmVariants）。
+function shaderFeatures(V = variantState()) {
   // minshader2 = minshader + 兩項編譯期收斂（見下方 slim2 的使用處）。
   // minshader 在 Windows ANGLE 上還是跨不過編譯門檻（實測與 compileonly 體感相同），
   // 所以再往下砍固定迴圈上限與分支數，但一樣不碰任何數學。
@@ -1611,8 +1912,6 @@ function shaderFeatures() {
   // 為什麼要這樣做：Windows 的 ANGLE→HLSL→fxc 會把所有函式攤平成一個巨大的函式，
   // 而優化器成本對函式大小是超線性的。實測把萬能 shader 拆成當下需要的最小組合，
   // cold compile 從兩分鐘級一路降到個位數秒級。
-  const V = variantState();
-
   const defines = {
     // --- 幾何：mapScene 的子系統，由 motion 決定 ---
     FEATURE_SHAPE_FIELD: V.shapeField ? '' : false,
@@ -1621,6 +1920,18 @@ function shaderFeatures() {
     FEATURE_SATELLITES: V.satellites ? '' : false,
     FEATURE_CAPILLARY_WAVE: V.capillaryWave ? '' : false,
     FEATURE_NEGATIVE_FIELD: V.negativeField ? '' : false,
+
+    // --- 造型場內部：只編這個模式真的走得到的那幾塊 ---
+    // 距離場來源二選一（SVG 擠出／GLB 體積）。體積那支是 8 次 atlasVoxel，
+    // 也就是 8 個 texture2D 加三線性插值，攤平後是造型模式最大的一塊。
+    FEATURE_SHAPE_SVG: V.shapeSvg ? '' : false,
+    FEATURE_SHAPE_VOLUME: V.shapeVolume ? '' : false,
+    // 兩顆形狀交接：只有形狀變形會設 uShapeMorph。它自己就帶兩份造型距離場。
+    FEATURE_SHAPE_MORPH: V.shapeMorph ? '' : false,
+    // 成型波前：只有形狀匯聚會設 uFormationCut。
+    FEATURE_FORMATION_CUT: V.formationCut ? '' : false,
+    // 上面兩者共用的消失場（含一個 3x3 Voronoi 迴圈），有一邊要就得編。
+    FEATURE_DISSOLVE_FIELD: V.dissolveField ? '' : false,
 
     // --- 法線路徑：只編當下這個造型型別真正會走到的那一條 ---
     // SVG 造型的 6-tap 分軸差分與四面體 4-tap 在原版是兩條 runtime 分支，兩條都會
@@ -1662,6 +1973,9 @@ function shaderFeatures() {
     defines.FEATURE_SHAPE_FIELD = false;
     defines.FEATURE_CAPILLARY = false;
     defines.FEATURE_MICRO_DROPS = false;
+    // dissolveField 的守衛是獨立的（它同時服務 morph 與成型波前兩塊），造型場整個
+    // 關掉時它就沒有呼叫者了，這裡跟著關掉才不會白編一個 Voronoi 迴圈。
+    defines.FEATURE_DISSOLVE_FIELD = false;
   }
   if (DIAG.minshader2 || DIAG.lowcompileloops) {
     defines.FEATURE_BEAM_PATTERNS = false;
@@ -1699,6 +2013,10 @@ function shaderFeatures() {
     defines.NORMAL_TAPS_TETRA = '';
   }
   if (DIAG.singleReflectionSample) defines.PROBE_SINGLE_REFLECTION_SAMPLE = '';
+  // 驗證用：把 calcNormal 的 SVG 分軸差分換回迴圈化之前那六個展開的 tap。
+  // 這一支只該在做逐像素 A/B 時開 —— 它會把 mapScene 的靜態展開份數從 2 拉回 7，
+  // 也就是回到這一輪要修掉的那個編譯規模。
+  if (DIAG.probeUnrolledSvgTaps) defines.PROBE_UNROLLED_SVG_TAPS = '';
   if (DIAG.probeNoWobble) defines.PROBE_NO_GEOMETRY_WOBBLE = '';
   if (DIAG.probeNoRefractionFilm || DIAG.probeNoTraceExit) defines.PROBE_NO_TRACE_EXIT = '';
   if (DIAG.probeNoRefractionFilm || DIAG.probeNoArtDispersion) defines.PROBE_NO_ART_DISPERSION = '';
@@ -3634,10 +3952,11 @@ function initGL() {
     uCompositionOffsetX: { value: 0 },
     uCompositionOffsetY: { value: 0 },
     uMaxSteps:   { value: qualitySteps },
-    // 只有 probe-loop-normal-taps 的 shader 會宣告這顆；其餘變體 three.js 找不到
-    // location 就直接略過。恆為 4 —— 它的作用是讓 trip count 對 fxc 保持未知，
-    // 不是拿來調整取樣數的。
+    // 這兩顆的作用都不是調整取樣數，而是讓 calcNormal 兩條法線路徑的迴圈 trip count
+    // 對 fxc 保持未知，迴圈才不會被靜態展開成一份一份的 mapScene（見 shaders.js 的
+    // calcNormal）。所以值恆定：四面體 4 個 tap、SVG 分軸中央差分 6 個 tap。
     uNormalTaps: { value: 4 },
+    uNormalAxisTaps: { value: 6 },
     uCount:      { value: Math.round(P.count) },
     uViscosity:  { value: P.viscosity },
     uWobble:     { value: P.wobble },
@@ -5013,8 +5332,18 @@ function captureFrameForDiff(key) {
     console.info('[bubble diag] 已擷取畫面 "' + key + '"：' + w + 'x' + h
       + '，hash=' + hash.toString(16) + '，取樣 ' + (sample.length / 4) + ' 像素'
       + '，uTime=' + record.simT);
+    return { ok: true, hash, width: w, height: h };
   } catch (e) {
-    console.error('[bubble diag] 擷取畫面失敗：' + e.message);
+    // 幾乎一定是 localStorage 配額：一筆擷取約 700KB，而配額只有 5MB 上下，
+    // 存到第七、八筆就滿了。失敗訊息一定要把原因跟清法講出來 —— 否則讀回來只是
+    // null，下游會以為「擷取到一張空畫面」而不是「根本沒存進去」，那是會白花
+    // 一整輪量測時間的誤判。
+    const 已存筆數 = Object.keys(localStorage).filter(k => k.startsWith('vfx:diagpix:')).length;
+    console.error('[bubble diag] 擷取畫面失敗：' + e.message
+      + '（localStorage 目前有 ' + 已存筆數 + ' 筆擷取，每筆約 700KB，配額約 5MB。'
+      + '清掉：Object.keys(localStorage)'
+      + '.filter(k=>k.startsWith("vfx:diagpix:")).forEach(k=>localStorage.removeItem(k))）');
+    return { ok: false, 錯誤: e.message, 已存筆數 };
   }
 }
 
@@ -5054,6 +5383,32 @@ window.__bubbleDiagComparePixels = function (keyA, keyB) {
           : '有可見差異，需要檢查',
     diag: { [keyA]: a.diag, [keyB]: b.diag },
   };
+};
+
+// 在「現在這個狀態」算繪一幀並擷取起來，供逐像素 A/B。
+//
+// ?diagCapture= 只在 DIAG.static 的第一幀觸發，那一幀必然是頁面預設模式（分裂）。
+// 造型類模式沒有 URL 參數可以直接進入，得先像使用者那樣切模式、等造型匯入、
+// 等變體在背景編好，才有「同一支 shader 的同一幀」可比 —— 那些等待由外部驅動
+// （__bubbleDiagReport 已經把需要的狀態全部攤出來了），這裡只負責最後那一步。
+//
+// 算繪路徑與 DIAG.static 那一段逐字相同：先對齊 last 讓 dt≈0，走完整的 frame()
+// 而不是只呼叫 renderer.render()，讀像素緊接在同一個 task 內，最後把 frame()
+// 自己排下去的那次 RAF 取消掉，只留這一幀。
+window.__bubbleDiagRenderAndCapture = function (key) {
+  if (!inited) return { 錯誤: 'WebGL 尚未初始化' };
+  last = performance.now();
+  frame(performance.now());
+  const result = captureFrameForDiff(key);
+  if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+  const saved = result.ok
+    ? JSON.parse(localStorage.getItem('vfx:diagpix:' + key) || 'null')
+    : null;
+  return saved
+    ? { key, 尺寸: saved.width + 'x' + saved.height, hash: saved.hash.toString(16),
+      simT: saved.simT, 取樣像素數: saved.sample.length / 4,
+      目前變體: activeVariantKey, defines: mesh.material.defines }
+    : { 錯誤: '擷取失敗：' + (result.錯誤 || '(未知)'), 已存筆數: result.已存筆數 };
 };
 
 // 診斷用的現況報告。任何時候都可以在 console 呼叫 __bubbleDiagReport()，
@@ -5124,9 +5479,74 @@ window.__bubbleDiagReport = function () {
     // 過程中後端有沒有換過人（見 glTimeline）。
     gl時間軸: glTimeline,
     shader規模: computeShaderStats(),
+    // 造型場的完整 runtime 狀態。「造型資料在不在」與「shader 有沒有把它編進來」是
+    // 兩件事，要並排看才分得出是資料沒到還是 shader 沒編。
+    造型: (() => {
+      const d = (mesh && mesh.material) ? mesh.material.defines || {} : {};
+      const has = k => d[k] !== false && d[k] !== undefined;
+      const tex = uniforms ? uniforms.uShapeTex.value : null;
+      const img = tex && tex.image ? tex.image : null;
+      return {
+        motion: P.motion,
+        shapeSource: P.shapeSource,
+        usesShapeField: usesShapeField(P.motion),
+        // --- shader 端 ---
+        FEATURE_SHAPE_FIELD已編入: has('FEATURE_SHAPE_FIELD'),
+        NORMAL_TAPS_SVG: has('NORMAL_TAPS_SVG'),
+        NORMAL_TAPS_TETRA: has('NORMAL_TAPS_TETRA'),
+        FEATURE_MICRO_DROPS: has('FEATURE_MICRO_DROPS'),
+        FEATURE_NEGATIVE_FIELD: has('FEATURE_NEGATIVE_FIELD'),
+        // 造型場內部的模式特化。FEATURE_SHAPE_SVG / VOLUME 應該正好對上 uShapeType
+        // （1 / 2）；不一致就代表變體還在背景編譯中，此刻 shapeDistance 會回傳
+        // 遠距離，造型暫時不顯示（見 shaders.js 的 shapeDistance）。
+        FEATURE_SHAPE_SVG: has('FEATURE_SHAPE_SVG'),
+        FEATURE_SHAPE_VOLUME: has('FEATURE_SHAPE_VOLUME'),
+        FEATURE_SHAPE_MORPH: has('FEATURE_SHAPE_MORPH'),
+        FEATURE_FORMATION_CUT: has('FEATURE_FORMATION_CUT'),
+        FEATURE_DISSOLVE_FIELD: has('FEATURE_DISSOLVE_FIELD'),
+        // --- uniform 端 ---
+        uShapeType: uniforms ? uniforms.uShapeType.value : null,
+        uShapeProgress: uniforms ? uniforms.uShapeProgress.value : null,
+        uShapeGrid: uniforms ? uniforms.uShapeGrid.value : null,
+        uShapeScale: uniforms ? uniforms.uShapeScale.value : null,
+        uShapeTex有貼圖: !!tex,
+        uShapeTex尺寸: img ? (img.width + 'x' + img.height) : '(無)',
+        // --- 造型資料端 ---
+        shapeField存在: !!shapeField,
+        shapeTargetsBase長度: shapeTargetsBase.length,
+        shapeTargets長度: shapeTargets.length,
+        shapeCavityBase長度: shapeCavityBase.length,
+        shapeFieldSource,
+        builtinSvgVariant,
+        期望的內建造型: MOTION_SVG_DEMO[P.motion] || 'question',
+        shapeConverting,
+        shapeImportingKind,
+        使用者匯入的檔案: { svg: !!userShapeFiles.svg, gltf: !!userShapeFiles.gltf },
+      };
+    })(),
     變體: {
       目前key: activeVariantKey,
+      應該要的key: variantKey(),
+      首編已完成: initialCompileDone,
+      待補做的切換: pendingVariantSync,
+      編譯中的key: variantSwapInFlight,
+      // 進行中的背景編譯：每次讀報告時重算已經過時間，這樣就能直接看出
+      // 「還在編」與「已經卡死」的差別，不必自己掐錶。
+      進行中編譯: variantStats.進行中 ? {
+        ...variantStats.進行中,
+        已經過ms: Math.round(performance.now() - variantStats.進行中.開始於ms),
+        期間contextLost: glTimeline.contextLost次數 - variantStats.進行中.開始時contextLost,
+      } : null,
       狀態: variantState(),
+      // 背景預熱。「略過」不是壞事 —— 快的後端本來就不該預熱（見 prewarmSkipReason）。
+      預熱: {
+        ...prewarmStats,
+        首編耗時ms: initialCompileMs === null ? null : Math.round(initialCompileMs),
+        進行中: prewarmStats.進行中 ? {
+          ...prewarmStats.進行中,
+          已經過ms: Math.round(performance.now() - prewarmStats.進行中.開始於ms),
+        } : null,
+      },
       已快取: [...variantCache.keys()],
       快取上限: VARIANT_CACHE_LIMIT,
       ...variantStats,

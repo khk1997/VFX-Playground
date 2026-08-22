@@ -85,9 +85,13 @@ uniform float uTanHalfFov;
 uniform float uCompositionOffsetX;
 uniform float uCompositionOffsetY;
 uniform int   uMaxSteps;
-// 恆為 4。它的作用不是調整取樣數，而是讓 calcNormal 那個四面體迴圈的 trip count
-// 對 fxc 保持未知，迴圈才不會被靜態展開成 4 份 mapScene（見 calcNormal 的說明）。
+// 法線取樣數。四面體 4 個 tap、SVG 分軸中央差分 6 個 tap，兩者都恆定。
+//
+// 它們是 uniform 而不是常數，作用不是「可以調」，而是讓 calcNormal 那個共用迴圈的
+// trip count 對 fxc 保持未知：上界若是編譯期常數，fxc 會把迴圈攤平成一份一份的
+// mapScene，這一整套編譯規模的改善就沒了（見 calcNormal 的說明）。
 uniform int   uNormalTaps;
+uniform int   uNormalAxisTaps;
 
 // ===== shader cache 破壞用的 salt（?shaderRun=N）=====
 // 目的：強迫每次都是 cold compile。
@@ -470,7 +474,15 @@ float microDropletDistance(vec3 p, vec4 sphere, vec4 shape){
 #endif // FEATURE_MICRO_DROPS
 
 #ifdef FEATURE_SHAPE_FIELD
-float decodeShape(float v){ return (v - 0.5) * 48.0; }
+// ===== 造型距離場的來源特化 =====
+//
+// 造型有兩種來源：SVG 擠出（uShapeType == 1）與 GLB 體積（uShapeType == 2），
+// 面板的「形狀來源」二選一。原版把兩支距離場都編進去，再用 uShapeType 在
+// runtime 選一支 —— 而 mapScene 攤平之後每一份都帶著兩支，其中一支必定是死碼。
+//
+// volumeShapeDistance 是 8 次 atlasVoxel（＝8 個 texture2D 加三線性插值），
+// 所以在 SVG 模式下這一刀砍掉的是編譯規模裡最大的一塊。
+#ifdef FEATURE_SHAPE_SVG
 // 硬體雙線性只有 C0 連續：梯度在每條 texel 邊界跳一次，格內近似常數。
 // 擠出側壁的法線完全等於這個 xy 梯度，而 edge 不隨 z 變化，於是每格 texel
 // 的固定法線會沿整個厚度重複，形成貫穿擠出深度的條紋（掠射角還會把 texel
@@ -554,6 +566,10 @@ float svgShapeDistance(vec3 p, bool smoothShape, int ch){
   }
   return result - uShapeSoftness;
 }
+#endif // FEATURE_SHAPE_SVG
+
+#ifdef FEATURE_SHAPE_VOLUME
+float decodeShape(float v){ return (v - 0.5) * 48.0; }
 // ch 的意義與 sampleShapeField 相同：形狀變形模式把第二顆形狀的體素圖集放在
 // g 通道，其餘情況 r=g=b 都是同一個值。
 float atlasVoxel(vec3 cell, int ch){
@@ -592,6 +608,29 @@ float volumeShapeDistance(vec3 p, int ch){
   float edge = mix(z0, z1, f.z) * voxelSize - uShapeSoftness - topologyGuard;
   vec3 outside = max(gridP - (n - 1.0), vec3(0.0)) + max(-gridP, vec3(0.0));
   return edge + length(outside) * voxelSize;
+}
+#endif // FEATURE_SHAPE_VOLUME
+
+// 造型距離場的單一入口。mapScene 有三個呼叫點，原本每一個都寫成
+//   uShapeType == 1 ? svgShapeDistance(...) : volumeShapeDistance(...)
+// 於是兩支都被編一份。這裡把那個三元運算子搬進一個函式，兩支的存在與否交給
+// FEATURE_SHAPE_SVG / FEATURE_SHAPE_VOLUME 決定。
+//
+// 兩者都開時（?diag=allfeatures 的驗證組合）三條 if 覆蓋了 uShapeType 的所有取值，
+// 最後那個 return 到不了，行為與原本的三元運算子逐位元相同。
+//
+// 只開一支時多出一個型別檢查，那不是保險而是有意義的：換「形狀來源」的當下
+// uShapeType 就變成新值，而對應的變體要在背景編好幾秒後才會換上來。這幾秒裡寧可
+// 回傳遠距離（＝此刻沒有造型，跟切換模式時造型還沒出現是同一種過渡），也不要把
+// 體素圖集當成 SVG 高度場、或反過來，解讀出一團跟形狀無關的東西。
+float shapeDistance(vec3 p, bool smoothShape, int ch){
+#ifdef FEATURE_SHAPE_SVG
+  if (uShapeType == 1) return svgShapeDistance(p, smoothShape, ch);
+#endif
+#ifdef FEATURE_SHAPE_VOLUME
+  if (uShapeType != 1) return volumeShapeDistance(p, ch);
+#endif
+  return 1e6;
 }
 
 #endif // FEATURE_SHAPE_FIELD
@@ -636,7 +675,11 @@ float capillaryWave(vec3 p, int i){
 //              這是碎裂鏡頭的讀感來源，糊掉就只是另一種噪聲了。
 //
 // 每個 march step 只算一次（兩顆形狀共用），所以成本與形狀數無關。
-#ifdef FEATURE_SHAPE_FIELD
+//
+// FEATURE_DISSOLVE_FIELD 由 bubble.js 在「形狀變形的交接」或「形狀匯聚的成型波前」
+// 任一個成立時開啟（見 shaderFeatures）。其餘造型模式兩道波前都不存在，這整段
+// 連著裡面那個 3x3 Voronoi 迴圈都是死碼 —— 而它在攤平後是跟著 mapScene 一起乘的。
+#ifdef FEATURE_DISSOLVE_FIELD
 float voronoiCellValue(vec2 p){
   vec2 cell = floor(p);
   vec2 f = fract(p);
@@ -690,7 +733,7 @@ float dissolveField(vec3 p){
   return base;
 }
 
-#endif // FEATURE_SHAPE_FIELD
+#endif // FEATURE_DISSOLVE_FIELD
 
 // 毛細波共用的程序紋理。最後只回傳表面距離偏移，不搬動距離場取樣座標；
 // 這能避免高密度螺旋把座標映射折回中心，讓 SVG／GLB 縮成皺褶。
@@ -980,8 +1023,22 @@ float mapScene(vec3 p, bool smoothShape){
     // 分開套在各自的通道上。fromCh/toCh 哪個是 A、哪個是 B 由 uShapeMorph 決定
     // （見下方），所以要先分出 shapeP 對應 A、B 各自的本地座標。
     vec3 shapePA = shapeP / uShapeAScale;
+#ifdef FEATURE_SHAPE_MORPH
     vec3 shapePB = shapeP / uShapeBScale;
+#endif
     float detailD;
+// ===== 兩顆形狀交接（形狀變形）的編譯期特化 =====
+//
+// uShapeMorph 只有形狀變形模式會設成非 0（見 bubble.js 的 morphSolid：其餘模式一律
+// uShapeMorph = 0），所以其他模式下這整條分支的 runtime 條件恆為 false。
+//
+// 它是造型場裡最貴的一塊：兩顆形狀各求一次造型距離（＝兩份 shapeDistance），再加
+// 一次 dissolveField。拿掉之後 mapScene 裡的造型距離場從 3 份降到 1 份，而每一份都
+// 要跟著 mapScene 的攤平份數一起乘。
+//
+// 形狀變形模式本身兩條都要編：雙通道貼圖還沒備妥時 morphSolid 是 false、
+// uShapeMorph 是 0，那時走的是下面的單形狀路徑。
+#ifdef FEATURE_SHAPE_MORPH
     if (uShapeMorph > 0.5) {
       // 兩顆形狀同時在場：舊的被「消失波前」削掉，新的被「出現波前」放出來，
       // 兩者聯集。單一貼圖的兩個通道，所以這裡沒有多綁任何取樣器。
@@ -996,14 +1053,10 @@ float mapScene(vec3 p, bool smoothShape){
       // 兩顆形狀一定是同一種來源（面板的「形狀來源」對兩個匯入槽共用），所以
       // 這裡只需要看一次 uShapeType，不會出現一顆走 SVG、一顆走體素的情況。
       float dFrom = uMorphActive.x > 0.5
-        ? (uShapeType == 1
-          ? svgShapeDistance(shapePFrom, smoothShape, fromCh)
-          : volumeShapeDistance(shapePFrom, fromCh)) * uShapeScale * scaleFrom
+        ? shapeDistance(shapePFrom, smoothShape, fromCh) * uShapeScale * scaleFrom
         : 1e6;
       float dTo = uMorphActive.y > 0.5
-        ? (uShapeType == 1
-          ? svgShapeDistance(shapePTo, smoothShape, toCh)
-          : volumeShapeDistance(shapePTo, toCh)) * uShapeScale * scaleTo
+        ? shapeDistance(shapePTo, smoothShape, toCh) * uShapeScale * scaleTo
         : 1e6;
       float field = dissolveField(p);
       // 收頸：波前前方那一小段裡，對距離場加一個正偏移把實體「侵蝕變薄」。
@@ -1024,15 +1077,20 @@ float mapScene(vec3 p, bool smoothShape){
       float keptFrom = -smin(-dFrom, -(uShapeCut.z - field), k);
       float keptTo = -smin(-dTo, -(field - uShapeCut.w), k);
       detailD = smin(keptFrom, keptTo, k);
-    } else {
+    } else
+#endif // FEATURE_SHAPE_MORPH
+    {
       // 非 morph 情境下場上只有形狀 A（通道 0）。
-      detailD = (uShapeType == 1
-        ? svgShapeDistance(shapePA, smoothShape, 0)
-        : volumeShapeDistance(shapePA, 0)) * uShapeScale * uShapeAScale;
+      detailD = shapeDistance(shapePA, smoothShape, 0) * uShapeScale * uShapeAScale;
       // 形狀匯聚的成型波前：跟上面那組消失波前共用同一個 dissolveField、同一組
       // 擾動與收頸 uniform，差別只有兩點——只有一道波前（沒有第二顆形狀要交接），
       // 而且方向相反：morph 保留波前「之後」的舊形狀，這裡保留波前「之前」掃過
       // 的區域，也就是掃到哪裡才長到哪裡。
+// 成型波前只有形狀匯聚會用：uFormationCut 是 isFormationMotion(motion) && shapeField
+// && P.formationFrontOn 才會被設成 1（見 bubble.js 的 updateDropUniforms），其餘造型
+// 模式恆為 0。裡面的 dissolveField 含一個 3x3 Voronoi 迴圈，是跟著 mapScene 攤平
+// 份數一起乘的，所以其他模式不編它省下來的量很可觀。
+#ifdef FEATURE_FORMATION_CUT
       if (uFormationCut > 0.5) {
         float field = dissolveField(p);
         // 收頸在這裡的身分也跟著反過來：morph 是斷開前先變薄，這裡是剛長出來
@@ -1047,6 +1105,7 @@ float mapScene(vec3 p, bool smoothShape){
         // （-smin 的對偶）取交集，uShapeCutBlend 控制切口本身的軟硬。
         detailD = -smin(-detailD, -(field - uShapeCut.w), max(0.0001, uShapeCutBlend));
       }
+#endif // FEATURE_FORMATION_CUT
     }
     // 以 signed-distance 偏移形成表面波，不再把多個取樣座標擠向螺旋中心。
 #ifdef FEATURE_CAPILLARY
@@ -1074,10 +1133,11 @@ float mapScene(vec3 p, bool smoothShape){
   // 最大位移遠小於 0.25；遠離表面時略過 noise，不影響射線接近表面的安全性。
   //
   // 診斷探針 C（?diag=probe-no-wobble）只把這一段在編譯期拿掉。
-  // 它測的是「同一份 noise 被重複 inline」的代價：mapScene 在正式 shader 有 13 個
-  // 靜態呼叫點（raymarch 迴圈體、calcNormal 的 10 個 tap、traceExitSurface），每個
-  // 都會把這裡的 fbmFast 展開成 2 份 snoise。probe 階梯已經量到「noise 進 mapScene」
-  // 是 148ms → 600ms 那一跳的來源，這一刀就是同一個機制在正式規模下的代價。
+  // 它測的是「同一份 noise 被重複 inline」的代價：mapScene 在造型模式有 6 個靜態
+  // 呼叫點（raymarch 迴圈體 1、calcNormal 1、traceExitSurface 2 個呼叫點各帶自己的
+  // march 與一份 calcNormal），每個都會把這裡的 fbmFast 展開成 2 份 snoise。
+  // probe 階梯已經量到「noise 進 mapScene」是 148ms → 600ms 那一跳的來源，這一刀
+  // 就是同一個機制在正式規模下的代價。
   // 拿掉之後水滴表面會少一層擾動，所以這是探針不是可上線的設定。
 #ifndef PROBE_NO_GEOMETRY_WOBBLE
   float geometryWobble = uWobble * mix(1.0, 0.10, uShapeProgress);
@@ -1109,27 +1169,40 @@ vec3 calcNormal(vec3 p){
   // 側壁需要跨過約 2 texels 才能平均 SDF 殘留的次像素梯度跳動；
   // 厚度方向則不能用同樣的大步長，否則會跨過正面／側壁倒角。
   // 因此 SVG 改用分軸中央差分：XY 平滑輪廓梯度，Z 獨立保留倒角。
-// 這條 SVG 分軸中央差分是 6 份 mapScene，而下面的四面體是 4 份 —— 兩條都會被
-// 編譯，所以 calcNormal 一次呼叫就展開 10 份 mapScene。它有 3 個呼叫點，於是
-// 33 份總展開量裡有 30 份出自這裡（實測 B1a：把 traceExitSurface 那 20 份拿掉
-// 就從 127 秒降到 30 秒）。
+// ===== 法線路徑：兩條路徑共用一個迴圈 =====
 //
-// KEEP_SVG_NORMAL_BRANCH 由 bubble.js 決定：不帶 probe 時恆為開啟，正式版一個
-// 字都沒變；只有 probe-lean-normals 且造型場沒編進來時才關掉 —— 那種情況下
-// svgShapeDistance 根本不存在，這條分支是純粹的死碼。
-// ===== 法線路徑的編譯期特化 =====
+// 這裡的成本不是「算幾次」而是「編幾份」。原版是兩條展開的路徑：SVG 分軸中央差分
+// 6 份 mapScene ＋ 四面體 4 份 ＝ 每個呼叫點 10 份；而 calcNormal 有 3 個呼叫點
+// （main 一個、traceExitSurface 兩個），所以 33 份總展開量裡有 30 份出自這裡
+// （實測 B1a：把 traceExitSurface 那 20 份拿掉就從 127 秒降到 30 秒）。
 //
-// 這個函式有兩條路徑，執行期只會走一條，但兩條都會被編譯 —— SVG 分軸差分 6 份
-// mapScene、四面體 4 份，合計每個呼叫點 10 份。它有 3 個呼叫點，所以 33 份總展開量
-// 裡有 30 份出自這裡。
+// 兩條路徑其實是同一個形狀的取樣：
+//   法線 = normalize( Σ w_i · mapScene(p + w_i·h_i) / divisor )
+// 四面體是 4 個 tap、w_i 是四面體的正負號向量、divisor 為 1；SVG 是 6 個 tap、
+// w_i 是 ±單位軸、divisor 是各軸自己的步長。既然形狀一樣，就不需要兩份程式碼 ——
+// 收成一個 uniform 守衛的迴圈之後，整個 calcNormal 只剩 1 份 mapScene，三個呼叫點
+// 合計 3 份（原版 30 份）。
 //
-// NORMAL_TAPS_SVG / NORMAL_TAPS_TETRA 兩個都預設開啟（bubble.js 決定），此時展開結果
-// 與特化之前逐字相同，正式版不受影響。只留一條時，那條的 runtime 條件也一併消失 ——
-// 因為「條件成立」本來就是選到這個 variant 的理由。
+// 這個改寫是逐位元等價的，不是近似：
+//   * 四面體：svgPath 為 false 時 w = e、h_i = h、divisor = 1，acc 的累加式與展開式
+//     逐字相同，而 acc / vec3(1.0) 在 IEEE754 下就是 acc。
+//   * SVG：offset 由 axis*(sgn*h) 改成 (axis*sgn)*h，逐分量都是 ±1/±0 乘上同一個 h，
+//     兩種結合順序的結果完全相同（含 ±0 的正負號）；除法仍然留到最後一次做，
+//     所以每一軸都還是「(正 tap − 負 tap) / 該軸步長」。
+//   * 兩者唯一的差別是多了起始的 0.0 + 與其他軸加上的 ±0.0。那只可能改變零的正負號，
+//     而零的正負號經過 normalize 之後對下游沒有可見影響。
+// 這個主張是量出來的，不是推論：?diag=probe-unrolled-svg-taps 會編出上面那份展開的
+// 兩路徑原版，同一個造型模式、同一個 ?diagTime 下擷取兩次比對，實測全畫面 FNV hash
+// 相同、最大通道誤差 0（formation／SVG，1899x1209）。
 //
-// 注意 SVG 模式不能單純只編 SVG 那條：uShapeProgress 從 0 長到 1，在 0 附近走的是
-// 四面體那條。所以 variant 的鍵必須包含「造型此刻是否已經生效」，而不是只看造型型別，
-// 否則成形過程中的法線會變。這一點是這個設計能不能宣稱「數學完全一致」的關鍵。
+// NORMAL_TAPS_SVG / NORMAL_TAPS_TETRA 由 bubble.js 決定。SVG 模式兩條都要編：
+// uShapeProgress 從 0 長到 1，在 0 附近走的是四面體那條，所以「造型此刻是否已經
+// 生效」不能拿來當變體條件，否則成形過程中法線會換一條路徑。
+#ifdef PROBE_UNROLLED_SVG_TAPS
+// 驗證用（?diag=probe-unrolled-svg-taps）：迴圈化之前那份展開的兩路徑原版，逐字保留。
+// 它是上面那個等價主張的可重現證據，不是備援 —— 唯一該開它的時候就是重跑那組比對。
+// 代價很實在：mapScene 的靜態展開份數會從 3 拉回 24，formation 的 cold compile 實測
+// 從 75 秒變成 218 秒。
 #ifdef NORMAL_TAPS_SVG
 #ifdef NORMAL_TAPS_TETRA
   if (uShapeType == 1 && uShapeProgress > 0.001)
@@ -1147,38 +1220,78 @@ vec3 calcNormal(vec3 p){
   }
 #endif // NORMAL_TAPS_SVG
 #ifdef NORMAL_TAPS_TETRA
+  {
+    float svgH = svgTexel * 1.5;
+    float shapeH = uShapeType == 2 ? voxelH * 1.70 : svgH;
+    float h = mix(0.0009, shapeH, uShapeProgress);
+    // 四面體那條在這一輪之前就已經是迴圈了（見 uNormalTaps 的說明），所以這份
+    // 「原版」保留它原本的迴圈形式，只把 SVG 那條還原成展開式 —— 這一輪要驗的
+    // 就是 SVG 那條。
+    vec3 acc = vec3(0.0);
+    for (int i = 0; i < 4; i++) {
+      if (i >= uNormalTaps) break;
+      vec3 e = i == 0 ? k.xyy : (i == 1 ? k.yyx : (i == 2 ? k.yxy : k.xxx));
+      acc += e * mapScene(p + e * h, true);
+    }
+    return normalize(acc);
+  }
+#endif // NORMAL_TAPS_TETRA
+#endif // PROBE_UNROLLED_SVG_TAPS
+
+#ifndef PROBE_UNROLLED_SVG_TAPS
+  // 這一刻走的是 SVG 分軸差分還是四面體。只留一條路徑的變體裡它是編譯期常數，
+  // 下面所有的 svgPath ? A : B 都會被摺掉，等於直接寫死那一條。
+#ifdef NORMAL_TAPS_SVG
+#ifdef NORMAL_TAPS_TETRA
+  bool svgPath = uShapeType == 1 && uShapeProgress > 0.001;
+#endif
+#ifndef NORMAL_TAPS_TETRA
+  bool svgPath = true;
+#endif
+#endif
+#ifndef NORMAL_TAPS_SVG
+  bool svgPath = false;
+#endif
+  // SVG 的兩個步長：XY 跨約 2 texels 平滑輪廓梯度，Z 獨立且更小，才不會跨過
+  // 正面／側壁的倒角（見上方那段 texel 說明）。
+  float xyH = min(svgTexel * 2.0, max(svgTexel * 0.75, uShapeEdgeBevel * 0.48));
+  float zH = min(xyH, max(0.0009, uShapeEdgeBevel * 0.22));
+  // 四面體的單一步長：造型成形後跨到造型自己的尺度（體素 1.70 個格距、SVG 1.5 個
+  // texel），成形前收回 0.0009 的水滴尺度。
   float svgH = svgTexel * 1.5;
   float shapeH = uShapeType == 2 ? voxelH * 1.70 : svgH;
-  float h = mix(0.0009, shapeH, uShapeProgress);
-// 探針 A（?diag=probe-loop-normal-taps）：把四個 tap 收進一個迴圈。
-//
-// 目的只有一個 —— 靜態展開份數。四個展開的 tap 會讓 mapScene 被 inline 四份；
-// 收進迴圈只剩一份。runtime 仍然算四次，數學完全一樣。
-//
-// 那個 if (i >= uNormalTaps) break; 不是多餘的：迴圈上界若是編譯期常數 4，fxc 很可能
-// 直接展開，那就白做了。uNormalTaps 是 uniform（恆為 4），trip count 對編譯器未知，
-// 就跟主 raymarch 迴圈同一個形狀 —— 而我們實測過那個迴圈把上界從 4 改到 88，
-// 編譯時間只差 1.4%，也就是 fxc 確實沒有展開它。
-//
-// 累加順序刻意與展開式一致（i = 0→3）。唯一的差別是多了一個起始的 0.0 +，
-// 那在 IEEE754 下除了 -0.0 會變成 +0.0 之外完全等值，而零的正負號經過
-// normalize 之後對下游沒有可見影響。
+  float tetraH = mix(0.0009, shapeH, uShapeProgress);
+  // trip count 必須對 fxc 未知，迴圈才不會被展開成一份一份的 mapScene ——
+  // 這兩顆 uniform 恆為 6 / 4，存在的唯一理由就是這件事（見它們的宣告）。
+  int taps = svgPath ? uNormalAxisTaps : uNormalTaps;
+  // 分軸差分的除法留到最後一次做，才與展開式的 dx/xyH、dy/xyH、dz/zH 逐位元相同。
+  vec3 divisor = svgPath ? vec3(xyH, xyH, zH) : vec3(1.0);
   vec3 acc = vec3(0.0);
-  for (int i = 0; i < 4; i++) {
-    if (i >= uNormalTaps) break;
+  for (int i = 0; i < 6; i++) {
+    if (i >= taps) break;
+    // SVG：i = 0..5 依序是 +x, -x, +y, -y, +z, -z，與展開式的評估順序一致。
+    vec3 axis = i < 2
+      ? vec3(1.0, 0.0, 0.0)
+      : (i < 4 ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0));
+    float sgn = (i == 0 || i == 2 || i == 4) ? 1.0 : -1.0;
+    // 四面體：i = 0..3 的四個正負號向量，與展開式的順序一致。
     vec3 e = i == 0 ? k.xyy : (i == 1 ? k.yyx : (i == 2 ? k.yxy : k.xxx));
-    acc += e * mapScene(p + e * h, true);
+    // 權重向量同時當取樣偏移的方向：offset = w * h，累加也是 w * 該 tap 的值。
+    vec3 w = svgPath ? axis * sgn : e;
+    float h = svgPath ? (i < 4 ? xyH : zH) : tetraH;
+    acc += w * mapScene(p + w * h, true);
   }
-  return normalize(acc);
-#endif // NORMAL_TAPS_TETRA
+  return normalize(acc / divisor);
+#endif // PROBE_UNROLLED_SVG_TAPS
 }
 
 #ifdef PROBE_LEAN_NORMALS
 // 出口法線專用的四面體法線（?diag=probe-lean-normals）。
 //
-// 存在的理由純粹是 inline 展開量：完整的 calcNormal 含 SVG 分軸差分（6 份）與
-// 四面體（4 份）兩條路徑，兩條都會被編譯，所以每個呼叫點都是 10 份 mapScene。
-// traceExitSurface 有 2 個呼叫點，光是它就貢獻 20 份。
+// 存在的理由純粹是 inline 展開量。它是在 calcNormal 還是兩條展開路徑（SVG 6 份 ＋
+// 四面體 4 份，每個呼叫點 10 份）的時候加的，那時 traceExitSurface 的 2 個呼叫點光
+// 自己就貢獻 20 份。calcNormal 收成單一迴圈之後每個呼叫點只剩 1 份，這支 probe 能
+// 省下的量因此小很多，留著只是為了跟當時的量測結果對得上。
 //
 // 這一版只保留四面體那條，h 的算法與 calcNormal 的非 SVG 路徑逐字相同，所以在
 // 非 SVG 造型上結果應該一致；差別只出現在 SVG 造型的出口法線上 —— 那裡會少掉

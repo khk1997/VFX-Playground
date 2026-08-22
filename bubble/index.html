@@ -53,6 +53,10 @@
       <option value="cinematic" hidden>分裂（舊值 cinematic）</option>
       <option value="pulse" hidden>脈動呼吸 Pulse（已移除）</option>
     </select><span class="val"></span></div>
+    <!-- shader 準備狀態。在 Windows 的 ANGLE D3D11 後端上，切到造型類模式後 shader
+         要編數十秒，那段時間畫面完全不會變 —— 沒有這一行的話使用者只會以為壞了。
+         文字由 bubble.js 的 updateShaderState() 填，沒事的時候是 hidden。 -->
+    <div id="shaderState" class="note" hidden></div>
     <div class="row" id="loopDurationRow"><label>循環秒數</label><input type="range" id="loopDuration" min="4" max="30" step="0.5" value="12"><span class="val" id="loopDuration_v"></span></div>
     <div class="modeBlock" data-gate="formation">
     <div class="row" id="holdBreathRow"><label>定格呼吸</label><input type="range" id="holdBreath" min="0" max="0.2" step="0.005" value="0.05"><span class="val" id="holdBreath_v"></span></div>
