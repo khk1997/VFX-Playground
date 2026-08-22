@@ -36,6 +36,15 @@
   .s-ok { color: var(--ok); } .s-slow { color: var(--slow); }
   .s-bad { color: var(--bad); } .s-run { color: var(--run); }
   .note { color: var(--dim); font-size: 12px; }
+  #env {
+    padding: 10px 14px; border: 1px solid var(--line); border-radius: 6px;
+    background: #10141d; margin-bottom: 16px; font-size: 12px; color: var(--dim);
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 2px 20px;
+  }
+  #env b { color: var(--fg); font-weight: 600; }
+  #ranking { margin-top: 26px; }
+  #ranking h2 { font-size: 15px; margin: 0 0 6px; }
+  #ranking table { margin-top: 10px; }
   #frameHost { position: fixed; left: -10000px; top: 0; width: 900px; height: 600px; }
   #frameHost iframe { width: 900px; height: 600px; border: 0; }
   code { background: #161b26; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
@@ -49,6 +58,8 @@
 <div class="sub">
   自動逐一測試 shader 變體的 cold compile 時間。每個 probe 用獨立 iframe、獨立
   shaderRun，測完立即銷毀。若某個 probe 讓瀏覽器卡死，重新開這一頁會自動跳過它繼續。
+  <b>測試期間請讓這一頁保持在前景</b>：切到背景時 bubble 的 <code>isPaused()</code>
+  會擋住 WebGL 初始化，那一筆會自動退回重測而不是記成假的 TIMEOUT。
 </div>
 
 <div class="bar">
@@ -59,6 +70,8 @@
 
 <div id="status">待機中。</div>
 
+<div id="env"></div>
+
 <table>
   <thead>
     <tr>
@@ -66,12 +79,18 @@
       <th class="num">shaderRun</th>
       <th class="num">編譯 (ms)</th>
       <th class="num">第一幀 (ms)</th>
-      <th class="num">輪詢</th>
+      <th class="num">行數</th>
+      <th class="num">mapScene<br>份數</th>
+      <th class="num">tex2D /<br>cubeUV</th>
+      <th class="num">fxc<br>warn</th>
+      <th>後端</th>
       <th>結果</th>
     </tr>
   </thead>
   <tbody id="rows"></tbody>
 </table>
+
+<div id="ranking"></div>
 
 <details>
   <summary>這一頁在測什麼、怎麼判讀</summary>
@@ -93,8 +112,40 @@
     <p><b>為什麼每個 probe 都要換 shaderRun</b>：同一份 shader 原始碼第二次編譯會命中
       驅動的 bytecode 快取，量到的就不是 cold compile。shaderRun 會注入一個整數字面值
       到 shader 裡（乘上恆為 0 的 uniform，畫面不變），讓每次的原始碼都不同。</p>
-    <p><b>TIMEOUT 與 CRASHED 的差別</b>：TIMEOUT 是 iframe 還活著但 5 秒內沒回報完成；
-      CRASHED 是這一頁在測那個 probe 時整個瀏覽器掛掉、重開後才發現。後者是更嚴重的訊號。</p>
+    <p><b>四種結果的差別</b></p>
+    <p>
+      <b>OK</b>：編譯完成，時間在偏慢門檻以下。<br>
+      <b>OK（偏慢）</b>：編譯完成，但超過偏慢門檻。門檻附近的訊號跟失敗一樣重要，
+      所以不併進 OK。<br>
+      <b>TIMEOUT</b>：iframe 還活著，但 timeout 之內沒回報完成。<br>
+      <b>CRASHED</b>：這一頁在測那個 probe 時整個瀏覽器掛掉，重開後才發現。
+      最嚴重的訊號。
+    </p>
+    <p><b>timeout 為什麼是 30 秒</b>：這個值原本是 5 秒，而那讓 TIMEOUT 同時涵蓋了
+      「編譯器 hang」與「編譯要二十秒」兩件完全不同的事 —— 5 秒一到父頁就把 iframe
+      收掉，編譯被中止，我們什麼都沒量到。正式 shader 的規模是 baseline probe 的十倍
+      以上，所以必須給它真的編譯完的機會，才分得出是慢還是掛。</p>
+    <p><b>後端要分開測</b>：Windows Chrome 走 ANGLE，而 ANGLE 底下還有 D3D11 /
+      Vulkan / OpenGL 幾種後端，編譯器完全不同。上方的環境面板顯示這一頁實際跑在哪一個，
+      而進度是<b>按後端分開存</b>的（localStorage key 帶後端名），所以換後端不會接續
+      上一個後端的結果。用 <code>start-server.bat</code> 的參數切換後端。</p>
+    <p><b>遇到 TIMEOUT / CRASHED 就停</b>：那意味著剛才那支 shader 可能已經把 GPU
+      process 或 driver 弄到不正常的狀態，之後量到的數字快也不能證明什麼、慢也不能歸咎
+      給那支 shader。所以這一版不自動往下跑 —— 請完全關閉並重開 Chrome，再回來按
+      「開始 / 繼續」從下一個 probe 接續。</p>
+    <p><b>結果怎麼傳回來</b>：由 iframe 主動 <code>postMessage</code> 給這一頁。
+      父頁直接讀 <code>frame.contentWindow</code> 需要同源，而那條路會在兩種情況下整批
+      失效 —— 這一頁用 <code>file://</code> 開啟（每個 file:// document 都是獨立的
+      opaque origin），或 iframe 的 renderer process 掛掉變成
+      <code>chrome-error://chromewebdata</code>（那也是 cross-origin）。兩種都只會讓
+      父頁收到一串看不懂的 cross-origin error 而不是「這個 probe 超時了」。
+      postMessage 不受同源限制；真的把 renderer process 弄掛時就沒有訊息送出來，
+      這一頁會乾淨地判定 TIMEOUT。後端欄的「via」標示這一筆是走哪條通道拿到的。</p>
+    <p><b>後端的三個時間點</b>：每個 probe 都記錄 renderer 建立後（編譯前）、編譯完成後、
+      以及結束當下的後端，外加 <code>webglcontextlost</code> /
+      <code>webglcontextrestored</code> 次數。三者一致時只顯示一個值；一旦不一致就標成
+      「後端換過人」並全部攤開 —— 「這個 context 一開始就是軟體算繪」和「它把 GPU 弄掛
+      之後才變成軟體算繪」是兩件完全不同的事，只看最後一次查詢分不出來。</p>
   </div>
 </details>
 
@@ -112,9 +163,19 @@
 // 所以進度寫在 localStorage：載入這一頁時如果發現上次有 probe 停在 running，就知道
 // 那個 probe 把瀏覽器弄死了，標成 CRASHED 然後跳過它繼續。
 
-const STORE_KEY = 'vfx:shader-matrix:v1';
 const PAGE_PATH = '../bubble/index.html';
-const TIMEOUT_MS = 5000;      // 單一 probe 的等待上限
+// 單一 probe 的等待上限。
+//
+// 這個值曾經是 5 秒，而那讓整個矩陣測不出想測的東西：88 步的 baseline probe 只要
+// 517ms，但正式 shader 大十倍以上，很可能是「五到三十秒的有限編譯」而不是真的掛掉。
+// 5 秒一到父頁就把 iframe 導向 about:blank，編譯被中止 —— 於是「慢」與「hang」被
+// 記成同一個 TIMEOUT，而這兩者的修法完全不同。
+//
+// 30 秒仍小於 iframe 內部輪詢自己的上限（POLL_LIMIT 15000 × 4ms ≈ 60 秒），
+// 所以真正在編譯的 probe 不會被父頁提前砍掉。
+const TIMEOUT_MS = 30000;
+// 沒失敗但慢到這個程度就標成「OK（偏慢）」—— 門檻附近的訊號跟乾脆失敗一樣重要。
+const SLOW_MS = 1000;
 const GAP_MS = 400;           // probe 之間的間隔，讓上一個 WebGL context 有時間釋放
 const POLL_MS = 100;          // 向 iframe 詢問結果的間隔
 
@@ -127,15 +188,150 @@ const LADDER_MINIMAL = [
   ['probe-noise-mapscene-88','同上但 march 88（約 184 份）'],
 ];
 
-// 第三階段：正式 shader 階梯，從砍最多到完整。
+// 第三階段：正式 shader 階梯，從砍最多到完整，每一步只加回一件事。
+//
+// lowcompileloops 排在 minshader2 前面：它是「minshader2 再把 march 88→16、內部折射
+// 28→8」，也就是比 minshader2 更小的一支，排在後面的話這個階梯就不是單調的。順序
+// 對這裡特別要緊 —— minshader2 之後的每一格都可能讓瀏覽器掛掉、要重開頁面才能繼續，
+// 所以最關鍵的那個數字不該排在它後面。
+//
+// 而 lowcompileloops 正是這一段最有價值的一刀：它保留 minshader2 的全部功能，只把
+// 兩個迴圈展開上限砍掉，於是每像素的 mapScene 展開份數從 174 降到 62（比 88 步的
+// baseline probe 還少）。它正常而 minshader2 不正常 → trigger 是展開量；兩者都不
+// 正常 → trigger 在跟 mapScene 無關的那些功能上。
 const LADDER_PRODUCTION = [
   ['minshader',        '正式 shader − 造型場/毛細波/微滴'],
   ['minshader2',       '再 − 光芒圖樣，主滴迴圈 12→4'],
-  ['lowcompileloops',  '再 − march 88→16、內部折射 28→8'],
+  ['lowcompileloops',  'minshader2 再 − march 88→16、內部折射 28→8'],
   ['compileonly',      '完整正式 shader（無任何裁切）'],
 ];
 
 const PROBE_LABELS = new Map([...LADDER_MINIMAL, ...LADDER_PRODUCTION]);
+
+// ===== 這一輪實際要測的 probe =====
+//
+// 第一輪刻意只有四個，而且不含 compileonly —— 完整 shader 已經被證實可能直接把
+// Chrome 弄掛，而一個會掛掉瀏覽器的 probe 放在計畫裡，代價是後面每一筆都要在
+// 「GPU 狀態可能已經壞掉」的前提下解讀。先用這四個把「展開量」與「功能組合」分開：
+//
+//   compilerbaseline         已知快（架構本身沒問題）
+//   probe-noise-mapscene-88  已知可過（88 步展開 + noise 在 mapScene 內不是 trigger）
+//   lowcompileloops          minshader2 但迴圈上限砍掉 → mapScene 展開 174 降到 62
+//   minshader2               上面那一支把迴圈上限加回去
+//
+// lowcompileloops 正常而 minshader2 不正常 → trigger 是展開量。
+// 兩者都不正常 → trigger 在跟 mapScene 無關的那些功能上。
+// ===== 後段著色隔離輪 =====
+//
+// 所有 probe 共用同一個基底，每一列只多關一個功能，這樣每一筆的差值就只歸因於
+// 那一個功能。第一列是基底本身（不多關任何東西），後面所有改善百分比都以它為分母。
+const BASE_DIAG = 'lowcompileloops,probe-mapscene-plain,probe-loop-normal-taps';
+const BASE_LABEL = '基底：mapscene-plain + loop-normal-taps（不關任何後段功能）';
+
+// 每一列是 [要疊加的 diag 旗標（可逗號串接多個）, 說明, 表格用的短名稱]。
+// 短名稱同時是 localStorage 的鍵，所以改了短名稱等於重測那一列。
+const ACTIVE_PLAN = [
+  [null,                              BASE_LABEL, '(base)'],
+
+  // 第一階段：單一功能逐項隔離（已完成，保留在表上當參照）
+  ['probe-no-prism-beam',             '− 稜光光芒（prismBeamCoord / prismBeamField）'],
+  ['probe-no-liquid-film-material',   '− 液態薄膜材質分支（約 143 行）'],
+  ['probe-no-prism-saturation',       '− 稜光彩度後處理（約 76 行）'],
+  ['probe-no-dispersion-spectral',    '− 色散／光譜（artisticDispersionOPD / visibleSpectrum）'],
+  ['probe-no-spectral-caustics',      '− 光譜焦散（約 150 行，含 ramp 取樣）'],
+  ['probe-no-thin-film-depth',        '− 液態薄膜深度'],
+  ['probe-no-thin-film',              '− thinFilm 本體（4 次 fbm + 取樣）'],
+  ['probe-no-env-pmrem',              '− 環境／PMREM 取樣（含 cube_uv chunk）'],
+
+  // 第二階段：組合。單項百分比不可相加（主導項會遮住其他項），所以要合併就得實測。
+  // 目的不是永久移除功能，而是回答「把最重的幾塊從同一支 shader 的 compile graph
+  // 拆出去之後，剩下的 base glass core 能不能進到 1–3 秒級」。
+  ['probe-no-env-pmrem,probe-no-thin-film',
+    '組合：− env/PMREM − thinFilm', 'COMBO-env+film'],
+  ['probe-no-env-pmrem,probe-no-thin-film,probe-no-liquid-film-material',
+    '組合：− env/PMREM − thinFilm − 液態薄膜材質分支', 'COMBO-env+film+liquid'],
+  ['probe-no-env-pmrem,probe-no-thin-film,probe-no-dispersion-spectral',
+    '組合：− env/PMREM − thinFilm − 色散／光譜', 'COMBO-env+film+disp'],
+];
+const PLAN_NAME = '後段著色隔離 + 組合驗證';
+
+// 每一列的實際 diag 字串：基底 + 這一列要疊加的旗標（本身可以是逗號串接的多個）。
+function diagFor(flags) {
+  return flags ? BASE_DIAG + ',' + flags : BASE_DIAG;
+}
+// 表格與 localStorage 用的識別字串；沒給短名稱就用旗標字串本身。
+function rowId(flags) { return flags || '(base)'; }
+function planEntry([flags, label, id]) {
+  return { probe: flags, label, id: id || rowId(flags), phase: PLAN_NAME };
+}
+
+// ===== 這一輪是在哪個環境跑的 =====
+//
+// 為什麼父頁自己也要測一次：如果某個 probe 把整個瀏覽器弄死，那一筆是沒有 iframe
+// 回報的（狀態只會是 CRASHED），但我們仍然必須知道那是在哪個 ANGLE 後端上發生的。
+// 父頁開一個用完就丟的 context 先把環境記下來，就不依賴任何 probe 活著回報。
+//
+// 全部是字串型 getParameter / getExtension，不涉及 program 狀態，不會阻塞。
+function detectEnvironment() {
+  let canvas = null, gl = null;
+  try {
+    canvas = document.createElement('canvas');
+    gl = canvas.getContext('webgl2');
+  } catch (_) {}
+  let version = 'WebGL2';
+  if (!gl) {
+    try { gl = canvas.getContext('webgl'); version = 'WebGL1'; } catch (_) {}
+  }
+  if (!gl) return { webgl版本: '(無法建立 WebGL context)', ANGLE後端推定: 'unknown' };
+
+  const get = p => { try { return gl.getParameter(p); } catch (_) { return null; } };
+  let dbg = null;
+  try { dbg = gl.getExtension('WEBGL_debug_renderer_info'); } catch (_) {}
+  const glRenderer = get(gl.RENDERER);
+  const unmaskedRenderer = dbg ? get(dbg.UNMASKED_RENDERER_WEBGL) : null;
+  const src = [glRenderer, unmaskedRenderer].filter(Boolean).join(' | ');
+  const backend = /SwiftShader/i.test(src) ? 'SwiftShader'
+    : /Vulkan/i.test(src) ? 'Vulkan'
+    : /Direct3D11|\bD3D11\b/i.test(src) ? 'D3D11'
+    : /Direct3D9|\bD3D9\b/i.test(src) ? 'D3D9'
+    : /OpenGL|GLES/i.test(src) ? 'OpenGL-GLES'
+    : /ANGLE/i.test(src) ? 'ANGLE-unknown'
+    : 'non-ANGLE';
+  let parallelCompile = false;
+  try { parallelCompile = !!gl.getExtension('KHR_parallel_shader_compile'); } catch (_) {}
+  const env = {
+    webgl版本: version,
+    ANGLE後端推定: backend,
+    GL_VENDOR: get(gl.VENDOR),
+    GL_RENDERER: glRenderer,
+    GL_VERSION: get(gl.VERSION),
+    UNMASKED_VENDOR_WEBGL: dbg
+      ? get(dbg.UNMASKED_VENDOR_WEBGL) : '(WEBGL_debug_renderer_info 不可用)',
+    UNMASKED_RENDERER_WEBGL: dbg
+      ? unmaskedRenderer : '(WEBGL_debug_renderer_info 不可用)',
+    KHR_parallel_shader_compile: parallelCompile,
+  };
+  // 這個 context 只用來問環境，立刻歸還 —— 連續測十幾個 iframe 已經很接近瀏覽器的
+  // context 上限，父頁不該再長期佔一個。
+  try { gl.getExtension('WEBGL_lose_context')?.loseContext(); } catch (_) {}
+  return env;
+}
+
+const ENV = detectEnvironment();
+
+// 這一批結果是從哪個 URL 跑的。事後回想「當時是 file:// 還是 http://」是不可靠的，
+// 而那個差別會決定 cross-origin error 該怎麼解讀，所以直接記下來、也顯示出來。
+// file:// 下每個 document 都是獨立的 opaque origin，父頁讀不到 iframe 的任何東西。
+const PAGE_HREF = location.href;
+const PAGE_ORIGIN = location.origin === 'null' || !location.origin
+  ? '(opaque origin：' + location.protocol + ')'
+  : location.origin;
+const IS_FILE_PROTOCOL = location.protocol === 'file:';
+
+// 進度按後端分開存。三個後端要各測一輪，混在同一個 key 裡的話換後端後會直接
+// 「接續」上一個後端的結果，CRASHED 的那一格也會被跳過，等於白測。
+// v3：計畫換成「基底 + 8 個單獨 probe」，欄位也不同，不能沿用 v2 的資料。
+const STORE_KEY = 'vfx:shader-matrix:v3:' + ENV.ANGLE後端推定;
 
 // ===== 狀態 =====
 
@@ -143,8 +339,14 @@ function freshState() {
   return {
     // shaderRun 只增不減，跨重開也不重複 —— 重複就會命中快取。
     runCounter: 9000 + Math.floor(Math.random() * 1000),
+    // 父頁自己測到的環境與這一頁的網址，跟這一批結果綁在一起存。
+    env: ENV,
+    href: PAGE_HREF,
     results: [],
     done: false,
+    // 上一個 probe 失敗（TIMEOUT / CRASHED）之後就把整批測試停住，等人重開
+    // 瀏覽器再繼續。見 runAll。
+    halted: null,
   };
 }
 
@@ -182,58 +384,57 @@ function planNext() {
   const byId = new Map(state.results.map(r => [r.probe, r]));
   const settled = id => {
     const r = byId.get(id);
-    return r && r.status !== 'running';
+    if (!r || r.status === 'running') return false;
+    // 環境問題（頁面載不到）代表這個 probe 根本沒被量到，不算有結果 —— 修好環境
+    // 之後要能重測，而不是被當成已知結果跳過。
+    if (r.infra) return false;
+    return true;
   };
   const ok = id => {
     const r = byId.get(id);
     return r && r.status === 'ok';
   };
 
-  // 階段 1：最小 shader 階梯
-  for (const [id, label] of LADDER_MINIMAL) {
-    if (!settled(id)) return { probe: id, label, phase: '最小 shader 階梯' };
+  // 這一輪的計畫（見 ACTIVE_PLAN）。基底那一列的旗標是 null，鍵由 planEntry 決定。
+  for (const row of ACTIVE_PLAN) {
+    const entry = planEntry(row);
+    if (!settled(entry.id)) return entry;
   }
 
-  // 階段 2：march 上限二分。
-  // 只有在「march 4 正常、march 88 不正常」時才有臨界點可找。
-  const lowOk = ok('probe-noise-mapscene');
-  const highOk = ok('probe-noise-mapscene-88');
-  if (lowOk && !highOk) {
-    let lo = 4;    // 已知可以
-    let hi = 88;   // 已知不行
-    for (const r of state.results) {
-      const m = r.probe.match(/^probe-noise-mapscene-(\d+)$/);
-      if (!m || r.status === 'running') continue;
-      const n = Number(m[1]);
-      if (r.status === 'ok') { if (n > lo) lo = n; }
-      else if (n < hi) hi = n;
-    }
-    if (hi - lo > 4) {
-      const mid = Math.round((lo + hi) / 2);
-      const id = 'probe-noise-mapscene-' + mid;
-      if (!settled(id)) {
-        return {
-          probe: id,
-          label: 'march ' + mid + '（約 ' + ((mid + 4) * 2) + ' 份 snoise）｜二分 ' + lo + '–' + hi,
-          phase: 'march 上限二分',
-        };
-      }
-    }
-  }
-
-  // 階段 3：正式 shader 階梯
-  for (const [id, label] of LADDER_PRODUCTION) {
-    if (!settled(id)) return { probe: id, label, phase: '正式 shader 階梯' };
-  }
-
+  // march 上限二分那一段已經移除：實測證明 ANGLE 沒有展開 march 迴圈（上界 4 對 88
+  // 只差 1.4% 的編譯時間），所以那條軸沒有臨界點可找。
   return null;
+}
+
+// ===== 頁面必須留在前景 =====
+//
+// bubble.js 的 isPaused() 包含 document.hidden，而 initGL() 只在沒有 paused 時才跑
+// （見 syncLoop）。所以這一頁被切到背景時，之後每個 probe 的 iframe 都不會建立
+// renderer、不會編譯、什麼都不會回報 —— 於是每一格都會等到 timeout 才收工，記成
+// TIMEOUT。那是假的失敗，而 timeout 放寬到 30 秒之後，一次分心就能安靜地報廢掉
+// 好幾分鐘的測試。
+//
+// 因此：開始前等到前景；測到一半被切走的那一筆直接退回佇列重測，不留下假數據。
+function waitUntilVisible() {
+  if (!document.hidden) return Promise.resolve();
+  setStatus('這一頁在背景 —— bubble 的 isPaused() 會擋住 WebGL 初始化，'
+    + '切回這一頁就會自動繼續。');
+  return new Promise(resolve => {
+    const onVisible = () => {
+      if (document.hidden) return;
+      document.removeEventListener('visibilitychange', onVisible);
+      resolve();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+  });
 }
 
 // ===== 單一 probe =====
 
 function probeUrl(probe, shaderRun) {
   // diagTiming=1 走非阻塞的 COMPLETION_STATUS_KHR 輪詢；shaderRun 讓每次都是 cold。
-  return PAGE_PATH + '?diag=' + encodeURIComponent(probe)
+  // probe 為 null 代表基底那一列。
+  return PAGE_PATH + '?diag=' + encodeURIComponent(diagFor(probe))
     + '&diagTiming=1&shaderRun=' + shaderRun;
 }
 
@@ -241,7 +442,9 @@ function runProbe(entry) {
   return new Promise(resolve => {
     const shaderRun = ++state.runCounter;
     const record = {
-      probe: entry.probe,
+      probe: entry.id,
+      isBase: !entry.probe,
+      diag: diagFor(entry.probe),
       label: entry.label,
       phase: entry.phase,
       shaderRun,
@@ -250,7 +453,30 @@ function runProbe(entry) {
       polls: null,
       status: 'running',      // 先寫 running 再載入 —— 卡死時重開才知道是誰
       note: '',
+      // 由這個 probe 自己的 context 回報的環境。父頁的 ENV 是同一台機器的同一個
+      // 瀏覽器，理論上一致，但這一筆才是真的編譯這支 shader 的那個 context ——
+      // 有出入的話（例如某個 probe 掉到 SwiftShader）那件事本身就是結論。
+      gl: null,
+      // 後端的三個時間點。「一開始就是軟體算繪」與「編譯之後才掉下去」是兩件
+      // 完全不同的事，只看最後一次查詢是分不出來的。
+      glAt: { 建立後: null, 編譯完成後: null, 結束當下: null },
+      contextLost: 0,
+      contextRestored: 0,
+      contextEvents: [],
+      // 結果是怎麼拿到的：postMessage（不受同源限制）或 direct（父頁直接讀）。
+      channel: null,
+      // 這一份 shader 的靜態規模（由 bubble 端的 computeShaderStats 算好送過來）
+      stats: null,
+      // fxc 的 program info log 摘要
+      fxc: null,
     };
+    // 同一個 probe 之前因為環境問題失敗過的話，那筆記錄要換掉而不是再堆一列 ——
+    // 它從來沒有被量到過，留著只會讓表格出現兩列同名的東西。
+    for (let i = state.results.length - 1; i >= 0; i--) {
+      if (state.results[i].probe === entry.id && state.results[i].infra) {
+        state.results.splice(i, 1);
+      }
+    }
     state.results.push(record);
     saveState();
     render();
@@ -262,10 +488,16 @@ function runProbe(entry) {
 
     let finished = false;
     let pollTimer = 0;
+    let onMessage = null;
+    let lateMessageListener = null;
     const started = performance.now();
 
     const cleanup = () => {
       clearTimeout(pollTimer);
+      // 監聽器一定要拆掉。每個 probe 都掛一組而不移除的話，之後每一筆都會被前面
+      // 所有 probe 的監聽器看到，而它們持有的是已經 settle 的 record。
+      if (onMessage) window.removeEventListener('message', onMessage);
+      if (lateMessageListener) window.removeEventListener('message', lateMessageListener);
       // 先導到 about:blank 再移除，讓 WebGL context 有機會被釋放，
       // 否則連續測十幾個很容易撞到瀏覽器的 context 上限。
       try { frame.src = 'about:blank'; } catch (_) {}
@@ -275,6 +507,18 @@ function runProbe(entry) {
     const settle = (status, note) => {
       if (finished) return;
       finished = true;
+      // requeue 不是一種結果，是「這一筆不算」：把記錄整筆拿掉，planNext() 就會
+      // 再把同一個 probe 排出來。留著一筆假的 TIMEOUT 反而更糟 —— 它會被當成
+      // settled 而永遠不再重測。
+      if (status === 'requeue') {
+        const at = state.results.indexOf(record);
+        if (at >= 0) state.results.splice(at, 1);
+        saveState();
+        render();
+        cleanup();
+        resolve();
+        return;
+      }
       record.status = status;
       if (note) record.note = note;
       saveState();
@@ -283,59 +527,208 @@ function runProbe(entry) {
       resolve();
     };
 
-    const poll = () => {
-      if (finished) return;
-      if (performance.now() - started > TIMEOUT_MS) {
-        settle('timeout', String(TIMEOUT_MS) + 'ms 內未回報完成');
-        return;
+    // ---- 吸收一份回報（不管是 postMessage 來的還是父頁直接讀到的）----
+    //
+    // 同一個 probe 會回報好幾次（context 事件、編譯完成、父頁主動要），所以這裡
+    // 必須是可以重複套用的：三個時間點各自只在還沒填的時候寫入，計時數字則以最新
+    // 的為準。
+    const absorb = (payload, channel) => {
+      if (!payload) return null;
+      if (channel) record.channel = channel;
+      const env = payload.gl環境;
+      if (env && !env.狀態) record.gl = env;
+      if (payload.shader規模) record.stats = payload.shader規模;
+      const tl = payload.gl時間軸;
+      if (tl) {
+        if (tl.renderer建立後 && !record.glAt.建立後) record.glAt.建立後 = tl.renderer建立後;
+        if (tl.編譯完成後) record.glAt.編譯完成後 = tl.編譯完成後;
+        record.contextLost = tl.contextLost次數 || 0;
+        record.contextRestored = tl.contextRestored次數 || 0;
+        if (Array.isArray(tl.事件)) record.contextEvents = tl.事件;
       }
-      let t = null;
-      try {
-        const win = frame.contentWindow;
-        if (win && typeof win.__bubbleDiagReport === 'function') {
-          t = win.__bubbleDiagReport().coldCompile量測;
-        }
-      } catch (e) {
-        // 同源下不該發生；真的發生就記下來而不是靜靜重試
-        settle('error', '讀取結果失敗：' + e.message);
-        return;
-      }
+      saveState();
+      render();
+      return payload.coldCompile || null;
+    };
 
-      if (t && t.parallelCompile支援 === false) {
+    // ---- 判斷一份計時是否已經定案 ----
+    const judge = t => {
+      if (!t) return false;
+      if (t.parallelCompile支援 === false) {
         settle('error', '此環境不支援 KHR_parallel_shader_compile');
-        return;
+        return true;
       }
-      if (t && t.program建立到編譯完成ms !== null) {
+      if (t.program建立到編譯完成ms !== null && t.program建立到編譯完成ms !== undefined) {
         record.compileMs = t.program建立到編譯完成ms;
         record.firstFrameMs = t.第一幀render耗時ms;
         record.polls = t.輪詢次數;
+        record.fxc = { 數量: t.fxc警告數, 內容: t.fxc警告 };
         settle(t.狀態 === '編譯完成' ? 'ok' : 'error', t.狀態 || '');
+        return true;
+      }
+      return false;
+    };
+
+    // ---- 主要通道：iframe 主動 postMessage ----
+    //
+    // 這是主路徑而不是備援：直接讀 frame.contentWindow 需要同源，而它會在矩陣頁用
+    // file:// 開啟、或 iframe 的 renderer process 掛掉變成 chrome-error:// 時整批失效。
+    onMessage = event => {
+      if (finished) return;
+      const d = event.data;
+      if (!d || d.source !== 'bubble-diag') return;
+      // 只認這一個 probe 的 frame。同時只跑一個 iframe，但比對來源仍然比信任內容安全。
+      if (event.source !== frame.contentWindow) return;
+      judge(absorb(d.payload, 'postMessage'));
+    };
+    window.addEventListener('message', onMessage);
+
+    const poll = () => {
+      if (finished) return;
+      if (document.hidden) {
+        // 這一筆從現在起量到的任何東西都不可信（iframe 的 initGL 被 isPaused 擋著）。
+        settle('requeue');
         return;
       }
+      if (performance.now() - started > TIMEOUT_MS) {
+        // 超時的當下再問一次後端。iframe 可能還活著只是編譯沒回來，那份現況正是
+        // 「超時當下是哪個後端」—— 這一題是這一版最想回答的東西之一。
+        requestReport();
+        setTimeout(() => {
+          settle('timeout', (TIMEOUT_MS / 1000) + ' 秒內未回報完成'
+            + (record.glAt.結束當下
+              ? '（超時當下後端 ' + record.glAt.結束當下.ANGLE後端推定 + '）'
+              : '（iframe 未回應現況查詢，可能已失去 renderer process）'));
+        }, 250);
+        return;
+      }
+      // 備援通道：同源時直接讀。postMessage 已經涵蓋正常情形，這條只是為了在
+      // bubble 端還沒跑到回報點時也能先取得後端資訊。跨 origin 會拋，安靜略過 ——
+      // 那不是錯誤，那正是我們改用 postMessage 的原因。
+      try {
+        const win = frame.contentWindow;
+        if (win && typeof win.__bubbleDiagReport === 'function') {
+          const r = win.__bubbleDiagReport();
+          if (judge(absorb(
+            { gl環境: r.gl環境, gl時間軸: r.gl時間軸, coldCompile: r.coldCompile量測 },
+            record.channel || 'direct',
+          ))) return;
+        }
+      } catch (_) { /* cross-origin：預期之內，等 postMessage */ }
       pollTimer = setTimeout(poll, POLL_MS);
     };
 
-    frame.src = probeUrl(entry.probe, shaderRun);
-    pollTimer = setTimeout(poll, POLL_MS);
+    // 向 iframe 要一份現況。跨 origin 也能送，所以超時當下仍然問得到後端。
+    function requestReport() {
+      try {
+        if (frame.contentWindow) {
+          frame.contentWindow.postMessage({ source: 'bubble-diag-request' }, '*');
+        }
+      } catch (_) {}
+    }
+
+    // 超時那一刻回來的那份，記進「結束當下」而不是覆蓋「編譯完成後」。
+    const lateListener = event => {
+      const d = event.data;
+      if (!d || d.source !== 'bubble-diag') return;
+      if (event.source !== frame.contentWindow) return;
+      if (d.payload && d.payload.gl環境 && !d.payload.gl環境.狀態) {
+        record.glAt.結束當下 = {
+          ANGLE後端推定: d.payload.gl環境.ANGLE後端推定,
+          webgl版本: d.payload.gl環境.webgl版本,
+          GL_RENDERER: d.payload.gl環境.GL_RENDERER,
+          UNMASKED_RENDERER_WEBGL: d.payload.gl環境.UNMASKED_RENDERER_WEBGL,
+        };
+        saveState();
+      }
+    };
+    window.addEventListener('message', lateListener);
+    lateMessageListener = lateListener;
+
+    // ---- 先確認 probe 頁面真的載得到，才把它塞進 iframe ----
+    //
+    // 這一步是為了修掉一整類會被誤讀的失敗：iframe 根本沒載起來（本機伺服器停了、
+    // 路徑錯、404）。那時 frame 會變成 chrome-error://chromewebdata，而它是
+    // cross-origin —— 舊版於是對每一個 probe 都吐出「Blocked a frame ... from
+    // accessing a cross-origin frame」，看起來像 origin 設定有問題，實際上只是
+    // 伺服器不在。改用 postMessage 之後這種情況會安靜地變成 30 秒 TIMEOUT，同樣
+    // 讀不出真正的原因，所以在這裡就直接問清楚。
+    const url = probeUrl(entry.probe, shaderRun);
+    fetch(url, { cache: 'no-store' })
+      .then(res => {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+      })
+      .then(() => {
+        if (finished) return;
+        frame.src = url;
+        pollTimer = setTimeout(poll, POLL_MS);
+      })
+      .catch(err => {
+        // 標記成環境問題，別讓上層把它講成「shader 把 GPU 弄壞了」。
+        record.infra = true;
+        settle('error', 'probe 頁面載不到（' + err.message + '）：'
+          + url + '。本機伺服器還在跑嗎？這不是 shader 的問題。');
+      });
   });
 }
 
 // ===== 主流程 =====
 
+// 這一筆結果是否代表「不要再往下測了」。
+//
+// TIMEOUT 與 CRASHED 都意味著剛才那支 shader 可能已經把 GPU process 或 driver 弄到
+// 不正常的狀態。在那之後量到的任何數字都無法解讀 —— 快也不能證明什麼、慢也不能歸咎
+// 給那支 shader。所以直接停住，等人重開瀏覽器再按「繼續」，而不是自動往下跑出一串
+// 沾了污染的數據。
+function isHaltingResult(r) {
+  return r && (r.status === 'timeout' || r.status === 'crashed' || r.status === 'error');
+}
+
 async function runAll() {
   if (running) return;
+  if (IS_FILE_PROTOCOL) {
+    setStatus('這一頁是用 file:// 開的。Chrome 把每個 file:// document 當成獨立的'
+      + ' opaque origin，iframe 的結果讀不到；請改用本機伺服器（start-server.bat）'
+      + '以 http://localhost 開啟。');
+    return;
+  }
   running = true;
   document.getElementById('run').disabled = true;
 
   while (true) {
     const next = planNext();
     if (!next) break;
-    setStatus('正在測 ' + next.probe + '（' + next.phase + '）…');
+    await waitUntilVisible();
+    setStatus('正在測 ' + next.id + '（' + next.phase + '）…最長等 '
+      + (TIMEOUT_MS / 1000) + ' 秒，請讓這一頁保持在前景。');
     await runProbe(next);
+
+    // 剛才那一筆的結果決定要不要繼續。
+    const last = state.results[state.results.length - 1];
+    if (isHaltingResult(last)) {
+      state.halted = { probe: last.probe, status: last.status, infra: !!last.infra };
+      saveState();
+      running = false;
+      document.getElementById('run').disabled = false;
+      render();
+      // 環境問題（載不到頁面）與 shader 問題（超時／掛掉）要講不同的話。把前者
+      // 說成「shader 把 GPU 弄壞了」會直接把人帶去追一個不存在的問題。
+      setStatus(last.probe + ' → ' + last.status.toUpperCase() + '。已停止測試。'
+        + (last.infra
+          ? '原因是環境問題，不是 shader：' + last.note
+            + ' 修好之後按「開始 / 繼續」就會從這個 probe 重測。'
+          : '不自動往下跑：那支 shader 可能已經把 GPU process 弄到不正常的狀態，'
+            + '之後量到的數字無法解讀。請完全關閉並重開 Chrome，再回到這一頁按'
+            + '「開始 / 繼續」從下一個 probe 接續。'));
+      return;
+    }
+    state.halted = null;
+    saveState();
     await new Promise(r => setTimeout(r, GAP_MS));
   }
 
   state.done = true;
+  state.halted = null;
   saveState();
   running = false;
   document.getElementById('run').disabled = false;
@@ -359,10 +752,53 @@ function statusCell(r) {
   };
   const [cls, text] = map[r.status] || ['', r.status];
   // 慢但沒失敗的也標出來 —— 那正是門檻附近的訊號
-  const slow = r.status === 'ok' && r.compileMs !== null && r.compileMs >= 1000;
+  const slow = r.status === 'ok' && r.compileMs !== null && r.compileMs >= SLOW_MS;
   return '<span class="' + (slow ? 's-slow' : cls) + '">'
     + (slow ? 'OK（偏慢）' : text) + '</span>'
     + (r.note ? '<div class="note">' + r.note + '</div>' : '');
+}
+
+const esc = s => String(s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;');
+
+// 這一格是「這支 shader 實際在哪個後端上編譯」，而且是三個時間點各一筆。
+//
+// 三個時間點如果一致，就只顯示一個值（多數情況）。一旦不一致就全部攤開 —— 那正是
+// 「編譯過程中後端換人」的證據，是這一版最想抓到的東西，絕不能被摘要吃掉。
+function backendCell(r) {
+  const at = r.glAt || {};
+  const stages = [
+    ['建立後', at.建立後],
+    ['編譯後', at.編譯完成後],
+    ['結束時', at.結束當下],
+  ].filter(([, v]) => v);
+
+  if (!stages.length) {
+    // 完全沒有回報（例如 CRASHED）。退回父頁測到的環境並標明來源，免得看起來像數據。
+    return '<span class="note" title="' + esc(ENV.GL_RENDERER || '') + '">'
+      + esc(ENV.ANGLE後端推定) + '（頁面）</span>';
+  }
+
+  const names = [...new Set(stages.map(([, v]) => v.ANGLE後端推定))];
+  const lost = (r.contextLost || 0) + (r.contextRestored || 0);
+  let html;
+  if (names.length === 1) {
+    const first = stages[0][1];
+    html = '<span title="' + esc(first.UNMASKED_RENDERER_WEBGL || first.GL_RENDERER || '') + '">'
+      + esc(names[0]) + '</span>'
+      + '<div class="note">' + esc(first.webgl版本 || '') + '</div>';
+  } else {
+    html = '<span class="s-bad">後端換過人</span><div class="note">'
+      + stages.map(([k, v]) => esc(k) + '：' + esc(v.ANGLE後端推定)).join('<br>')
+      + '</div>';
+  }
+  if (lost) {
+    html += '<div class="note s-bad">contextLost ' + (r.contextLost || 0)
+      + ' / restored ' + (r.contextRestored || 0) + '</div>';
+  }
+  if (r.channel) html += '<div class="note">via ' + esc(r.channel) + '</div>';
+  return html;
 }
 
 function render() {
@@ -376,26 +812,196 @@ function render() {
       + '<td class="num">' + r.shaderRun + '</td>'
       + '<td class="num">' + (r.compileMs === null ? '—' : r.compileMs) + '</td>'
       + '<td class="num">' + (r.firstFrameMs === null ? '—' : r.firstFrameMs) + '</td>'
-      + '<td class="num">' + (r.polls === null ? '—' : r.polls) + '</td>'
+      + '<td class="num">' + (r.stats ? r.stats.有效行數 : '—') + '</td>'
+      + '<td class="num">' + (r.stats ? r.stats.mapScene展開份數 : '—') + '</td>'
+      + '<td class="num">' + (r.stats
+        ? r.stats.texture2D呼叫點 + ' / ' + r.stats.textureCubeUV呼叫點 : '—') + '</td>'
+      + '<td class="num" title="' + esc(r.fxc ? r.fxc.內容 : '') + '">'
+        + (r.fxc ? r.fxc.數量 : '—') + '</td>'
+      + '<td>' + backendCell(r) + '</td>'
       + '<td>' + statusCell(r) + '</td>'
       + '</tr>';
   }).join('');
+  renderEnv();
+  renderRanking();
+}
+
+// ===== 自動排名 =====
+//
+// 這一頁的重點不是原始數字，而是「哪一個功能最貴」。所以基底跑完之後就自動用它當
+// 分母算改善百分比，並由大到小排序 —— 不必再自己開試算表。
+function renderRanking() {
+  const host = document.getElementById('ranking');
+  if (!host) return;
+  const base = state.results.find(r => r.isBase && r.status === 'ok');
+  const done = state.results.filter(r => !r.isBase && r.status === 'ok' && r.compileMs !== null);
+  if (!base) {
+    host.innerHTML = '<div class="note">基底還沒跑完，跑完之後這裡會自動列出排名。</div>';
+    return;
+  }
+  if (!done.length) {
+    host.innerHTML = '<div class="note">基底 ' + base.compileMs
+      + ' ms。還沒有可比較的 probe。</div>';
+    return;
+  }
+  const rows = done.map(r => ({
+    probe: r.probe,
+    label: r.label,
+    ms: r.compileMs,
+    saved: base.compileMs - r.compileMs,
+    pct: (base.compileMs - r.compileMs) / base.compileMs * 100,
+    lines: r.stats ? r.stats.有效行數 : null,
+  })).sort((a, b) => b.pct - a.pct);
+
+  const baseLines = base.stats ? base.stats.有效行數 : null;
+  host.innerHTML = '<h2>相對基底的編譯改善（由大到小）</h2>'
+    + '<div class="note">基底 <code>' + esc(BASE_DIAG) + '</code>：'
+    + base.compileMs + ' ms'
+    + (baseLines ? '，' + baseLines + ' 行' : '') + '</div>'
+    + '<table><thead><tr><th>#</th><th>關掉的功能</th>'
+    + '<th class="num">編譯 (ms)</th><th class="num">省下 (ms)</th>'
+    + '<th class="num">改善 %</th><th class="num">少掉行數</th></tr></thead><tbody>'
+    + rows.map((r, i) => {
+      const cls = r.pct >= 25 ? 's-ok' : r.pct >= 10 ? 's-slow' : '';
+      // 1–3 秒級是這一輪組合驗證的目標；達標就明確標出來，不用自己讀數字。
+      const hit = r.ms <= 3000 ? ' <span class="s-ok">✔ 1–3 秒級</span>' : '';
+      return '<tr><td>' + (i + 1) + '</td>'
+        + '<td><code>' + esc(r.probe) + '</code>' + hit
+        + '<div class="note">' + esc(r.label) + '</div></td>'
+        + '<td class="num">' + r.ms + '</td>'
+        + '<td class="num">' + Math.round(r.saved) + '</td>'
+        + '<td class="num ' + cls + '"><b>' + r.pct.toFixed(1) + '%</b></td>'
+        + '<td class="num">' + (r.lines !== null && baseLines !== null
+          ? (baseLines - r.lines) : '—') + '</td>'
+        + '</tr>';
+    }).join('')
+    + '</tbody></table>'
+    + '<div class="note" style="margin-top:8px">改善 % 是相對基底的單獨效果。'
+    + '注意它們<b>不可相加</b> —— 先前已經量到，主導項會把其他項遮住，'
+    + '所以要合併多個功能時必須重新量。</div>';
+}
+
+// 環境面板。三組後端要分開測，所以「現在這一頁是哪個後端」必須一眼看得到 ——
+// 忘記這件事就會把 Vulkan 的數字當成預設 Chrome 的數字。
+function renderEnv() {
+  const host = document.getElementById('env');
+  if (!host) return;
+  const rows = [
+    ['矩陣頁 URL', PAGE_HREF],
+    ['矩陣頁 origin', PAGE_ORIGIN],
+    ['父頁 ANGLE 後端推定', ENV.ANGLE後端推定],
+    ['WebGL', ENV.webgl版本],
+    ['GL_VENDOR', ENV.GL_VENDOR],
+    ['GL_RENDERER', ENV.GL_RENDERER],
+    ['GL_VERSION', ENV.GL_VERSION],
+    ['UNMASKED_VENDOR_WEBGL', ENV.UNMASKED_VENDOR_WEBGL],
+    ['UNMASKED_RENDERER_WEBGL', ENV.UNMASKED_RENDERER_WEBGL],
+    ['KHR_parallel_shader_compile', String(ENV.KHR_parallel_shader_compile)],
+    ['timeout / 偏慢門檻', (TIMEOUT_MS / 1000) + ' 秒 / ' + SLOW_MS + ' ms'],
+    ['localStorage key', STORE_KEY],
+    ['這一輪的計畫', ACTIVE_PLAN.map(([id]) => id).join(' → ')],
+  ];
+  let html = rows
+    .map(([k, v]) => '<div><b>' + esc(k) + '</b>：' + esc(v === null ? '(null)' : v) + '</div>')
+    .join('');
+  if (IS_FILE_PROTOCOL) {
+    html += '<div class="s-bad" style="grid-column:1/-1"><b>這一頁是用 file:// 開的</b>：'
+      + 'Chrome 把每個 file:// document 當成獨立的 opaque origin，父頁讀不到 iframe 的'
+      + '任何東西。請改用 start-server.bat 以 http://localhost 開啟。</div>';
+  }
+  // 這一批舊結果是從別的網址跑的 —— 那會改變 cross-origin error 的解讀，要講出來。
+  if (state.href && state.href !== PAGE_HREF) {
+    html += '<div class="s-slow" style="grid-column:1/-1">注意：已存的結果是從 '
+      + esc(state.href) + ' 跑的，與現在這一頁的網址不同。</div>';
+  }
+  host.innerHTML = html;
 }
 
 function resultsAsText() {
-  const w = [4, 30, 10, 12, 12, 7, 12];
+  const w = [4, 30, 10, 12, 12, 7, 14, 12];
   const pad = (s, n) => String(s).padEnd(n);
+  // 環境先寫在最前面。跨後端比較時，一份沒有環境標頭的結果是無法解讀的。
   const lines = [
+    '# 環境',
+    '  矩陣頁 URL                 : ' + PAGE_HREF,
+    '  矩陣頁 origin              : ' + PAGE_ORIGIN,
+    '  父頁 ANGLE 後端推定        : ' + ENV.ANGLE後端推定,
+    '  WebGL                      : ' + ENV.webgl版本,
+    '  GL_VENDOR                  : ' + ENV.GL_VENDOR,
+    '  GL_RENDERER                : ' + ENV.GL_RENDERER,
+    '  GL_VERSION                 : ' + ENV.GL_VERSION,
+    '  UNMASKED_VENDOR_WEBGL      : ' + ENV.UNMASKED_VENDOR_WEBGL,
+    '  UNMASKED_RENDERER_WEBGL    : ' + ENV.UNMASKED_RENDERER_WEBGL,
+    '  KHR_parallel_shader_compile: ' + ENV.KHR_parallel_shader_compile,
+    '  timeout                    : ' + (TIMEOUT_MS / 1000) + ' 秒（偏慢門檻 ' + SLOW_MS + ' ms）',
+    '',
+    '# 結果',
     pad('#', w[0]) + pad('probe', w[1]) + pad('run', w[2])
-      + pad('compile(ms)', w[3]) + pad('frame(ms)', w[4]) + pad('polls', w[5]) + 'status',
+      + pad('compile(ms)', w[3]) + pad('frame(ms)', w[4]) + pad('polls', w[5])
+      + pad('backend', w[6]) + 'status',
   ];
   state.results.forEach((r, i) => {
     lines.push(pad(i + 1, w[0]) + pad(r.probe, w[1]) + pad(r.shaderRun, w[2])
       + pad(r.compileMs === null ? '-' : r.compileMs, w[3])
       + pad(r.firstFrameMs === null ? '-' : r.firstFrameMs, w[4])
       + pad(r.polls === null ? '-' : r.polls, w[5])
+      + pad(r.gl ? r.gl.ANGLE後端推定 : ENV.ANGLE後端推定 + '(頁面)', w[6])
       + r.status + (r.note ? ' — ' + r.note : ''));
   });
+  // 改善排名。這是這一輪真正要看的東西，放在結果表後面。
+  const base = state.results.find(r => r.isBase && r.status === 'ok');
+  if (base) {
+    lines.push('', '# 相對基底的編譯改善（由大到小）',
+      '  基底 ' + BASE_DIAG + ' = ' + base.compileMs + ' ms');
+    const ranked = state.results
+      .filter(r => !r.isBase && r.status === 'ok' && r.compileMs !== null)
+      .map(r => ({ p: r.probe, ms: r.compileMs, pct: (base.compileMs - r.compileMs) / base.compileMs * 100 }))
+      .sort((a, b) => b.pct - a.pct);
+    ranked.forEach((r, i) => {
+      lines.push('  ' + String(i + 1).padEnd(3) + r.p.padEnd(34)
+        + String(r.ms).padStart(9) + ' ms   ' + r.pct.toFixed(1).padStart(6) + '%');
+    });
+    lines.push('  （這些百分比不可相加：主導項會遮住其他項，合併必須重新量）');
+  }
+
+  // shader 規模
+  lines.push('', '# shader 規模');
+  for (const r of state.results) {
+    if (!r.stats) continue;
+    lines.push('  ' + r.probe.padEnd(34)
+      + '行數 ' + String(r.stats.有效行數).padStart(5)
+      + '  mapScene份數 ' + String(r.stats.mapScene展開份數).padStart(3)
+      + '  tex2D ' + String(r.stats.texture2D呼叫點).padStart(2)
+      + '  cubeUV ' + String(r.stats.textureCubeUV呼叫點).padStart(2)
+      + '  snoise ' + String(r.stats.snoise呼叫點).padStart(2)
+      + '  fxc警告 ' + (r.fxc ? r.fxc.數量 : '-'));
+  }
+
+  // 每個 probe 的後端時間軸與 context 事件全部攤開。摘要在這裡是有害的 ——
+  // 「一開始就是軟體算繪」與「編譯之後才掉下去」的差別就藏在這幾行裡。
+  lines.push('', '# 各 probe 的後端時間軸');
+  for (const r of state.results) {
+    const at = r.glAt || {};
+    const one = v => v ? (v.ANGLE後端推定 + ' / ' + (v.GL_RENDERER || '?')) : '-';
+    lines.push('  ' + r.probe + '  (via ' + (r.channel || '無回報') + ')');
+    lines.push('    建立後  : ' + one(at.建立後));
+    lines.push('    編譯完成: ' + one(at.編譯完成後));
+    lines.push('    結束當下: ' + one(at.結束當下));
+    lines.push('    context : lost ' + (r.contextLost || 0)
+      + ' / restored ' + (r.contextRestored || 0));
+    for (const ev of (r.contextEvents || [])) {
+      lines.push('      ' + ev.距頁面載入ms + 'ms ' + ev.類型
+        + ' → ' + (ev.ANGLE後端推定 || '?') + ' / ' + (ev.GL_RENDERER || '?'));
+    }
+    if (at.建立後 && at.建立後.UNMASKED_RENDERER_WEBGL) {
+      lines.push('    unmasked: ' + at.建立後.UNMASKED_RENDERER_WEBGL);
+    }
+  }
+
+  if (state.halted) {
+    lines.push('', '# 測試已在 ' + state.halted.probe + ' → '
+      + state.halted.status.toUpperCase() + ' 之後停止（未自動續測）');
+  }
   return lines.join('\n');
 }
 
@@ -426,13 +1032,38 @@ document.getElementById('copy').addEventListener('click', async () => {
   }
 });
 
+// 只給驗證畫面用的假資料通道。刻意不寫進 localStorage，也刻意要求 probe 名稱看起來
+// 就是假的 —— 上一版用真實 probe 名 + 半真半假的數字做 fixture，結果那批數字被當成
+// 真的量測結果拿去做結論。
+window.__matrixRenderFixture = function (rows) {
+  if (!Array.isArray(rows)) { console.error('要一個陣列'); return; }
+  const bad = rows.filter(r => !String(r.probe || '').startsWith('FAKE-'));
+  if (bad.length) {
+    console.error('fixture 的 probe 名稱必須以 FAKE- 開頭，否則會跟真實結果混淆');
+    return;
+  }
+  console.warn('[matrix] 正在顯示假資料，不會存檔。重新載入即消失。');
+  state.results = rows;
+  render();   // 注意：沒有 saveState()
+};
+
 render();
-if (state.results.some(r => r.status === 'crashed')) {
-  setStatus('偵測到上次有 probe 讓瀏覽器掛掉（已標記 CRASHED）。按「開始 / 繼續」會跳過它往下測。');
+const here = '後端 ' + ENV.ANGLE後端推定 + '：';
+if (state.halted) {
+  setStatus(here + '上次停在 ' + state.halted.probe + ' → '
+    + state.halted.status.toUpperCase() + '。'
+    + (state.halted.infra
+      ? '那是環境問題（probe 頁面載不到），不是 shader。確認本機伺服器在跑之後'
+        + '按「開始 / 繼續」就會重測這個 probe。'
+      : '請確認已經完全重開過 Chrome，再按「開始 / 繼續」從下一個 probe 接續。'));
+} else if (state.results.some(r => r.status === 'crashed')) {
+  setStatus(here + '偵測到上次有 probe 讓瀏覽器掛掉（已標記 CRASHED）。按「開始 / 繼續」會跳過它往下測。');
 } else if (state.results.length && !state.done) {
-  setStatus('已有 ' + state.results.length + ' 筆結果，按「開始 / 繼續」接著測。');
+  setStatus(here + '已有 ' + state.results.length + ' 筆結果，按「開始 / 繼續」接著測。');
 } else if (state.done) {
-  setStatus('上次已全部測完。要重測請先清除結果。');
+  setStatus(here + '上次已全部測完。要重測請先清除結果。');
+} else {
+  setStatus(here + '待機中，按「開始 / 繼續」開始。');
 }
 </script>
 </body>
