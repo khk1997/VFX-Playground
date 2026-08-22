@@ -71,6 +71,29 @@ if (PREVIEW) document.documentElement.classList.add('preview-mode');
 //                    renderer / camera / scene / 全螢幕算繪架構，但 GLSL 只剩
 //                    「相機射線 → 4 步 raymarch → 法線 → Lambert」。畫面只有一兩顆
 //                    藍球，用來確認 ANGLE 在這個架構下到不到得了「能正常編譯」。
+//   single-reflection-sample  把 sampleReflection 的環形補樣在編譯期移除，只留
+//                中心那一次 textureCubeUV（9 次 → 1 次）。可與任何其他 diag 疊加，
+//                因為它要回答的是「同一支 shader、只差 PMREM 取樣這一塊」的
+//                cold compile 差距。fxc 只對 sampleReflection 與 backgroundSample
+//                發出 X4000 警告，而 textureCubeUV 每次都展開整份 three.js 的
+//                cube_uv_reflection_fragment，所以它是第一個該被單獨量的對象。
+//                注意：畫面會少掉高粗糙度的環形預濾波，這是探針不是可上線的設定。
+//   probe-no-late-shading  探針 A。編譯期移除 main() 光線行進之後的六個著色區塊：
+//                稜光光芒、液態薄膜材質分支、稜光彩度後處理、色散/光譜、光譜焦散、
+//                薄膜深度。raymarch、noise、thinFilm、內部折射全部保留。
+//   probe-no-refraction  探針 B。編譯期抽掉三支函式的「本體」（簽章保留，所以呼叫點
+//                與 main() 的控制流都不變）：traceExitSurface（自帶 raymarch 迴圈 +
+//                calcNormal）、thinFilm（4 次 fbm + 取樣）、artisticDispersionOPD
+//                （4 次 fbm）。等同於下面三個同時開。
+//   probe-no-trace-exit / probe-no-thin-film / probe-no-art-dispersion
+//                B 的三個成分各自單獨（B1 / B2 / B3），用來二分 B 本身：是「fbm 的
+//                靜態展開份數」在主導，還是 traceExitSurface → mapScene → calcNormal
+//                那個結構性的放大器。三者互斥可組合，也都可以跟其他 diag 疊加。
+//   probe-no-wobble  探針 C。只把正式 mapScene 尾端 geometry wobble 那一次 fbmFast
+//                在編譯期移除，其餘完全不動。測「同一份 noise 被 13 個 mapScene
+//                呼叫點重複 inline」的代價。
+//   以上三個都可與其他 diag 疊加（例如 ?diag=lowcompileloops,probe-no-wobble），
+//   預設全部關閉，正式版行為完全不變。畫面會少東西，它們是探針不是可上線的設定。
 //   lowcompileloops  minshader2 再加上：主 raymarch 展開上限 88→16、內部折射 28→8。
 //                    純二分診斷探針 —— 步數不足畫面會破，只用來確認 ANGLE 是否
 //                    卡在 loop expansion，不會套用到正式版。
@@ -95,6 +118,35 @@ const SHADER_RUN = (() => {
 // 卡頓來自量測工具而不是 shader。現在計時改成非阻塞輪詢（見 startDiagTiming）。
 const DIAG_TIMING = new URLSearchParams(location.search).get('diagTiming') === '1';
 
+// ?diagTime=<秒> —— 把動畫時間釘死在固定值。
+//
+// 存在的理由是畫面 A/B：兩個 shader 變體必須在「完全相同的一幀」上比較，否則
+// simT 會因為載入時間的抖動而不同，量到的像素差是動畫時間造成的，跟 shader 無關。
+// 未指定時完全不介入，正式行為不變。
+const DIAG_TIME = (() => {
+  const raw = new URLSearchParams(location.search).get('diagTime');
+  if (raw === null) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+})();
+
+// ?diagCapture=<key> —— 算繪完那一幀之後把 drawing buffer 讀回來存進 localStorage，
+// 供跨頁面載入的逐像素比對。必須在 render 之後的同一個 task 內讀，因為
+// preserveDrawingBuffer 是 false，交還給合成器之後內容就沒了。
+const DIAG_CAPTURE = new URLSearchParams(location.search).get('diagCapture');
+
+// ?forceFeatures=FEATURE_A,FEATURE_B —— 驗證用：強制把指定的功能編進去，即使當下
+// 狀態不需要它。
+//
+// 這是驗證變體特化正確性的主力工具。特化的主張是「該狀態下這個功能的 runtime 條件
+// 恆為 false，所以編不編都一樣」。要證明它，就把功能單獨加回去編一次，然後在同一幀
+// 逐像素比對 —— 兩者必須完全相同。一次只加一個，錯了才知道是哪一個。
+//
+// 比整支「全功能版」好用的地方在於成本：全功能版在這台機器上會編到 GPU driver
+// 逾時重置（實測 91.8 秒時 webglcontextlost），根本量不完。
+const FORCE_FEATURES = (new URLSearchParams(location.search).get('forceFeatures') || '')
+  .split(',').map(s => s.trim()).filter(Boolean);
+
 const DIAG = (() => {
   const raw = new URLSearchParams(location.search).get('diag');
   const set = new Set((raw || '').split(',').map(s => s.trim()).filter(Boolean));
@@ -110,6 +162,61 @@ const DIAG = (() => {
     minshader2: set.has('minshader2'),
     lowcompileloops: set.has('lowcompileloops'),
     compilerbaseline: set.has('compilerbaseline'),
+    // 環境／PMREM 取樣的探針。可以跟任何其他 diag 疊加（例如
+    // ?diag=lowcompileloops,single-reflection-sample），因為 A/B 要的是
+    // 「同一支 shader、只差這一塊」。見 shaders.js 的 sampleReflection。
+    singleReflectionSample: set.has('single-reflection-sample'),
+    // 正式 FRAG 的 feature-level 二分。三個都可以跟任何其他 diag 疊加，因為要比的是
+    // 「同一支 shader、只差這一塊」。見 shaders.js 對應的 #ifndef 區塊。
+    //   A 後段著色：稜光、液態薄膜分支、彩度後處理、色散/光譜、光譜焦散、薄膜深度
+    //   B 折射/薄膜群：traceExitSurface、thinFilm、artisticDispersionOPD（保留簽章、抽掉本體）
+    //   C 只拿掉 mapScene 尾端的 geometry wobble noise
+    probeNoLateShading: set.has('probe-no-late-shading'),
+    // 後段著色的 8 個單獨隔離探針（第七、八項不在 main() 的後段，但同屬這一輪）。
+    // 每個只關一個功能，其餘完全維持基底。
+    probeNoPrismBeam: set.has('probe-no-prism-beam'),
+    probeNoLiquidFilmMaterial: set.has('probe-no-liquid-film-material'),
+    probeNoPrismSaturation: set.has('probe-no-prism-saturation'),
+    probeNoDispersionSpectral: set.has('probe-no-dispersion-spectral'),
+    probeNoSpectralCaustics: set.has('probe-no-spectral-caustics'),
+    probeNoThinFilmDepth: set.has('probe-no-thin-film-depth'),
+    probeNoEnvPmrem: set.has('probe-no-env-pmrem'),
+    probeNoRefractionFilm: set.has('probe-no-refraction'),
+    probeNoWobble: set.has('probe-no-wobble'),
+    // B 的三個成分，用來二分 B 本身。probe-no-refraction 等於這三個同時開。
+    probeNoTraceExit: set.has('probe-no-trace-exit'),
+    // B1 的兩個成分：B1a 拿掉 traceExitSurface 結尾的 calcNormal（10 個 mapScene tap
+    // × 2 個呼叫點），B1b 拿掉它自己的 march 迴圈。
+    probeNoTraceNormal: set.has('probe-no-trace-normal'),
+    probeNoTraceMarch: set.has('probe-no-trace-march'),
+    // B1b 的乾淨版：保留迴圈與 found 的動態性，只把迴圈體裡的 mapScene 換成便宜的
+    // 包圍球 SDF。舊的 probe-no-trace-march 會讓 main() 的折射分支被 dead-strip，
+    // 量到的不只是迴圈成本，保留它只是為了對照。
+    probeCheapTraceSdf: set.has('probe-cheap-trace-sdf'),
+    // 方向 1 + 2 合併的候選修法探針：calcNormal 的 SVG 分支只在造型場有編進來時
+    // 保留，且 traceExitSurface 的出口法線改用獨立的 4-tap 四面體。
+    probeLeanNormals: set.has('probe-lean-normals'),
+    // 依模式編譯 shader variant 的探針。三選一：
+    //   probe-mode-none   無造型／一般 metaball／分裂 → 只編四面體 4-tap
+    //   probe-mode-voxel  體素（GLB）造型生效中      → 也只需要四面體 4-tap
+    //   probe-mode-svg    SVG 造型生效中             → 只編 SVG 6-tap
+    // 「生效中」是 variant 鍵的一部分：uShapeProgress 還在 0 附近時走的是四面體那條，
+    // 所以造型成形過程要用 none 那支 variant，否則法線數學就不一致了。
+    // mapScene 的模式特化探針：
+    //   probe-mapscene-plain  一般 Bubble（非分裂、無造型）
+    //   probe-mapscene-split  分裂（保留衛星滴與毛細回彈波）
+    // 方案 A：把 calcNormal 的四個 tetrahedral tap 收進一個 uniform 守衛的迴圈。
+    // 目標是靜態展開份數（15 → 6），runtime 仍然算四次，數學不變。
+    // 驗證用：編進所有功能，等同變體特化之前的萬能 shader（見 shaderFeatures）。
+    allFeatures: set.has('allfeatures'),
+    probeLoopNormalTaps: set.has('probe-loop-normal-taps'),
+    probeMapscenePlain: set.has('probe-mapscene-plain'),
+    probeMapsceneSplit: set.has('probe-mapscene-split'),
+    probeModeNone: set.has('probe-mode-none'),
+    probeModeVoxel: set.has('probe-mode-voxel'),
+    probeModeSvg: set.has('probe-mode-svg'),
+    probeNoThinFilm: set.has('probe-no-thin-film'),
+    probeNoArtDispersion: set.has('probe-no-art-dispersion'),
     probeNoise: set.has('probe-noise'),
     probeSnoise: set.has('probe-snoise'),
     probeFbm: set.has('probe-fbm'),
@@ -684,6 +791,9 @@ function applyToggle(key) {
     const effective = DISPERSION_TOGGLE_KEYS.includes(key) ? (P[key] && dispersionMasterOn) : P[key];
     uniforms[target].value = effective ? 1 : 0;
   }
+  // 薄膜與三個色散開關會改變要編譯哪些功能；切到新組合時在背景預編譯，
+  // 編好之前繼續用目前這一支（見 syncShaderVariant）。
+  syncShaderVariant();
 }
 
 // DEFAULTS 的 key 一律用 'u' + 首字大寫推導 uniform 名稱（uReflect、uRoughness...），
@@ -940,6 +1050,98 @@ const diagTiming = {
 
 let diagTimingStarted = false;
 
+// ===== renderer 後端的時間軸 =====
+//
+// 一筆 cold compile 的結果只說「多久」或「沒回來」，說不出這個 context 在過程中有沒有
+// 換過人。Windows 上 GPU process 被打掉時 Chrome 會把 context 換成軟體算繪
+// （SwiftShader），而事後只看最後一次查詢的話，「這個 probe 從頭就是軟體算繪」與
+// 「它把 GPU 弄掛之後才變成軟體算繪」看起來一模一樣 —— 前者是環境設定問題，後者才是
+// 我們在找的東西。所以兩個時間點都要留紀錄，加上 context 遺失事件本身。
+const glTimeline = {
+  renderer建立後: null,      // initGL 剛建好 renderer，還沒編譯任何 program
+  編譯完成後: null,          // COMPLETION_STATUS_KHR 全部為 true 之後
+  contextLost次數: 0,
+  contextRestored次數: 0,
+  事件: [],                  // { 距頁面載入ms, 類型, renderer }
+};
+
+// 只留分辨後端要用的欄位。完整的環境每次都塞一份會讓 localStorage 與畫面都難讀，
+// 而這裡要回答的問題只有「現在是哪個後端」。
+function compactGlEnvironment() {
+  const e = collectGlEnvironment();
+  if (e.狀態) return { 狀態: e.狀態 };
+  return {
+    ANGLE後端推定: e.ANGLE後端推定,
+    webgl版本: e.webgl版本,
+    GL_RENDERER: e.GL_RENDERER,
+    UNMASKED_RENDERER_WEBGL: e.UNMASKED_RENDERER_WEBGL,
+  };
+}
+
+function markGlEvent(類型) {
+  const at = Math.round(performance.now() * 10) / 10;
+  glTimeline.事件.push({ 距頁面載入ms: at, 類型, ...compactGlEnvironment() });
+  console.warn('[bubble diag] ' + 類型 + ' @ ' + at + 'ms');
+  postDiagReport(類型);
+}
+
+function startGlTimeline() {
+  glTimeline.renderer建立後 = compactGlEnvironment();
+  // webglcontextlost 預設會讓瀏覽器不再嘗試恢復；這裡刻意不 preventDefault ——
+  // 診斷要的是「實際發生了什麼」，不是改變它的行為。
+  canvas.addEventListener('webglcontextlost', () => {
+    glTimeline.contextLost次數++;
+    markGlEvent('webglcontextlost');
+  });
+  canvas.addEventListener('webglcontextrestored', () => {
+    glTimeline.contextRestored次數++;
+    markGlEvent('webglcontextrestored');
+  });
+}
+
+// ===== 把結果主動回報給父頁（postMessage）=====
+//
+// 為什麼不讓父頁直接讀 frame.contentWindow.__bubbleDiagReport()：那條路要求同源，
+// 而它會在兩種情況下整批失效 ——
+//   1. 矩陣頁用 file:// 開啟：每個 file:// document 都是獨立的 opaque origin。
+//   2. iframe 的 renderer process 掛掉：那個 frame 會變成 chrome-error://chromewebdata，
+//      而它是 cross-origin，之後任何存取都拋 SecurityError。
+// 兩種都會讓父頁收到一串看不懂的 cross-origin error，而不是「這個 probe 超時了」。
+//
+// postMessage 不受同源限制。真的把 renderer process 弄掛時就沒有訊息會送出來，
+// 父頁會乾淨地判定 TIMEOUT —— 那正是我們要的語意。
+//
+// targetOrigin 用 '*'：矩陣頁可能是任何 origin（含 file:// 的 "null"），而這裡送的
+// 只有 GPU 字串與計時數字，沒有任何機敏資料。
+function postDiagReport(reason) {
+  if (window.parent === window) return;          // 不在 iframe 裡就沒有對象
+  if (!DIAG.any && !DIAG_TIMING) return;         // 只在診斷模式下說話
+  let payload = null;
+  try {
+    payload = {
+      diag: DIAG.list,
+      shaderRun: SHADER_RUN,
+      gl環境: collectGlEnvironment(),
+      gl時間軸: glTimeline,
+      coldCompile: { ...diagTiming },
+      shader規模: computeShaderStats(),
+    };
+  } catch (_) { return; }
+  try {
+    window.parent.postMessage(
+      { source: 'bubble-diag', version: 1, reason: reason || 'update', payload },
+      '*',
+    );
+  } catch (_) { /* 父頁不可達就算了，父頁自己會 timeout */ }
+}
+
+// 父頁可以主動要一份現況（例如 timeout 當下想知道後端有沒有變）。
+window.addEventListener('message', event => {
+  const d = event.data;
+  if (!d || d.source !== 'bubble-diag-request') return;
+  postDiagReport('requested');
+});
+
 // 非阻塞地等所有 program 編譯完成，然後才量第一幀。
 //
 // 順序刻意是「先 compile、輪詢到完成、才 render」：如果直接 render，three.js 內部
@@ -947,6 +1149,24 @@ let diagTimingStarted = false;
 function startDiagTiming(onDone) {
   if (diagTimingStarted) { onDone(); return; }
   diagTimingStarted = true;
+  // 先等環境狀態確定，理由跟正式路徑一樣：uHasEnv 是變體軸之一，不等它就會隨載入
+  // 時機的抖動量到不同的 variant，同一個 URL 兩次跑出不同數字。
+  waitForEnvSettled().then(() => runDiagTiming(onDone));
+}
+
+function runDiagTiming(onDone) {
+  // env 確定後，第一支 variant 也要依最終狀態定案，才不會量到已經被丟棄的那一支。
+  const key = variantKey();
+  if (key !== activeVariantKey && mesh) {
+    const stale = variantCache.get(activeVariantKey);
+    variantCache.delete(activeVariantKey);
+    if (stale) { try { stale.dispose(); } catch (_) {} }
+    const mat = buildVariantMaterial();
+    variantCache.set(key, mat);
+    mesh.material = mat;
+    activeVariantKey = key;
+  }
+  initialCompileDone = true;   // 計時模式自己負責首編，之後的切換交回 syncShaderVariant
 
   const gl = renderer.getContext();
   let ext = null;
@@ -960,15 +1180,53 @@ function startDiagTiming(onDone) {
     diagTiming.狀態 = '此環境不支援 KHR_parallel_shader_compile，略過非阻塞量測';
     console.warn('[bubble diag] ' + diagTiming.狀態);
     if (DIAG.any) window.__bubbleDiagReport();
+    // 一樣要回報，否則父頁只能等到 timeout 才知道這個環境量不了。
+    postDiagReport('unsupported');
     onDone();
     return;
   }
 
   const t0 = performance.now();
-  // compile() 只建立 program 並送出 linkProgram，不等待結果。
-  renderer.compile(scene, camera);
-
   let polls = 0;
+
+  // ===== 心跳 =====
+  //
+  // 這一行的價值不在「還活著」，而在它停掉的時候。
+  //
+  // KHR_parallel_shader_compile 只保證「查詢編譯好了沒」這個動作不阻塞，它不保證
+  // 驅動真的在背景執行緒編譯。如果 ANGLE 是在 glLinkProgram 裡面同步把 HLSL 編成
+  // D3D bytecode，那主執行緒會被整段扣住 —— 而那正好就是使用者感受到的「Chrome 沒
+  // 反應」，也會讓 console 在那段期間一個字都印不出來（看起來像什麼都沒發生）。
+  //
+  // 心跳刻意在 renderer.compile() 之前就開始跑。之後只要看紀錄裡的空洞，就能直接
+  // 讀出主執行緒被卡住多久：
+  //   有心跳、沒完成 → 編譯真的在背景跑，只是慢（效能問題）
+  //   心跳整段消失   → glLinkProgram 同步阻塞主執行緒（卡死的真正機制）
+  //
+  // 只在前景分頁判讀這個數字。分頁被切到背景時 Chrome 會把計時器節流到每秒甚至每分鐘
+  // 一次，心跳自然會出現十幾秒的空洞，那是節流不是阻塞（實測背景分頁量到 15 秒「停頓」，
+  // 但同一段時間 renderer.compile() 只花 1.7ms、分頁也一直有回應）。同理，背景分頁的
+  // 輪詢次數也會遠低於實際經過時間 ÷ POLL_INTERVAL_MS。
+  let lastBeat = t0;
+  let maxBeatGap = 0;
+  const beatTimer = setInterval(() => {
+    const now = performance.now();
+    const gap = now - lastBeat;
+    lastBeat = now;
+    if (gap > maxBeatGap) maxBeatGap = gap;
+    console.info('[bubble diag] 心跳 ' + ((now - t0) / 1000).toFixed(1) + 's'
+      + '（輪詢 ' + polls + ' 次）'
+      + (gap > 2000 ? '　⚠ 主執行緒剛被卡住約 ' + Math.round(gap) + 'ms' : ''));
+  }, 1000);
+
+  // compile() 只建立 program 並送出 linkProgram，不等待結果 —— 前提是驅動真的支援
+  // 背景編譯。上面的心跳就是用來驗證這個前提到底成不成立。
+  const compileEnteredAt = performance.now();
+  renderer.compile(scene, camera);
+  const compileReturnedAfter = Math.round((performance.now() - compileEnteredAt) * 10) / 10;
+  diagTiming['renderer_compile()同步耗時ms'] = compileReturnedAfter;
+  console.info('[bubble diag] renderer.compile() 同步部分耗時 = ' + compileReturnedAfter
+    + 'ms（這段時間主執行緒是被扣住的）');
   // 用 setTimeout 而不是 rAF 輪詢：rAF 在頁面不可見／未被合成時會被瀏覽器整體暫停，
   // 那樣輪詢永遠不會執行、量測就卡在 null（本機實測踩到）。setTimeout 不受影響，
   // 而且一樣不阻塞主執行緒。
@@ -990,8 +1248,33 @@ function startDiagTiming(onDone) {
       return;
     }
 
+    clearInterval(beatTimer);
+    // fxc 的警告。這時 COMPLETION_STATUS_KHR 已經全部為 true，program 早就連結完成，
+    // 所以 getProgramInfoLog 只是把現成的字串取回來，不會逼任何等待 —— 跟舊版那個
+    // 會強迫同步的 LINK_STATUS 查詢是兩回事。
+    try {
+      const logs = [];
+      for (const wrapper of renderer.info.programs || []) {
+        const glProgram = wrapper.program || wrapper;
+        if (!glProgram) continue;
+        const log = gl.getProgramInfoLog(glProgram);
+        if (log && log.trim()) logs.push(log.trim());
+      }
+      const joined = logs.join('\n');
+      diagTiming.fxc警告數 = (joined.match(/warning\s+X\d+/g) || []).length;
+      diagTiming.fxc警告 = joined
+        ? [...new Set(joined.split('\n').filter(l => /warning|error/i.test(l)))].join(' | ')
+        : '(無)';
+    } catch (e) {
+      diagTiming.fxc警告 = '(讀取失敗：' + e.message + ')';
+    }
     diagTiming.program建立到編譯完成ms = Math.round((performance.now() - t0) * 10) / 10;
     diagTiming.輪詢次數 = polls;
+    // 整段過程中主執行緒最長被扣住多久。心跳是每秒一次，所以正常值應該接近 1000ms；
+    // 明顯大於那個數字就代表有東西同步阻塞了主執行緒。
+    diagTiming.最長主執行緒停頓ms = Math.round(maxBeatGap);
+    // 編譯結束的當下就取後端，不要等到第一幀之後 —— 中間若換了後端就分不清是誰造成的。
+    glTimeline.編譯完成後 = compactGlEnvironment();
     diagTiming.狀態 = pending > 0
       ? '輪詢超過上限仍未完成（' + pending + ' 個 program 未回報完成）'
       : '編譯完成';
@@ -1006,6 +1289,8 @@ function startDiagTiming(onDone) {
     console.info('[bubble diag] 第一幀render耗時 = ' + diagTiming.第一幀render耗時ms + 'ms');
 
     if (DIAG.any) window.__bubbleDiagReport();
+    // 父頁不必輪詢，編譯一完成就主動送出去（見 postDiagReport）。
+    postDiagReport('complete');
     onDone();
   };
 
@@ -1031,6 +1316,251 @@ function startDiagTiming(onDone) {
 function usesBaselineShader() {
   return DIAG.compilerbaseline || DIAG.probeNoise || DIAG.probeSnoise
     || DIAG.probeFbm || DIAG.probeNoiseMapscene || DIAG.probeMarchBound > 0;
+}
+
+// ===== 變體快取 =====
+//
+// 一個 key 對應一支已經編好的 ShaderMaterial。切回用過的組合時直接取用，零編譯。
+//
+// 上限存在的理由：每個 variant 是一支真的 WebGL program，佔 GPU 記憶體。12 個足夠
+// 覆蓋一般使用會碰到的組合，超過就以 LRU 淘汰並 dispose。
+const VARIANT_CACHE_LIMIT = 12;
+const variantCache = new Map();     // Map 的插入順序就是 LRU 順序
+let activeVariantKey = null;
+let variantSwapInFlight = null;     // 正在背景預編譯的 key，避免重複發動
+const variantStats = { 命中: 0, 未命中: 0, 最後一次切換ms: null, 最後一次是命中: null };
+
+function touchVariant(key) {
+  // 重新插入 = 移到 LRU 尾端
+  const mat = variantCache.get(key);
+  if (mat) { variantCache.delete(key); variantCache.set(key, mat); }
+  return mat;
+}
+
+function evictVariantsIfNeeded() {
+  while (variantCache.size > VARIANT_CACHE_LIMIT) {
+    const oldest = variantCache.keys().next().value;
+    if (oldest === activeVariantKey) break;   // 絕不淘汰正在用的那一支
+    const mat = variantCache.get(oldest);
+    variantCache.delete(oldest);
+    try { mat.dispose(); } catch (_) {}
+    console.info('[bubble variant] 淘汰 ' + oldest);
+  }
+}
+
+// ===== 環境貼圖就緒與否 =====
+//
+// uHasEnv 是變體軸之一：HDRI 載入前是 0，載入後變 1。如果不等它就先編第一支，
+// 冷載入會編兩次（先無 env、HDRI 到了再編有 env 的），而每一次都是十秒級。
+//
+// 所以第一支 variant 一律等到 env 狀態「確定」之後才決定。確定包含三種：載入成功、
+// 載入失敗、以及等太久 —— 後兩者都讓 uHasEnv 維持 0，編出無 env 的變體，畫面照樣
+// 出得來（那本來就是沒有 HDRI 時的正常路徑）。絕不無限等待。
+const ENV_SETTLE_TIMEOUT_MS = 4000;
+let envSettled = false;
+let envSettleResolve = null;
+const envSettledPromise = new Promise(resolve => { envSettleResolve = resolve; });
+function settleEnv(reason) {
+  if (envSettled) return;
+  envSettled = true;
+  console.info('[bubble variant] 環境狀態確定：' + reason
+    + '（uHasEnv=' + (uniforms ? uniforms.uHasEnv.value : '?') + '）');
+  if (envSettleResolve) envSettleResolve();
+}
+function waitForEnvSettled() {
+  if (envSettled) return Promise.resolve();
+  // 逾時只是「不再等」，不是錯誤：預覽用的 iframe 或離線情境下 HDRI 可能永遠不來，
+  // 那時該做的是照樣把畫面畫出來，而不是黑屏等下去。
+  return Promise.race([
+    envSettledPromise,
+    new Promise(resolve => setTimeout(() => { settleEnv('等待逾時'); resolve(); },
+      ENV_SETTLE_TIMEOUT_MS)),
+  ]);
+}
+
+// 首次算繪前的背景預編譯。只做一次，結果快取成 promise。
+let initialCompilePromise = null;
+let initialCompileDone = false;
+function ensureInitialCompile() {
+  if (initialCompilePromise) return initialCompilePromise;
+  initialCompilePromise = waitForEnvSettled().then(() => {
+    // env 確定之後才決定第一支 variant。initGL 建立 mesh 時那一支是用當時（尚未載入
+    // HDRI）的狀態算出來的，如果 key 變了就地換掉 —— 它從未被算繪過，也就從未被
+    // 編譯過，丟掉不浪費任何東西。
+    const key = variantKey();
+    if (key !== activeVariantKey && mesh) {
+      const stale = variantCache.get(activeVariantKey);
+      variantCache.delete(activeVariantKey);
+      if (stale) { try { stale.dispose(); } catch (_) {} }
+      const mat = buildVariantMaterial();
+      variantCache.set(key, mat);
+      mesh.material = mat;
+      console.info('[bubble variant] 首支 variant 依 env 狀態改為 ' + key
+        + '（未編譯的 ' + activeVariantKey + ' 已丟棄）');
+      activeVariantKey = key;
+    }
+    const t0 = performance.now();
+    return (renderer.compileAsync
+      ? renderer.compileAsync(scene, camera)
+      : Promise.resolve())
+      .then(() => {
+        console.info('[bubble variant] 首次 program 背景編譯完成 '
+          + Math.round(performance.now() - t0) + 'ms（主執行緒未被阻塞）key=' + key);
+      });
+  }).catch(err => {
+    // 失敗也要放行：讓 three.js 走原本的同步路徑，畫面該出來還是要出來。
+    console.warn('[bubble variant] 背景預編譯失敗，退回同步路徑：' + err.message);
+  }).then(() => {
+    initialCompileDone = true;
+  });
+  return initialCompilePromise;
+}
+
+function buildVariantMaterial() {
+  const mat = new THREE.ShaderMaterial({
+    uniforms,                       // 所有變體共用同一組 uniform 物件
+    vertexShader: VERT,
+    fragmentShader: usesBaselineShader() ? FRAG_BASELINE : FRAG,
+    defines: shaderFeatures(),
+    depthTest: false, depthWrite: false,
+  });
+  mat.envMap = pmremTarget.texture;
+  return mat;
+}
+
+// 依當下狀態切換到對應的變體。
+//
+// 關鍵在於「不要直接把新 material 掛上 mesh」：three.js 會在下一次 render 時同步把
+// program 準備好，而取 uniform location 會強迫等待連結完成 —— 那就等於把我們花了
+// 一整輪診斷才避開的主執行緒阻塞又加回來。所以新變體一律先在離屏 scene 上用
+// compileAsync 預編譯，resolve 之後才換上去；這段期間畫面繼續用舊變體算繪，
+// 不會黑掉也不需要 loading UI。
+function syncShaderVariant() {
+  if (!inited || !mesh) return;
+  // 首支 variant 還沒定案前一律不動作。這一段是「冷載入只編一次」的關鍵：
+  // HDRI 載入完成會呼叫進來，若此時就去編有 env 的那一支，就會與 ensureInitialCompile
+  // 之後要編的那一支重複。ensureInitialCompile 本來就會讀當下最新狀態，交給它就好。
+  if (!initialCompileDone) return;
+  const key = variantKey();
+  if (key === activeVariantKey) return;
+
+  const cached = touchVariant(key);
+  if (cached) {
+    const t0 = performance.now();
+    mesh.material = cached;
+    activeVariantKey = key;
+    variantStats.命中++;
+    variantStats.最後一次切換ms = Math.round((performance.now() - t0) * 10) / 10;
+    variantStats.最後一次是命中 = true;
+    console.info('[bubble variant] 命中 ' + key
+      + '（' + variantStats.最後一次切換ms + 'ms，未編譯）');
+    return;
+  }
+
+  if (variantSwapInFlight === key) return;   // 已經在背景編這一支了
+  variantSwapInFlight = key;
+  const t0 = performance.now();
+  const next = buildVariantMaterial();
+  const stage = new THREE.Scene();
+  const stageMesh = new THREE.Mesh(mesh.geometry, next);
+  stageMesh.frustumCulled = false;
+  stage.add(stageMesh);
+
+  const finish = () => {
+    // 期間使用者可能又切到別的組合；只有還是同一個目標才換上去。
+    if (variantSwapInFlight !== key) { try { next.dispose(); } catch (_) {} return; }
+    variantSwapInFlight = null;
+    if (variantKey() !== key) { try { next.dispose(); } catch (_) {} syncShaderVariant(); return; }
+    variantCache.set(key, next);
+    mesh.material = next;
+    activeVariantKey = key;
+    evictVariantsIfNeeded();
+    variantStats.未命中++;
+    variantStats.最後一次切換ms = Math.round((performance.now() - t0) * 10) / 10;
+    variantStats.最後一次是命中 = false;
+    console.info('[bubble variant] 新編 ' + key
+      + '（' + variantStats.最後一次切換ms + 'ms，背景編譯）');
+  };
+
+  const compiled = renderer.compileAsync
+    ? renderer.compileAsync(stage, camera)
+    : Promise.resolve(renderer.compile(stage, camera));
+  compiled.then(finish).catch(err => {
+    variantSwapInFlight = null;
+    console.error('[bubble variant] 預編譯失敗 ' + key + '：' + err.message);
+    try { next.dispose(); } catch (_) {}
+  });
+}
+
+// ===== 變體狀態 =====
+//
+// 這個函式是「這一刻真正需要哪些 shader 功能」的唯一來源。shaderFeatures() 把它翻成
+// defines，variantKey() 把它翻成快取鍵，兩者必須看同一份資料，否則會出現「鍵相同但
+// 編出來的 shader 不同」這種很難查的錯。
+//
+// 收進來的都是會大幅改變 control flow / call graph 的東西。數值滑桿（厚度、IOR、
+// 粗糙度、各種強度）一律不收 —— 它們只改變數字，不改變要編譯什麼，收進來只會造成
+// 變體爆炸。
+function variantState() {
+  const shapeField = usesShapeField(P.motion);
+  // 造型型別：面板的「形狀來源」。SVG 的 6-tap 法線只有在造型場真的編進來、
+  // 而且型別是 SVG 時才可能被走到（uShapeType == 1 且 uShapeProgress > 0.001）。
+  // 只看型別不看進度是刻意的：uShapeProgress 是動畫值，收進鍵裡會讓造型成形過程中
+  // 不斷切換變體。所以 SVG 模式兩條法線路徑都編，維持原本的數學。
+  const svgNormals = shapeField && P.shapeSource === 'svg';
+  return {
+    // --- 幾何 ---
+    shapeField,
+    svgNormals,
+    capillaryTexture: P.motion === 'capillary',
+    // 微滴的實際條件與 updateMicroDrops 的 activeCount 完全一致：四種模式之一，
+    // 而且造型場真的在（微滴的 anchors 也來自匯入的造型）。
+    microDrops: shapeField
+      && (isFormationMotion(P.motion) || P.motion === 'shatter'
+        || P.motion === 'melt' || P.motion === 'morph'),
+    // 衛星滴與毛細回彈波只在分裂的 pinch-off 產生（見 bubble.js 寫入 satelliteDrops
+    // 與 elasticEvent 的地方，其餘模式一律歸零）。
+    satellites: P.motion === 'split',
+    capillaryWave: P.motion === 'split',
+    // 負形（空腔）是造型的一部分：anchors 由 shapeCavityBase 產生，沒有匯入造型
+    // 就永遠是空陣列。
+    negativeField: shapeField,
+
+    // --- 光學 ---
+    // 薄膜干涉：面板預設關閉。關閉時整條 noise/干涉鏈的產物恆為 0（見 shaders.js
+    // 的 FEATURE_THIN_FILM 說明）。
+    thinFilm: !!P.filmEnabled,
+    // 液態薄膜材質：只有 uMaterialStyle === 1 才走那個分支。
+    liquidFilm: P.materialStyle === 'membrane',
+    dispersion: !!P.dispersionEnabled,
+    prismBeam: !!P.rayDispersionEnabled,
+    spectralCaustics: !!P.spectralCausticEnabled,
+    // 稜光的另外四種圖樣：只有選了非預設圖樣才需要。
+    beamPatterns: P.rayBeamPattern !== 'grid',
+    // 環境／PMREM 取樣。HDRI 載入前是 0，載入後變 1 —— 這是少數會在執行期改變的軸，
+    // 由 loadMaterialEnvironment 完成時觸發一次變體切換。
+    envPmrem: !!(uniforms && uniforms.uHasEnv.value === 1),
+  };
+}
+
+// 穩定且可預測的快取鍵。順序固定、只含布林，所以同一組狀態永遠產生同一個字串。
+//
+// 診斷覆寫必須進鍵裡：它們會改變 shaderFeatures() 產生的 defines，但不改變
+// variantState()。少了這一段，同一個鍵會對應到兩支不同的 shader，快取就會拿錯東西
+// （實測踩過：context 遺失後重建，拿到的是別組 defines 的材質）。
+function variantKey(v = variantState()) {
+  const flag = (on, ch) => (on ? ch : '-');
+  const diagSalt = DIAG.any || FORCE_FEATURES.length
+    ? '.d[' + DIAG.list.join('+') + (FORCE_FEATURES.length ? '|' + FORCE_FEATURES.join('+') : '') + ']'
+    : '';
+  return [
+    'g' + flag(v.shapeField, 'S') + flag(v.svgNormals, 'V') + flag(v.capillaryTexture, 'C')
+      + flag(v.microDrops, 'M') + flag(v.satellites, 'A') + flag(v.capillaryWave, 'W')
+      + flag(v.negativeField, 'N'),
+    'o' + flag(v.thinFilm, 'F') + flag(v.liquidFilm, 'L') + flag(v.dispersion, 'D')
+      + flag(v.prismBeam, 'P') + flag(v.spectralCaustics, 'K') + flag(v.beamPatterns, 'B')
+      + flag(v.envPmrem, 'E'),
+  ].join('.') + diagSalt;
 }
 
 function shaderFeatures() {
@@ -1072,34 +1602,114 @@ function shaderFeatures() {
     }
     return withRun(d);
   }
-  // lowcompileloops 以 minshader2 為基底再往下砍兩個硬編碼的展開上限。
-  const probe = DIAG.lowcompileloops;
-  const slim2 = DIAG.minshader2 || probe;
-  // 三大區塊的實際需求（見 motions/registry.js 的 usesShapeField 與
-  // updateMicroDrops 的 activeCount）：
-  //   造型場   只有 formation/weave/shatter/melt/morph/jelly/capillary 要
-  //   毛細波   只有 capillary 要（注意：分裂的彈性回彈波紋 capillaryWave 不在此列，
-  //            那是另一個函式，任何模式都可能用到，不受這個開關影響）
-  //   微滴     只有 formation/shatter/melt/morph 要
-  const slim = DIAG.minshader || slim2;
+  // ===== 正式的變體特化 =====
+  //
+  // 這裡不再「一支 shader 包所有功能」。實際會編進去的東西由當下真正需要的模式、
+  // 材質與光學開關決定，其餘在編譯期就不存在。每一項的依據都是「該狀態下 runtime
+  // 條件恆為 false」，所以是行為等價的特化，不是降級。
+  //
+  // 為什麼要這樣做：Windows 的 ANGLE→HLSL→fxc 會把所有函式攤平成一個巨大的函式，
+  // 而優化器成本對函式大小是超線性的。實測把萬能 shader 拆成當下需要的最小組合，
+  // cold compile 從兩分鐘級一路降到個位數秒級。
+  const V = variantState();
+
   const defines = {
-    FEATURE_SHAPE_FIELD: slim ? false : '',
-    FEATURE_CAPILLARY: slim ? false : '',
-    FEATURE_MICRO_DROPS: slim ? false : '',
-    // 五種稜光圖樣裡 preview 只用預設的晶格（uRayBeamPattern = 0）。
-    // 關掉之後另外四種連同各自的 3 次迴圈在編譯期消失。
-    FEATURE_BEAM_PATTERNS: slim2 ? false : '',
+    // --- 幾何：mapScene 的子系統，由 motion 決定 ---
+    FEATURE_SHAPE_FIELD: V.shapeField ? '' : false,
+    FEATURE_CAPILLARY: V.capillaryTexture ? '' : false,
+    FEATURE_MICRO_DROPS: V.microDrops ? '' : false,
+    FEATURE_SATELLITES: V.satellites ? '' : false,
+    FEATURE_CAPILLARY_WAVE: V.capillaryWave ? '' : false,
+    FEATURE_NEGATIVE_FIELD: V.negativeField ? '' : false,
+
+    // --- 法線路徑：只編當下這個造型型別真正會走到的那一條 ---
+    // SVG 造型的 6-tap 分軸差分與四面體 4-tap 在原版是兩條 runtime 分支，兩條都會
+    // 被編譯（每個呼叫點 10 份 mapScene）。四面體是任何狀態都可能走到的，一律保留；
+    // SVG 那條只有在「造型場有編進來且造型型別是 SVG」時才可能成立。
+    NORMAL_TAPS_TETRA: '',
+    NORMAL_TAPS_SVG: V.svgNormals ? '' : false,
+
+    // --- 光學：只編當下真的開著的 ---
+    FEATURE_THIN_FILM: V.thinFilm ? '' : false,
+    FEATURE_LIQUID_FILM: V.liquidFilm ? '' : false,
+    FEATURE_LIQUID_FILM_DEPTH: V.liquidFilm ? '' : false,
+    FEATURE_DISPERSION: V.dispersion ? '' : false,
+    FEATURE_PRISM_BEAM: V.prismBeam ? '' : false,
+    FEATURE_PRISM_SATURATION: V.prismBeam ? '' : false,
+    FEATURE_SPECTRAL_CAUSTICS: V.spectralCaustics ? '' : false,
+    FEATURE_ENV_PMREM: V.envPmrem ? '' : false,
+    // 五種稜光圖樣裡只有預設的晶格是常用的；其餘四種各帶一個 3 次迴圈。
+    FEATURE_BEAM_PATTERNS: V.beamPatterns ? '' : false,
   };
-  // 主滴迴圈上限。uniform 陣列仍是 [12]，這裡只縮迴圈展開次數；
-  // preview 的分裂模式實際只有 2 顆主滴，4 已經留了餘裕。
-  if (slim2) defines.MAX_DROPS_COMPILE = 4;
-  // 編譯期展開上限。刻意不動 uMaxSteps —— 這裡砍的是「ANGLE 要展開幾次」，
-  // 執行期的步數決策完全沒變（見 resolveMaxSteps）。步數不足畫面會破，這是
-  // 這個探針的預期結果。
-  if (probe) {
+
+  // ?diag=allfeatures —— 驗證用：把所有功能都編進去，等同變體特化之前那支「萬能
+  // shader」。存在的理由是逐像素驗證：特化的正確性主張是「該狀態下 runtime 條件恆為
+  // false，所以編不編都一樣」，而驗證這個主張最直接的方式，就是拿同一份程式碼的
+  // 全功能版與特化版在同一幀比對。兩者必須逐位元相同。
+  if (DIAG.allFeatures) {
+    for (const k of Object.keys(defines)) {
+      if (k.startsWith('FEATURE_') || k.startsWith('NORMAL_TAPS_')) defines[k] = '';
+    }
+  }
+  // 一次只強制加回一個功能，用來逐項證明「編了也不會改變畫面」。
+  for (const k of FORCE_FEATURES) defines[k] = '';
+
+  // ===== 以下是診斷探針的覆寫 =====
+  //
+  // 全部預設關閉，只有帶 ?diag= 時才生效。它們可以把上面任何一個正式旗標再關掉，
+  // 用來在 production 架構上做 A/B，而不是另外維護一套平行的 shader。
+  if (DIAG.minshader || DIAG.minshader2 || DIAG.lowcompileloops) {
+    defines.FEATURE_SHAPE_FIELD = false;
+    defines.FEATURE_CAPILLARY = false;
+    defines.FEATURE_MICRO_DROPS = false;
+  }
+  if (DIAG.minshader2 || DIAG.lowcompileloops) {
+    defines.FEATURE_BEAM_PATTERNS = false;
+    defines.MAX_DROPS_COMPILE = 4;
+  }
+  // 純診斷：步數不足畫面會破，只用來確認 ANGLE 是否卡在 loop expansion。
+  // 正式版一律使用 shaders.js 的預設 88 / 28。
+  if (DIAG.lowcompileloops) {
     defines.MAX_MARCH_COMPILE = 16;
     defines.MAX_INTERIOR_COMPILE = 8;
   }
+  const late = DIAG.probeNoLateShading;
+  if (late || DIAG.probeNoPrismBeam) defines.FEATURE_PRISM_BEAM = false;
+  if (late || DIAG.probeNoPrismSaturation) defines.FEATURE_PRISM_SATURATION = false;
+  if (late || DIAG.probeNoLiquidFilmMaterial) defines.FEATURE_LIQUID_FILM = false;
+  if (late || DIAG.probeNoThinFilmDepth) defines.FEATURE_LIQUID_FILM_DEPTH = false;
+  if (late || DIAG.probeNoDispersionSpectral) defines.FEATURE_DISPERSION = false;
+  if (late || DIAG.probeNoSpectralCaustics) defines.FEATURE_SPECTRAL_CAUSTICS = false;
+  if (DIAG.probeNoEnvPmrem) defines.FEATURE_ENV_PMREM = false;
+  if (DIAG.probeNoThinFilm || DIAG.probeNoRefractionFilm) defines.FEATURE_THIN_FILM = false;
+  if (DIAG.probeMapscenePlain || DIAG.probeMapsceneSplit) {
+    defines.FEATURE_NEGATIVE_FIELD = false;
+    if (!DIAG.probeMapsceneSplit) {
+      defines.FEATURE_SATELLITES = false;
+      defines.FEATURE_CAPILLARY_WAVE = false;
+    } else {
+      defines.FEATURE_SATELLITES = '';
+      defines.FEATURE_CAPILLARY_WAVE = '';
+    }
+    defines.NORMAL_TAPS_SVG = false;
+  }
+  if (DIAG.probeModeSvg) { defines.NORMAL_TAPS_SVG = ''; defines.NORMAL_TAPS_TETRA = false; }
+  if (DIAG.probeModeNone || DIAG.probeModeVoxel) {
+    defines.NORMAL_TAPS_SVG = false;
+    defines.NORMAL_TAPS_TETRA = '';
+  }
+  if (DIAG.singleReflectionSample) defines.PROBE_SINGLE_REFLECTION_SAMPLE = '';
+  if (DIAG.probeNoWobble) defines.PROBE_NO_GEOMETRY_WOBBLE = '';
+  if (DIAG.probeNoRefractionFilm || DIAG.probeNoTraceExit) defines.PROBE_NO_TRACE_EXIT = '';
+  if (DIAG.probeNoRefractionFilm || DIAG.probeNoArtDispersion) defines.PROBE_NO_ART_DISPERSION = '';
+  if (DIAG.probeNoTraceNormal) defines.PROBE_NO_TRACE_NORMAL = '';
+  if (DIAG.probeNoTraceMarch) defines.PROBE_NO_TRACE_MARCH = '';
+  if (DIAG.probeCheapTraceSdf) defines.PROBE_CHEAP_TRACE_SDF = '';
+  if (DIAG.probeLeanNormals) {
+    defines.PROBE_LEAN_NORMALS = '';
+    defines.TRACE_EXIT_NORMAL_FN = 'exitNormalTetra';
+  }
+
   return withRun(defines);
 }
 
@@ -3000,6 +3610,10 @@ function initGL() {
   renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false });
   renderer.setClearColor(0x000000, 1);
   renderer.setPixelRatio(qualityDpr);
+  // 診斷：把 renderer 剛建立時的後端記下來（此時還沒有編譯任何 program），並開始
+  // 監聽 context 遺失。「這個 context 一開始就是軟體算繪」與「編譯把 GPU process
+  // 打掉之後才掉下去」在事後是分不出來的，除非兩個時間點都留下紀錄。
+  if (DIAG.any || DIAG_TIMING) startGlTimeline();
 
   pmremGenerator = new PMREMGenerator(renderer);
   pmremGenerator.compileEquirectangularShader();
@@ -3020,6 +3634,10 @@ function initGL() {
     uCompositionOffsetX: { value: 0 },
     uCompositionOffsetY: { value: 0 },
     uMaxSteps:   { value: qualitySteps },
+    // 只有 probe-loop-normal-taps 的 shader 會宣告這顆；其餘變體 three.js 找不到
+    // location 就直接略過。恆為 4 —— 它的作用是讓 trip count 對 fxc 保持未知，
+    // 不是拿來調整取樣數的。
+    uNormalTaps: { value: 4 },
     uCount:      { value: Math.round(P.count) },
     uViscosity:  { value: P.viscosity },
     uWobble:     { value: P.wobble },
@@ -3192,6 +3810,8 @@ function initGL() {
   });
   // 讓 Three.js 依 PMREM atlas 尺寸注入 CubeUV shader 常數。
   mat.envMap = pmremTarget.texture;
+  variantCache.set(variantKey(), mat);
+  activeVariantKey = variantKey();
   mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
   scene.add(mesh);
@@ -3572,6 +4192,9 @@ function bindControls() {
       if ((key === 'motion' || key === 'shapeSource') && previousValue !== P[key]) {
         ensureShapeForCurrentSource();
       }
+      // motion / shapeSource / materialStyle / rayBeamPattern 都可能改變要編譯的功能
+      // 組合。syncShaderVariant 自己會判斷有沒有變，沒變就是零成本。
+      syncShaderVariant();
       requestPausedRender();
     };
     el.value = P[key];
@@ -3921,8 +4544,14 @@ function applyEnvironmentTexture(tex, label, requestId) {
   uniforms.uPmremMap.value = nextPmremTarget.texture;
   uniforms.uHasEnv.value = 1;
   pmremTarget = nextPmremTarget;
-  mesh.material.envMap = nextPmremTarget.texture;
-  mesh.material.needsUpdate = true;
+  // 快取裡每一支變體都吃同一張 PMREM，換 HDRI 時全部要更新，否則切回舊變體會用到
+  // 已經 dispose 的貼圖。
+  for (const mat of variantCache.values()) {
+    mat.envMap = nextPmremTarget.texture;
+    mat.needsUpdate = true;
+  }
+  // uHasEnv 從 0 變 1 會改變環境／PMREM 那一軸，需要切變體。
+  syncShaderVariant();
 
   if (oldEnv && oldEnv.dispose) oldEnv.dispose();
   if (oldPmremTarget) oldPmremTarget.dispose();
@@ -3934,15 +4563,22 @@ function loadEnvironment(url, label, isHDR, revokeURL = false) {
   hdriState.textContent = 'HDRI 載入中：' + label;
   const finish = () => { if (revokeURL) URL.revokeObjectURL(url); };
   const apply = tex => {
-    try { applyEnvironmentTexture(tex, label, requestId); }
-    catch (_) {
+    try {
+      applyEnvironmentTexture(tex, label, requestId);
+      // 成功：uHasEnv 已經是 1，首支 variant 可以定案了。
+      settleEnv('HDRI 載入完成');
+    } catch (_) {
       if (requestId === environmentRequestId) hdriState.textContent = 'HDRI 載入失敗：' + label;
       if (tex && tex.dispose) tex.dispose();
+      // 套用失敗也算確定：uHasEnv 維持 0，編無 env 的變體，不要卡著等。
+      settleEnv('HDRI 套用失敗');
     }
     finish();
   };
   const fail = () => {
     if (requestId === environmentRequestId) hdriState.textContent = 'HDRI 載入失敗：' + label;
+    // 載入失敗同樣要放行，否則首幀會一直等到逾時才出現。
+    settleEnv('HDRI 載入失敗');
     finish();
   };
 
@@ -4229,6 +4865,197 @@ function updatePausedCameraRotation() {
   rotM4.multiply(tmpZ);
   uniforms.uRot.value.setFromMatrix4(rotM4);
 }
+// WebGL / ANGLE 環境。Windows 上「bubble shader 編譯卡死」必須先分清是 shader
+// 本身還是某一個 ANGLE 後端，而後端只能從 renderer 字串讀出來 —— 頁面內沒有別的
+// 途徑能知道 --use-angle 實際生效在哪裡。
+//
+// 這裡用的全部是字串型 getParameter 與 getExtension：它們只問 context 的靜態屬性，
+// 跟任何 program 的狀態無關，不會 flush、不會等待編譯。絕對不能為了取環境資訊順手
+// 加上 getProgramParameter(LINK_STATUS) / gl.finish() 那類查詢 —— 那正是先前把
+// Chrome 卡住、讓整批測試數據作廢的東西（見 startDiagTiming 的註解）。
+function collectGlEnvironment() {
+  const gl = renderer && renderer.getContext ? renderer.getContext() : null;
+  if (!gl) return { 狀態: '(renderer 未初始化)' };
+  const get = p => { try { return gl.getParameter(p); } catch (_) { return null; } };
+  let dbg = null;
+  try { dbg = gl.getExtension('WEBGL_debug_renderer_info'); } catch (_) {}
+  const glRenderer = get(gl.RENDERER);
+  const unmaskedRenderer = dbg ? get(dbg.UNMASKED_RENDERER_WEBGL) : null;
+  // ANGLE 把後端寫進 renderer 字串，例如
+  //   ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 Direct3D11 vs_5_0 ps_5_0, D3D11)
+  //   ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 (0x00002786), Vulkan 1.3.260)
+  // 兩個字串都看，因為未遮蔽的那個才有完整的後端資訊，而它可能不可用。
+  const backendSource = [glRenderer, unmaskedRenderer].filter(Boolean).join(' | ');
+  const backend = /SwiftShader/i.test(backendSource) ? 'SwiftShader（軟體算繪）'
+    : /Vulkan/i.test(backendSource) ? 'Vulkan'
+    : /Direct3D11|\bD3D11\b/i.test(backendSource) ? 'D3D11'
+    : /Direct3D9|\bD3D9\b/i.test(backendSource) ? 'D3D9'
+    : /OpenGL|GLES/i.test(backendSource) ? 'OpenGL/GLES'
+    : /ANGLE/i.test(backendSource) ? 'ANGLE（後端字串無法分辨）'
+    : '非 ANGLE 或無法分辨';
+  let parallelCompile = false;
+  try { parallelCompile = !!gl.getExtension('KHR_parallel_shader_compile'); } catch (_) {}
+  return {
+    webgl版本: (typeof WebGL2RenderingContext !== 'undefined'
+      && gl instanceof WebGL2RenderingContext) ? 'WebGL2' : 'WebGL1',
+    ANGLE後端推定: backend,
+    GL_VENDOR: get(gl.VENDOR),
+    GL_RENDERER: glRenderer,
+    GL_VERSION: get(gl.VERSION),
+    UNMASKED_VENDOR_WEBGL: dbg
+      ? get(dbg.UNMASKED_VENDOR_WEBGL) : '(WEBGL_debug_renderer_info 不可用)',
+    UNMASKED_RENDERER_WEBGL: dbg
+      ? unmaskedRenderer : '(WEBGL_debug_renderer_info 不可用)',
+    KHR_parallel_shader_compile: parallelCompile,
+  };
+}
+
+// 這一份 shader 的靜態規模統計。矩陣頁需要它才能把「編譯多久」跟「編譯了多少東西」
+// 放在同一列看，否則只有時間數字沒有解釋力。
+//
+// 逐項都是對「前處理之後」的原始碼算的，跟真正送進 ANGLE 的內容一致。
+function computeShaderStats() {
+  const activeFrag = usesBaselineShader() ? FRAG_BASELINE : FRAG;
+  const d = (mesh && mesh.material) ? mesh.material.defines || {} : {};
+  const isOn = k => d[k] !== false && d[k] !== undefined;
+  const eff = [];
+  let depth = 0, skip = [];
+  for (const line of activeFrag.split('\n')) {
+    let m = line.match(/^\s*#ifdef\s+(\w+)/);
+    if (m) { depth++; if (!isOn(m[1])) skip.push(depth); continue; }
+    m = line.match(/^\s*#ifndef\s+(\w+)/);
+    if (m) { depth++; if (isOn(m[1])) skip.push(depth); continue; }
+    if (/^\s*#endif/.test(line)) { skip = skip.filter(x => x !== depth); depth--; continue; }
+    if (!skip.length) eff.push(line);
+  }
+  // 註解要先剝掉，否則註解裡提到的函式名會被算成呼叫點。
+  const bodyOf = name => {
+    const i = eff.findIndex(l => new RegExp('^\\w+\\s+' + name + '\\s*\\(').test(l));
+    if (i < 0) return null;
+    let dep = 0, started = false; const out = [];
+    for (let j = i; j < eff.length; j++) {
+      out.push(eff[j]);
+      dep += (eff[j].match(/\{/g) || []).length;
+      dep -= (eff[j].match(/\}/g) || []).length;
+      if ((eff[j].match(/\{/g) || []).length) started = true;
+      if (started && dep === 0) break;
+    }
+    return out;
+  };
+  const strip = ls => (ls || []).map(l => l.replace(/\/\/.*$/, '')).join('\n');
+  const count = (ls, re) => (strip(ls).match(new RegExp(re, 'g')) || []).length;
+
+  const all = eff;
+  const calcNormal = bodyOf('calcNormal');
+  const exitFnName = d.TRACE_EXIT_NORMAL_FN || 'calcNormal';
+  const exitFn = exitFnName === 'calcNormal' ? calcNormal : bodyOf(exitFnName);
+  const trace = bodyOf('traceExitSurface');
+  const main = bodyOf('main');
+
+  // mapScene 在攤平之後總共會出現幾份：沿呼叫圖算，不是數文字出現次數。
+  const calcNormalTaps = count(calcNormal, 'mapScene\\s*\\(');
+  const exitTaps = exitFn ? count(exitFn, 'mapScene\\s*\\(') : 0;
+  const tracePer = count(trace, 'mapScene\\s*\\(') + exitTaps;
+  const mapScene展開份數 = count(main, 'mapScene\\s*\\(')
+    + count(main, 'calcNormal\\s*\\(') * calcNormalTaps
+    + count(main, 'traceExitSurface\\s*\\(') * tracePer;
+
+  return {
+    有效行數: all.length,
+    純程式碼行數: all.filter(l => l.trim() && !l.trim().startsWith('//')).length,
+    mapScene展開份數,
+    calcNormalTaps,
+    texture2D呼叫點: count(all, 'texture2D\\s*\\('),
+    textureCubeUV呼叫點: count(all, 'textureCubeUV\\s*\\('),
+    snoise呼叫點: count(all, 'snoise\\s*\\(') - count(all, 'float\\s+snoise\\s*\\('),
+    固定迴圈數: all.filter(l => /^\s*for\s*\(/.test(l)).length,
+  };
+}
+
+// 把剛算繪的那一幀讀回來存起來，供跨頁面載入的 A/B 逐像素比對（?diagCapture=key）。
+//
+// 存兩份東西：整張畫面的雜湊，以及一份等間隔取樣的原始像素。
+//   雜湊    —— 用來回答「是不是完全一模一樣」。相同就代表逐位元相同，不必再看誤差。
+//   取樣    —— 雜湊不同時才需要，用來算最大／平均誤差，判斷是浮點級還是真的畫錯。
+// 不存整張是因為 localStorage 只有幾 MB，而兩份全解析度緩衝區就會撐爆。
+function captureFrameForDiff(key) {
+  try {
+    const gl = renderer.getContext();
+    const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+    const px = new Uint8Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+
+    // FNV-1a，逐位元敏感
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < px.length; i++) {
+      hash ^= px[i];
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+
+    // 等間隔取樣（取原值，不做平均——平均會把浮點級差異抹掉）
+    const TARGET = 200;
+    const stepX = Math.max(1, Math.floor(w / TARGET));
+    const stepY = Math.max(1, Math.floor(h / TARGET));
+    const sample = [];
+    for (let y = 0; y < h; y += stepY) {
+      for (let x = 0; x < w; x += stepX) {
+        const o = (y * w + x) * 4;
+        sample.push(px[o], px[o + 1], px[o + 2], px[o + 3]);
+      }
+    }
+    const record = {
+      key, width: w, height: h, hash, stepX, stepY,
+      simT: uniforms.uTime.value,
+      diag: DIAG.list,
+      sample,
+    };
+    localStorage.setItem('vfx:diagpix:' + key, JSON.stringify(record));
+    console.info('[bubble diag] 已擷取畫面 "' + key + '"：' + w + 'x' + h
+      + '，hash=' + hash.toString(16) + '，取樣 ' + (sample.length / 4) + ' 像素'
+      + '，uTime=' + record.simT);
+  } catch (e) {
+    console.error('[bubble diag] 擷取畫面失敗：' + e.message);
+  }
+}
+
+// 比較兩份擷取結果。純讀 localStorage，任何時候都可以在 console 呼叫。
+window.__bubbleDiagComparePixels = function (keyA, keyB) {
+  const a = JSON.parse(localStorage.getItem('vfx:diagpix:' + keyA) || 'null');
+  const b = JSON.parse(localStorage.getItem('vfx:diagpix:' + keyB) || 'null');
+  if (!a || !b) return { 錯誤: '找不到擷取結果', a: !!a, b: !!b };
+  if (a.width !== b.width || a.height !== b.height) {
+    return { 錯誤: '尺寸不同，無法比較', a: a.width + 'x' + a.height, b: b.width + 'x' + b.height };
+  }
+  if (a.simT !== b.simT) {
+    return { 錯誤: '動畫時間不同，這樣的比較沒有意義（請帶同一個 ?diagTime=）',
+      aTime: a.simT, bTime: b.simT };
+  }
+  const 逐位元相同 = a.hash === b.hash;
+  let max = 0, sum = 0, diffCount = 0;
+  const n = Math.min(a.sample.length, b.sample.length);
+  for (let i = 0; i < n; i++) {
+    const d = Math.abs(a.sample[i] - b.sample[i]);
+    if (d > max) max = d;
+    if (d !== 0) diffCount++;
+    sum += d;
+  }
+  return {
+    逐位元相同,
+    全畫面hash: { [keyA]: a.hash.toString(16), [keyB]: b.hash.toString(16) },
+    尺寸: a.width + 'x' + a.height,
+    uTime: a.simT,
+    取樣通道數: n,
+    最大通道誤差: max,
+    平均通道誤差: Math.round((sum / n) * 10000) / 10000,
+    有差異的通道數: diffCount,
+    判讀: 逐位元相同 ? '完全相同'
+      : max <= 1 ? '僅 ±1/255 的浮點捨入級差異'
+        : max <= 4 ? '極小差異（可能是浮點累加順序）'
+          : '有可見差異，需要檢查',
+    diag: { [keyA]: a.diag, [keyB]: b.diag },
+  };
+};
+
 // 診斷用的現況報告。任何時候都可以在 console 呼叫 __bubbleDiagReport()，
 // 帶 ?diag= 時初始化完成後也會自動印一次。純讀取，不改變任何狀態。
 window.__bubbleDiagReport = function () {
@@ -4291,6 +5118,19 @@ window.__bubbleDiagReport = function () {
     + Math.round(uniforms ? uniforms.uNegativeCount.value : 0);
   const r = {
     模式: { preview: PREVIEW, diag: DIAG.list, motion: P.motion },
+    // 每一筆 cold compile 數字都必須帶著它是在哪個後端量到的，否則跨後端的
+    // 結果混在一起就無法比較（見 collectGlEnvironment）。這一份是呼叫當下的現況。
+    gl環境: collectGlEnvironment(),
+    // 過程中後端有沒有換過人（見 glTimeline）。
+    gl時間軸: glTimeline,
+    shader規模: computeShaderStats(),
+    變體: {
+      目前key: activeVariantKey,
+      狀態: variantState(),
+      已快取: [...variantCache.keys()],
+      快取上限: VARIANT_CACHE_LIMIT,
+      ...variantStats,
+    },
     coldCompile量測: {
       shaderRun: SHADER_RUN === null ? '(未指定 → 可能命中已暖好的 shader cache)' : SHADER_RUN,
       計時工具: DIAG_TIMING
@@ -4499,14 +5339,33 @@ function syncLoop() {
         // 的 14，而 split 模式實際上該是 0（syncPanelToUniforms 在 initGL 裡跑在
         // updateDropUniforms 之後，兩者都寫同一顆 uniform）。那樣量到的成本不具代表性。
         // frame() 開頭會自己排下一次，這裡算完立刻取消，只留這一幀。
-        last = performance.now();
-        frame(performance.now());
-        if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
-        console.info('[bubble diag] static: 已算繪 1 幀，不啟動 RAF 迴圈');
+        // 跟正式路徑一樣先等 env 狀態確定＋背景編譯完成，否則擷取到的會是
+        // 「還沒切到最終 variant」的那一幀，A/B 比對就不是同一支 shader。
+        ensureInitialCompile().then(() => {
+          last = performance.now();
+          frame(performance.now());
+          // 讀像素必須緊接在 render 之後、同一個 task 內（見 DIAG_CAPTURE 的說明）。
+          if (DIAG_CAPTURE) captureFrameForDiff(DIAG_CAPTURE);
+          if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+          console.info('[bubble diag] static: 已算繪 1 幀，不啟動 RAF 迴圈');
+        });
       }
       return;
     }
-    if (!rafId) { last = performance.now(); rafId = requestAnimationFrame(frame); }
+    // 第一次算繪前先把 program 在背景編好。
+    //
+    // 這一段是「Chrome 整個卡住」的直接對策。three.js 在真正 render 時才準備 program，
+    // 而取 uniform location 會強迫等待連結完成 —— 主執行緒因此被扣住整個編譯時間，
+    // 而在 Windows 上那可能長到讓 GPU driver 逾時重置（本機實測：全功能 shader 在
+    // 91.8 秒時觸發 webglcontextlost）。compileAsync 走的是
+    // KHR_parallel_shader_compile 的非阻塞路徑，編好之前主執行緒完全自由。
+    //
+    // 代價是首幀會晚一點出現，但那段時間頁面是活的，而不是整個瀏覽器沒反應。
+    if (!rafId) {
+      ensureInitialCompile().then(() => {
+        if (!rafId && !isPaused()) { last = performance.now(); rafId = requestAnimationFrame(frame); }
+      });
+    }
   }
 }
 pauseBtn.addEventListener('click', () => {
@@ -4940,6 +5799,8 @@ function frame(now) {
   const dt = Math.min((now - last) / 1000, 0.05);
   last = now;
   simT = (simT + dt) % Math.max(0.001, P.loopDuration);
+  // 診斷：釘死動畫時間，讓兩個 shader 變體能在同一幀上做逐像素比對。
+  if (DIAG_TIME !== null) simT = DIAG_TIME;
   updateDropUniforms(simT);
 
   if (!dragging) {

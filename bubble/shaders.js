@@ -85,6 +85,9 @@ uniform float uTanHalfFov;
 uniform float uCompositionOffsetX;
 uniform float uCompositionOffsetY;
 uniform int   uMaxSteps;
+// 恆為 4。它的作用不是調整取樣數，而是讓 calcNormal 那個四面體迴圈的 trip count
+// 對 fxc 保持未知，迴圈才不會被靜態展開成 4 份 mapScene（見 calcNormal 的說明）。
+uniform int   uNormalTaps;
 
 // ===== shader cache 破壞用的 salt（?shaderRun=N）=====
 // 目的：強迫每次都是 cold compile。
@@ -287,7 +290,12 @@ uniform sampler2D uEnvMap;
 uniform sampler2D uPmremMap;
 uniform int   uHasEnv;
 
+// 環境／PMREM 探針（?diag=probe-no-env-pmrem）：連 three.js 這一整塊都不編。
+// 底下 sampleReflection / sampleEnvironmentBackdrop 的本體同時會被換成不含
+// textureCubeUV 的版本，所以拿掉這個 chunk 之後沒有任何東西會參照到它。
+#ifdef FEATURE_ENV_PMREM
 #include <cube_uv_reflection_fragment>
+#endif
 
 // 主滴迴圈的上限。uniform 陣列固定宣告成 [12]（見上方），這個常數只決定
 // 「迴圈要展開幾次」。ANGLE 翻成 HLSL 時會嘗試展開這個迴圈，而迴圈體裡是
@@ -339,11 +347,29 @@ vec3 rotateEnvDir(vec3 d){
   return vec3(d.x, cp * d.y - sp * d.z, sp * d.y + cp * d.z);
 }
 vec3 sampleReflection(vec3 d, float rough){
+// 環境／PMREM 探針：保留簽章、換掉本體，讓所有呼叫點與 main() 的控制流都不變，
+// 量到的就是「PMREM 取樣這一整塊」的純編譯成本。退回程序化棚燈（原本就是沒有
+// HDRI 時的路徑），所以仍然回傳合理的環境色，不會讓下游拿到常數而被摺掉。
+#ifndef FEATURE_ENV_PMREM
+  return proceduralEnv(d, rough);
+#endif
+#ifdef FEATURE_ENV_PMREM
   if (uHasEnv == 1) {
     d = rotateEnvDir(d);
     vec3 center = textureCubeUV(uPmremMap, d, rough).rgb;
     // 高粗糙度直接取 PMREM 低階 mip 容易顯出 cube-UV 的格狀邊界。
     // 用 roughness² 控制 GGX lobe 寬度，再以 8 點環形半球近似補樣本。
+    //
+    // 診斷探針（?diag=single-reflection-sample）會把下面整段環形補樣在編譯期移除，
+    // 只留上面那一次 textureCubeUV。目的是量「同一支 shader、只差這一塊」的 cold
+    // compile 差距 —— textureCubeUV 每次都會展開整份 three.js cube_uv_reflection_fragment
+    // （getFace / getUV / bilinearCubeUV × 2 個 mip），所以這裡最多 9 次取樣在
+    // ANGLE 翻成 HLSL 之後是很大的一塊。fxc 也只對這支與 backgroundSample 發出
+    // X4000 警告，所以它是第一個該被單獨量的對象。
+    //
+    // 未帶這個 diag 時整段照常編譯，正式版行為完全不變。畫面會少掉高粗糙度的
+    // 環形預濾波，所以這只是探針，不是可以直接上線的設定。
+#ifndef PROBE_SINGLE_REFLECTION_SAMPLE
     float blur = smoothstep(0.28, 0.92, rough);
     if (blur > 0.001) {
       vec3 axis = abs(d.y) < 0.92
@@ -372,11 +398,17 @@ vec3 sampleReflection(vec3 d, float rough){
         center = mix(prefiltered, center, centerWeight);
       }
     }
+#endif // PROBE_SINGLE_REFLECTION_SAMPLE
     return center;
   }
   return proceduralEnv(d, rough);
+#endif // FEATURE_ENV_PMREM
 }
 vec3 sampleEnvironmentBackdrop(vec3 d){
+#ifndef FEATURE_ENV_PMREM
+  return proceduralEnv(rotateEnvDir(d), max(0.025, uHdriBlur));
+#endif
+#ifdef FEATURE_ENV_PMREM
   if (uHasEnv != 1) return uBgColor;
   d = rotateEnvDir(d);
   // 1K equirectangular HDRI 直接以 LOD 0 放進高解析度折射時，少量 texel
@@ -385,6 +417,7 @@ vec3 sampleEnvironmentBackdrop(vec3 d){
   // 不是美術模糊。滑桿往上時仍直接控制其餘 roughness 範圍。
   float rayFootprint = max(0.025, uHdriBlur);
   return textureCubeUV(uPmremMap, d, rayFootprint).rgb;
+#endif // FEATURE_ENV_PMREM
 }
 vec4 backgroundSample(vec3 rd){
   if (uBgMode == 1 && uHasEnv == 1){
@@ -564,6 +597,8 @@ float volumeShapeDistance(vec3 p, int ch){
 #endif // FEATURE_SHAPE_FIELD
 
 // 分離後由接觸極點向外傳播的局部毛細波；只處理主要水滴對 0/1。
+// 只有分裂模式會呼叫（見 mapScene 的 FEATURE_CAPILLARY_WAVE），所以函式本體也一起關。
+#ifdef FEATURE_CAPILLARY_WAVE
 float capillaryWave(vec3 p, int i){
   vec3 center = uDrops[i].xyz;
   int pairA = int(uElasticPair.x + 0.5);
@@ -585,6 +620,7 @@ float capillaryWave(vec3 p, int i){
   float ripple = sin(behindFront * uElasticDensity * PI);
   return ripple * spatialDecay * hemisphereMask * uElasticEvent.x * uElasticStrength;
 }
+#endif // FEATURE_CAPILLARY_WAVE
 
 // 形狀變形的「消失場」。整套切削的核心就是這個純量場：舊形狀留在場值大於
 // 消失波前的那一側、新形狀留在場值小於出現波前的那一側（見 mapScene 裡的
@@ -855,12 +891,17 @@ float mapScene(vec3 p, bool smoothShape){
     // 微滴迴圈早就有同樣的 w > 0.0001 守衛，這裡補上。
     if (uDrops[i].w <= 0.0001) continue;
     float sphereD = dropletDistance(p, i);
+// 分裂 pinch-off 的彈性回彈波紋。只有 P.motion === 'split' 會把 elasticEvent 設成
+// 非零（見 bubble.js：其餘所有模式走 else 分支 elasticEvent.set(0, 0)），所以
+// 非分裂模式下這整段的 runtime 條件恆為 false —— 編譯期拿掉是行為等價的。
+#ifdef FEATURE_CAPILLARY_WAVE
     int pairA = int(uElasticPair.x + 0.5);
     int pairB = int(uElasticPair.y + 0.5);
     // 僅在事件期間、活動配對且接近表面時付出波紋成本。
     if (uElasticEvent.x > 0.0001 && (i == pairA || i == pairB) && abs(sphereD) < 0.3) {
       sphereD -= capillaryWave(p, i);
     }
+#endif // FEATURE_CAPILLARY_WAVE
     // 每滴融合權重只在分裂模式的子滴出生／吸收尾端低於 1；其餘模式固定為 1。
     // 讓 k 與子滴半徑一起平滑歸零，才能連續接上上方的零半徑守衛。
     float dropBlend = mainBlend * clamp(uDropPhysics[i].w, 0.0, 1.0);
@@ -872,11 +913,17 @@ float mapScene(vec3 p, bool smoothShape){
   }
   // 衛星滴以「會釋放的 smin」與頸部相連：成形期 blend 高（細絲上的鼓包），
   // 掐斷時 blend→0，smin 退化為硬 min → 成為自由滴。
+  //
+  // 衛星滴串只在分裂的 pinch-off 產生：bubble.js 只有 P.motion === 'split' 那個分支
+  // 會寫入 satelliteDrops，其餘模式一律 satelliteDrops[s].w = 0 且 uSatelliteBlend = 0。
+  // 所以非分裂模式下 uSatellites[s].w > 0.001 恆為 false。
+#ifdef FEATURE_SATELLITES
   for (int s = 0; s < 3; s++) {
     if (uSatellites[s].w > 0.001) {
       d = smin(d, length(p - uSatellites[s].xyz) - uSatellites[s].w, uSatelliteBlend);
     }
   }
+#endif
   // 大量形狀微滴由資料紋理提供，突破 uniform array 的數量限制。
   // 它們先真正填滿目標體積，模型 SDF 只在最後階段補足細節。
 #ifdef FEATURE_MICRO_DROPS
@@ -893,6 +940,12 @@ float mapScene(vec3 p, bool smoothShape){
     }
   }
 #endif // FEATURE_MICRO_DROPS
+// 負形（空腔）場。它是「造型的一部分」，不是水滴的一部分：negativeFormationAnchors
+// 只在 rebuildShapeAAnchors() 裡由 shapeCavityBase 產生，而那需要匯入的造型；沒有造型時
+// shapeTargetsBase 是空的、rebuildShapeAAnchors 直接 return，anchors 永遠是 []，
+// updateNegativeDrops 回傳 0 且所有半徑為 0。所以無造型模式下這整段恆為 no-op。
+// 附帶效益：這是 mapScene 裡唯一的 texture2D 取樣。
+#ifdef FEATURE_NEGATIVE_FIELD
   float negativeD = 1e9;
   for (int n = 0; n < MAX_NEGATIVE; n++) {
     if (n >= uNegativeCount) break;
@@ -911,6 +964,7 @@ float mapScene(vec3 p, bool smoothShape){
       max(0.0001, max(0.018, uMicroBlend * 0.55) * dropletBlendFade)
     );
   }
+#endif // FEATURE_NEGATIVE_FIELD
 #ifdef FEATURE_SHAPE_FIELD
   if (uShapeProgress > 0.0001) {
     // uShapeTex 在 GLB 模式儲存的是匯入時烘焙的高密度 Metaball 場，
@@ -1018,10 +1072,19 @@ float mapScene(vec3 p, bool smoothShape){
   }
 #endif // FEATURE_SHAPE_FIELD
   // 最大位移遠小於 0.25；遠離表面時略過 noise，不影響射線接近表面的安全性。
+  //
+  // 診斷探針 C（?diag=probe-no-wobble）只把這一段在編譯期拿掉。
+  // 它測的是「同一份 noise 被重複 inline」的代價：mapScene 在正式 shader 有 13 個
+  // 靜態呼叫點（raymarch 迴圈體、calcNormal 的 10 個 tap、traceExitSurface），每個
+  // 都會把這裡的 fbmFast 展開成 2 份 snoise。probe 階梯已經量到「noise 進 mapScene」
+  // 是 148ms → 600ms 那一跳的來源，這一刀就是同一個機制在正式規模下的代價。
+  // 拿掉之後水滴表面會少一層擾動，所以這是探針不是可上線的設定。
+#ifndef PROBE_NO_GEOMETRY_WOBBLE
   float geometryWobble = uWobble * mix(1.0, 0.10, uShapeProgress);
   if (geometryWobble > 0.001 && d < 0.25) {
     d += fbmFast(p * uWobbleScale + loopNoiseOffset(uWobbleSpeed)) * geometryWobble * 0.25;
   }
+#endif
   return d;
 }
 
@@ -1046,7 +1109,32 @@ vec3 calcNormal(vec3 p){
   // 側壁需要跨過約 2 texels 才能平均 SDF 殘留的次像素梯度跳動；
   // 厚度方向則不能用同樣的大步長，否則會跨過正面／側壁倒角。
   // 因此 SVG 改用分軸中央差分：XY 平滑輪廓梯度，Z 獨立保留倒角。
-  if (uShapeType == 1 && uShapeProgress > 0.001) {
+// 這條 SVG 分軸中央差分是 6 份 mapScene，而下面的四面體是 4 份 —— 兩條都會被
+// 編譯，所以 calcNormal 一次呼叫就展開 10 份 mapScene。它有 3 個呼叫點，於是
+// 33 份總展開量裡有 30 份出自這裡（實測 B1a：把 traceExitSurface 那 20 份拿掉
+// 就從 127 秒降到 30 秒）。
+//
+// KEEP_SVG_NORMAL_BRANCH 由 bubble.js 決定：不帶 probe 時恆為開啟，正式版一個
+// 字都沒變；只有 probe-lean-normals 且造型場沒編進來時才關掉 —— 那種情況下
+// svgShapeDistance 根本不存在，這條分支是純粹的死碼。
+// ===== 法線路徑的編譯期特化 =====
+//
+// 這個函式有兩條路徑，執行期只會走一條，但兩條都會被編譯 —— SVG 分軸差分 6 份
+// mapScene、四面體 4 份，合計每個呼叫點 10 份。它有 3 個呼叫點，所以 33 份總展開量
+// 裡有 30 份出自這裡。
+//
+// NORMAL_TAPS_SVG / NORMAL_TAPS_TETRA 兩個都預設開啟（bubble.js 決定），此時展開結果
+// 與特化之前逐字相同，正式版不受影響。只留一條時，那條的 runtime 條件也一併消失 ——
+// 因為「條件成立」本來就是選到這個 variant 的理由。
+//
+// 注意 SVG 模式不能單純只編 SVG 那條：uShapeProgress 從 0 長到 1，在 0 附近走的是
+// 四面體那條。所以 variant 的鍵必須包含「造型此刻是否已經生效」，而不是只看造型型別，
+// 否則成形過程中的法線會變。這一點是這個設計能不能宣稱「數學完全一致」的關鍵。
+#ifdef NORMAL_TAPS_SVG
+#ifdef NORMAL_TAPS_TETRA
+  if (uShapeType == 1 && uShapeProgress > 0.001)
+#endif
+  {
     float xyH = min(svgTexel * 2.0, max(svgTexel * 0.75, uShapeEdgeBevel * 0.48));
     float zH = min(xyH, max(0.0009, uShapeEdgeBevel * 0.22));
     float dx = mapScene(p + vec3(xyH, 0.0, 0.0), true)
@@ -1057,6 +1145,49 @@ vec3 calcNormal(vec3 p){
       - mapScene(p - vec3(0.0, 0.0, zH), true);
     return normalize(vec3(dx / xyH, dy / xyH, dz / zH));
   }
+#endif // NORMAL_TAPS_SVG
+#ifdef NORMAL_TAPS_TETRA
+  float svgH = svgTexel * 1.5;
+  float shapeH = uShapeType == 2 ? voxelH * 1.70 : svgH;
+  float h = mix(0.0009, shapeH, uShapeProgress);
+// 探針 A（?diag=probe-loop-normal-taps）：把四個 tap 收進一個迴圈。
+//
+// 目的只有一個 —— 靜態展開份數。四個展開的 tap 會讓 mapScene 被 inline 四份；
+// 收進迴圈只剩一份。runtime 仍然算四次，數學完全一樣。
+//
+// 那個 if (i >= uNormalTaps) break; 不是多餘的：迴圈上界若是編譯期常數 4，fxc 很可能
+// 直接展開，那就白做了。uNormalTaps 是 uniform（恆為 4），trip count 對編譯器未知，
+// 就跟主 raymarch 迴圈同一個形狀 —— 而我們實測過那個迴圈把上界從 4 改到 88，
+// 編譯時間只差 1.4%，也就是 fxc 確實沒有展開它。
+//
+// 累加順序刻意與展開式一致（i = 0→3）。唯一的差別是多了一個起始的 0.0 +，
+// 那在 IEEE754 下除了 -0.0 會變成 +0.0 之外完全等值，而零的正負號經過
+// normalize 之後對下游沒有可見影響。
+  vec3 acc = vec3(0.0);
+  for (int i = 0; i < 4; i++) {
+    if (i >= uNormalTaps) break;
+    vec3 e = i == 0 ? k.xyy : (i == 1 ? k.yyx : (i == 2 ? k.yxy : k.xxx));
+    acc += e * mapScene(p + e * h, true);
+  }
+  return normalize(acc);
+#endif // NORMAL_TAPS_TETRA
+}
+
+#ifdef PROBE_LEAN_NORMALS
+// 出口法線專用的四面體法線（?diag=probe-lean-normals）。
+//
+// 存在的理由純粹是 inline 展開量：完整的 calcNormal 含 SVG 分軸差分（6 份）與
+// 四面體（4 份）兩條路徑，兩條都會被編譯，所以每個呼叫點都是 10 份 mapScene。
+// traceExitSurface 有 2 個呼叫點，光是它就貢獻 20 份。
+//
+// 這一版只保留四面體那條，h 的算法與 calcNormal 的非 SVG 路徑逐字相同，所以在
+// 非 SVG 造型上結果應該一致；差別只出現在 SVG 造型的出口法線上 —— 那裡會少掉
+// 倒角感知的分軸差分。出口法線只餵背面 Fresnel、出射折射方向與背面薄膜，
+// 正面輪廓完全不經過它，所以這是這次要用畫面 A/B 驗證的取捨。
+vec3 exitNormalTetra(vec3 p){
+  const vec2 k = vec2(1.0, -1.0);
+  float voxelH = 2.1 / max(1.0, uShapeGrid - 1.0);
+  float svgTexel = 3.0 / max(1.0, uShapeGrid);
   float svgH = svgTexel * 1.5;
   float shapeH = uShapeType == 2 ? voxelH * 1.70 : svgH;
   float h = mix(0.0009, shapeH, uShapeProgress);
@@ -1066,6 +1197,13 @@ vec3 calcNormal(vec3 p){
     k.yxy * mapScene(p + k.yxy * h, true) +
     k.xxx * mapScene(p + k.xxx * h, true));
 }
+#endif
+
+// traceExitSurface 用哪一支算出口法線。預設就是完整的 calcNormal，所以不帶 probe
+// 時展開結果與加入這個巨集之前完全相同。
+#ifndef TRACE_EXIT_NORMAL_FN
+#define TRACE_EXIT_NORMAL_FN calcNormal
+#endif
 
 // 從正面折射進入後，在實心 SDF 內尋找背面出口；只由亮底路徑呼叫。
 bool traceExitSurface(
@@ -1075,14 +1213,48 @@ bool traceExitSurface(
   out vec3 exitNormal,
   out float pathLength
 ){
+// 診斷探針 B（?diag=probe-no-refraction）把函式「本體」在編譯期換成常數，簽章保留。
+// 這樣所有呼叫點都還是合法的 GLSL，main() 會自然走「找不到出口」那條路，而我們量到的
+// 就是這個本體在 ANGLE/fxc 眼中的純成本。刻意不刪呼叫點 —— 刪呼叫點會連帶改動 main()
+// 的控制流，那樣量到的就不只是這一塊。
+// 這一支是三者中最重的嫌疑：它有自己的 raymarch 迴圈，迴圈體呼叫 mapScene，結尾再
+// 呼叫一次 calcNormal（本身又是 10 個 mapScene tap），而它在 main() 有 2 個呼叫點。
+// 用 #ifdef 給 stub、#ifndef 包真正的本體，而不是「stub + return」就了事：return 之後
+// 的程式碼雖然執行不到，但它仍然要通過編譯，成本不會消失 —— 那就量不到東西了。
+#ifdef PROBE_NO_TRACE_EXIT
+  exitPoint = entryPoint;
+  exitNormal = vec3(0.0, 0.0, 1.0);
+  pathLength = 0.0;
+  return false;
+#endif
+#ifndef PROBE_NO_TRACE_EXIT
   float travel = 0.012;
   float maxTravel = uBounds.w * 2.25;
   bool found = false;
   vec3 q = entryPoint + insideDir * travel;
 
+// 診斷探針 B1b（?diag=probe-no-trace-march）：只把這個 march 迴圈在編譯期移除，
+// 結尾的 calcNormal 保留。用來把 traceExitSurface 裡的兩個放大來源分開量。
+#ifndef PROBE_NO_TRACE_MARCH
   for (int i = 0; i < MAX_INTERIOR_COMPILE; i++) {
     q = entryPoint + insideDir * travel;
+// 診斷探針 B1b-clean（?diag=probe-cheap-trace-sdf）：只把「迴圈體裡的這一份 mapScene」
+// 換掉，迴圈結構、found 的動態性、結尾的 calcNormal 全部保留。
+//
+// 換成包圍球的 SDF。這個選擇有三個必要條件，缺一個這次量測就沒有意義：
+//   便宜   —— 一次 length + 一次減法，相對 mapScene 幾乎免費
+//   動態   —— uBounds 是 uniform，編譯器摺不掉；q 也跟著射線走
+//   可命中也可落空 —— 起點在包圍球內（d < 0），往外 march 會穿出去（d > 0），
+//                    超過 maxTravel 則 found 維持 false
+// 第三點是重點：舊版 B1b 直接拿掉迴圈，found 變成編譯期常數 false，於是 main() 裡
+// 依賴回傳值的整個折射分支（含第二次 traceExitSurface、背面薄膜、全內反射彈跳）
+// 被 fxc 一起消掉，量到的就不只是迴圈的成本。這一版不會有那個問題。
+#ifndef PROBE_CHEAP_TRACE_SDF
     float d = mapScene(q);
+#endif
+#ifdef PROBE_CHEAP_TRACE_SDF
+    float d = length(q - uBounds.xyz) - uBounds.w;
+#endif
     if (travel > 0.025 && d > -0.0009) {
       q -= insideDir * max(d, 0.0);
       found = true;
@@ -1091,11 +1263,31 @@ bool traceExitSurface(
     travel += max(-d * 0.72, 0.004);
     if (travel > maxTravel) break;
   }
+#endif
 
   exitPoint = q;
   pathLength = travel;
-  exitNormal = found ? calcNormal(q) : vec3(0.0, 0.0, 1.0);
+// 法線的來源，三種組態互斥：
+//   預設   found ? calcNormal(q) : 常數
+//   B1a    完全不呼叫 calcNormal，改用最便宜的診斷用法線
+//   B1b    無條件呼叫 calcNormal
+//
+// B1b 為什麼要改成無條件：march 迴圈一旦被移除，found 就是編譯期常數 false，
+// 三元運算子會被摺疊掉、calcNormal 跟著被 fxc 消除 —— 那樣 B1b 就同時砍掉了兩個
+// 變因，量到的數字沒有意義。無條件呼叫才能保證 B1b 只少了迴圈這一個變因。
+#ifdef PROBE_NO_TRACE_NORMAL
+  exitNormal = normalize(-insideDir);
+#endif
+#ifndef PROBE_NO_TRACE_NORMAL
+#ifdef PROBE_NO_TRACE_MARCH
+  exitNormal = calcNormal(q);
+#endif
+#ifndef PROBE_NO_TRACE_MARCH
+  exitNormal = found ? TRACE_EXIT_NORMAL_FN(q) : vec3(0.0, 0.0, 1.0);
+#endif
+#endif
   return found;
+#endif // PROBE_NO_TRACE_EXIT
 }
 
 // ===== 稜光光芒 Prism Beams（面板上叫「模擬色散」）=====
@@ -1351,6 +1543,11 @@ vec3 separateSpectrum(vec3 spectrum){
 }
 
 float artisticDispersionOPD(vec3 p, vec3 N, vec3 V){
+// 診斷探針 B（?diag=probe-no-refraction）。本體含 4 次 fbm＝16 份展開的 snoise。
+#ifdef PROBE_NO_ART_DISPERSION
+  return 0.0;
+#endif
+#ifndef PROBE_NO_ART_DISPERSION
   float cosTheta = clamp(dot(N, V), 0.0, 1.0);
   vec3 sp = p * uArtNoiseScale;
   vec3 flow = loopNoiseOffset(uArtPatternSpeed);
@@ -1367,12 +1564,24 @@ float artisticDispersionOPD(vec3 p, vec3 N, vec3 V){
   float sinI = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
   float cosT = sqrt(max(0.0, 1.0 - (sinI / uIOR) * (sinI / uIOR)));
   return 2.0 * uIOR * thickness * cosT;
+#endif // PROBE_NO_ART_DISPERSION
 }
 
 // 薄膜反射與透射分開計算；避免以暗色 alpha 覆蓋白色背景。
 FilmMaterial thinFilm(vec3 p, vec3 N, vec3 V){
   float cosTheta = clamp(dot(N, V), 0.0, 1.0);
 
+  vec3 interf = vec3(0.0);
+// 薄膜干涉的整條計算鏈：4 次 fbm（＝16 份展開的 snoise）→ 厚度 → 光程差 →
+// sampleFilmInterference（3 次 texture2D）。
+//
+// 它唯一的產物是 interf，而 interf 在 uFilmEnabled 為 0 時：這裡維持 vec3(0.0)，
+// 下游的 filmAmount 又整個乘上 uFilmEnabled，film / filmChroma / darkInterf 因此
+// 全部歸零。thickness 與 opd 沒有別的去處。所以薄膜關閉時整條鏈是死碼，
+// 編譯期移除與 uFilmEnabled=0 的執行結果逐位元相同 —— 不是降級，是不編用不到的東西。
+//
+// 面板預設 filmEnabled = false，所以預設變體不含這一整塊。
+#ifdef FEATURE_THIN_FILM
   vec3 sp = p * uNoiseScale;
   vec3 flow = loopNoiseOffset(uPatternSpeed);
   vec3 warp = vec3(
@@ -1392,8 +1601,8 @@ FilmMaterial thinFilm(vec3 p, vec3 N, vec3 V){
   float cosT = sqrt(max(0.0, 1.0 - (sinI / uIOR) * (sinI / uIOR)));
   float opd = 2.0 * uIOR * thickness * cosT;
 
-  vec3 interf = vec3(0.0);
   if (uFilmEnabled > 0.5) interf = sampleFilmInterference(opd);
+#endif
 
   float lum = dot(interf, vec3(0.3333));
   interf = mix(vec3(lum), interf, uSaturation);
@@ -1602,6 +1811,12 @@ void main(){
         volumeAbsorption = exp(-vec3(0.045, 0.018, 0.005) * pathLength);
 
         // 背面使用低成本 2-octave 厚度場，產生內部彩色折線與融合區層次。
+        //
+        // 跟正面那條鏈同樣的道理：唯一產物 backFilmChroma 最後整個乘上 uFilmEnabled，
+        // 薄膜關閉時恆為 vec3(0.0)，而 backThickness / backOpd 沒有別的去處。
+        // 所以薄膜關閉時這一段（1 次 fbmFast + sampleFilmInterference 的 3 次 texture2D）
+        // 也是死碼，編譯期移除與執行結果逐位元相同。
+#ifdef FEATURE_THIN_FILM
         vec3 backFlow = loopNoiseOffset(uPatternSpeed);
         float backNoise = fbmFast(exitPoint * uNoiseScale + backFlow);
         float backThickness = uThickness + backNoise * uThickVar;
@@ -1618,11 +1833,13 @@ void main(){
           vec3(-0.65),
           vec3(0.65)
         ) * uFilmEnabled;
+#endif // FEATURE_THIN_FILM
       }
     }
   }
   // 稜光光芒：沿折射後的出射方向取樣程序化光束圖樣（見 prismBeamField）。
   // 完全不用額外的 raymarch —— 舊版在這裡每個 fragment 要多跑四次波長追蹤。
+#ifdef FEATURE_PRISM_BEAM   // 單獨隔離：稜光光芒 prism beam
   if (uRayDispersionEnabled > 0.5 && uRayBeamIntensity > 0.001) {
     // 背面追蹤成功時 transmissionDir 是穿過整塊玻璃後的方向；沒命中時它會保留
     // 前表面的 Snell 折射方向，效果仍然成立（只是少了背面那一次彎折）。
@@ -1672,6 +1889,7 @@ void main(){
       * beamFresnel * beamNoiseMask * uRayBeamIntensity;
     beamMask = clamp(max(beamLight.r, max(beamLight.g, beamLight.b)), 0.0, 1.0);
   }
+#endif // FEATURE_PRISM_BEAM：稜光光芒 prism beam
   // 純色只控制畫布；水滴內部獨立取樣同一張 HDRI。若背面追蹤未命中，
   // transmissionDir 會保留前表面的 Snell 折射方向，滑桿仍能穩定產生效果。
   if (uBgMode == 0 && uHasEnv == 1 && uEnvRefraction > 0.001) {
@@ -1769,6 +1987,7 @@ void main(){
   float membraneBlueCardGrade = 0.0;
   float membraneWhiteCardGrade = 0.0;
   vec3 membraneComposite = glassComposite;
+#ifdef FEATURE_LIQUID_FILM   // 單獨隔離：液態薄膜材質分支 liquid-film material branch
   if (uMaterialStyle == 1) {
     float pairedNormal = hasExitSurface
       ? clamp(dot(N, -exitNormal), 0.0, 1.0)
@@ -1912,6 +2131,7 @@ void main(){
       membraneFilmWeight
     );
   }
+#endif // FEATURE_LIQUID_FILM：液態薄膜材質分支 liquid-film material branch
 
   vec3 finalColor = mix(glassComposite, membraneComposite, membraneMode);
   // 稜光光芒的合成。舊版在這裡有兩套完全不同的路徑（HDRI 差值相消 + 獨立光源
@@ -1922,6 +2142,7 @@ void main(){
   // 選擇性透射 —— 白底上 screen 完全看不出來（1 已經飽和），所以改成保留色相、
   // 壓掉亮度，光束才會在白底上顯示成彩色而不是消失。這是 ART 與 LIGHT 兩層
   // 已經在用的同一套雙路合成，三者行為因此一致。
+#ifdef FEATURE_PRISM_SATURATION   // 單獨隔離：稜光彩度後處理 beam chroma post-processing
   if (beamMask > 0.001) {
     vec3 beamEnergy = 1.0 - exp(-max(beamLight, vec3(0.0)) * uMaterialExposure * 2.2);
     float beamPeak = max(beamEnergy.r, max(beamEnergy.g, beamEnergy.b));
@@ -1999,6 +2220,7 @@ void main(){
     );
     finalColor = mix(beamScreen, beamTransmission, beamTransmissionAmount);
   }
+#endif // FEATURE_PRISM_SATURATION：稜光彩度後處理 beam chroma post-processing
   // 通用玻璃的亮底補償仍由原開關管理；液態薄膜本身就是透射模型，不依賴該開關。
   float brightColorSupport = max(
     whiteBackdrop,
@@ -2008,6 +2230,7 @@ void main(){
   // 色散沿用薄膜的 thickness → OPD mapping：厚度噪聲、花紋尺度、
   // 花紋流動、重力與入射角都和薄膜一致；唯一不同的是固定使用獨立
   // 可見光譜，不讀取自訂漸層。Fresnel 只控制亮度，不生成同心環。
+#ifdef FEATURE_DISPERSION   // 單獨隔離：色散／光譜 dispersion / spectral
   if (dispersionStrength > 0.001) {
     float artOpd = artisticDispersionOPD(p, N, -rd);
     float dispersionPeriod = 205.0 * max(0.35, uCausticScale);
@@ -2073,9 +2296,11 @@ void main(){
       prismTransmissionAmount
     );
   }
+#endif // FEATURE_DISPERSION：色散／光譜 dispersion / spectral
 
   // 獨立虛擬光源驅動的光譜焦散。HDRI 不參與圖樣或顏色，只能選擇
   // 調節總亮度，因此純色畫布不會顯示攝影棚影像。
+#ifdef FEATURE_SPECTRAL_CAUSTICS   // 單獨隔離：光譜焦散 spectral caustics
   float spectralCausticStrength =
     uSpectralCausticEnabled * uSpectralCausticIntensity;
   if (spectralCausticStrength > 0.001) {
@@ -2228,10 +2453,12 @@ void main(){
       causticTransmissionAmount
     );
   }
+#endif // FEATURE_SPECTRAL_CAUSTICS：光譜焦散 spectral caustics
 
   // 立體明暗必須在所有色散與焦散之後套用，否則亮底的 transmission
   // 合成會把低頻厚薄關係洗回接近白色。這四個權重都含 uMembraneDepth，
   // 因此滑桿為 0 時與原本液態薄膜輸出完全一致。
+#ifdef FEATURE_LIQUID_FILM_DEPTH   // 單獨隔離：液態薄膜深度 membrane depth
   if (uMaterialStyle == 1 && uMembraneDepth > 0.001) {
     float membraneShadeGrade = clamp(
       membraneThicknessGrade + membraneFoldGrade,
@@ -2254,6 +2481,7 @@ void main(){
       clamp(membraneWhiteCardGrade, 0.0, 0.16)
     );
   }
+#endif // FEATURE_LIQUID_FILM_DEPTH：液態薄膜深度 membrane depth
   // 通用玻璃的 over 合成。finalColor 此刻是「黑場上的水滴自身能量」，也就是
   // premultiplied 的顏色；covered 是它佔掉的比例，剩下的 (1 - covered) 讓折射
   // 過來的背景通過。透射本身仍帶波長選擇性（material.transmission 是干涉反射
