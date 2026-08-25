@@ -14,7 +14,7 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-89';
+} from './motions/registry.js?v=svg-shape-92';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
@@ -325,7 +325,14 @@ const DEFAULTS = {              // 數值滑桿
   spread: 0.75,
   fresnel: 0.8,
   gravity: 1,
-  roughness: 0.26,
+  // 粗糙度改成全域預設 0（原本 0.26）。這一條不做成「只有靜態模式」的覆寫，
+  // 因為 roughness 屬於材質設定檔（MATERIAL_PROFILE_KEYS），跟動態模式記憶是
+  // 兩套系統，同時掛會互相搶同一個控制項。
+  //
+  // 而且全域改成 0 反而更安全：粗糙度接上透射側之後（見 shaders.js 的
+  // transmissionSpread），0.26 產生的模糊比改動前明顯得多；設成 0 時所有計算
+  // 都退化成原式，其餘動態模式的外觀因此跟這次改動之前完全一致。
+  roughness: 0,
   flowSpeed: 0.47,
   reflect: 1.6,
   transmission: 1.0,
@@ -691,9 +698,21 @@ const MOTION_SCOPED_KEYS = [
   'shapeDepth', 'shapeEdgeBevel', 'edgeDropsEnabled',
   'shapeLiquid', 'shapeLiquidPosition', 'shapeLiquidSize', 'shapeLiquidSpeed',
   'rayBeamIntensity', 'rayBeamSeparation', 'rayBeamChroma', 'rayBeamZoom',
+  // 這兩條是稜光光芒的遮罩，跟上面那四條同一組；原本漏了，靜態模式要用自己的
+  // 值就得連它們一起按模式記憶，否則調完切走再切回來會被別的模式蓋掉。
+  'rayBeamFresnelMask', 'rayBeamNoiseScale',
   'spectralCausticEnabled',
+  // 藝術色散的開關，跟上面的光譜焦散開關同一個身分。
+  'dispersionEnabled',
   'cameraDistance', 'cameraRotationX', 'cameraRotationY',
+  // 環繞幅度也是構圖的一部分，跟上面三條鏡頭參數同一組。
+  'spin',
   'materialStyle',
+  // 這一組波紋參數是靜態模式與毛細波共用的同一批控制項（見 registry.js 的
+  // capillaryTextureUI），但兩個模式要的預設不一樣：毛細波是整個模式的主角，
+  // 靜態模式只是拿它在幾何體表面做一層很淡的質感。不按模式記憶的話，把靜態
+  // 想要的數值設成預設會連帶改掉毛細波，反之亦然。
+  'capillaryTexture', 'capillaryHeight', 'capillaryRings', 'capillarySpeed',
 ];
 function motionDefaultsFor(key) {
   const base = key in DEFAULTS ? DEFAULTS[key]
@@ -1033,7 +1052,7 @@ function refreshLoopScaledReadouts() {
   refreshShatterTimelineReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=baseline-6';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=baseline-13';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
@@ -1506,8 +1525,16 @@ function syncShaderVariant() {
 // 收進來的都是會大幅改變 control flow / call graph 的東西。數值滑桿（厚度、IOR、
 // 粗糙度、各種強度）一律不收 —— 它們只改變數字，不改變要編譯什麼，收進來只會造成
 // 變體爆炸。
+// 靜態模式的「匯入 SVG／GLB」是 staticShape 的第 8 個選項（值 7）。選內建幾何
+// （0–6）時整條形狀場都不該存在：不只是不畫出來，連負形空腔、微滴、匯入 UI
+// 都要一起關掉，否則內建展示造型的空腔會被挖進程序化幾何裡，變成畫面上莫名
+// 其妙多出來的孔洞。
+function staticUsesImportedShape() {
+  return P.motion !== 'static' || P.staticShape === 7;
+}
+
 function variantState() {
-  const shapeField = usesShapeField(P.motion);
+  const shapeField = usesShapeField(P.motion) && staticUsesImportedShape();
   // 造型型別：面板的「形狀來源」。SVG 的 6-tap 法線只有在造型場真的編進來、
   // 而且型別是 SVG 時才可能被走到（uShapeType == 1 且 uShapeProgress > 0.001）。
   // 只看型別不看進度是刻意的：uShapeProgress 是動畫值，收進鍵裡會讓造型成形過程中
@@ -4172,6 +4199,7 @@ function bindControls() {
     const valEl = document.getElementById(key + '_v');
     const uName = uniformNameFor(key);
     const update = () => {
+      const previousValue = P[key];
       P[key] = parseFloat(el.value);
       if (key === 'cameraRotationX') rot.x = P[key] * Math.PI / 180;
       if (key === 'cameraRotationY') rot.y = P[key] * Math.PI / 180;
@@ -4183,12 +4211,19 @@ function bindControls() {
       if (key === 'shapeBScale') scheduleShapeBScaleRebuild();
       if (valEl) valEl.textContent = (fmt[key] || (v => +v.toFixed(2)))(P[key]);
       if (key === 'capillaryRings') refreshCapillaryHeightReadout();
-      // staticShape 驅動好幾條參數列的顯示／隱藏（GATES 的 staticShapeBox／
-      // staticShapePrimitive／staticShapeCylOrCone／staticShapeTorus／
-      // staticShapeImport），跟 jellyStyle 那種走 SELECTS、change 時自動呼叫
-      // updateUIState() 的字串型 select 不同——這條走的是這裡的數值型通用迴圈，
-      // 沒有這行就切幾何形狀時其他列的顯示狀態不會跟著換。
-      if (key === 'staticShape') applyGates();
+      // 這兩個是數值型的 select，但它們的身分是「總開關」而不是單純的參數：
+      // 會改變哪些控制項該顯示，staticShape 還會改變要編譯哪一支 shader。
+      // 走 SELECTS 的字串型 select 在 change 時會自動呼叫 updateUIState() 與
+      // syncShaderVariant()，但這兩個走的是這裡的數值型通用迴圈，得自己補。
+      if (key === 'capillaryTexture') applyGates();
+      if (key === 'staticShape' && previousValue !== P[key]) {
+        applyGates();
+        // 內建幾何走程序化 SDF、匯入走形狀場，是兩支不同的 shader。少了這行，
+        // 切到「匯入」時畫面會停在舊的變體上，匯入的造型永遠不會出現。
+        syncShaderVariant();
+        // 切到「匯入」時才需要把內建展示造型載進來（使用者還沒自己匯入的話）。
+        ensureShapeForCurrentSource();
+      }
       if (uniforms && uniforms[uName]) uniforms[uName].value = (key === 'count') ? Math.round(P[key]) : P[key];
       if (SHATTER_TIMELINE_KEYS.includes(key)) refreshShatterTimelineReadouts();
       if (key === 'gatherDuration' || key === 'shapeHold' || key === 'loopDuration') {
@@ -4200,7 +4235,16 @@ function bindControls() {
       requestPausedRender();
     };
     el.value = P[key];
-    if (!PREVIEW && !el._bound) { el.addEventListener('input', update); el._bound = true; }
+    if (!PREVIEW && !el._bound) {
+      el.addEventListener('input', update);
+      // 這條迴圈也管「以數字作為 option value 的下拉選單」（程序紋理、波場類型）。
+      // 使用者手動操作 <select> 時瀏覽器 input/change 都會發，但切換動態模式時
+      // 還原按模式記憶的值那段（見下方 MOTION_MEMORY_KEYS 的迴圈）對 SELECT 送的
+      // 是 change——只綁 input 的話，程序紋理這種被記憶的 select 會只換了顯示值
+      // 而 P 沒跟著更新。update 本身是冪等的，兩個事件都綁不會有副作用。
+      el.addEventListener('change', update);
+      el._bound = true;
+    }
     update();
   }
   // 下拉選單
@@ -4396,6 +4440,10 @@ function resetRamp() {
 // 形狀來源這種與模式無關的條件仍寫在這裡。
 const GATES = {
   ...motionGates(() => P.motion),
+  // 覆寫 motionGates 產生的 shape：那一份只看「這個模式吃不吃形狀場」，但靜態
+  // 模式是吃不吃要看選了哪種幾何。選內建幾何時「形狀匯聚」與「造型動態」兩塊
+  // 匯入 UI 都跟這裡一起收起來（它們的 data-gate 都是 shape）。
+  shape:     () => usesShapeField(P.motion) && staticUsesImportedShape(),
   svg:       () => P.shapeSource === 'svg',
   glb:       () => P.shapeSource !== 'svg',
   // 果凍的兩條分支。跟 motion 的 gate 一樣用巢狀疊加：這兩個只宣告分支條件，
@@ -4412,6 +4460,8 @@ const GATES = {
   staticShapeCylOrCone: () => P.staticShape === 4 || P.staticShape === 5,
   staticShapeTorus:     () => P.staticShape === 6,
   staticShapeImport:    () => P.staticShape === 7,
+  // 程序紋理的總開關：選「無」（6）時整組波紋參數都沒有作用，一併收起來。
+  capillaryTextureOn:   () => Math.round(P.capillaryTexture) !== 6,
 };
 
 function gateOpen(spec) {
@@ -4867,6 +4917,9 @@ shapeInput.addEventListener('change', e => {
 // userShapeFiles.svg 就有值，這個判斷會直接短路，不會蓋掉使用者的檔案。
 function ensureShapeForCurrentSource() {
   if (!usesShapeField(P.motion)) return;
+  // 靜態模式選內建幾何時不吃形狀場，載進來的造型不會被畫出來，只是白花一次
+  // 烘焙。切到「匯入」時 bindControls 的 staticShape 分支會再呼叫一次。
+  if (!staticUsesImportedShape()) return;
   const usingBuiltinSvg = P.shapeSource === 'svg' && !userShapeFiles.svg;
   const desiredSvgVariant = MOTION_SVG_DEMO[P.motion] || 'question';
   // 烘焙途中要拿「這一份即將產出什麼」來比，不能拿已載入的那一份——見

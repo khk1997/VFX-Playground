@@ -332,6 +332,33 @@ const float TAU  = 6.28318530718;
 ${NOISE_GLSL}
 
 float hash11(float n){ return fract(sin(n * 127.1) * 43758.5453123); }
+
+// ===== 粗糙度在「透射側」的作用量 =====
+//
+// uRoughness 原本只接在反射那一條線上（sampleReflection 的 PMREM lobe 寬度，
+// 以及玻璃亮點的指數）。問題是通用玻璃的反射權重極小：正視角的 Fresnel 只有
+// f0 = ((n-1)/(n+1))² ≈ 2%，而透射率預設 0.96，畫面絕大部分是折射進來的背景。
+// 於是滑桿實際上只在 Fresnel 衝高的輪廓那一圈有反應，中央幾乎不動——「調粗糙度
+// 好像沒作用」就是這麼來的。而且色散（稜光光芒／光譜焦散）整條都掛在透射方向
+// 上，完全沒接粗糙度，會出現「霧面玻璃卻打出針一樣銳利的彩虹光芒」這種矛盾。
+//
+// 這支函式把同一根滑桿接到透射側的兩個地方：折射／內部填光取樣的預濾波寬度，
+// 以及色散圖樣的銳利度。兩者共用同一個換算，滑桿才會是一致的一件事。
+//
+// 注意這裡只做「模糊」與「鈍化」，不做任何方向擾動——單樣本渲染下的確定性擾動
+// 只會變成一層看得見的花紋（見下方 exitDir 附近那段註解）。
+//
+// 刻意用 rough 而不是 GGX 慣用的 rough²。理由有兩個：
+//
+// 一、rough² 會把滑桿的低段整個吃掉。粗糙度預設 0.2、幾個模式的 override 是
+//     0.26，平方之後只剩 0.04～0.07，幾乎貼著下面那個 0.025 的抗鋸齒下限——
+//     等於換一種方式重演「推了沒感覺」，正是這次要修的問題本身。
+// 二、sampleReflection 裡的 PMREM 取樣本來就是把 rough 直接當 lod 參數用
+//     （textureCubeUV(uPmremMap, d, rough)），只有補樣環的半徑才用 rough²。
+//     這裡的用途跟前者同類（選 mip），所以線性才是跟既有程式一致的那個選擇。
+float transmissionSpread(){
+  return clamp(uRoughness, 0.0, 1.0);
+}
 vec3 loopNoiseOffset(float speed){
   float phase = TAU * uTime / max(uLoopDuration, 0.001);
   return vec3(cos(phase), sin(phase), sin(phase * 2.0)) * speed;
@@ -377,7 +404,10 @@ vec3 sampleReflection(vec3 d, float rough){
     // 未帶這個 diag 時整段照常編譯，正式版行為完全不變。畫面會少掉高粗糙度的
     // 環形預濾波，所以這只是探針，不是可以直接上線的設定。
 #ifndef PROBE_SINGLE_REFLECTION_SAMPLE
-    float blur = smoothstep(0.28, 0.92, rough);
+    // 起跳點原本是 0.28，但粗糙度滑桿的預設值就是 0.2、幾個模式的 override 是
+    // 0.26，全都落在起跳點以下——等於滑桿前四分之一是死行程，推了沒反應。
+    // 降到 0.05，讓補樣從滑桿一離開 0 就開始接手。
+    float blur = smoothstep(0.05, 0.92, rough);
     if (blur > 0.001) {
       vec3 axis = abs(d.y) < 0.92
         ? normalize(cross(d, vec3(0.0, 1.0, 0.0)))
@@ -411,9 +441,15 @@ vec3 sampleReflection(vec3 d, float rough){
   return proceduralEnv(d, rough);
 #endif // FEATURE_ENV_PMREM
 }
-vec3 sampleEnvironmentBackdrop(vec3 d){
+// extraBlur：呼叫端額外要求的預濾波寬度。穿過玻璃的取樣（折射背景、內部填光）
+// 傳粗糙度換算過的值進來，看向背景畫布的那一次傳 0——後者是「物體背後的背景」，
+// 不該被物體自己的表面粗糙度糊掉。
+//
+// PMREM 的 mip 本身就是預濾波過的環境模糊，拿它當霧面玻璃的模糊來源是零額外
+// 取樣成本的：不必在錐內多打好幾根射線，換 mip 就好。
+vec3 sampleEnvironmentBackdrop(vec3 d, float extraBlur){
 #ifndef FEATURE_ENV_PMREM
-  return proceduralEnv(rotateEnvDir(d), max(0.025, uHdriBlur));
+  return proceduralEnv(rotateEnvDir(d), max(max(0.025, uHdriBlur), extraBlur));
 #endif
 #ifdef FEATURE_ENV_PMREM
   if (uHasEnv != 1) return uBgColor;
@@ -422,13 +458,13 @@ vec3 sampleEnvironmentBackdrop(vec3 d){
   // 會被厚玻璃大幅放大，攝影棚牆面看起來就像一塊塊方格。即使 UI 的模糊
   // 是 0，也保留一個只相當於射線 footprint 的 PMREM 下限；這是反鋸齒，
   // 不是美術模糊。滑桿往上時仍直接控制其餘 roughness 範圍。
-  float rayFootprint = max(0.025, uHdriBlur);
+  float rayFootprint = max(max(0.025, uHdriBlur), extraBlur);
   return textureCubeUV(uPmremMap, d, rayFootprint).rgb;
 #endif // FEATURE_ENV_PMREM
 }
-vec4 backgroundSample(vec3 rd){
+vec4 backgroundSample(vec3 rd, float extraBlur){
   if (uBgMode == 1 && uHasEnv == 1){
-    return vec4(sampleEnvironmentBackdrop(rd), 1.0);
+    return vec4(sampleEnvironmentBackdrop(rd, extraBlur), 1.0);
   }
   return vec4(uBgColor, uTransparentBackground == 1 ? 0.0 : 1.0);
 }
@@ -763,9 +799,11 @@ float capillaryCellularFieldLoop(vec2 p, float period){
 }
 
 float capillarySurfaceOffset(vec3 p){
-  // 7 是毛細波、8 是靜態方體（見 motions/registry.js 的 uniform 編號）；兩者共用
-  // 同一支程序紋理，只是分別套在形狀場座標與方體座標上。
+  // 7 是毛細波、8 是靜態模式（見 motions/registry.js 的 uniform 編號）；兩者共用
+  // 同一支程序紋理，只是分別套在形狀場座標與內建幾何的座標上。
   if (uExtendedMotion != 7 && uExtendedMotion != 8) return 0.0;
+  // 程序紋理選「無」（6）：表面完全不產生偏移，物體維持原本的幾何。
+  if (uCapillaryStyle.y > 5.5) return 0.0;
   float phase = fract(uTime / max(0.001, uLoopDuration));
   // 整數速度維持循環無縫；0 靜止，負值沿同一條路徑反向播放。
   float movingA = phase * TAU * uExtendedParams.z;
@@ -1110,13 +1148,9 @@ float mapScene(vec3 p, bool smoothShape){
     // uShapeSwell 是崩解噴濺炸開前的蓄力：對距離場做等距膨脹，讓造型像被內壓
     // 撐大。等距偏移是均勻的，不會像 contactLead 那樣在碎片附近結出局部的瘤。
     float growingDetail = detailD + (1.0 - localGrowth) * 0.38 - uShapeSwell;
-    // 靜態模式選了內建幾何時（uStaticShape != 7）完全不吃這顆形狀場——它多半
-    // 只是 ensureShapeForCurrentSource 自動載入的內建展示造型，真正要顯示的是
-    // 下面 FEATURE_STATIC_SHAPE 那段程序化 SDF。選了「匯入」（== 7）才併進 d，
-    // 這時的行為跟其他吃形狀場的模式完全一樣。
-#ifdef FEATURE_STATIC_SHAPE
-    if (uStaticShape == 7)
-#endif
+    // 註：靜態模式選內建幾何時根本不會編譯到這一段——variantState 的 shapeField
+    // 已經把那種情況排除掉了（見 staticUsesImportedShape），FEATURE_SHAPE_FIELD
+    // 與 FEATURE_STATIC_SHAPE 因此是互斥的，不必在執行期再判斷一次。
     d = smin(
       d,
       growingDetail,
@@ -1486,6 +1520,10 @@ vec3 prismBeamField(vec2 q, float radius){
   // 亮點／光帶的核心尺寸。銳利度調高 → 分子變小、收緊成細長的光針；調低 →
   // 糊成一團柔光。
   float core = mix(0.035, 0.004, clamp(uRayBeamGlow, 0.0, 1.0));
+  // 註：色散的分離角由 dn/dλ 決定，是材質本身的性質，不會因為表面變粗糙而改變。
+  // 所以這裡的相位差要維持原值——粗糙度該做的是讓每個波長「各自變寬然後互相
+  // 重疊」，不是把它們往中間收。收分離量會讓色帶縮小，方向剛好相反。
+  // 真正的處理在函式尾端（攤開 + 重疊）。
   // 「環紋 / 分支數」在每種圖樣裡都有意義，只是意義不同：晶格是徑向漣漪的環數，
   // 星芒是分支數，光環是環數，條光與窗光是垂直方向的分割數。
   float rings = max(0.5, uRayBeamRings);
@@ -1572,7 +1610,37 @@ vec3 prismBeamField(vec2 q, float radius){
     }
   }
 
-  return beams * gain / falloff;
+  beams = beams * gain / falloff;
+
+  // B：粗糙度把光針的尖端削鈍。
+  //
+  // 這裡不能去動上面的 core —— 每種圖樣都是「core / 距離」，core 是整個光場的
+  // 乘數而不是寬度，推大它等於整體加亮（銳利度拉滿時 core 只有 0.004，推到
+  // 0.05 就是十倍亮度），看起來會像「粗糙度變成了亮度滑桿」。
+  //
+  // 改用軟膝壓縮 x/(1+kx)：它對 x 單調遞增、恆 ≤ x，所以**只會變暗不會變亮**；
+  // 亮到爆的針尖被壓成平頂，暗的尾巴幾乎原封不動——正是「散射把尖峰攤平」
+  // 該有的樣子。k = 0 時逐位元等於原式，粗糙度 0 完全不影響既有畫面。
+  float knee = transmissionSpread() * 0.03;
+  if (knee > 0.0) beams = beams / (1.0 + beams * knee);
+
+  // 粗糙度對色散做的第二件事：重疊。
+  //
+  // 上面的軟膝把每個通道的尖峰壓成平頂，等於各自「變寬」；三束變寬的光疊在
+  // 一起，疊到的地方各波長混合，就洗回接近白光——這才是霧面稜鏡只透出一片
+  // 彩色暈光、而不是清楚彩虹的成因。
+  //
+  // 往三通道的算術平均收（不是往亮度收）：算術平均讓 r+g+b 精確不變，所以
+  // 這一步只重新分配顏色，不會動到總光量。
+  //
+  // 刻意不收到底（上限 0.7）：扇形的最外緣永遠只有最外側的波長到得了，真實的
+  // 霧面稜鏡在很粗糙時仍保有淡淡的彩色，不會變成純灰。
+  float wash = transmissionSpread() * 0.7;
+  if (wash > 0.0) {
+    float beamMean = (beams.r + beams.g + beams.b) / 3.0;
+    beams = mix(beams, vec3(beamMean), wash);
+  }
+  return beams;
 }
 
 
@@ -1624,15 +1692,29 @@ vec3 visibleSpectrum(float t){
 
 vec3 separateSpectrum(vec3 spectrum){
   float lum = dot(spectrum, vec3(0.2126, 0.7152, 0.0722));
+  // 粗糙度會把色散「洗掉」，而不只是「弄柔」——這是霧面玻璃不會打出彩虹的原因。
+  //
+  // 色散的分離角由 dn/dλ 決定，是一個很小的固定角；粗糙度則讓每個波長的出射
+  // 方向各自散開成一個錐。當角度模糊大過那個分離角，紅綠藍三個錐就互相重疊，
+  // 疊回來的結果是白光。所以粗糙度上升時，彩虹該做的是褪色成消色差的霧，
+  // 不是保持一樣鮮豔只把邊緣糊掉。
+  //
+  // 單樣本渲染沒辦法真的去疊那些錐，改用等效的做法：把有效分離量往下收，
+  // separated 就往純亮度 vec3(lum) 靠，也就是褪色。
+  //
+  // 但刻意保留 35% 不收（係數 0.65 而不是 1.0）：扇形最外緣永遠只有最外側的
+  // 波長到得了，所以即使很粗糙也還是「霧玻璃透出的彩色暈光」，不是純灰。
+  // 收到 0 會過頭，看起來像色散被關掉，而不是被散射。
+  float separation = uDispersionSeparation * (1.0 - transmissionSpread() * 0.65);
   vec3 separated = mix(
     vec3(lum),
     spectrum,
-    clamp(uDispersionSeparation, 0.0, 1.0)
+    clamp(separation, 0.0, 1.0)
   );
   return mix(
     separated,
     clamp((separated - 0.5) * 1.45 + 0.5, 0.0, 1.0),
-    clamp(uDispersionSeparation - 1.0, 0.0, 0.5) * 2.0
+    clamp(separation - 1.0, 0.0, 0.5) * 2.0
   );
 }
 
@@ -1767,7 +1849,12 @@ void main(){
   vec3 ro = uRot * vec3(0.0, 0.0, uCameraDistance);
   vec3 rd = uRot * normalize(vec3(uv * tanHalfFov, -1.0));
 
-  vec4 bg = backgroundSample(rd);
+  // 物體背後的背景畫布：不吃粗糙度（那是物體表面的性質，不是背景的）。
+  vec4 bg = backgroundSample(rd, 0.0);
+  // 透射側的粗糙度預濾波寬度（見 transmissionSpread 的說明），直接當 PMREM 的
+  // lod 參數用。上限壓在 0.85 而不是 1.0：PMREM 最高階的那幾層已經接近一顆單色
+  // 球，糊到底會讓玻璃裡什麼結構都不剩，看起來像實心塑膠而不是霧面玻璃。
+  float roughBlur = transmissionSpread() * 0.85;
 #ifdef SHADER_RUN
   // cache-bust：恆為 0，不影響畫面。放在這裡是因為它在 SDF 與 raymarch 之外。
   bg.rgb += vec3(float(SHADER_RUN) * uShaderSalt);
@@ -1892,8 +1979,17 @@ void main(){
         }
         if (dot(exitDir, exitDir) < 0.0001) exitDir = rd;
         exitDir = normalize(exitDir);
+        // 註：這裡曾經有一段「微觀刻面」——用一個平滑的三角函數場擾動出射方向，
+        // 想模擬霧面把光打散成一個錐。那是錯的：單樣本渲染沒辦法用擾動做出
+        // 「散開」，任何確定性的擾動場都會被原封不動地畫成一層看得見的圖案，
+        // 結果是壓花玻璃的紋路而不是霧面（粗糙度不該長出花紋）。真正的霧面
+        // 要嘛在錐內多重取樣（每根都得重跑 traceExitSurface，太貴），要嘛就是
+        // 現在的做法：模糊全部交給 PMREM 的預濾波（roughBlur），那本來就是
+        // 已經濾好的環境，零額外取樣。
         transmissionDir = exitDir;
-        refractedBg = backgroundSample(exitDir).rgb;
+        // A：折射進來的背景依粗糙度預濾波。這是「霧面玻璃」最主要的視覺來源——
+        // 畫面九成以上的內容走這條路徑，接上這裡滑桿才真的有感。
+        refractedBg = backgroundSample(exitDir, roughBlur).rgb;
 
         // 白色背景也保留極淡的虛擬棚燈漸層，讓折射方向產生可見形變。
         float bend = clamp(length(exitDir - rd) * 0.55 + backRim * 0.18, 0.0, 1.0);
@@ -1987,7 +2083,7 @@ void main(){
   // 純色只控制畫布；水滴內部獨立取樣同一張 HDRI。若背面追蹤未命中，
   // transmissionDir 會保留前表面的 Snell 折射方向，滑桿仍能穩定產生效果。
   if (uBgMode == 0 && uHasEnv == 1 && uEnvRefraction > 0.001) {
-    vec3 envRefraction = sampleEnvironmentBackdrop(transmissionDir);
+    vec3 envRefraction = sampleEnvironmentBackdrop(transmissionDir, roughBlur);
     // 白底只借用 HDRI 的明暗結構，不把攝影棚的米黃色牆面染進玻璃。
     // envRefraction 滑桿仍控制混合量，因此 0 的語意完全不變。
     float envRefractionLum = dot(
@@ -2057,7 +2153,7 @@ void main(){
   // 背景與滑桿脫鉤；沒有 HDRI 時沒有其他光源可用，才退回 refractedBg。
   vec3 interiorFillLight = refractedBg;
   if (universalGlass && uBgMode == 0 && uHasEnv == 1) {
-    interiorFillLight = sampleEnvironmentBackdrop(transmissionDir);
+    interiorFillLight = sampleEnvironmentBackdrop(transmissionDir, roughBlur);
   }
   if (needsEnvironmentTransmission) {
     vec3 darkRefraction = 1.0 - exp(
@@ -2453,14 +2549,24 @@ void main(){
       bounceWave * uSpectralCausticBounce * 0.78
     );
     float sizeFactor = clamp(uSpectralCausticWidth / 2.5, 0.0, 1.0);
+    // B：粗糙度把焦散的亮帶攤開。bandWave 落在 0..1，pow 的指數調低會讓亮帶
+    // 變寬——但同時整體變亮（底數 < 1，指數越小值越大）。所以這個乘數不能單獨
+    // 用，必須配下面那個補償。
+    float roughFocus = mix(1.0, 0.42, transmissionSpread());
     float focusExponent = mix(0.8, 5.5, uSpectralCausticFocus)
       * mix(1.45, 0.52, sizeFactor)
       * mix(1.0, 0.48, uSpectralCausticSoftness)
-      * mix(1.12, 0.78, uSpectralCausticLightSize);
+      * mix(1.12, 0.78, uSpectralCausticLightSize)
+      * roughFocus;
     float bandFocus = pow(
       max(bandWave, 0.0),
       max(0.32, focusExponent)
     );
+    // 上面那個 roughFocus 的能量補償。cos 型亮帶取 p 次方後，帶內平均值大致
+    // 正比於 p^(-1/2)，所以指數乘上 m 之後平均會變成原本的 m^(-1/2) 倍；乘回
+    // sqrt(m) 就把總光量拉回原位，只留下「變寬變柔」而不帶亮度變化。
+    // roughFocus ≤ 1，所以這個補償恆 ≤ 1：一樣是只會變暗、不會變亮。
+    bandFocus *= sqrt(roughFocus);
     float incidenceFold = pow(
       clamp(1.0 - abs(dot(N, virtualLightDir)), 0.0, 1.0),
       0.72
@@ -2500,7 +2606,9 @@ void main(){
 
     float hdriDrive = 1.0;
     if (uHasEnv == 1) {
-      vec3 hdriLightSample = sampleEnvironmentBackdrop(virtualLightDir);
+      // 虛擬光源的取色：這是「光是什麼顏色」，不是「穿過玻璃看到什麼」，
+      // 所以不吃粗糙度，焦散的色調才不會隨著粗糙度漂掉。
+      vec3 hdriLightSample = sampleEnvironmentBackdrop(virtualLightDir, 0.0);
       float hdriLightLuma = dot(
         hdriLightSample,
         vec3(0.2126, 0.7152, 0.0722)

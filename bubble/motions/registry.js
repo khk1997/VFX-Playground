@@ -42,18 +42,31 @@ export const MOTIONS = {
     loopDuration: 4,
     dolly: false,
     svgDemo: 'question',
-    // 材質參數沿用毛細波那組（通用玻璃 + 稜光棚燈 + 關閉光譜焦散），開發這顆
-    // 預設模式時不必重新調一輪材質手感。
+    // 這是進入模組後看到的第一個畫面，所以整組數值是實際調出來、存成參數檔之後
+    // 搬過來的，不是隨手填的。材質底子沿用毛細波那組（通用玻璃 + 稜光棚燈），
+    // 其餘為這顆landing 畫面各自調整。
     overrides: {
       materialStyle: 'universal',
       rayBeamIntensity: 13.5,
       rayBeamSeparation: 0.065,
       rayBeamChroma: 1.3,
       rayBeamZoom: 5,
+      rayBeamFresnelMask: 0.8,
+      rayBeamNoiseScale: 0.5,
       spectralCausticEnabled: false,
-      cameraDistance: 3.7,
-      cameraRotationX: 9.4,
-      cameraRotationY: 27.9,
+      dispersionEnabled: false,
+      cameraDistance: 6.8,
+      cameraRotationX: -40.4,
+      cameraRotationY: 47.7,
+      // 靜止的展示畫面，鏡頭不自己繞。
+      spin: 0,
+      // 表面帶一層很淡的 Wave 波紋（0 = Wave）。這裡的用法跟毛細波模式不同：
+      // 那邊波紋是主角，這邊只是讓幾何體表面不要平得像一塊塑膠，所以振幅小、
+      // 環數少、速度慢。四個值都按模式記憶，不會汙染毛細波自己的設定。
+      capillaryTexture: 0,
+      capillaryHeight: 0.11,
+      capillaryRings: 2,
+      capillarySpeed: 1,
     },
     // 幾何選項用數字枚舉（不是字串），這樣才能沿用 bindControls 既有的「數值
     // 滑桿／數字型 select 一律 parseFloat」那條路徑，不必為了一個字串型 select
@@ -247,13 +260,28 @@ export const MOTIONS = {
       cameraRotationX: 9.4,
       cameraRotationY: 27.9,
     },
+    // 「程序紋理」是這一整組的總開關：選「無」時表面完全不產生偏移，其餘每一條
+    // 都變成調了沒反應的死滑桿，所以一律掛上 capillaryTextureOn 這個 gate 收起來。
     params: [
-      { key: 'capillaryHeight', label: '波浪高度', min: 0, max: 0.8, step: 0.01, value: 0.09 },
-      { key: 'capillaryCrestSoftness', label: '波峰過渡', min: 0, max: 1, step: 0.01, value: 1 },
-      { key: 'capillaryRings', label: '環波密度', min: 1, max: 8, step: 1, value: 3 },
-      { key: 'capillarySpeed', label: '傳播速度', min: -4, max: 4, step: 1, value: 2 },
+      {
+        key: 'capillaryHeight', label: '波浪高度', min: 0, max: 0.8, step: 0.01, value: 0.09,
+        gate: 'capillaryTextureOn',
+      },
+      {
+        key: 'capillaryCrestSoftness', label: '波峰過渡', min: 0, max: 1, step: 0.01, value: 1,
+        gate: 'capillaryTextureOn',
+      },
+      {
+        key: 'capillaryRings', label: '環波密度', min: 1, max: 8, step: 1, value: 3,
+        gate: 'capillaryTextureOn',
+      },
+      {
+        key: 'capillarySpeed', label: '傳播速度', min: -4, max: 4, step: 1, value: 2,
+        gate: 'capillaryTextureOn',
+      },
       {
         key: 'capillaryField', label: '波場類型', type: 'select', value: 1,
+        gate: 'capillaryTextureOn',
         options: [
           { value: 0, label: '同心放射' },
           { value: 1, label: '定向推進' },
@@ -262,7 +290,11 @@ export const MOTIONS = {
       },
       {
         key: 'capillaryTexture', label: '程序紋理', type: 'select', value: 0,
+        // 「無」用 6 而不是插在 0：既有的 0–5 是已經被參數組合檔存下來的值，
+        // 重新編號會讓舊檔案的紋理全部錯位。顯示順序由 options 的排列決定，
+        // 跟數值無關，所以擺在第一個不影響相容性。
         options: [
+          { value: 6, label: '無' },
           { value: 0, label: 'Wave' },
           { value: 1, label: 'Noise' },
           { value: 2, label: 'Voronoi' },
@@ -271,10 +303,22 @@ export const MOTIONS = {
           { value: 5, label: 'Magic' },
         ],
       },
-      { key: 'capillaryDirectionX', label: '波向 X', min: -1, max: 1, step: 0.05, value: 0.4 },
-      { key: 'capillaryDirectionY', label: '波向 Y', min: -1, max: 1, step: 0.05, value: 0.5 },
-      { key: 'capillaryDirectionZ', label: '波向 Z', min: -1, max: 1, step: 0.05, value: 0 },
-      { key: 'capillaryWarp', label: '紋理扭曲', min: 0, max: 1, step: 0.01, value: 0.18 },
+      {
+        key: 'capillaryDirectionX', label: '波向 X', min: -1, max: 1, step: 0.05, value: 0.4,
+        gate: 'capillaryTextureOn',
+      },
+      {
+        key: 'capillaryDirectionY', label: '波向 Y', min: -1, max: 1, step: 0.05, value: 0.5,
+        gate: 'capillaryTextureOn',
+      },
+      {
+        key: 'capillaryDirectionZ', label: '波向 Z', min: -1, max: 1, step: 0.05, value: 0,
+        gate: 'capillaryTextureOn',
+      },
+      {
+        key: 'capillaryWarp', label: '紋理扭曲', min: 0, max: 1, step: 0.01, value: 0.18,
+        gate: 'capillaryTextureOn',
+      },
     ],
   },
 };
