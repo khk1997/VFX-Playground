@@ -4290,7 +4290,7 @@ function bindControls() {
       if (uniforms && uniforms[uniform]) uniforms[uniform].value = map[el.value];
       updateUIState();
       if (key === 'shapeQuality' && previousValue !== P[key]) {
-        scheduleLastGLBRebuild();
+        scheduleGLBRebuild();
       }
       if ((key === 'motion' || key === 'shapeSource') && previousValue !== P[key]) {
         ensureShapeForCurrentSource();
@@ -4791,8 +4791,17 @@ document.getElementById('morphTargetResetBtn').addEventListener('click', () => {
   morphTargetPending = null;
 });
 
-function scheduleLastGLBRebuild() {
-  if (!lastGLBFile || P.shapeSource !== 'gltf') return;
+// 「模型品質」是體素化的網格解析度，只有 GLB 這條路用得到（SVG 走的是解析式
+// 距離場，跟網格無關，所以那個下拉本來就 data-gate="glb"）。
+//
+// 內建展示造型（importShapeFile 的 file = null）同樣是用同一個 glbGridSize 烘
+// 出來的，所以沒有匯入自己的檔案時一樣要重烘。這裡原本卡了一個 `!lastGLBFile`
+// 的提前 return，於是「還沒匯入模型就切品質」完全沒有任何反應——而那正是使用者
+// 最先會遇到的情況（切到 GLB 來源時看到的就是內建造型）。
+function scheduleGLBRebuild() {
+  if (P.shapeSource !== 'gltf') return;
+  // 靜態模式選內建幾何時根本沒有形狀場，烘出來也沒人看得到。
+  if (!staticUsesImportedShape()) return;
   clearTimeout(shapeRebuildTimer);
   // 立刻使正在進行的舊品質結果失效；短暫 debounce 避免快速連切時重複開工。
   shapeImportRequestId++;
@@ -4801,6 +4810,8 @@ function scheduleLastGLBRebuild() {
     || `${grid}³`;
   shapeState.textContent = `品質已切換，準備重新生成 ${qualityLabel}…`;
   shapeRebuildTimer = window.setTimeout(() => {
+    // lastGLBFile 為 null 時走內建造型那條路（見 importShapeFile 的 builtin），
+    // 兩種來源都會用當下的 glbGridSize 重新體素化。
     importShapeFile(lastGLBFile, 'gltf', { rebuilding: true });
   }, 160);
 }
