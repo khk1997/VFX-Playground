@@ -28,6 +28,74 @@
 //                  少數模式需要覆寫」，不必為了一個模式的特例把同樣的數字
 //                  在五個模式裡各抄一次。
 export const MOTIONS = {
+  static: {
+    label: '靜態 Static',
+    uniform: 8,
+    // 「匯入 SVG／GLB」選項要借用形狀匯聚那整套匯入／烘焙管線，所以跟毛細波
+    // 一樣一律開著；沒選匯入時（staticShape 0-6）shader 端會直接跳過形狀場，
+    // 改走程序化 SDF（見 shaders.js 的 FEATURE_STATIC_SHAPE），不會兩個一起畫。
+    usesShapeField: true,
+    gate: 'static',
+    // 沒有水滴、沒有動態——純粹展示材質本身在一個簡單體積上的樣子。
+    count: 0,
+    radius: 0.24,
+    loopDuration: 4,
+    dolly: false,
+    svgDemo: 'question',
+    // 材質參數沿用毛細波那組（通用玻璃 + 稜光棚燈 + 關閉光譜焦散），開發這顆
+    // 預設模式時不必重新調一輪材質手感。
+    overrides: {
+      materialStyle: 'universal',
+      rayBeamIntensity: 13.5,
+      rayBeamSeparation: 0.065,
+      rayBeamChroma: 1.3,
+      rayBeamZoom: 5,
+      spectralCausticEnabled: false,
+      cameraDistance: 3.7,
+      cameraRotationX: 9.4,
+      cameraRotationY: 27.9,
+    },
+    // 幾何選項用數字枚舉（不是字串），這樣才能沿用 bindControls 既有的「數值
+    // 滑桿／數字型 select 一律 parseFloat」那條路徑，不必為了一個字串型 select
+    // 額外開一條特例（毛細波的 capillaryField／capillaryTexture 也是同樣理由
+    // 用數字枚舉）。0 方體、1 平面、2 圓盤、3 球體、4 圓柱、5 圓錐、6 圓環、
+    // 7 匯入——7 是唯一會讓 shader 改吃形狀場貼圖、而不是程序化 SDF 的值。
+    params: [
+      {
+        key: 'staticShape', label: '幾何形狀', type: 'select', value: 0,
+        options: [
+          { value: 0, label: '方體 Cube' },
+          { value: 1, label: '平面 Plane' },
+          { value: 2, label: '圓盤 Circle' },
+          { value: 3, label: '球體 UV/Ico Sphere' },
+          { value: 4, label: '圓柱 Cylinder' },
+          { value: 5, label: '圓錐 Cone' },
+          { value: 6, label: '圓環 Torus' },
+          { value: 7, label: '匯入 SVG／GLB…' },
+        ],
+      },
+      {
+        key: 'boxSize', label: '方塊大小', min: 0.3, max: 1.2, step: 0.01, value: 0.75,
+        gate: 'staticShapeBox',
+      },
+      {
+        key: 'boxCornerRadius', label: '圓角', min: 0, max: 0.4, step: 0.005, value: 0.12,
+        gate: 'staticShapeBox',
+      },
+      {
+        key: 'primitiveSize', label: '尺寸', min: 0.2, max: 1.2, step: 0.01, value: 0.6,
+        gate: 'staticShapePrimitive',
+      },
+      {
+        key: 'primitiveHeight', label: '高度', min: 0.2, max: 1.6, step: 0.01, value: 0.75,
+        gate: 'staticShapeCylOrCone',
+      },
+      {
+        key: 'primitiveTubeRatio', label: '管徑比例', min: 0.1, max: 0.6, step: 0.01, value: 0.35,
+        gate: 'staticShapeTorus',
+      },
+    ],
+  },
   split: {
     label: '分裂 Split',
     uniform: 0,

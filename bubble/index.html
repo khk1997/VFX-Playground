@@ -40,7 +40,7 @@
   <details class="group" open>
     <summary><h3>動態 Motion</h3></summary>
     <div class="row"><label>動態模式</label><select id="motion">
-      <option value="split">分裂 Split</option>
+      <option value="static">靜態 Static（預設）</option>
       <option value="formation">形狀匯聚 Formation</option>
       <option value="weave">穿梭環繞 Weave</option>
       <option value="shatter">崩解噴濺 Shatter</option>
@@ -48,12 +48,13 @@
       <option value="morph">形狀變形 Morph</option>
       <option value="jelly">果凍 Jelly</option>
       <option value="capillary">毛細波 Capillary Wave</option>
+      <option value="split">分裂 Split</option>
       <!-- 已改名或已移除的舊值。留成隱藏選項，舊的參數組合檔寫進來時 value 才不會
            被瀏覽器丟成空字串；bindControls 會立刻把它導向現有選項（LEGACY_SELECT_VALUES）。 -->
       <option value="cinematic" hidden>分裂（舊值 cinematic）</option>
       <option value="pulse" hidden>脈動呼吸 Pulse（已移除）</option>
     </select><span class="val"></span></div>
-    <div class="row" id="loopDurationRow"><label>循環秒數</label><input type="range" id="loopDuration" min="4" max="30" step="0.5" value="12"><span class="val" id="loopDuration_v"></span></div>
+    <div class="row" id="loopDurationRow" data-gate="!static"><label>循環秒數</label><input type="range" id="loopDuration" min="4" max="30" step="0.5" value="12"><span class="val" id="loopDuration_v"></span></div>
     <div class="modeBlock" data-gate="formation">
     <div class="row" id="holdBreathRow"><label>定格呼吸</label><input type="range" id="holdBreath" min="0" max="0.2" step="0.005" value="0.05"><span class="val" id="holdBreath_v"></span></div>
     <div class="row" id="formationVarietyRow"><label>軌跡多樣性</label><input type="range" id="formationVariety" min="0" max="1" step="0.01" value="0.35"><span class="val" id="formationVariety_v"></span></div>
@@ -195,7 +196,7 @@
       <div data-gate="formation" class="row timelineRow"><label>完成停留</label><input type="range" id="shapeHold" min="0.05" max="0.45" step="0.01" value="0.45"><span class="val" id="shapeHold_v"></span></div>
       <div data-gate="formation" id="timelineSummary" class="note timelineRow"></div>
       <div class="effectSubhead">外形細節</div>
-      <div data-gate="!weave !jelly !capillary" class="row" id="microCountRow"><label>輪廓細節滴</label><input type="range" id="microCount" min="8" max="48" step="1" value="14"><span class="val" id="microCount_v"></span></div>
+      <div data-gate="!weave !jelly !capillary !static" class="row" id="microCountRow"><label>輪廓細節滴</label><input type="range" id="microCount" min="8" max="48" step="1" value="14"><span class="val" id="microCount_v"></span></div>
       <div data-gate="svg" class="row"><label>形狀厚度</label><input type="range" id="shapeDepth" min="0.05" max="0.8" step="0.01" value="0.1"><span class="val" id="shapeDepth_v"></span></div>
       <div data-gate="svg" class="row"><label>邊緣圓角</label><input type="range" id="shapeEdgeBevel" min="0" max="0.15" step="0.001" value="0.025"><span class="val" id="shapeEdgeBevel_v"></span></div>
       <div class="row"><label>邊緣液化</label><input type="range" id="shapeSoftness" min="0" max="0.25" step="0.005" value="0"><span class="val" id="shapeSoftness_v"></span></div>
@@ -207,7 +208,7 @@
       <input type="file" id="morphTargetInput" accept=".svg,image/svg+xml" hidden>
     </div>
 
-    <div data-gate="svg !capillary" class="effectBlock effectBlock--drop" id="edgeDropGroup">
+    <div data-gate="svg !capillary !static" class="effectBlock effectBlock--drop" id="edgeDropGroup">
       <div class="effectTitle"><span>DROP</span> 輪廓液滴</div>
       <div class="row toggleRow"><label>輪廓液滴</label><input type="checkbox" id="edgeDropsEnabled"><span class="switchTrack" aria-hidden="true"></span><span class="val" id="edgeDropsEnabled_v">關閉</span></div>
       <div class="row keepEnabled"><label>邊緣水滴</label><input type="range" id="shapeLiquid" min="0" max="1" step="0.01" value="0.1"><span class="val" id="shapeLiquid_v"></span></div>
@@ -217,7 +218,7 @@
     </div>
   </details>
 
-  <details class="group" data-gate="!capillary" open>
+  <details class="group" data-gate="!capillary !static" open>
     <summary><h3>水滴形態 Droplets</h3></summary>
     <div class="row"><label>水滴數量</label><input type="range" id="count" min="0" max="12" step="1" value="2"><span class="val" id="count_v"></span></div>
     <div class="row"><label>水滴大小</label><input type="range" id="radius" min="0" max="1.1" step="0.01" value="0.4"><span class="val" id="radius_v"></span></div>
@@ -382,8 +383,9 @@
   <div class="btns">
     <button id="resetBtn">↺ 重設</button>
   </div>
-  <div class="hint" data-gate="!capillary">水滴會依速度與尺寸產生體積守恆形變；接觸時排液壓平、融合收頸，強拉斷時可能形成衛星小滴。<br>拖曳可旋轉視角；滾輪可縮放；上色模式切「自訂漸層」可指定配色。</div>
+  <div class="hint" data-gate="!capillary !static">水滴會依速度與尺寸產生體積守恆形變；接觸時排液壓平、融合收頸，強拉斷時可能形成衛星小滴。<br>拖曳可旋轉視角；滾輪可縮放；上色模式切「自訂漸層」可指定配色。</div>
   <div class="hint" data-gate="capillary">毛細波會直接作用在 SVG／GLB 主體表面，不生成周圍水滴。<br>可搭配同心、定向或螺旋波場，以及 Wave、Noise、Voronoi、Gabor、Gradient、Magic 程序紋理。</div>
+  <div class="hint" data-gate="static">靜態模式可在方體、平面、圓盤、球體、圓柱、圓錐、圓環之間切換，或選「匯入」自行載入 SVG／GLB；材質沿用毛細波的通用玻璃設定，也共用同一組程序波紋（同心、定向或螺旋波場，Wave、Noise、Voronoi、Gabor、Gradient、Magic 程序紋理）直接作用在物體表面。<br>拖曳可旋轉視角；滾輪可縮放。</div>
 </div>
 <button id="exportBtn" type="button" aria-haspopup="dialog" aria-controls="exportDialog">輸出</button>
 <button id="toggleBtn"><svg class="btnIcon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" stroke="currentColor" stroke-width="1.4"/><path d="M16.4 12.3c.1-.3.1-.6.1-.9V9.6c0-.3 0-.6-.1-.9l1.4-1.1a.6.6 0 0 0 .1-.8l-1.3-2.2a.6.6 0 0 0-.7-.3l-1.6.6a5.9 5.9 0 0 0-1.5-.9L12.4 2a.6.6 0 0 0-.6-.5H8.2a.6.6 0 0 0-.6.5l-.3 1.7a5.9 5.9 0 0 0-1.5.9l-1.6-.6a.6.6 0 0 0-.7.3L2.2 6.5a.6.6 0 0 0 .1.8l1.4 1.1c-.1.3-.1.6-.1.9v1.8c0 .3 0 .6.1.9l-1.4 1.1a.6.6 0 0 0-.1.8l1.3 2.2c.1.2.4.3.7.3l1.6-.6c.4.4.9.7 1.5.9l.3 1.7c0 .3.3.5.6.5h3.6c.3 0 .6-.2.6-.5l.3-1.7c.6-.2 1.1-.5 1.5-.9l1.6.6c.3.1.6 0 .7-.3l1.3-2.2a.6.6 0 0 0-.1-.8l-1.4-1.1Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg><span>面板</span></button>
@@ -482,6 +484,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=diag-29"></script>
+<script type="module" src="./bubble.js?v=diag-30"></script>
 </body>
 </html>

@@ -14,7 +14,7 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-88';
+} from './motions/registry.js?v=svg-shape-89';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
@@ -573,7 +573,7 @@ const SELECT_DEFAULTS = {
   bgMode: 'color',
   materialStyle: 'universal',
   colorMode: 'spectral',
-  motion: 'split',
+  motion: 'static',
   shapeSource: 'svg',
   shapeQuality: 'balanced',
   jellyStyle: 'bounce',
@@ -712,6 +712,11 @@ function buildMotionMemory() {
 }
 let motionMemory = buildMotionMemory();
 const MOTION_MEMORY_KEYS = Object.keys(motionMemory);
+// 初始模式（SELECT_DEFAULTS.motion）不會經過 select 的 change 事件，
+// 切模式時「套用該模式記憶值」那段回寫邏輯不會跑。以前預設模式是分裂、
+// 沒有 overrides，這個落差看不出來；現在預設模式換成靜態、帶了整組材質
+// overrides，得在這裡把起始 P 值先補成該模式記得的值，跟切換模式時的行為一致。
+for (const key of MOTION_MEMORY_KEYS) P[key] = motionMemory[key][P.motion];
 
 // 自訂漸層色標（最多 6，可調位置）— reset 用
 const STOP_MAX = 6;
@@ -1028,7 +1033,7 @@ function refreshLoopScaledReadouts() {
   refreshShatterTimelineReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=baseline-5';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=baseline-6';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
@@ -1512,7 +1517,12 @@ function variantState() {
     // --- 幾何 ---
     shapeField,
     svgNormals,
-    capillaryTexture: P.motion === 'capillary',
+    // 毛細波的程序紋理現在也服務靜態模式：兩者共用同一支 capillarySurfaceOffset，
+    // 只是分別套在形狀場（毛細波）與程序化 SDF（靜態的內建幾何）上。
+    capillaryTexture: P.motion === 'capillary' || P.motion === 'static',
+    // 靜態模式選了內建幾何（staticShape 0-6）時才編譯程序化 SDF；選了「匯入」
+    // （staticShape 7）就完全交給上面的 shapeField 走形狀場，兩邊不同時混進 d。
+    staticShape: P.motion === 'static' && P.staticShape !== 7,
     // 微滴的實際條件與 updateMicroDrops 的 activeCount 完全一致：四種模式之一，
     // 而且造型場真的在（微滴的 anchors 也來自匯入的造型）。
     microDrops: shapeField
@@ -1556,7 +1566,7 @@ function variantKey(v = variantState()) {
   return [
     'g' + flag(v.shapeField, 'S') + flag(v.svgNormals, 'V') + flag(v.capillaryTexture, 'C')
       + flag(v.microDrops, 'M') + flag(v.satellites, 'A') + flag(v.capillaryWave, 'W')
-      + flag(v.negativeField, 'N'),
+      + flag(v.negativeField, 'N') + flag(v.staticShape, 'X'),
     'o' + flag(v.thinFilm, 'F') + flag(v.liquidFilm, 'L') + flag(v.dispersion, 'D')
       + flag(v.prismBeam, 'P') + flag(v.spectralCaustics, 'K') + flag(v.beamPatterns, 'B')
       + flag(v.envPmrem, 'E'),
@@ -1617,6 +1627,7 @@ function shaderFeatures() {
     // --- 幾何：mapScene 的子系統，由 motion 決定 ---
     FEATURE_SHAPE_FIELD: V.shapeField ? '' : false,
     FEATURE_CAPILLARY: V.capillaryTexture ? '' : false,
+    FEATURE_STATIC_SHAPE: V.staticShape ? '' : false,
     FEATURE_MICRO_DROPS: V.microDrops ? '' : false,
     FEATURE_SATELLITES: V.satellites ? '' : false,
     FEATURE_CAPILLARY_WAVE: V.capillaryWave ? '' : false,
@@ -2747,7 +2758,10 @@ function updateDropUniforms(t) {
     // 形狀變形的實體同樣永遠滿值：它不靠淡入淡出交接，兩顆形狀是被兩道波前
     // 各自削掉／放出來的（見 shaders.js 的 uShapeCut），整個循環都該全力顯示。
     // 果凍的形狀從頭到尾完整，只是在晃——完全不參與任何體積交接。
-    : P.motion === 'weave' || melting || morphSolid || jelly || extended
+    // 靜態模式的匯入造型同樣要一直是滿值：沒有匯聚時間軸這回事，選了「匯入」
+    // 就整顆展示，不管選的是哪種內建幾何都跟這個進度值無關（那條走
+    // FEATURE_STATIC_SHAPE 自己的 uStaticShape 分支，不受這個值影響）。
+    : P.motion === 'weave' || melting || morphSolid || jelly || extended || P.motion === 'static'
       ? 1
       : shatter
         ? shatterShapeAmount(shatter)
@@ -3056,15 +3070,21 @@ function updateDropUniforms(t) {
           ? 1 + (0.15 - 1) * shatter.flight
           : 1;
   if (uniforms) uniforms.uViscosity.value = effectiveViscosity * mergeScale;
+  // 毛細波的程序紋理現在同時服務兩個模式：毛細波本身（作用在匯入的形狀場）與
+  // 靜態方體（作用在程序化方體 SDF）。兩者共用同一組 uniform 與同一支
+  // capillarySurfaceOffset，差別只在呼叫端喂進去的是哪顆 SDF 的座標。
+  const capillaryFamily = P.motion === 'capillary' || P.motion === 'static';
   if (uniforms) {
     // 同樣封住舊參數檔可能保存的輪廓液滴與一般水滴噪聲；切離毛細波後會立即
     // 從 P 恢復原模式各自記憶的值。
-    uniforms.uEdgeDropCount.value = P.motion === 'capillary'
+    uniforms.uEdgeDropCount.value = capillaryFamily
       ? 0 : (P.edgeDropsEnabled ? activeEdgeDrops.length : 0);
-    uniforms.uWobble.value = P.motion === 'capillary' ? 0 : P.wobble;
-    uniforms.uExtendedMotion.value = extended ? MOTION_UNIFORM_MAP[P.motion] : 0;
+    // 靜態方體沒有水滴系統，「表面起伏」這段通用 fbm 噪聲不該波及它——用戶
+    // 明確要求靜態模式不吃任何水滴形態參數，波紋只能來自下面這組毛細波參數。
+    uniforms.uWobble.value = capillaryFamily ? 0 : P.wobble;
+    uniforms.uExtendedMotion.value = (extended || capillaryFamily) ? MOTION_UNIFORM_MAP[P.motion] : 0;
     const extendedParams = uniforms.uExtendedParams.value;
-    if (P.motion === 'capillary') {
+    if (capillaryFamily) {
       extendedParams.set(P.capillaryHeight, P.capillaryRings, P.capillarySpeed, P.capillaryWarp);
       uniforms.uCapillaryStyle.value.set(
         Math.round(P.capillaryField), Math.round(P.capillaryTexture), P.capillaryCrestSoftness, 0,
@@ -3451,6 +3471,29 @@ function updateDropUniforms(t) {
           + microDropData[o + 3] + 0.12);
     }
   }
+  // 靜態模式選了內建幾何（staticShape 0-6）時完全不吃形狀場，也沒有水滴
+  // （count 0），上面兩條路徑給的邊界不會涵蓋程序化 SDF 的實際範圍——射線
+  // 邊界太小會讓造型被裁掉一角，甚至整顆漏在邊界外完全不會被 raymarch 走到。
+  // 選了「匯入」（staticShape 7）則完全交給上面 usesShapeField 那條路徑，
+  // 這裡不需要再疊加。半徑抓對應幾何的最大延伸再加安全 padding，用 Math.max
+  // 疊加（不是 .set 直接覆蓋），這樣才不會蓋掉上面已經算好的邊界。
+  if (P.motion === 'static' && P.staticShape !== 7) {
+    let staticRadius;
+    if (P.staticShape === 0) {
+      // 方體對角線（√2 倍半邊長，這裡再乘 1.5 留餘裕）加圓角。
+      staticRadius = P.boxSize * Math.SQRT2 * 1.5 + P.boxCornerRadius + 0.2;
+    } else if (P.staticShape === 6) {
+      // 圓環：外緣 = 主半徑 + 管半徑（管半徑 = 主半徑 × 比例）。
+      staticRadius = P.primitiveSize * (1 + P.primitiveTubeRatio) * 1.5 + 0.2;
+    } else if (P.staticShape === 4 || P.staticShape === 5) {
+      // 圓柱／圓錐：取半徑與（半）高兩者較大者，涵蓋躺著或立著的極端角度。
+      staticRadius = Math.max(P.primitiveSize, P.primitiveHeight) * 1.8 + 0.2;
+    } else {
+      // 平面、圓盤、球體都只由 primitiveSize 決定範圍。
+      staticRadius = P.primitiveSize * 1.8 + 0.2;
+    }
+    dropBounds.w = Math.max(dropBounds.w, staticRadius);
+  }
 }
 
 function makeBlankEnv() {
@@ -3778,6 +3821,12 @@ function initGL() {
     // 在輪廓上結出一顆顆瘤；融化則是形狀從頭到尾完整，沒有「先成形」可言，只剩
     // 隨水滴掃過的整片漲縮。用這個 0/1 開關在那兩個模式關掉它。
     uContactLead: { value: 1 },
+    uStaticShape: { value: P.staticShape },
+    uBoxSize: { value: P.boxSize },
+    uBoxCornerRadius: { value: P.boxCornerRadius },
+    uPrimitiveSize: { value: P.primitiveSize },
+    uPrimitiveHeight: { value: P.primitiveHeight },
+    uPrimitiveTubeRatio: { value: P.primitiveTubeRatio },
     uShapeDepth: { value: P.shapeDepth },
     uShapeSoftness: { value: P.shapeSoftness },
     uShapeEdgeBevel: { value: P.shapeEdgeBevel },
@@ -4078,7 +4127,10 @@ function buildExtendedMotionControls() {
     if (!params.length) continue;
     const block = document.createElement('div');
     block.className = 'modeBlock';
-    block.dataset.gate = motion;
+    // 毛細波的程序紋理參數同時服務毛細波與靜態方體兩個模式（見 variantState 的
+    // capillaryTexture），面板得跟著用同一塊、用同一個 gate 顯示，不能各自
+    // 宣告一份參數——那會讓兩顆 block 的滑桿 id 撞在一起。
+    block.dataset.gate = motion === 'capillary' ? 'capillaryTextureUI' : motion;
     for (const param of params) {
       const row = document.createElement('div');
       row.className = 'row';
@@ -4086,6 +4138,7 @@ function buildExtendedMotionControls() {
       const label = document.createElement('label');
       label.htmlFor = param.key;
       label.textContent = param.label;
+      if (param.gate) row.dataset.gate = param.gate;
       const control = document.createElement(param.type === 'select' ? 'select' : 'input');
       control.id = param.key;
       if (param.type === 'select') {
@@ -4130,6 +4183,12 @@ function bindControls() {
       if (key === 'shapeBScale') scheduleShapeBScaleRebuild();
       if (valEl) valEl.textContent = (fmt[key] || (v => +v.toFixed(2)))(P[key]);
       if (key === 'capillaryRings') refreshCapillaryHeightReadout();
+      // staticShape 驅動好幾條參數列的顯示／隱藏（GATES 的 staticShapeBox／
+      // staticShapePrimitive／staticShapeCylOrCone／staticShapeTorus／
+      // staticShapeImport），跟 jellyStyle 那種走 SELECTS、change 時自動呼叫
+      // updateUIState() 的字串型 select 不同——這條走的是這裡的數值型通用迴圈，
+      // 沒有這行就切幾何形狀時其他列的顯示狀態不會跟著換。
+      if (key === 'staticShape') applyGates();
       if (uniforms && uniforms[uName]) uniforms[uName].value = (key === 'count') ? Math.round(P[key]) : P[key];
       if (SHATTER_TIMELINE_KEYS.includes(key)) refreshShatterTimelineReadouts();
       if (key === 'gatherDuration' || key === 'shapeHold' || key === 'loopDuration') {
@@ -4343,6 +4402,16 @@ const GATES = {
   // 「必須是果凍模式」那半由祖先的 data-gate="jelly" 自動疊上。
   jellyPoke:   () => P.jellyStyle === 'poke',
   jellyBounce: () => P.jellyStyle === 'bounce',
+  // 毛細波的程序紋理參數面板：毛細波與靜態方體共用同一組，見
+  // buildExtendedMotionControls 裡對 'capillary' 那份 block 的特例。
+  capillaryTextureUI: () => P.motion === 'capillary' || P.motion === 'static',
+  // 靜態模式的幾何選項（見 registry.js 的 staticShape 數字枚舉：
+  // 0 方體／1 平面／2 圓盤／3 球體／4 圓柱／5 圓錐／6 圓環／7 匯入）。
+  staticShapeBox:       () => P.staticShape === 0,
+  staticShapePrimitive: () => P.staticShape >= 1 && P.staticShape <= 6,
+  staticShapeCylOrCone: () => P.staticShape === 4 || P.staticShape === 5,
+  staticShapeTorus:     () => P.staticShape === 6,
+  staticShapeImport:    () => P.staticShape === 7,
 };
 
 function gateOpen(spec) {

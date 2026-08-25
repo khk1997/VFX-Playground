@@ -129,6 +129,13 @@ uniform int   uExtendedMotion;
 uniform vec4  uExtendedParams;
 uniform vec4  uCapillaryStyle; // x 波場、y 程序紋理、z 波峰過渡、w 保留
 uniform vec3  uCapillaryDirection;
+uniform int   uStaticShape;     // 靜態模式的幾何：0 方體 1 平面 2 圓盤 3 球體
+                                 // 4 圓柱 5 圓錐 6 圓環 7 匯入（見 registry.js）
+uniform float uBoxSize;         // 靜態模式：方體半邊長
+uniform float uBoxCornerRadius; // 靜態模式：方體圓角半徑
+uniform float uPrimitiveSize;   // 靜態模式：平面/圓盤/球體/圓柱/圓錐/圓環的主尺寸
+uniform float uPrimitiveHeight; // 靜態模式：圓柱/圓錐的半高
+uniform float uPrimitiveTubeRatio; // 靜態模式：圓環管半徑／主半徑的比例
 uniform float uFidelityAbsorb;
 uniform float uShapeSwell;
 // 形狀變形：0 = 關閉（其餘模式一律走原本的單一形狀路徑，一格都不變），
@@ -756,7 +763,9 @@ float capillaryCellularFieldLoop(vec2 p, float period){
 }
 
 float capillarySurfaceOffset(vec3 p){
-  if (uExtendedMotion != 7) return 0.0;
+  // 7 是毛細波、8 是靜態方體（見 motions/registry.js 的 uniform 編號）；兩者共用
+  // 同一支程序紋理，只是分別套在形狀場座標與方體座標上。
+  if (uExtendedMotion != 7 && uExtendedMotion != 8) return 0.0;
   float phase = fract(uTime / max(0.001, uLoopDuration));
   // 整數速度維持循環無縫；0 靜止，負值沿同一條路徑反向播放。
   float movingA = phase * TAU * uExtendedParams.z;
@@ -870,6 +879,43 @@ float capillarySurfaceOffset(vec3 p){
   return basePreservingCrest * amplitude * coreAmplitude;
 }
 #endif // FEATURE_CAPILLARY
+
+// 靜態模式的內建幾何：一組經典 Inigo Quilez SDF 公式，不吃水滴也不吃匯入
+// 造型（那是 uStaticShape == 7 時的「匯入」分支，走的是上面的形狀場）。
+#ifdef FEATURE_STATIC_SHAPE
+// 圓角方體。圓角半徑在呼叫端已夾在半邊長以內，避免拉滿時塌成自交錯誤形狀。
+float sdRoundBox(vec3 p, vec3 halfExtents, float cornerRadius){
+  vec3 q = abs(p) - halfExtents + cornerRadius;
+  return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0) - cornerRadius;
+}
+// 球體。UV Sphere／Ico Sphere 在多邊形網格上有差別，SDF 上是同一顆球，
+// 所以面板把兩者併成一個選項。
+float sdSphere(vec3 p, float r){
+  return length(p) - r;
+}
+// 圓柱（含平面／圓盤：兩者都是「很扁的圓柱」，半高改小就好，不必另開一支）。
+// 軸沿 y，r 半徑、h 半高。
+float sdCylinder(vec3 p, float r, float h){
+  vec2 d = abs(vec2(length(p.xz), p.y)) - vec2(r, h);
+  return min(max(d.x, d.y), 0.0) + length(max(d, 0.0));
+}
+// 實心圓錐（尖端朝 +y、底面在 -y），Inigo Quilez 的 capped cone 公式令頂端
+// 半徑固定為 0 的特例。r1 是底面半徑，h 是半高。
+float sdCone(vec3 p, float r1, float h){
+  vec2 q = vec2(length(p.xz), p.y);
+  vec2 k1 = vec2(0.0, h);
+  vec2 k2 = vec2(-r1, 2.0 * h);
+  vec2 ca = vec2(q.x - min(q.x, (q.y < 0.0) ? r1 : 0.0), abs(q.y) - h);
+  vec2 cb = q - k1 + k2 * clamp(dot(k1 - q, k2) / dot(k2, k2), 0.0, 1.0);
+  float s = (cb.x < 0.0 && ca.y < 0.0) ? -1.0 : 1.0;
+  return s * sqrt(min(dot(ca, ca), dot(cb, cb)));
+}
+// 圓環，軸沿 y。majorR 是環心到管中心的距離，minorR 是管半徑。
+float sdTorus(vec3 p, float majorR, float minorR){
+  vec2 q = vec2(length(p.xz) - majorR, p.y);
+  return length(q) - minorR;
+}
+#endif // FEATURE_STATIC_SHAPE
 
 float mapScene(vec3 p, bool smoothShape){
   float d = 1e9;
@@ -1064,6 +1110,13 @@ float mapScene(vec3 p, bool smoothShape){
     // uShapeSwell 是崩解噴濺炸開前的蓄力：對距離場做等距膨脹，讓造型像被內壓
     // 撐大。等距偏移是均勻的，不會像 contactLead 那樣在碎片附近結出局部的瘤。
     float growingDetail = detailD + (1.0 - localGrowth) * 0.38 - uShapeSwell;
+    // 靜態模式選了內建幾何時（uStaticShape != 7）完全不吃這顆形狀場——它多半
+    // 只是 ensureShapeForCurrentSource 自動載入的內建展示造型，真正要顯示的是
+    // 下面 FEATURE_STATIC_SHAPE 那段程序化 SDF。選了「匯入」（== 7）才併進 d，
+    // 這時的行為跟其他吃形狀場的模式完全一樣。
+#ifdef FEATURE_STATIC_SHAPE
+    if (uStaticShape == 7)
+#endif
     d = smin(
       d,
       growingDetail,
@@ -1071,6 +1124,47 @@ float mapScene(vec3 p, bool smoothShape){
     );
   }
 #endif // FEATURE_SHAPE_FIELD
+#ifdef FEATURE_STATIC_SHAPE
+  // 無水滴、無造型場：d 在這裡仍是初始的 1e9，程序化 SDF 就是全部的可見表面。
+  // uStaticShape == 7（匯入）不會走到這裡——那個值讓 variantState 不編這段
+  // FEATURE_STATIC_SHAPE（見 bubble.js 的 staticShape 判斷），交給上面的
+  // 形狀場處理。
+  {
+    float shapeD;
+    if (uStaticShape == 0) {
+      float boxHalf = max(uBoxSize, 0.05);
+      float boxCorner = clamp(uBoxCornerRadius, 0.0, boxHalf * 0.98);
+      shapeD = sdRoundBox(p, vec3(boxHalf), boxCorner);
+    } else if (uStaticShape == 1) {
+      // 平面：極扁的方體，厚度固定抓尺寸的一小部分，不需要另外開一個滑桿。
+      // 註：不能叫 half——GLSL ES 保留給未來的半精度型別，拿來當識別字會編譯失敗。
+      float halfSize = max(uPrimitiveSize, 0.05);
+      shapeD = sdRoundBox(p, vec3(halfSize, halfSize * 0.06, halfSize), 0.0);
+    } else if (uStaticShape == 2) {
+      // 圓盤：極扁的圓柱。
+      float r = max(uPrimitiveSize, 0.05);
+      shapeD = sdCylinder(p, r, r * 0.06);
+    } else if (uStaticShape == 3) {
+      shapeD = sdSphere(p, max(uPrimitiveSize, 0.05));
+    } else if (uStaticShape == 4) {
+      shapeD = sdCylinder(p, max(uPrimitiveSize, 0.05), max(uPrimitiveHeight, 0.05));
+    } else if (uStaticShape == 5) {
+      shapeD = sdCone(p, max(uPrimitiveSize, 0.05), max(uPrimitiveHeight, 0.05));
+    } else {
+      // uStaticShape == 6：圓環。管半徑夾在主半徑以內，避免比例拉滿時管子比
+      // 環心還粗，SDF 會自交出錯誤形狀。
+      float major = max(uPrimitiveSize, 0.05);
+      float minor = clamp(uPrimitiveTubeRatio, 0.05, 0.9) * major;
+      shapeD = sdTorus(p, major, minor);
+    }
+#ifdef FEATURE_CAPILLARY
+    // 跟毛細波共用的程序紋理，直接套在物體本地座標上（這些幾何沒有形狀場的
+    // 縮放／剛體變換要反解，p 本身就是它們的本地座標）。
+    shapeD -= capillarySurfaceOffset(p);
+#endif
+    d = min(d, shapeD);
+  }
+#endif // FEATURE_STATIC_SHAPE
   // 最大位移遠小於 0.25；遠離表面時略過 noise，不影響射線接近表面的安全性。
   //
   // 診斷探針 C（?diag=probe-no-wobble）只把這一段在編譯期拿掉。
