@@ -114,6 +114,16 @@ uniform float uWobbleSpeed;
 uniform float uResearchShellAmount;
 uniform float uResearchShellSpeed;
 uniform float uResearchShellDensity;
+// 打字模式。字形距離場圖集（glyph-field.js 烘的）與整行的排版／擠出參數。
+// 每一格字自己的資料（哪一個字形、成形進度）走 uTypeGlyphData 這張 1D 資料貼圖，
+// 跟 uMicroDrops 同一個手法——GLSL ES 1.0 對 uniform 陣列的非常數索引限制不一，
+// 換成貼圖取樣就完全繞開這個問題。
+uniform sampler2D uTypeAtlas;
+uniform sampler2D uTypeGlyphData;
+uniform vec4  uTypeAtlasInfo;  // x：圖集列數，y：行數，z：每格解析度，w：距離編碼範圍
+uniform vec4  uTypeLine;       // x：字距（格單位），y：字級，z：基線位移，w：可見字數
+uniform vec4  uTypeShape;      // x：擠出厚度，y：邊緣圓角，z：液態長出，w：字形特徵尺度
+uniform vec4  uTypeCaret;      // xy：游標中心，z：半寬，w：>0.5 代表這一幀亮著
 uniform vec2  uElasticEvent;    // x：事件包絡，y：傳播進度
 uniform float uElasticStrength;
 uniform float uElasticDensity;
@@ -1071,6 +1081,117 @@ bool researchTraceIcon(vec3 ro, vec3 rd, float maxDistance, out vec3 hitPoint){
 }
 #endif
 
+#ifdef FEATURE_TYPEWRITER
+// 每格字的資料貼圖寬度，必須跟 glyph-field.js 的 MAX_TYPE_GLYPHS 一致。
+#define TYPE_MAX 24.0
+
+// 從字形圖集取一格的距離。
+//
+// 收半個 texel 是必要的：圖集是規則網格，硬體雙線性在格緣會跨到隔壁那個字，
+// 於是每個字的邊上都會浮出鄰居的殘影。SVG 路徑不必處理這件事（只有一張圖），
+// 這是圖集特有的問題。
+float typeAtlasSample(float idx, vec2 tileUV){
+  float cols = uTypeAtlasInfo.x;
+  float tile = uTypeAtlasInfo.z;
+  float col = mod(idx, cols);
+  float row = floor(idx / cols);
+  vec2 inset = clamp(tileUV, vec2(0.5 / tile), vec2(1.0 - 0.5 / tile));
+  vec2 uv = (vec2(col, row) + inset) / vec2(cols, uTypeAtlasInfo.y);
+  return (texture2D(uTypeAtlas, uv).r - 0.5) * 2.0 * uTypeAtlasInfo.w;
+}
+
+// 單一格字的 2D 距離（還沒擠出）。slot 是它在行內的位置。
+float typeGlyphEdge(vec2 xy, float slot, float count){
+  vec4 g = texture2D(uTypeGlyphData, vec2((slot + 0.5) / TYPE_MAX, 0.5));
+  float reveal = clamp(g.y, 0.0, 1.0);
+  // 完全還沒出現的格子直接跳過。這不只是省成本：reveal→0 時下面的除法會炸。
+  if (reveal < 0.004) return 1e9;
+  float size = max(uTypeLine.y, 0.001);
+  float adv = uTypeLine.x * size;
+  // 行置中：slot 0 在最左。
+  float cx = (slot - (count - 1.0) * 0.5) * adv;
+
+  // 液態長出。DOM 版的 c.current++ 是字元瞬間出現，在這裡會「啪」一下跳出來很廉價。
+  //
+  // 第一版用的是等比縮放（x/y 同一個 squash），結果新字是「一個小點放大成字」——
+  // 讀起來是縮放，不是液體。液體從基線被擠出來的樣子是：寬度一開始就在（甚至因為
+  // 表面張力略微鼓出），高度才從零長起來。所以這裡改成非等比：
+  //   rise  縱向，以基線（世界 y = 0）為錨點從 0 長到 1
+  //   widen 橫向，未成形時略寬，收尾時回到 1
+  float grow = clamp(uTypeShape.z, 0.0, 1.0);
+  float emerge = 1.0 - reveal;
+  // rise 有下限：它是除數，太小的話下面 yLocal 會爆掉，整個場退化成「處處都是很小
+  // 的正距離」，march 步長被壓到極小。0.12 已經扁到看不出字形，夠用。
+  float rise = mix(1.0, mix(1.0, 0.12, grow), emerge);
+  float widen = 1.0 + emerge * grow * 0.22;
+
+  // 世界座標 → 格內座標。兩個縮放各自的錨點不同（rise 錨在基線、widen 錨在字心），
+  // 所以要分開反推，不能寫成一個向量除法。
+  float xLocal = (xy.x - cx) / widen;
+  float yLocal = xy.y / rise;
+  // 格中心在基線上方 baseline × 字級處，扣掉之後才是格內座標。
+  vec2 tileUV = vec2(xLocal, yLocal - uTypeLine.z * size) / size + 0.5;
+  vec2 safeUV = clamp(tileUV, vec2(0.0), vec2(1.0));
+  float raw = typeAtlasSample(g.x, safeUV);
+  // 圖集存的是「格單位」的距離，換回世界要乘上 size；非等比縮放後的真實距離無法
+  // 只用一個係數表示，取兩軸較小的那個是保守的低估——低估對 raymarch 安全（步小
+  // 一點），高估會直接穿進字裡面。
+  float d = raw * size * min(widen, rise);
+  // 取樣盒外：延續盒緣的正距離，再加上「離開盒子」那一段。少了這一段，被 rise 壓扁
+  // 的格子在盒外會回傳一個很小的正值，march 得一步一步爬過整片空白。
+  // svgShapeDistance 用同樣的手法處理它的 3×3 取樣盒。
+  vec2 boxHalf = vec2(0.5 * size * widen, 0.5 * size * rise);
+  vec2 over = abs(xy - vec2(cx, uTypeLine.z * size * rise)) - boxHalf;
+  d += length(max(over, vec2(0.0)));
+  // 未成形時把距離場整體膨脹，細節被磨圓成一團——表面張力先把筆畫拉成液團，
+  // 收尾才收出字的邊。這是「液態」與「淡入」的差別所在。
+  return d - emerge * grow * 0.05 * size;
+}
+
+float typewriterDistance(vec3 p){
+  float count = uTypeLine.w;
+  if (count < 0.5) return 1e9;
+  float size = max(uTypeLine.y, 0.001);
+  float adv = uTypeLine.x * size;
+  float x0 = -(count - 1.0) * 0.5 * adv;
+
+  // x 軸切片剔除：字沿 x 等距排列，所以任一點只有最近的三格可能是最小值。
+  // 少了這一步，每個 march step 要對 24 格各取一次樣，這個模式就不可能跑。
+  // 三格（而不是兩格）是因為每格覆蓋的世界寬度比 advance 大——圖集刻意留了
+  // padding，相鄰格在世界空間是重疊的。取少了會高估距離，而高估距離的 SDF
+  // 會讓 raymarch 過衝、穿進字裡面。
+  float k = floor((p.x - x0) / adv + 0.5);
+  float edge = 1e9;
+  for (int j = -1; j <= 1; j++) {
+    float slot = k + float(j);
+    if (slot < -0.5 || slot > count - 0.5) continue;
+    edge = min(edge, typeGlyphEdge(p.xy, slot, count));
+  }
+
+  // 游標。DOM 版是一個閃爍的 .caret span；這裡是行尾的一根液柱，閃爍相位鎖在
+  // 循環上（見 bubble.js），所以循環接回去時不會跳。
+  if (uTypeCaret.w > 0.5 && uTypeCaret.z > 0.001) {
+    vec2 halfExtent = vec2(uTypeCaret.z, size * 0.36);
+    vec2 q = abs(p.xy - uTypeCaret.xy) - halfExtent + vec2(size * 0.05);
+    float caret = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - size * 0.05;
+    edge = min(edge, caret);
+  }
+  if (edge > 1e8) return 1e9;
+
+  // 擠出。與 svgShapeDistance 同一個作法：smooth-max 只圓化正面與側壁的交界，
+  // 半徑由獨立的圓角參數控制。
+  //
+  // 圓角要夾在字形的特徵尺度（烘焙時量到的最細筆畫半厚，見 glyph-field.js）之下。
+  // 沒有這道夾制，繁體字會壞得很難懂：圓角是世界單位的絕對值，而「態」的筆畫間隙
+  // 只有 0.04 世界單位左右，一個對拉丁字母剛好的圓角（0.056）就大過整條間隙，
+  // 每條筆畫各自往外長一圈之後直接黏成一團黑影。夾制之後同一組參數在中英文都成立，
+  // 使用者不必為了換一種文字重調滑桿。
+  float bevel = min(max(uTypeShape.y, 0.0001), max(uTypeShape.w, 0.002) * size * 0.75);
+  float depth = abs(p.z) - uTypeShape.x;
+  return -smin(-edge, -depth, bevel);
+}
+#endif // FEATURE_TYPEWRITER
+
 float mapScene(vec3 p, bool smoothShape){
   float d = 1e9;
   // 吸收時半徑歸零並不足以消除 smooth-min：零半徑點落在模型表面時
@@ -1113,6 +1234,13 @@ float mapScene(vec3 p, bool smoothShape){
   }
 #ifdef FEATURE_RESEARCH
   if (uCount > 0) d -= researchShellOffset(p);
+#endif
+// 打字模式的字就是玻璃本體（不是球裡的內容物），所以直接聯集進 d，法線與第二
+// 表面因此自動走既有的 calcNormal／traceExitSurface，折射與色散一併作用在字上。
+// 用 min 而不是 smin：預設沒有主滴（count 0），而使用者若把主滴拉出來，那些水滴
+// 的身分是繞著行走的墨滴，不該跟字融成一團。
+#ifdef FEATURE_TYPEWRITER
+  d = min(d, typewriterDistance(p));
 #endif
   // 衛星滴以「會釋放的 smin」與頸部相連：成形期 blend 高（細絲上的鼓包），
   // 掐斷時 blend→0，smin 退化為硬 min → 成為自由滴。

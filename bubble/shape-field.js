@@ -197,7 +197,11 @@ function edt1dArg(f, srcIn, d, srcOut, v, z, n) {
   }
 }
 
-function subpixelSigned2D(coverage, w, h) {
+// 以下三支是烘焙 2D 距離場的通用工具，字形圖集（glyph-field.js）走的是同一條
+// 「canvas 覆蓋率 → 次像素有號距離 → 降採樣 → 微模糊 → float 貼圖」管線，因此開放
+// 出去共用。上面那段關於「軸對齊硬邊沒有抗鋸齒像素」的分析本來就是拿一段粗體文字
+// 量出來的，字形正是它最直接的使用者——複製一份只會讓兩邊各自長歪。
+export function subpixelSigned2D(coverage, w, h) {
   const INF = 1e20;
   const n = w * h;
   const f = new Float32Array(n);
@@ -276,7 +280,7 @@ function subpixelSigned2D(coverage, w, h) {
   return signed;
 }
 
-function encodeFloat2D(field, w, h, range = 24) {
+export function encodeFloat2D(field, w, h, range = 24) {
   const data = new Float32Array(w * h * 4);
   for (let i = 0; i < field.length; i++) {
     const v = clamp(0.5 + field[i] / (range * 2), 0, 1);
@@ -296,7 +300,7 @@ function encodeFloat2D(field, w, h, range = 24) {
 }
 
 // 可分離高斯模糊，邊界以複製取樣（場外圍是 padding 的正距離，複製不會生出實體）。
-function blurField(field, size, sigma) {
+export function blurField(field, size, sigma) {
   if (!(sigma > 0)) return field;
   const radius = Math.max(1, Math.ceil(sigma * 3));
   const kernel = new Float32Array(radius * 2 + 1);

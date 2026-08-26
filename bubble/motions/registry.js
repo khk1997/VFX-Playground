@@ -159,6 +159,82 @@ export const MOTIONS = {
       },
     ],
   },
+  typewriter: {
+    label: '打字 Typewriter',
+    uniform: 10,
+    // 字形不走 SVG／GLB 那條匯入管線，而是自己烘一份字形圖集
+    // （glyph-field.js）——每個字要能獨立動畫，整句話烘成一張距離場做不到。
+    usesShapeField: false,
+    gate: 'typewriter',
+    // 字本身就是玻璃主體，不需要 metaball 主滴。使用者想加幾顆當「墨滴」仍然
+    // 可以拉高，那些水滴會照一般模式繞著行走。
+    count: 0,
+    radius: 0.24,
+    // 三句話、每句十來個字，一輪 8 秒的打字節奏最接近原型（每字約 55ms）。
+    loopDuration: 8,
+    dolly: false,
+    overrides: {
+      materialStyle: 'universal',
+      // 一行字是橫向鋪開的，鏡頭得退遠一點才裝得下。
+      cameraDistance: 9.4,
+      // 刻意不是正面。第一版鏡頭幾乎正對著字，而擠出的字正面與背面是兩片平行的
+      // 平面——平行界面幾乎不折射，於是只有輪廓那一圈有玻璃感，中間看起來是空的，
+      // 整個字讀成一條描邊。斜一點才看得到側壁，厚度也才變成看得見的東西。
+      cameraRotationX: -13,
+      cameraRotationY: 19,
+      // 字要看得清楚，鏡頭不繞、表面不晃。
+      spin: 0,
+      wobble: 0,
+      transmission: 0.97,
+      roughness: 0.04,
+      dispersionEnabled: true,
+      dispersionSeparation: 0.32,
+      spectralCausticEnabled: false,
+    },
+    params: [
+      {
+        key: 'typeText', label: '文字內容', type: 'text',
+        value: 'LIQUID\nGLASS\nTYPE',
+      },
+      {
+        key: 'typeSize', label: '字級', min: 0.2, max: 1.2, step: 0.01, value: 0.82,
+      },
+      {
+        key: 'typeTracking', label: '字距', min: 0.6, max: 1.6, step: 0.01, value: 1,
+      },
+      {
+        // 0.11（第一版）在斜視下仍然偏薄，側壁只有一線；0.18 才讓字讀成一塊實心
+        // 玻璃而不是一片壓克力。上限保留 0.4，再厚字腔就會被側壁吃掉。
+        key: 'typeDepth', label: '擠出厚度', min: 0.02, max: 0.4, step: 0.005, value: 0.18,
+      },
+      {
+        key: 'typeBevel', label: '邊緣圓角', min: 0, max: 0.12, step: 0.002, value: 0.056,
+      },
+      {
+        key: 'typeGrow', label: '液態長出', min: 0, max: 1, step: 0.01, value: 0.6,
+      },
+      {
+        // 不能叫 typeCaret：uniform 名稱是從 key 自動推導的（'u' + 首字大寫），
+        // 那樣會撞上 shader 端那顆 vec4 uTypeCaret，通用綁定迴圈會把它整個覆寫成
+        // 一個 float。撞名是靜默的——uniforms[uName] 存在就寫，沒有任何警告。
+        key: 'typeCaretWidth', label: '游標寬度', min: 0, max: 0.4, step: 0.01, value: 0.16,
+      },
+      // 以下四條是時間軸的「相對權重」而不是絕對毫秒，讀數會換算成實際毫秒
+      // 顯示。理由見 motions/typewriter.js 的開頭：loopDuration 是主時鐘。
+      {
+        key: 'typeCharTime', label: '每字時間', min: 0, max: 4, step: 0.05, value: 1,
+      },
+      {
+        key: 'typeHold', label: '打完停留', min: 0, max: 60, step: 0.5, value: 20,
+      },
+      {
+        key: 'typeEraseTime', label: '每字刪除', min: 0, max: 4, step: 0.05, value: 0.55,
+      },
+      {
+        key: 'typeGap', label: '換句空檔', min: 0, max: 30, step: 0.5, value: 6,
+      },
+    ],
+  },
   formation: {
     label: '形狀匯聚 Formation',
     uniform: 1,
@@ -375,8 +451,21 @@ export const MOTION_SVG_DEMO = pick('svgDemo');
 export const MOTION_OVERRIDES = pick('overrides');
 export const MOTION_KEYS = Object.keys(MOTIONS);
 export const MOTION_PARAMS = Object.fromEntries(entries.map(([key, motion]) => [key, motion.params || []]));
+
+// 文字型參數（type: 'text'）刻意不進 MOTION_PARAM_DEFAULTS。bubble.js 的 DEFAULTS
+// 明確是「數值滑桿」那一組，它的通用綁定迴圈對每個 key 一律 parseFloat——字串混
+// 進去會變成 NaN。改走一張獨立的表，跟 SELECTS／TOGGLES／COLORS 各有各的表是
+// 同一個作法。
+const isTextParam = param => param.type === 'text';
 export const MOTION_PARAM_DEFAULTS = Object.fromEntries(
-  entries.flatMap(([, motion]) => (motion.params || []).map(param => [param.key, param.value])),
+  entries.flatMap(([, motion]) => (motion.params || [])
+    .filter(param => !isTextParam(param))
+    .map(param => [param.key, param.value])),
+);
+export const MOTION_TEXT_DEFAULTS = Object.fromEntries(
+  entries.flatMap(([, motion]) => (motion.params || [])
+    .filter(isTextParam)
+    .map(param => [param.key, param.value])),
 );
 
 export const usesShapeField = motion => Boolean(MOTIONS[motion]?.usesShapeField);

@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
-} from './shape-field.js?v=svg-shape-76';
+} from './shape-field.js?v=typewriter-1';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
   MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
@@ -13,8 +13,8 @@ import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
-  usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-93';
+  MOTION_TEXT_DEFAULTS, usesShapeField, motionGates,
+} from './motions/registry.js?v=typewriter-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
@@ -24,6 +24,10 @@ import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-76';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
 import createResearchMotion from './motions/research.js?v=research-4';
+import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
+import {
+  bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
+} from './glyph-field.js?v=typewriter-1';
 import {
   createExtendedMotionRuntime, effectiveCapillaryHeight, isExtendedMotion,
 } from './motions/extended/index.js?v=extended-motions-4';
@@ -626,7 +630,7 @@ const COLOR_DEFAULTS  = {
   membraneCardColor: '#94c7ff',
   membraneShadeColor: '#85b8e6',
 };
-const P = { ...DEFAULTS, ...SELECT_DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS };
+const P = { ...DEFAULTS, ...MOTION_TEXT_DEFAULTS, ...SELECT_DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS };
 const extendedMotions = createExtendedMotionRuntime(P);
 
 // 材質切換不是同一組滑桿換 shader 分支：通用玻璃與液態薄膜各自保留一份
@@ -1033,6 +1037,9 @@ function refreshCapillaryHeightReadout() {
 
 // 崩解噴濺的四段時長是正規化的相對權重，所以動任何一段，其他三段實際佔的秒數
 // 都會跟著變 —— 讀數必須一起重畫，不能只更新被拖動的那一個。
+// 打字的四段時長同樣是正規化的相對權重（見 motions/typewriter.js），所以讀數也
+// 必須整組一起重畫。
+const TYPE_TIMELINE_KEYS = ['typeCharTime', 'typeHold', 'typeEraseTime', 'typeGap'];
 const SHATTER_TIMELINE_KEYS = ['shatterRest', 'shatterChargeTime', 'shatterFlight', 'shatterReform'];
 function refreshShatterTimelineReadouts() {
   for (const key of SHATTER_TIMELINE_KEYS) {
@@ -1054,6 +1061,7 @@ function refreshLoopScaledReadouts() {
     if (valEl) valEl.textContent = fmt[key](P[key]);
   }
   refreshShatterTimelineReadouts();
+  refreshTypewriterReadouts();
 }
 
 import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=baseline-21';
@@ -1555,6 +1563,7 @@ function variantState() {
     // （staticShape 7）就完全交給上面的 shapeField 走形狀場，兩邊不同時混進 d。
     staticShape: P.motion === 'static' && P.staticShape !== 7,
     research: P.motion === 'research',
+    typewriter: P.motion === 'typewriter',
     // 微滴的實際條件與 updateMicroDrops 的 activeCount 完全一致：四種模式之一，
     // 而且造型場真的在（微滴的 anchors 也來自匯入的造型）。
     microDrops: shapeField
@@ -1598,7 +1607,8 @@ function variantKey(v = variantState()) {
   return [
     'g' + flag(v.shapeField, 'S') + flag(v.svgNormals, 'V') + flag(v.capillaryTexture, 'C')
       + flag(v.microDrops, 'M') + flag(v.satellites, 'A') + flag(v.capillaryWave, 'W')
-      + flag(v.negativeField, 'N') + flag(v.staticShape, 'X') + flag(v.research, 'R'),
+      + flag(v.negativeField, 'N') + flag(v.staticShape, 'X') + flag(v.research, 'R')
+      + flag(v.typewriter, 'T'),
     'o' + flag(v.thinFilm, 'F') + flag(v.liquidFilm, 'L') + flag(v.dispersion, 'D')
       + flag(v.prismBeam, 'P') + flag(v.spectralCaustics, 'K') + flag(v.beamPatterns, 'B')
       + flag(v.envPmrem, 'E'),
@@ -1665,6 +1675,7 @@ function shaderFeatures() {
     FEATURE_CAPILLARY_WAVE: V.capillaryWave ? '' : false,
     FEATURE_NEGATIVE_FIELD: V.negativeField ? '' : false,
     FEATURE_RESEARCH: V.research ? '' : false,
+    FEATURE_TYPEWRITER: V.typewriter ? '' : false,
 
     // --- 法線路徑：只編當下這個造型型別真正會走到的那一條 ---
     // SVG 造型的 6-tap 分軸差分與四面體 4-tap 在原版是兩條 runtime 分支，兩條都會
@@ -2418,6 +2429,10 @@ const {
   dropPosition: researchDropPosition,
   shellEnvelope: researchShellEnvelope,
 } = createResearchMotion(P);
+const {
+  typeState: typewriterState,
+  segmentMilliseconds: typewriterSegmentMs,
+} = createTypewriterMotion(P, { phrases: () => typewriterPhrases });
 let shapeRigidNow = null;
 const shapeRigidVec = new THREE.Vector3();
 // 旋轉現在是任意軸（XYZ 各自振幅），用歐拉角組出一個 3x3 旋轉矩陣，比逐軸
@@ -3120,6 +3135,8 @@ function updateDropUniforms(t) {
   // 靜態方體（作用在程序化方體 SDF）。兩者共用同一組 uniform 與同一支
   // capillarySurfaceOffset，差別只在呼叫端喂進去的是哪顆 SDF 的座標。
   const capillaryFamily = P.motion === 'capillary' || P.motion === 'static';
+  // 打字模式的排版與行狀態。回傳值是這一行需要的包圍球半徑（見下面 dropBounds）。
+  const typewriterReach = P.motion === 'typewriter' ? updateTypewriterUniforms(phase) : 0;
   if (uniforms) {
     // 同樣封住舊參數檔可能保存的輪廓液滴與一般水滴噪聲；切離毛細波後會立即
     // 從 P 恢復原模式各自記憶的值。
@@ -3512,6 +3529,9 @@ function updateDropUniforms(t) {
   dropBounds.set(cx, cy, cz, boundRadius);
   // 穿梭環繞的形狀恆定顯示，射線邊界必須永遠涵蓋整個形狀範圍，不能只依水滴
   // 目前分佈算——水滴群聚集中時，形狀本身仍完整存在，邊界縮小會讓外圍被裁掉。
+  // 一行字是橫向鋪開的，而 boundRadius 是從水滴分佈算出來的——預設沒有主滴時
+  // 那個半徑是 0，整行會被射線邊界整段裁掉。
+  if (typewriterReach > 0) dropBounds.set(0, 0, 0, Math.max(boundRadius, typewriterReach));
   if (usesShapeField(P.motion) && shapeField) {
     dropBounds.set(0, 0, 0, Math.max(boundRadius, 2.25));
     for (let i = 0; i < microCount; i++) {
@@ -3556,6 +3576,152 @@ function makeBlankShape() {
   const tex = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1, THREE.RGBAFormat);
   tex.needsUpdate = true;
   return tex;
+}
+
+/* ===== 打字模式：字形圖集與每幀的行狀態 ===== */
+
+// 每格字的資料：x 字形在圖集裡的索引、y 成形進度、zw 保留。走資料貼圖而不是
+// uniform 陣列的理由見 shaders.js 的 uTypeGlyphData 宣告。
+const glyphData = new Float32Array(MAX_TYPE_GLYPHS * 4);
+const glyphDataTexture = new THREE.DataTexture(
+  glyphData, MAX_TYPE_GLYPHS, 1, THREE.RGBAFormat, THREE.FloatType,
+);
+glyphDataTexture.minFilter = glyphDataTexture.magFilter = THREE.NearestFilter;
+glyphDataTexture.wrapS = glyphDataTexture.wrapT = THREE.ClampToEdgeWrapping;
+glyphDataTexture.generateMipmaps = false;
+glyphDataTexture.needsUpdate = true;
+
+let glyphAtlas = null;
+// 目前這份圖集是用哪段文字烘的。文字沒變就不重烘——切換模式、載入參數組合檔
+// 都會走到 ensureGlyphAtlas，但那些情況下文字通常沒動。
+let glyphAtlasText = null;
+let glyphRebuildTimer = null;
+let typewriterPhrases = [];
+// 上一次烘焙耗時。這是同步的主執行緒工作，所以它直接就是「打完字之後畫面卡多久」，
+// 放進面板讓它可見——中文會比拉丁字貴得多（解析度高一倍以上）。
+let glyphBakeMs = 0;
+
+// 烘焙是同步的 CPU 工作（EDT 那條路，跟 SVG 一樣），所以打字時每個 keystroke
+// 都重烘會卡住主執行緒。debounce 的長度沿用 GLB 品質切換那條（160ms）。
+function scheduleGlyphRebuild() {
+  clearTimeout(glyphRebuildTimer);
+  glyphRebuildTimer = setTimeout(() => {
+    glyphRebuildTimer = null;
+    ensureGlyphAtlas(true);
+    requestPausedRender();
+  }, 220);
+}
+
+function ensureGlyphAtlas(force = false) {
+  if (P.motion !== 'typewriter') return;
+  const text = String(P.typeText ?? '');
+  if (!force && glyphAtlasText === text && glyphAtlas) return;
+  typewriterPhrases = parsePhrases(text);
+  const t0 = performance.now();
+  const next = typewriterPhrases.length ? bakeGlyphAtlas(typewriterPhrases) : null;
+  glyphBakeMs = Math.round(performance.now() - t0);
+  if (glyphAtlas && glyphAtlas.texture !== next?.texture) glyphAtlas.texture.dispose();
+  glyphAtlas = next;
+  glyphAtlasText = text;
+  if (glyphAtlas && !glyphAtlas.font.ok) console.warn('[打字] 字體驗證：' + glyphAtlas.font.note);
+  if (glyphAtlas && glyphAtlas.truncated) {
+    console.warn(`[打字] 不同字元數超過圖集上限，已忽略 ${glyphAtlas.truncated} 個`);
+  }
+  uploadGlyphAtlas();
+  refreshTypewriterReadouts();
+}
+
+// 把烘好的圖集綁上 uniform。單獨一支的理由：面板還原（載入自動保存的模式）發生在
+// initGL 之前，那時 uniforms 還是 null，圖集會烘好卻上不去，畫面只剩空白貼圖而
+// 完全沒有錯誤訊息。所以 initGL 建好 uniforms 之後要再套一次。
+function uploadGlyphAtlas() {
+  if (!uniforms || !glyphAtlas) return;
+  uniforms.uTypeAtlas.value = glyphAtlas.texture;
+  uniforms.uTypeAtlasInfo.value.set(
+    glyphAtlas.cols, glyphAtlas.rows, glyphAtlas.tile, glyphAtlas.range,
+  );
+}
+
+// 一行字能容納的格數。超過上限就從尾巴截斷——把「打到第幾個字」硬塞進 24 格
+// 會讓行首的字被吃掉，截尾至少讓讀者看得到句子的開頭。
+function typewriterLineLimit() {
+  return MAX_TYPE_GLYPHS;
+}
+
+// 每幀把行狀態打包成 uniform。時間軸整條都在 CPU 這邊算完，shader 只認
+// 「第幾格、是哪個字形、成形到幾成」。
+function updateTypewriterUniforms(phase) {
+  if (!uniforms) return 0;
+  const state = glyphAtlas ? typewriterState(phase) : null;
+  if (!state || !glyphAtlas) {
+    uniforms.uTypeLine.value.set(0.6, P.typeSize, 0.22, 0);
+    uniforms.uTypeCaret.value.set(0, 0, 0, 0);
+    return 0;
+  }
+  const limit = typewriterLineLimit();
+  const visible = Math.min(state.chars, limit);
+  let slot = 0;
+  for (let i = 0; i < visible; i++) {
+    const idx = glyphAtlas.indexOf.get(state.phrase[i]);
+    if (idx === undefined) continue;
+    // 最後一格是正在打（或正在刪）的那一個，成形進度來自時間軸；其餘都已就位。
+    const reveal = i === state.chars - 1 ? state.charFrac : 1;
+    const o = slot * 4;
+    glyphData[o] = idx;
+    glyphData[o + 1] = reveal;
+    glyphData[o + 2] = 0;
+    glyphData[o + 3] = 0;
+    slot++;
+  }
+  // 空白字元在圖集裡確實有一格（全正距離），所以上面不會被 continue 掉；
+  // 這裡只是把沒用到的格子清乾淨，避免上一幀的殘值被 x 切片剔除誤讀。
+  for (let i = slot; i < MAX_TYPE_GLYPHS; i++) glyphData[i * 4 + 1] = 0;
+  glyphDataTexture.needsUpdate = true;
+
+  const advance = glyphAtlas.advance * Math.max(0.1, P.typeTracking);
+  const size = Math.max(0.01, P.typeSize);
+  uniforms.uTypeLine.value.set(advance, size, glyphAtlas.baseline, slot);
+  uniforms.uTypeShape.value.set(P.typeDepth, P.typeBevel, P.typeGrow, glyphAtlas.feature);
+
+  // 游標：行尾往右半格。閃爍相位鎖在循環上（每循環固定的整數次閃爍），這樣
+  // 循環接回去時不會出現半亮的一幀。
+  const caretWidth = Math.max(0, P.typeCaretWidth) * size * 0.5;
+  if (caretWidth > 0.001) {
+    const advWorld = advance * size;
+    const x0 = -(slot - 1) * 0.5 * advWorld;
+    // slot 0 在最左，游標站在最後一格的右邊；一格都沒有時停在行中央。
+    const caretX = slot > 0 ? x0 + slot * advWorld : 0;
+    const blinks = Math.max(1, Math.round(P.loopDuration / 0.53));
+    const on = fract(phase * blinks) < 0.5 ? 1 : 0;
+    uniforms.uTypeCaret.value.set(caretX, size * 0.18, caretWidth, on);
+  } else uniforms.uTypeCaret.value.set(0, 0, 0, 0);
+
+  // 包圍球半徑。這個模式的形狀是橫向鋪開的一行字，不是聚在原點的水滴群，
+  // 所以邊界得自己算——沿用水滴分佈算出來的半徑會把行尾整段裁掉。
+  return (slot * advance * size) * 0.5 + size * 0.9;
+}
+
+function refreshTypewriterReadouts() {
+  const ms = typewriterSegmentMs();
+  const show = (key, value) => {
+    const el = document.getElementById(key + '_v');
+    if (el) el.textContent = value;
+  };
+  show('typeCharTime', ms.char >= 1 ? Math.round(ms.char) + ' ms/字' : '瞬間');
+  show('typeHold', (ms.hold / 1000).toFixed(2) + ' s');
+  show('typeEraseTime', ms.erase >= 1 ? Math.round(ms.erase) + ' ms/字' : '瞬間');
+  show('typeGap', (ms.gap / 1000).toFixed(2) + ' s');
+  const info = document.getElementById('typeTextInfo');
+  if (info) {
+    if (!glyphAtlas) info.textContent = '沒有文字';
+    else {
+      const longest = typewriterPhrases.reduce((m, x) => Math.max(m, x.length), 0);
+      const over = longest > MAX_TYPE_GLYPHS ? `，最長一句 ${longest} 字超過上限 ${MAX_TYPE_GLYPHS}` : '';
+      const font = glyphAtlas.cjk ? `${glyphAtlas.font.note} + 系統中文字` : glyphAtlas.font.note;
+      info.textContent = `${typewriterPhrases.length} 句／${glyphAtlas.count} 個字形`
+        + `／${glyphAtlas.tile}² 烘焙 ${glyphBakeMs}ms（${font}）${over}`;
+    }
+  }
 }
 
 function makeMicroDropTexture() {
@@ -3739,6 +3905,15 @@ function initGL() {
     uResearchShellAmount: { value: P.researchShellAmount },
     uResearchShellSpeed: { value: P.researchShellSpeed },
     uResearchShellDensity: { value: P.researchShellDensity },
+    // 打字模式。字形圖集在切進這個模式時才烘（見 scheduleGlyphRebuild），在那之前
+    // 綁一張 1x1 的空貼圖——取樣器一定要綁著東西，某些驅動會直接拒絕未綁定的
+    // sampler，即使 runtime 永遠不會走到那個分支。
+    uTypeAtlas: { value: makeBlankGlyphAtlas() },
+    uTypeGlyphData: { value: glyphDataTexture },
+    uTypeAtlasInfo: { value: new THREE.Vector4(1, 1, 1, 1) },
+    uTypeLine: { value: new THREE.Vector4(0.6, P.typeSize, 0.22, 0) },
+    uTypeShape: { value: new THREE.Vector4(P.typeDepth, P.typeBevel, P.typeGrow, 0) },
+    uTypeCaret: { value: new THREE.Vector4(0, 0, 0, 0) },
     uElasticEvent: { value: elasticEvent },
     uElasticStrength: { value: P.elasticStrength },
     uElasticDensity: { value: P.elasticDensity },
@@ -3914,6 +4089,8 @@ function initGL() {
   mat.envMap = pmremTarget.texture;
   variantCache.set(variantKey(), mat);
   activeVariantKey = variantKey();
+  // 面板還原比 initGL 早，字形圖集可能已經烘好但還沒有 uniform 可以綁。
+  uploadGlyphAtlas();
   mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
   scene.add(mesh);
@@ -4192,9 +4369,19 @@ function buildExtendedMotionControls() {
       label.htmlFor = param.key;
       label.textContent = param.label;
       if (param.gate) row.dataset.gate = param.gate;
-      const control = document.createElement(param.type === 'select' ? 'select' : 'input');
+      const tag = param.type === 'select' ? 'select'
+        : param.type === 'text' ? 'textarea'
+        : 'input';
+      const control = document.createElement(tag);
       control.id = param.key;
-      if (param.type === 'select') {
+      if (param.type === 'text') {
+        // 一行一句。rows 給 3 是「看得到三句、超過就自己捲」的折衷——面板本來就窄，
+        // 再高會把下面的時間軸滑桿推出可視範圍。
+        control.rows = 3;
+        control.spellcheck = false;
+        control.placeholder = '一行一句';
+        row.classList.add('textRow');
+      } else if (param.type === 'select') {
         for (const optionSpec of param.options) {
           const option = document.createElement('option');
           option.value = String(optionSpec.value);
@@ -4213,8 +4400,37 @@ function buildExtendedMotionControls() {
       if (param.type !== 'select') value.id = `${param.key}_v`;
       row.append(label, control, value);
       block.append(row);
+      // 文字輸入底下掛一行狀態：幾句、烘出幾個字形、字體有沒有 fallback。
+      // 字體 fallback 是靜默的（fillText 找不到就換一套字形），沒有這行的話
+      // 使用者只會覺得「字看起來怪」而不知道原因。
+      if (param.type === 'text') {
+        const note = document.createElement('div');
+        note.className = 'row noteRow';
+        note.id = `${param.key}Info`;
+        block.append(note);
+      }
     }
     host.append(block);
+  }
+}
+
+// 文字型控制項。單獨一支而不是塞進下面那個數值迴圈：那個迴圈對每個 key 一律
+// parseFloat，而且每次 input 都直接寫 uniform；文字要走的是「debounce 之後重烘一份
+// 字形圖集」，兩條路的生命週期完全不同。
+//
+// 參數組合檔不必特別處理——preset-io.js 的控件查詢本來就含 textarea[id]，
+// 序列化直接讀 DOM value，所以存檔與六格快速暫存自動就支援了。
+function bindTextControls() {
+  for (const key of Object.keys(MOTION_TEXT_DEFAULTS)) {
+    const el = document.getElementById(key);
+    if (!el) continue;
+    el.value = P[key];
+    if (PREVIEW || el._bound) continue;
+    el.addEventListener('input', () => {
+      P[key] = el.value;
+      if (key === 'typeText') scheduleGlyphRebuild();
+    });
+    el._bound = true;
   }
 }
 
@@ -4252,6 +4468,7 @@ function bindControls() {
       }
       if (uniforms && uniforms[uName]) uniforms[uName].value = (key === 'count') ? Math.round(P[key]) : P[key];
       if (SHATTER_TIMELINE_KEYS.includes(key)) refreshShatterTimelineReadouts();
+      if (TYPE_TIMELINE_KEYS.includes(key)) refreshTypewriterReadouts();
       if (key === 'gatherDuration' || key === 'shapeHold' || key === 'loopDuration') {
         updateTimelineSummary();
         // 循環秒數變了，那些「比例 × 循環秒數」的讀數也要跟著換算，但不動
@@ -4321,6 +4538,9 @@ function bindControls() {
       if ((key === 'motion' || key === 'shapeSource') && previousValue !== P[key]) {
         ensureShapeForCurrentSource();
       }
+      // 字形圖集只在真正切進打字模式時才烘（一次同步的 EDT，不該在其他模式付這個
+      // 錢）。ensureGlyphAtlas 自己會判斷模式與文字有沒有變。
+      if (key === 'motion') ensureGlyphAtlas();
       // motion / shapeSource / materialStyle / rayBeamPattern 都可能改變要編譯的功能
       // 組合。syncShaderVariant 自己會判斷有沒有變，沒變就是零成本。
       syncShaderVariant();
@@ -4623,7 +4843,7 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   // 重設不換動態模式：按重設是想把「現在這個模式」的參數歸零，不是想被丟回
   // 分裂模式再自己切回來。
   const motion = P.motion;
-  Object.assign(P, DEFAULTS, SELECT_DEFAULTS, TOGGLE_DEFAULTS, COLOR_DEFAULTS);
+  Object.assign(P, DEFAULTS, MOTION_TEXT_DEFAULTS, SELECT_DEFAULTS, TOGGLE_DEFAULTS, COLOR_DEFAULTS);
   P.motion = motion;
   resetMaterialProfiles();
   if (mobileRenderQuery.matches && !PREVIEW) P.cameraDistance = MOBILE_CAMERA_DISTANCE_DEFAULT;
@@ -4638,6 +4858,9 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   resetSpectralCausticColors();
   resetRamp();
   bindControls();
+  bindTextControls();
+  // 文字被還原成預設，字形圖集得跟著重烘（bindTextControls 只同步 DOM）。
+  ensureGlyphAtlas(true);
   if (inited) loadMaterialEnvironment('universal');
 });
 
@@ -5327,6 +5550,15 @@ window.__bubbleDiagReport = function () {
         uMaterialStyle: uniforms.uMaterialStyle.value,
         uRayBeamPattern: uniforms.uRayBeamPattern.value,
       } : '(未初始化)',
+      // 打字模式的排版狀態。字沒出現時第一個要看的就是這幾個值：可見字數（.w）、
+      // 字距、字級，以及射線邊界有沒有涵蓋整行。
+      打字: uniforms && P.motion === 'typewriter' ? {
+        uTypeLine: uniforms.uTypeLine.value.toArray(),
+        uTypeShape: uniforms.uTypeShape.value.toArray(),
+        uTypeAtlasInfo: uniforms.uTypeAtlasInfo.value.toArray(),
+        uTypeCaret: uniforms.uTypeCaret.value.toArray(),
+        uBounds: uniforms.uBounds.value.toArray(),
+      } : undefined,
       每像素SDF評估_最壞: (mapSceneCalls * innerMax).toLocaleString(),
       每像素SDF評估_目前參數: (mapSceneCalls * innerActual).toLocaleString(),
     },
@@ -6077,6 +6309,7 @@ function frame(now) {
 
 buildExtendedMotionControls();
 bindControls();
+bindTextControls();
 
 // 參數組合匯出/匯入。預覽模式要呈現正規預設值，不套用個人的自動保存狀態。
 if (!PREVIEW && window.PresetIO) {

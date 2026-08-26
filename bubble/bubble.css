@@ -268,6 +268,19 @@
     font: 12px inherit; cursor: pointer;
   }
   .row .val { flex: 0 0 46px; text-align: right; font-size: 11px; color: #9fb8ff; font-variant-numeric: tabular-nums; }
+  /* 打字模式的文字輸入。面板其餘控件都是單行高度，textarea 得自己撐開，
+     所以這一列改成換行排版：標籤在上、輸入框佔滿整寬。 */
+  .textRow { flex-wrap: wrap; align-items: flex-start; }
+  .textRow label { flex: 1 1 100%; }
+  .textRow .val { display: none; }
+  .row textarea {
+    flex: 1 1 100%; min-width: 0; padding: 5px 7px;
+    background: rgba(20,26,40,.95); color: #c6cfe4;
+    border: 1px solid rgba(150,180,255,.3); border-radius: 6px;
+    font: 12px/1.45 ui-monospace, Menlo, monospace; resize: vertical;
+  }
+  .row textarea:focus-visible { outline: 2px solid #9fb8ff; outline-offset: 1px; }
+  .noteRow { font-size: 10.5px; color: #7f8ead; line-height: 1.4; margin-top: -2px; }
   #capillaryHeightRow .val { flex-basis: 72px; }
   #capillarySpeedRow .val { flex-basis: 64px; }
   .stopRow label { flex: 0 0 34px; font-size: 11px; color: #97a6c6; }
