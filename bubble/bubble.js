@@ -14,7 +14,7 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   usesShapeField, motionGates,
-} from './motions/registry.js?v=svg-shape-92';
+} from './motions/registry.js?v=svg-shape-93';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
@@ -23,6 +23,7 @@ import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-sha
 import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-76';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
+import createResearchMotion from './motions/research.js?v=research-4';
 import {
   createExtendedMotionRuntime, effectiveCapillaryHeight, isExtendedMotion,
 } from './motions/extended/index.js?v=extended-motions-4';
@@ -707,6 +708,9 @@ const MOTION_SCOPED_KEYS = [
   'cameraDistance', 'cameraRotationX', 'cameraRotationY',
   // 環繞幅度也是構圖的一部分，跟上面三條鏡頭參數同一組。
   'spin',
+  // Research 的外殼需要比一般水滴低很多的 FBM 起伏；列入模式記憶後 registry
+  // 的 wobble override 才會真的寫回控制項與 uniform，而不是仍沿用全域 0.305。
+  'wobble',
   'materialStyle',
   // 這一組波紋參數是靜態模式與毛細波共用的同一批控制項（見 registry.js 的
   // capillaryTextureUI），但兩個模式要的預設不一樣：毛細波是整個模式的主角，
@@ -1052,7 +1056,7 @@ function refreshLoopScaledReadouts() {
   refreshShatterTimelineReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=baseline-13';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=baseline-20';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
@@ -1550,6 +1554,7 @@ function variantState() {
     // 靜態模式選了內建幾何（staticShape 0-6）時才編譯程序化 SDF；選了「匯入」
     // （staticShape 7）就完全交給上面的 shapeField 走形狀場，兩邊不同時混進 d。
     staticShape: P.motion === 'static' && P.staticShape !== 7,
+    research: P.motion === 'research',
     // 微滴的實際條件與 updateMicroDrops 的 activeCount 完全一致：四種模式之一，
     // 而且造型場真的在（微滴的 anchors 也來自匯入的造型）。
     microDrops: shapeField
@@ -1593,7 +1598,7 @@ function variantKey(v = variantState()) {
   return [
     'g' + flag(v.shapeField, 'S') + flag(v.svgNormals, 'V') + flag(v.capillaryTexture, 'C')
       + flag(v.microDrops, 'M') + flag(v.satellites, 'A') + flag(v.capillaryWave, 'W')
-      + flag(v.negativeField, 'N') + flag(v.staticShape, 'X'),
+      + flag(v.negativeField, 'N') + flag(v.staticShape, 'X') + flag(v.research, 'R'),
     'o' + flag(v.thinFilm, 'F') + flag(v.liquidFilm, 'L') + flag(v.dispersion, 'D')
       + flag(v.prismBeam, 'P') + flag(v.spectralCaustics, 'K') + flag(v.beamPatterns, 'B')
       + flag(v.envPmrem, 'E'),
@@ -1659,6 +1664,7 @@ function shaderFeatures() {
     FEATURE_SATELLITES: V.satellites ? '' : false,
     FEATURE_CAPILLARY_WAVE: V.capillaryWave ? '' : false,
     FEATURE_NEGATIVE_FIELD: V.negativeField ? '' : false,
+    FEATURE_RESEARCH: V.research ? '' : false,
 
     // --- 法線路徑：只編當下這個造型型別真正會走到的那一條 ---
     // SVG 造型的 6-tap 分軸差分與四面體 4-tap 在原版是兩條 runtime 分支，兩條都會
@@ -2407,6 +2413,11 @@ const { jellyTransform } = createJellyMotion(P);
 // jellyTransform（見 hop.js 的 driveIndex/driveE/driveStrength），果凍在這條路上
 // 不跑自己的戳擊節奏。兩條分支互斥，見 updateDropUniforms 的 jelly 分支。
 const { hopTransform } = createHopMotion(P);
+const {
+  shapeRigidMotion: researchShapeRigidMotion,
+  dropPosition: researchDropPosition,
+  shellEnvelope: researchShellEnvelope,
+} = createResearchMotion(P);
 let shapeRigidNow = null;
 const shapeRigidVec = new THREE.Vector3();
 // 旋轉現在是任意軸（XYZ 各自振幅），用歐拉角組出一個 3x3 旋轉矩陣，比逐軸
@@ -2746,6 +2757,8 @@ function updateDropUniforms(t) {
     // 原地戳擊：完全是改動前的那條路，一個字都沒動——既有的參數組合檔載進來
     // 外觀必須一模一樣。
     shapeRigidNow = jellyTransform(phase);
+  } else if (P.motion === 'research') {
+    shapeRigidNow = researchShapeRigidMotion(phase);
   } else {
     shapeRigidNow = usesShapeField(P.motion) ? shapeRigidMotion(phase) : null;
   }
@@ -2904,6 +2917,12 @@ function updateDropUniforms(t) {
       const pool = weaveSurfaceAnchors.length ? weaveSurfaceAnchors : formationAnchors;
       const home = pool.length ? pool[Math.floor(h2 * pool.length) % pool.length] : null;
       if (home) { x = home.x; y = home.y; z = home.z; }
+    } else if (P.motion === 'research') {
+      const research = researchDropPosition(i, phase, formationPosNow);
+      x = formationPosNow.x;
+      y = formationPosNow.y;
+      z = formationPosNow.z;
+      radiusFactor = research.reveal * research.pulse;
     } else if (extended) {
       const state = extendedMotions.sample(
         P.motion, i, phase, layoutCount, dropSeeds[i], extendedShapeContext, extendedMotionState[i],
@@ -2927,7 +2946,7 @@ function updateDropUniforms(t) {
     // 水滴自己排出來，大小不一的下沉量會讓靜止的形狀邊緣參差不齊。
     // 果凍同樣排除：它的水滴要正好貼在實體的表面錨點上，被推低一截就會在輪廓旁
     // 浮出一圈對不上的球。
-    if (!melting && !morphing && !jelly && !extended) {
+    if (!melting && !morphing && !jelly && !extended && P.motion !== 'research') {
       y -= P.gravity * P.spread * 0.045 * Math.pow(radius, 1.35);
     }
     if (isFormationMotion(P.motion)) {
@@ -3108,7 +3127,11 @@ function updateDropUniforms(t) {
       ? 0 : (P.edgeDropsEnabled ? activeEdgeDrops.length : 0);
     // 靜態方體沒有水滴系統，「表面起伏」這段通用 fbm 噪聲不該波及它——用戶
     // 明確要求靜態模式不吃任何水滴形態參數，波紋只能來自下面這組毛細波參數。
-    uniforms.uWobble.value = capillaryFamily ? 0 : P.wobble;
+    uniforms.uWobble.value = capillaryFamily
+      ? 0
+      : P.motion === 'research'
+        ? P.wobble * researchShellEnvelope(phase)
+        : P.wobble;
     uniforms.uExtendedMotion.value = (extended || capillaryFamily) ? MOTION_UNIFORM_MAP[P.motion] : 0;
     const extendedParams = uniforms.uExtendedParams.value;
     if (capillaryFamily) {
@@ -3713,6 +3736,9 @@ function initGL() {
     uWobble:     { value: P.wobble },
     uWobbleScale: { value: P.wobbleScale },
     uWobbleSpeed: { value: P.wobbleSpeed },
+    uResearchShellAmount: { value: P.researchShellAmount },
+    uResearchShellSpeed: { value: P.researchShellSpeed },
+    uResearchShellDensity: { value: P.researchShellDensity },
     uElasticEvent: { value: elasticEvent },
     uElasticStrength: { value: P.elasticStrength },
     uElasticDensity: { value: P.elasticDensity },

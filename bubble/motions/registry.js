@@ -119,6 +119,46 @@ export const MOTIONS = {
     loopDuration: 12,
     dolly: false,
   },
+  research: {
+    label: '研究中 Research',
+    uniform: 9,
+    usesShapeField: false,
+    gate: 'research',
+    count: 1,
+    radius: 0.76,
+    loopDuration: 4.5,
+    dolly: false,
+    overrides: {
+      materialStyle: 'universal',
+      cameraDistance: 4.8,
+      spin: 0,
+      wobble: 0.05,
+      viscosity: 0.82,
+      surfaceTension: 0.92,
+      transmission: 0.97,
+      roughness: 0.035,
+      dispersionEnabled: true,
+      dispersionSeparation: 0.24,
+    },
+    params: [
+      {
+        key: 'researchShellAmount', label: '外殼起伏大小',
+        min: 0, max: 0.08, step: 0.001, value: 0.022,
+      },
+      {
+        key: 'researchShellSpeed', label: '外殼起伏速度',
+        min: 0, max: 4, step: 1, value: 1,
+      },
+      {
+        key: 'researchShellDensity', label: '外殼起伏密度',
+        min: 0.4, max: 2.2, step: 0.05, value: 1,
+      },
+      {
+        key: 'researchBreath', label: '整體呼吸幅度',
+        min: 0, max: 0.06, step: 0.001, value: 0.018,
+      },
+    ],
+  },
   formation: {
     label: '形狀匯聚 Formation',
     uniform: 1,

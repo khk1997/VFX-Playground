@@ -111,6 +111,9 @@ uniform float uViscosity;
 uniform float uWobble;
 uniform float uWobbleScale;
 uniform float uWobbleSpeed;
+uniform float uResearchShellAmount;
+uniform float uResearchShellSpeed;
+uniform float uResearchShellDensity;
 uniform vec2  uElasticEvent;    // x：事件包絡，y：傳播進度
 uniform float uElasticStrength;
 uniform float uElasticDensity;
@@ -955,6 +958,91 @@ float sdTorus(vec3 p, float majorR, float minorR){
 }
 #endif // FEATURE_STATIC_SHAPE
 
+#ifdef FEATURE_RESEARCH
+float researchShellOffset(vec3 p){
+  vec3 q = normalize(p - uDrops[0].xyz + vec3(0.0001));
+  float phase01 = fract(uTime / max(uLoopDuration, 0.001));
+  float cycles = floor(max(uResearchShellSpeed, 0.0) + 0.5);
+  float phase = phase01 * TAU * cycles;
+  // 三個不同頻率的低幅度鼓包；權重偏在側面與下緣，保留主體圓形可讀性。
+  float density = max(uResearchShellDensity, 0.1);
+  // 所有時間倍率都是整數諧波，phase=TAU 時精確接回 phase=0；外殼可以持續
+  // 起伏而不必在每輪末尾淡回圓球。
+  float lobes = sin(q.x * 4.6 * density + phase)
+    * sin(q.y * 3.8 * density - phase)
+    + 0.55 * sin((q.x - q.y + q.z) * 7.2 * density + phase * 2.0);
+  float side = smoothstep(-0.15, 0.9, abs(q.x) + max(-q.y, 0.0) * 0.55);
+  return lobes * side * uResearchShellAmount;
+}
+
+float researchCapsule(vec3 p, vec3 a, vec3 b, float r){
+  vec3 pa = p - a, ba = b - a;
+  float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return length(pa - ba * h) - r;
+}
+
+float researchTorusZ(vec3 p, float majorR, float minorR){
+  return length(vec2(length(p.xy) - majorR, p.z)) - minorR;
+}
+
+float researchIconOne(vec3 p, vec3 center, float scale, float angle){
+  p = (p - center) / max(scale, 0.001);
+  float c = cos(angle), s = sin(angle);
+  p.xy = mat2(c, -s, s, c) * p.xy;
+  float ring = researchTorusZ(p, 0.17, 0.026);
+  float tail = researchCapsule(
+    p,
+    vec3(-0.095, -0.122, 0.0),
+    vec3(-0.155, -0.194, 0.0),
+    0.025
+  );
+  return min(ring, tail) * scale;
+}
+
+float researchIconMap(vec3 p){
+  float phase = fract(uTime / max(uLoopDuration, 0.001));
+  float revealA = smoothstep(0.08, 0.32, phase)
+    * (1.0 - smoothstep(0.82, 0.94, phase));
+  float revealB = smoothstep(0.22, 0.50, phase)
+    * (1.0 - smoothstep(0.80, 0.92, phase));
+  float travelA = smoothstep(0.06, 0.44, phase);
+  float travelB = smoothstep(0.20, 0.60, phase);
+  float orbit = phase * TAU;
+  vec3 centerA = mix(vec3(0.55, -0.035, 0.03), vec3(0.095, 0.035, 0.025), travelA);
+  vec3 centerB = mix(vec3(-0.56, 0.07, -0.035), vec3(-0.10, -0.045, -0.02), travelB);
+  centerA += vec3(cos(orbit), sin(orbit), sin(orbit * 0.7)) * vec3(0.022, 0.018, 0.016);
+  centerB += vec3(cos(-orbit + 1.1), sin(-orbit + 1.1), cos(orbit * 0.8)) * vec3(0.020, 0.017, 0.014);
+  float a = revealA > 0.001
+    ? researchIconOne(p, centerA, 0.90 * revealA, 0.10 + sin(orbit) * 0.08)
+    : 1e4;
+  float b = revealB > 0.001
+    ? researchIconOne(p, centerB, 0.82 * revealB, -0.16 + cos(orbit) * 0.07)
+    : 1e4;
+  return min(a, b);
+}
+
+vec3 researchIconNormal(vec3 p){
+  const float h = 0.0018;
+  return normalize(vec3(
+    researchIconMap(p + vec3(h, 0, 0)) - researchIconMap(p - vec3(h, 0, 0)),
+    researchIconMap(p + vec3(0, h, 0)) - researchIconMap(p - vec3(0, h, 0)),
+    researchIconMap(p + vec3(0, 0, h)) - researchIconMap(p - vec3(0, 0, h))
+  ));
+}
+
+bool researchTraceIcon(vec3 ro, vec3 rd, float maxDistance, out vec3 hitPoint){
+  float t = 0.006;
+  for (int i = 0; i < 28; i++) {
+    hitPoint = ro + rd * t;
+    float d = researchIconMap(hitPoint);
+    if (d < 0.0012) return true;
+    t += max(d * 0.72, 0.0012);
+    if (t > maxDistance) break;
+  }
+  return false;
+}
+#endif
+
 float mapScene(vec3 p, bool smoothShape){
   float d = 1e9;
   // 吸收時半徑歸零並不足以消除 smooth-min：零半徑點落在模型表面時
@@ -995,6 +1083,9 @@ float mapScene(vec3 p, bool smoothShape){
       arrivalDistanceSq = min(arrivalDistanceSq, dot(arrivalDelta, arrivalDelta));
     }
   }
+#ifdef FEATURE_RESEARCH
+  if (uCount > 0) d -= researchShellOffset(p);
+#endif
   // 衛星滴以「會釋放的 smin」與頸部相連：成形期 blend 高（細絲上的鼓包），
   // 掐斷時 blend→0，smin 退化為硬 min → 成為自由滴。
   //
@@ -1939,6 +2030,12 @@ void main(){
   vec3 exitNormal = -N;
   float pathLength = 0.0;
   bool hasExitSurface = false;
+#ifdef FEATURE_RESEARCH
+  bool researchIconHit = false;
+  vec3 researchIconPoint = vec3(0.0);
+  vec3 researchIconN = vec3(0.0, 0.0, 1.0);
+  vec3 researchInsideDir = rd;
+#endif
   bool needsEnvironmentTransmission =
     uBgMode == 0 && uHasEnv == 1
       && (uEnvRefraction > 0.001 || universalGlass);
@@ -1946,9 +2043,22 @@ void main(){
     vec3 insideDir = refract(rd, N, 1.0 / uIOR);
     if (dot(insideDir, insideDir) > 0.0001) {
       transmissionDir = normalize(insideDir);
-      if (traceExitSurface(p, normalize(insideDir), exitPoint, exitNormal, pathLength)) {
+      bool tracedExit = traceExitSurface(
+        p, normalize(insideDir), exitPoint, exitNormal, pathLength
+      );
+      if (tracedExit) {
         hasExitSurface = true;
         insideDir = normalize(insideDir);
+#ifdef FEATURE_RESEARCH
+        researchInsideDir = insideDir;
+        researchIconHit = researchTraceIcon(
+          p + insideDir * 0.004,
+          insideDir,
+          max(pathLength - 0.008, 0.0),
+          researchIconPoint
+        );
+        if (researchIconHit) researchIconN = researchIconNormal(researchIconPoint);
+#endif
         float exitFacing = clamp(dot(exitNormal, insideDir), 0.0, 1.0);
         float f0 = pow((uIOR - 1.0) / (uIOR + 1.0), 2.0);
         backFres = f0 + (1.0 - f0) * pow(1.0 - exitFacing, 5.0);
@@ -1966,7 +2076,10 @@ void main(){
           vec3 exitPoint2;
           vec3 exitNormal2;
           float pathLength2;
-          if (traceExitSurface(exitPoint, bounceDir, exitPoint2, exitNormal2, pathLength2)) {
+          bool tracedBounce = traceExitSurface(
+            exitPoint, bounceDir, exitPoint2, exitNormal2, pathLength2
+          );
+          if (tracedBounce) {
             insideDir = bounceDir;
             exitFacing = clamp(dot(exitNormal2, bounceDir), 0.0, 1.0);
             backFres = f0 + (1.0 - f0) * pow(1.0 - exitFacing, 5.0);
@@ -2722,6 +2835,23 @@ void main(){
   // 此時也已經是合成完的顏色，乘上去的語意一致。暗底時 beamAbsorb 恆為 vec3(1)，
   // 這一行是精確的恆等運算。
   finalColor = clamp(finalColor * beamAbsorb, 0.0, 1.0);
+
+#ifdef FEATURE_RESEARCH
+  if (researchIconHit) {
+    float iconFacing = clamp(dot(-researchInsideDir, researchIconN), 0.0, 1.0);
+    float iconFresnel = 0.07 + 0.93 * pow(1.0 - iconFacing, 4.0);
+    vec3 iconReflection = sampleEnvironmentBackdrop(
+      reflect(researchInsideDir, researchIconN),
+      roughBlur * 0.24
+    );
+    vec3 iconTone = vec3(0.06, 0.22, 0.34) * (0.30 + iconFacing * 0.20)
+      + iconReflection * (0.12 + iconFresnel * 0.42)
+      + vec3(0.20, 0.62, 0.94) * iconFresnel * 0.32;
+    // 先以透射吸收壓暗，再 screen 進第二表面的反射；內物件因此有自己的厚度與法線。
+    finalColor *= vec3(0.72, 0.80, 0.86);
+    finalColor = 1.0 - (1.0 - finalColor) * (1.0 - clamp(iconTone, 0.0, 0.82));
+  }
+#endif
 
   float outputAlpha = 1.0;
   if (uTransparentBackground == 1) {
