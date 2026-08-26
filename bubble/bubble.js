@@ -1056,7 +1056,7 @@ function refreshLoopScaledReadouts() {
   refreshShatterTimelineReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=baseline-20';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=baseline-21';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //

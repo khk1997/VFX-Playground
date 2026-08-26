@@ -959,6 +959,31 @@ float sdTorus(vec3 p, float majorR, float minorR){
 #endif // FEATURE_STATIC_SHAPE
 
 #ifdef FEATURE_RESEARCH
+// 側面／下緣權重的圓角半徑。這個常數存在的理由是折痕，不是造型：
+//
+// 這個遮罩原本寫成 abs(q.x) + max(-q.y, 0.0) * 0.55。q 是球心指向表面的單位
+// 方向，所以 abs() 在 q.x=0 那整圈子午線上、max() 在 q.y=0 那整圈赤道上斜率
+// 反號 —— 值是連續的，跳掉的是梯度。偏移量又直接減進距離場（見 mapScene），
+// 法線是對同一個 mapScene 做中央差分，於是那兩圈折線變成兩道法線硬折，在
+// roughness 0.035 的透射玻璃上被折射放大成「一條把球切開」的亮線；因為
+// mapScene 同時被 traceExitSurface 用來找第二表面，正面與背面各有一道，看
+// 起來就像貫穿整顆球。GPU 實測（預設 amount 0.022、density 1，掃過折線 ±0.12、
+// 16 個相位，單步 h=0.0018 的法線轉角）：跨越 x=0 峰值 5.94°、y=0 峰值 1.77°，
+// 而同一條掃描帶的平均只有 0.33° —— 折線是唯一的離群值，所以看得見。
+//
+// 換掉的是那兩個不可微運算，不是造型意圖：
+//   sqrt(x*x + k*k)                 abs(x) 的雙曲線圓角版
+//   0.5 * (sqrt(y*y + k*k) - y)     max(-y, 0) 的同款平滑版
+// 兩者的兩條尾巴都逐字收斂回原式（|值| ≫ k 時），只在寬約 k 的那條窄帶內
+// 抬高一點 —— 也就是只有折線本身被抹平，側面與下緣的鼓包手感沒動。
+//
+// k 取 0.06 是量出來的：同一組掃描的峰值降到 x=0 為 0.62°、y=0 為 0.64°，而且
+// 峰值位置移到帶緣（|q| ≈ 0.12，那是鼓包本身最陡的地方），折線處不再有殘留；
+// 帶內平均維持 0.31–0.32°，與舊式的最大高度差 0.0025 世界單位（半徑的 0.32%）。
+// k 再往上加只多磨掉 0.1° 左右，純粹是白付偏差。折痕與周圍的自然變化都與
+// uResearchShellAmount 成正比，所以這個比例在滑桿拉到上限 0.08 時同樣成立。
+const float RESEARCH_SIDE_SOFT = 0.06;
+
 float researchShellOffset(vec3 p){
   vec3 q = normalize(p - uDrops[0].xyz + vec3(0.0001));
   float phase01 = fract(uTime / max(uLoopDuration, 0.001));
@@ -971,7 +996,10 @@ float researchShellOffset(vec3 p){
   float lobes = sin(q.x * 4.6 * density + phase)
     * sin(q.y * 3.8 * density - phase)
     + 0.55 * sin((q.x - q.y + q.z) * 7.2 * density + phase * 2.0);
-  float side = smoothstep(-0.15, 0.9, abs(q.x) + max(-q.y, 0.0) * 0.55);
+  float k2 = RESEARCH_SIDE_SOFT * RESEARCH_SIDE_SOFT;
+  float lateral = sqrt(q.x * q.x + k2);
+  float lower = 0.5 * (sqrt(q.y * q.y + k2) - q.y);
+  float side = smoothstep(-0.15, 0.9, lateral + lower * 0.55);
   return lobes * side * uResearchShellAmount;
 }
 
