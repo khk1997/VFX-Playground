@@ -280,6 +280,15 @@
     font: 12px/1.45 ui-monospace, Menlo, monospace; resize: vertical;
   }
   .row textarea:focus-visible { outline: 2px solid #9fb8ff; outline-offset: 1px; }
+  /* 打字模式：直接輸入系統字體名稱那一列，跟 textarea 同款輸入框樣式，
+     旁邊掛一顆窄按鈕，不像 textarea 需要自己整行換行。 */
+  .row input[type=text].fontNameInput {
+    flex: 1 1 auto; min-width: 0; padding: 5px 7px;
+    background: rgba(20,26,40,.95); color: #c6cfe4;
+    border: 1px solid rgba(150,180,255,.3); border-radius: 6px;
+    font: 12px inherit;
+  }
+  .row input[type=text].fontNameInput:focus-visible { outline: 2px solid #9fb8ff; outline-offset: 1px; }
   .noteRow { font-size: 10.5px; color: #7f8ead; line-height: 1.4; margin-top: -2px; }
   #capillaryHeightRow .val { flex-basis: 72px; }
   #capillarySpeedRow .val { flex-basis: 64px; }
@@ -293,6 +302,9 @@
     padding: 6px 0; font-size: 12px; cursor: pointer;
   }
   #hdriBtn:hover, .fileBtn:hover { background: rgba(150,180,255,.22); }
+  /* 系統字體名稱輸入框旁邊那顆「套用」按鈕——跟 .fileBtn 同一套配色，但不搶版面，
+     固定寬度就好，不用像匯入按鈕那樣撐滿整行。 */
+  .fileBtn.fileBtn--compact { flex: 0 0 auto; padding: 6px 14px; }
   #formationGroup { border-color: rgba(105,225,255,.3); }
   #formationGroup h3 { color: #78ddf4; }
   /* ===== 參數組合匯出/匯入（preset-io.js） ===== */

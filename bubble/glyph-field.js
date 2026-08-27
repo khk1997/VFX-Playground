@@ -52,15 +52,78 @@ export const MAX_TYPE_GLYPHS = 24;
 // 圖集能容納的不同字元數上限。超過就截斷並回報，不要靜默吃掉。
 const MAX_ATLAS_GLYPHS = 96;
 
-// 等寬是硬要求，不是風格選擇：shader 端靠「字沿 x 軸等距」把每個 march step 的
-// 取樣數壓到 3 格（見 shaders.js 的 typewriterDistance）。比例字體的 advance 逐字
-// 不同，那條 O(1) 的定位算式就不成立，字會互相錯位。
+// 等寬原本是硬要求：shader 端靠「字沿 x 軸等距」把每個 march step 的取樣數壓到
+// 3 格（見 shaders.js 的 typewriterDistance）。比例字體的 advance 逐字不同，那條
+// O(1) 的定位算式本該不成立——但 advance 的算法（見 bakeGlyphAtlas）取的是「這句話
+// 裡最寬的那個字元」，所有字一律用這個寬度排版，等於把任何字體都「假裝」成等寬。
+// 不是最貼合原字體手感的排法（窄字元兩側會有多餘留白），但不會錯位、不會重疊，
+// 所以使用者匯入比例字體時仍然可以用，只是字距觀感跟原字體的排版不同。
 //
-// Menlo 是 macOS 一定有的等寬字；SF Mono 要裝 Xcode/Terminal 才有，不能假設。
-// 這裡沒有 bundle 字體檔（assets/ 目前只有 HDR），所以換一台機器會 fallback 到
-// 該平台的 monospace——不會壞，但字形不同。verifyFont 會把這件事講出來。
+// Menlo 是 macOS 一定有的等寬字，沒有 bundle 字體檔時的預設 fallback；SF Mono 要
+// 裝 Xcode/Terminal 才有，不能假設。換一台機器會 fallback 到該平台的 monospace——
+// 不會壞，但字形不同。verifyFont 會把這件事講出來。
 const FONT_STACK = 'Menlo, Monaco, "DejaVu Sans Mono", monospace';
 const FONT_WEIGHT = 700;
+
+// 使用者換過的字體有兩種來源（見 bubble.js 的 loadCustomFont／useSystemFont）：
+//   1. 匯入檔案——FontFace 註冊時固定用這個家族名，不用原始檔名，因為檔名可能
+//      帶副檔名、空白，或剛好跟系統字體同名；使用者看到的原始檔名另外存在
+//      customFontLabel，只給面板顯示，不進 ctx.font。
+//   2. 直接輸入系統字體名稱（例如 Adobe Fonts 桌面同步裝好的字體）——這種情況下
+//      customFontFamily 就是使用者輸入的名稱本身，customFontLabel 跟它相同。
+const CUSTOM_FONT_FAMILY = 'TypewriterCustomFont';
+let customFontActive = false;
+let customFontLabel = '';
+let customFontFamily = CUSTOM_FONT_FAMILY;
+// 系統字體挑選器（Local Font Access API）可以指名特定字重／樣式（Regular／
+// Bold／Light…），這裡另外存一個可覆寫的字重，預設仍是 700（走 A 路線的下限，
+// 見下面 verifyFont 的說明）。手動輸入名稱那條路徑不指定，維持原本的 700。
+let customFontWeight = FONT_WEIGHT;
+
+// 目前實際要用的字型堆疊。有匯入字體時排在最前面，找不到才落回 Menlo 那條預設
+// fallback 鏈——不是整個換掉，這樣匯入的字體檔本身若缺字（例如只做了英文，句子
+// 裡卻混了中文），至少不會整格開天窗，會落到系統等寬字。
+function fontStack() {
+  return customFontActive ? `"${customFontFamily}", ${FONT_STACK}` : FONT_STACK;
+}
+
+// 註冊一顆使用者匯入的字體檔。呼叫端（bubble.js）已經完成 FontFace 的載入與
+// document.fonts.add，這裡只負責「往後 fillText 用哪個家族名」與「快取要不要
+// 整份作廢」——換字體之後，快取裡任何舊字元都是用舊字體烘的，必須全部丟掉，
+// 否則畫面會出現新舊字體混雜的字元（新打的字用新字體，之前就在句子裡、剛好
+// 被快取命中的字還是舊字體）。
+export function setCustomFont(label) {
+  customFontActive = true;
+  customFontLabel = label;
+  customFontFamily = CUSTOM_FONT_FAMILY;
+  customFontWeight = FONT_WEIGHT;
+  glyphCache.clear();
+}
+
+// 直接指名一個系統字體，不透過 FontFace／檔案——例如 Adobe Fonts 用「啟用桌面
+// 字體」同步裝好的字體，本來就已經是這台機器上一個真正的系統字體，Canvas 原生
+// 就找得到，不需要（也不該）另外去抓字體檔案。name 直接當 CSS 家族名使用，
+// 呼叫端需自行確保沒有異常字元（bubble.js 的 useSystemFont 會先做基本檢查）。
+// weight 可選——系統字體挑選器會帶正確的字重數字（100～900）過來，讓 Canvas
+// 選到那個特定樣式的字面；手動輸入名稱時不帶，維持原本固定 700 的行為。
+export function useSystemFont(name, weight) {
+  customFontActive = true;
+  customFontLabel = name;
+  customFontFamily = name;
+  customFontWeight = weight || FONT_WEIGHT;
+  glyphCache.clear();
+}
+
+// 還原成內建的 Menlo。同樣要清快取，理由跟 setCustomFont 一樣。
+export function clearCustomFont() {
+  customFontActive = false;
+  customFontLabel = '';
+  customFontFamily = CUSTOM_FONT_FAMILY;
+  customFontWeight = FONT_WEIGHT;
+  glyphCache.clear();
+}
+
+export const CUSTOM_FONT_FAMILY_NAME = CUSTOM_FONT_FAMILY;
 
 // 全角字的 advance 補正。
 //
@@ -82,6 +145,17 @@ const isCJK = ch => /[\u3000-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00
 export function verifyFont() {
   const fonts = document.fonts;
   if (!fonts || typeof fonts.check !== 'function') return { ok: true, note: '無法驗證（瀏覽器不支援 document.fonts）' };
+  if (customFontActive) {
+    // 匯入的字體是 bubble.js 用 FontFace.load() 成功之後才呼叫 setCustomFont，
+    // 所以理論上這裡一定查得到；仍然檢查一次是防禦性寫法，不是信不過呼叫端——
+    // 例如分頁重新整理後 document.fonts 被清空、但某個殘留的 P.typeText 觸發
+    // 這裡先跑到的極端情況。
+    const ok = fonts.check(`${customFontWeight} 100px "${customFontFamily}"`);
+    return {
+      ok,
+      note: ok ? customFontLabel : `字體「${customFontLabel}」目前讀不到，已 fallback 到 Menlo`,
+    };
+  }
   const ok = fonts.check(`${FONT_WEIGHT} 100px Menlo`);
   return {
     ok,
@@ -189,7 +263,7 @@ export function bakeGlyphAtlas(phrases) {
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = hi;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  ctx.font = `${FONT_WEIGHT} ${emPx}px ${FONT_STACK}`;
+  ctx.font = `${customFontActive ? customFontWeight : FONT_WEIGHT} ${emPx}px ${fontStack()}`;
 
   // advance 取所有字元的最大值。等寬字下每個字都一樣，這個 max 只在混入全角
   // 字元時起作用（全角是半角的兩倍寬），此時整行退化成全角網格——字距會偏寬，

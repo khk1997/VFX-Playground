@@ -27,7 +27,8 @@ import createResearchMotion from './motions/research.js?v=research-4';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
-} from './glyph-field.js?v=typewriter-1';
+  setCustomFont, useSystemFont, clearCustomFont, CUSTOM_FONT_FAMILY_NAME,
+} from './glyph-field.js?v=typewriter-3';
 import {
   createExtendedMotionRuntime, effectiveCapillaryHeight, isExtendedMotion,
 } from './motions/extended/index.js?v=extended-motions-4';
@@ -307,7 +308,7 @@ const DEFAULTS = {              // 數值滑桿
   spectralCausticWarp: 0.57,
   spectralCausticSeparation: 0,
   spectralCausticBounce: 0.19,
-  spectralCausticFlow: 0.18,
+  spectralCausticFlow: 0,
   spectralCausticFresnelMask: 1,
   spectralCausticNoiseMask: 1,
   spectralCausticNoiseScale: 2.5,
@@ -847,6 +848,8 @@ function uniformNameFor(key) {
 }
 
 const fmt = {
+  typeDepth: v => v.toFixed(3),
+  typeBevel: v => v.toFixed(3),
   thickness: v => v.toFixed(0) + 'nm',
   thickVar: v => '±' + v.toFixed(0),
   noiseScale: v => 'x' + v.toFixed(1),
@@ -3670,6 +3673,140 @@ function typewriterLineLimit() {
   return MAX_TYPE_GLYPHS;
 }
 
+/* ===== 打字模式：使用者匯入字體 ===== */
+// 只接受單一檔案的字體格式，不含需要授權伺服器的雲字體服務、也不含 .dfont／.fon
+// 這類冷門格式——那些不是單一二進位檔，FontFace 讀不到。
+const CUSTOM_FONT_ACCEPT = '.ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2';
+let customFontFace = null; // 目前註冊在 document.fonts 裡的那顆，換字體或還原時要先移除舊的
+let customFontRequestId = 0; // 使用者連續選了好幾個檔案時，只有最後一個請求的結果算數
+
+function setFontState(text) {
+  const el = document.getElementById('typeFontState');
+  if (el) el.textContent = text;
+}
+
+async function loadCustomFont(file) {
+  const requestId = ++customFontRequestId;
+  setFontState(`正在載入「${file.name}」…`);
+  try {
+    const buffer = await file.arrayBuffer();
+    const face = new FontFace(CUSTOM_FONT_FAMILY_NAME, buffer);
+    await face.load();
+    // 載入是非同步的：使用者可能在這段期間又選了別的檔案，或按了「還原內建字體」。
+    // 只有仍然是最後一個請求時才生效，否則這份載入結果已經過期，直接丟棄
+    // （包括把它從 document.fonts 移除，不留著佔記憶體）。
+    if (requestId !== customFontRequestId) { document.fonts.delete(face); return; }
+    if (customFontFace) document.fonts.delete(customFontFace);
+    document.fonts.add(face);
+    customFontFace = face;
+    setCustomFont(file.name);
+    ensureGlyphAtlas(true);
+    requestPausedRender();
+    setFontState(`已套用：${file.name}`);
+  } catch (err) {
+    if (requestId !== customFontRequestId) return;
+    // 常見失敗：選到的檔案不是字體（例如誤選了圖片）、或字體檔本身壞損——
+    // FontFace.load() 對這兩種情況都是 reject，不會拋出更細的原因，只能照瀏覽器
+    // 給的訊息原樣顯示。
+    setFontState(`載入失敗：${err.message || '檔案格式不支援'}`);
+  }
+}
+
+// 直接指名一個系統字體，不透過檔案——例如 Adobe Fonts 用「啟用桌面字體」同步裝好
+// 的字體，本來就已經是這台機器上一個真正的系統字體，Canvas 原生就找得到。這條路
+// 完全不牽涉抓取字體檔案，也就不會踩到雲字體服務的授權問題（見 glyph-field.js 的
+// useSystemFont 說明）。
+//
+// 不在這裡先用 document.fonts.check 擋掉「找不到」的名稱——找不到時 fontStack()
+// 本來就會落回 Menlo，而 verifyFont() 會在面板狀態列如實回報「讀不到」，比在這裡
+// 攔下來更準確：check() 只能問「瀏覽器認得這個名字嗎」，問不出「等一下 fillText
+// 實際畫出來是不是真的這個字體」，兩者在某些瀏覽器/字體組合下會不一致。
+function setSystemFontState(text) {
+  const el = document.getElementById('typeSystemFontState');
+  if (el) el.textContent = text;
+}
+
+// name 若剛好命中瀏覽出來的家族清單，weight 會由呼叫端從樣式下拉帶過來；否則
+// （使用者手動打的名字、或還沒按過「列出系統字體」）走原本固定 700 的行為。
+function applySystemFont(name, weight, label) {
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  customFontRequestId++; // 讓任何還在進行中的檔案載入請求作廢
+  if (customFontFace) { document.fonts.delete(customFontFace); customFontFace = null; }
+  useSystemFont(trimmed, weight);
+  ensureGlyphAtlas(true);
+  requestPausedRender();
+  // 烘完之後 glyphAtlas.font.note 才是「這個名字瀏覽器實際讀不讀得到」的真實結果，
+  // 這裡先顯示「已套用」是樂觀的即時回饋；refreshTypewriterReadouts 已經會把
+  // font.note 顯示在 typeTextInfo，讀不到的話那邊會蓋過來寫「已 fallback 到 Menlo」。
+  setSystemFontState(`已套用系統字體：${label || trimmed}`);
+}
+
+// ===== 打字模式：瀏覽系統字體（Local Font Access API） =====
+// 只有 Chrome／Edge（且要 https 或 localhost）支援 window.queryLocalFonts；其他
+// 瀏覽器一律 fallback 到手動輸入名稱那條路，這裡的按鈕會照實回報不支援，不假裝
+// 有這個功能。搜尋框跟手動輸入是同一個 <input>：有清單時輸入框旁的原生
+// <datalist> 會提供自動完成建議（含中文子字串），沒清單（或清單沒收到那個字體）
+// 一樣可以直接手動打完整名稱送出，兩條路徑不再是分開的兩組控制項。
+let localFontsByFamily = null; // Map<family, FontData[]>，瀏覽完重建一次，僅用來組 datalist 建議清單
+
+async function browseLocalFonts() {
+  if (typeof window.queryLocalFonts !== 'function') {
+    setSystemFontState('此瀏覽器不支援系統字體清單（僅 Chrome／Edge 有 Local Font Access API），請直接在下面手動輸入完整名稱。');
+    return;
+  }
+  setSystemFontState('正在讀取系統字體清單…（可能會跳出瀏覽器授權詢問）');
+  try {
+    const list = await window.queryLocalFonts();
+    const map = new Map();
+    for (const f of list) {
+      if (!map.has(f.family)) map.set(f.family, []);
+      map.get(f.family).push(f);
+    }
+    localFontsByFamily = map;
+    const datalist = document.getElementById('typeLocalFontDatalist');
+    if (datalist) {
+      datalist.innerHTML = '';
+      const families = [...map.keys()].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+      for (const fam of families) {
+        const opt = document.createElement('option');
+        opt.value = fam;
+        datalist.appendChild(opt);
+      }
+    }
+    setSystemFontState(
+      `已讀到 ${map.size} 個字體家族——下面打字會自動篩出符合的名稱。若系統裡確實有的字體沒出現在建議清單，`
+      + `通常是瀏覽器基於系統保護排除了那顆字體（常見於作業系統內建的介面字型），`
+      + `或它其實是網頁字型服務（例如 Adobe Fonts）還沒同步成系統字體，這兩種情況都可以直接手動打完整名稱送出試試。`
+    );
+  } catch (err) {
+    // 使用者拒絕授權、或非安全環境（http 非 localhost）時會 reject。
+    setSystemFontState(`無法讀取系統字體清單：${err.message || '使用者拒絕權限或環境不支援'}`);
+  }
+}
+
+// 粗細一律由旁邊那顆下拉直接決定，不再依賴瀏覽清單裡的樣式字串猜測——手動輸入
+// 名稱時本來就常常抓不到清單，猜測式的自動判斷只會讓「有沒有粗細可選」變得
+// 不可預期。使用者自己選，永遠有得選。
+function applyTypedSystemFont() {
+  const input = document.getElementById('typeSystemFontInput');
+  const weightSel = document.getElementById('typeSystemFontWeight');
+  if (!input) return;
+  const trimmed = input.value.trim();
+  if (!trimmed) return;
+  const weight = Number(weightSel?.value) || 700;
+  applySystemFont(trimmed, weight, `${trimmed}（${weightSel?.selectedOptions[0]?.textContent || weight}）`);
+}
+
+function resetCustomFont() {
+  customFontRequestId++; // 讓任何還在進行中的載入請求作廢
+  if (customFontFace) { document.fonts.delete(customFontFace); customFontFace = null; }
+  clearCustomFont();
+  ensureGlyphAtlas(true);
+  requestPausedRender();
+  setFontState('已還原成內建字體 Menlo');
+}
+
 // 每幀把行狀態打包成 uniform。時間軸整條都在 CPU 這邊算完，shader 只認
 // 「第幾格、是哪個字形、成形到幾成」。
 function updateTypewriterUniforms(phase) {
@@ -3760,6 +3897,8 @@ function refreshTypewriterReadouts() {
   show('typeHold', P.typeHold.toFixed(2) + ' s');
   show('typeEraseTime', P.typeEraseTime > 0 ? Math.round(P.typeEraseTime) + ' ms/字' : '瞬間');
   show('typeGap', P.typeGap.toFixed(2) + ' s');
+  show('typeDepth', fmt.typeDepth(P.typeDepth));
+  show('typeBevel', fmt.typeBevel(P.typeBevel));
   const info = document.getElementById('typeTextInfo');
   if (info) {
     if (!glyphAtlas) info.textContent = '沒有文字';
@@ -5089,6 +5228,34 @@ const userShapeFiles = { svg: null, gltf: null };
 // ensureShapeForCurrentSource 也不會再拿它跟模式比對。
 let builtinSvgVariant = null;
 document.getElementById('shapeBtn').addEventListener('click', () => shapeInput.click());
+
+/* ===== 打字模式：匯入字體的按鈕綁定 ===== */
+{
+  const fontBtn = document.getElementById('typeFontBtn');
+  const fontInput = document.getElementById('typeFontInput');
+  const fontResetBtn = document.getElementById('typeFontResetBtn');
+  if (fontBtn && fontInput) {
+    fontBtn.addEventListener('click', () => fontInput.click());
+    fontInput.addEventListener('change', e => {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (file) loadCustomFont(file);
+    });
+  }
+  if (fontResetBtn) fontResetBtn.addEventListener('click', resetCustomFont);
+
+  const systemFontInput = document.getElementById('typeSystemFontInput');
+  const systemFontBtn = document.getElementById('typeSystemFontBtn');
+  if (systemFontInput && systemFontBtn) {
+    systemFontBtn.addEventListener('click', applyTypedSystemFont);
+    // Enter 直接套用，不用特地點按鈕——這顆輸入框旁邊沒有其他會被 Enter
+    // 意外觸發的控制項，跟表單提交無關（面板本來就不是 <form>）。
+    systemFontInput.addEventListener('keydown', e => { if (e.key === 'Enter') applyTypedSystemFont(); });
+  }
+
+  const browseBtn = document.getElementById('typeLocalFontBrowseBtn');
+  if (browseBtn) browseBtn.addEventListener('click', browseLocalFonts);
+}
 
 /* ===== 形狀 B（變形目標）的匯入 ===== */
 const morphTargetInput = document.getElementById('morphTargetInput');

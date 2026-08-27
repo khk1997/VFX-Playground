@@ -177,26 +177,58 @@ export const MOTIONS = {
     dolly: false,
     overrides: {
       materialStyle: 'universal',
-      // 鏡頭距離不覆寫——沿用跟形狀匯聚、穿梭環繞等大多數模式一樣的共用預設
-      // （DEFAULTS.cameraDistance，見 bubble.js），不再是打字模式自己的 9.4。
-      // 刻意不是正面。第一版鏡頭幾乎正對著字，而擠出的字正面與背面是兩片平行的
-      // 平面——平行界面幾乎不折射，於是只有輪廓那一圈有玻璃感，中間看起來是空的，
-      // 整個字讀成一條描邊。斜一點才看得到側壁，厚度也才變成看得見的東西。
-      cameraRotationX: -13,
-      cameraRotationY: 19,
+      // 使用者實測後定案的一整組外觀預設（2026-08-27 存檔匯入）。鏡頭改成斜一點
+      // 是刻意的——第一版鏡頭幾乎正對著字，擠出字的正面與背面是兩片平行平面，
+      // 平行界面幾乎不折射，只有輪廓那一圈有玻璃感、中間讀起來像描邊；斜一點
+      // 才看得到側壁，厚度才變成看得見的東西。
+      cameraDistance: 5.1,
+      cameraRotationX: 0.2,
+      cameraRotationY: 23.2,
+      antialiasLevel: 'ultra',
       // 字要看得清楚，鏡頭不繞、表面不晃。
       spin: 0,
       wobble: 0,
+      wobbleSpeed: 0.53,
       transmission: 0.97,
-      roughness: 0.04,
+      roughness: 0.12,
+      fresnel: 0,
+      ior: 1.5,
+      reflect: 2,
+      materialExposure: 0.85,
+      shapeSoftness: 0.025,
+      meltSizeMax: 0.53,
+      meltStretch: 0.1,
+      meltNeck: 0.22,
+      capillaryHeight: 0.09,
+      capillaryRings: 3,
+      capillarySpeed: 2,
       dispersionEnabled: true,
       dispersionSeparation: 0.32,
-      spectralCausticEnabled: false,
+      rayBeamIntensity: 2.05,
+      rayBeamSeparation: 0.04,
+      rayBeamChroma: 2.3,
+      rayBeamZoom: 1.5,
+      rayBeamRings: 1.5,
+      rayBeamGlow: 0.28,
+      rayBeamAzimuth: -8,
+      rayBeamElevation: 66,
+      rayBeamFresnelMask: 0.28,
+      rayBeamNoiseMask: 0.42,
+      rayBeamNoiseScale: 1.6,
+      spectralCausticEnabled: true,
+      spectralCausticCol3: '#f9b43e',
+      spectralCausticCol6: '#ff4d4d',
+      spectralCausticIntensity: 6,
+      spectralCausticFlow: 0,
+      hdriYaw: -56,
+      hdriPitch: 0,
+      hdriBlur: 0.18,
+      envRefraction: 0.07,
     },
     params: [
       {
         key: 'typeText', label: '文字內容', type: 'text',
-        value: 'LIQUID\nGLASS\nTYPE',
+        value: 'LIQUID',
       },
       {
         // 使用者實測後定案：1.5 比先前調過的 0.82／0.95 都更大——鏡頭距離改回跟
@@ -211,14 +243,11 @@ export const MOTIONS = {
         key: 'typeTracking', label: '字距', min: 0.6, max: 1.6, step: 0.01, value: 1.15,
       },
       {
-        // 使用者實測後定案：0.07 比先前調過的 0.18／0.26 都薄很多，字讀起來更像
-        // 一片薄玻璃／壓克力，而不是厚實的玻璃塊——是刻意選的手感，不是回退。
-        key: 'typeDepth', label: '擠出厚度', min: 0.02, max: 0.4, step: 0.005, value: 0.07,
+        // 使用者實測後定案（2026-08-27 存檔匯入）。
+        key: 'typeDepth', label: '擠出厚度', min: 0.02, max: 0.4, step: 0.005, value: 0.115,
       },
       {
-        // 配合上面的薄擠出，圓角也收到 0.01——薄片本來就不需要大圓角，稜邊維持
-        // 俐落。
-        key: 'typeBevel', label: '邊緣圓角', min: 0, max: 0.12, step: 0.002, value: 0.01,
+        key: 'typeBevel', label: '邊緣圓角', min: 0, max: 0.12, step: 0.002, value: 0.1,
       },
       {
         // 關閉：字直接完整出現，不做基線往上長的液態動畫。

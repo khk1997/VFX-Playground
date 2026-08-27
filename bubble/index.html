@@ -168,6 +168,32 @@
     </div>
     </div>
     <div id="extendedMotionControls"></div>
+    <div data-gate="typewriter" id="typeFontGroup">
+      <div class="row"><button class="fileBtn" id="typeFontBtn">匯入字體…</button></div>
+      <input type="file" id="typeFontInput" accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2" hidden>
+      <div class="row"><button class="fileBtn" id="typeFontResetBtn">還原內建字體 Menlo</button></div>
+      <div id="typeFontState" class="note">支援 .ttf／.otf／.woff／.woff2。字重建議夠粗（Bold 以上）——擠出成玻璃後太細的筆畫會變成一束鐵絲，不是玻璃塊。</div>
+      <div class="row"><button class="fileBtn" id="typeLocalFontBrowseBtn">列出系統字體（可搜尋）…</button></div>
+      <div class="row">
+        <input type="text" id="typeSystemFontInput" class="fontNameInput" list="typeLocalFontDatalist" placeholder="輸入或搜尋系統字體名稱…" autocomplete="off">
+        <datalist id="typeLocalFontDatalist"></datalist>
+      </div>
+      <div class="row">
+        <label style="flex:0 0 auto;">粗細</label>
+        <select id="typeSystemFontWeight" class="fontNameInput">
+          <option value="100">Thin 100</option>
+          <option value="300">Light 300</option>
+          <option value="400" selected>Regular 400</option>
+          <option value="500">Medium 500</option>
+          <option value="600">SemiBold 600</option>
+          <option value="700">Bold 700</option>
+          <option value="800">ExtraBold 800</option>
+          <option value="900">Black 900</option>
+        </select>
+        <button class="fileBtn fileBtn--compact" id="typeSystemFontBtn">套用</button>
+      </div>
+      <div id="typeSystemFontState" class="note">名稱可以直接手動打完整名稱（適合已經用 Adobe Fonts「啟用桌面字體」之類方式裝成系統字體的字型），也可以先按「列出系統字體」讓輸入框打字時自動篩出建議名稱（支援中文，僅 Chrome／Edge）。粗細一律自己在旁邊選——擠出成玻璃後筆畫太細會變成一束鐵絲，中文字建議至少 Bold 以上。</div>
+    </div>
     <div data-gate="split" class="row" id="flowSpeedRow"><label>動態張力</label><input type="range" id="flowSpeed" min="0" max="1.5" step="0.01" value="0.47"><span class="val" id="flowSpeed_v"></span></div>
     <!-- 果凍排除：它的阻尼彈簧走的是同一份造型變換（見 bubble.js 的 shapeRigidNow），
          兩者疊起來會看不出哪一下是被戳的，所以那個模式底下這一組不開放。 -->
