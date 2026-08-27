@@ -170,7 +170,9 @@ export const MOTIONS = {
     // 可以拉高，那些水滴會照一般模式繞著行走。
     count: 0,
     radius: 0.24,
-    // 三句話、每句十來個字，一輪 8 秒的打字節奏最接近原型（每字約 55ms）。
+    // 這個模式的循環秒數是由下面四段時間軸的總和推導出來的（見 bubble.js 的
+    // syncTypewriterLoopDuration），這裡的值只是切進模式那一幀還沒算出來之前
+    // 的占位，實際會在同一幀被覆寫掉。
     loopDuration: 8,
     dolly: false,
     overrides: {
@@ -219,19 +221,23 @@ export const MOTIONS = {
         // 一個 float。撞名是靜默的——uniforms[uName] 存在就寫，沒有任何警告。
         key: 'typeCaretWidth', label: '游標寬度', min: 0, max: 0.4, step: 0.01, value: 0.16,
       },
-      // 以下四條是時間軸的「相對權重」而不是絕對毫秒，讀數會換算成實際毫秒
-      // 顯示。理由見 motions/typewriter.js 的開頭：loopDuration 是主時鐘。
+      // 以下四條是絕對時間，不是相對權重——循環秒數由它們的總和推導出來（見
+      // motions/typewriter.js 開頭與 bubble.js 的 syncTypewriterLoopDuration）。
+      // 第一版走相對權重，結果把示範文字從三句短句換成兩個字的「hi」時，總權重
+      // 掉了七成但循環秒數沒變，每字反而從 79ms 變慢成 275ms——字打得越少越慢，
+      // 這跟任何人對「打字」的直覺都相反。數值上盡量貼近原型（55ms／字、
+      // 1100ms 停留、30ms／字刪除、320ms 換句空檔）。
       {
-        key: 'typeCharTime', label: '每字時間', min: 0, max: 4, step: 0.05, value: 1,
+        key: 'typeCharTime', label: '每字時間', min: 0, max: 400, step: 5, value: 55,
       },
       {
-        key: 'typeHold', label: '打完停留', min: 0, max: 60, step: 0.5, value: 20,
+        key: 'typeHold', label: '打完停留', min: 0, max: 10, step: 0.1, value: 1.1,
       },
       {
-        key: 'typeEraseTime', label: '每字刪除', min: 0, max: 4, step: 0.05, value: 0.55,
+        key: 'typeEraseTime', label: '每字刪除', min: 0, max: 200, step: 5, value: 30,
       },
       {
-        key: 'typeGap', label: '換句空檔', min: 0, max: 30, step: 0.5, value: 6,
+        key: 'typeGap', label: '換句空檔', min: 0, max: 2, step: 0.02, value: 0.32,
       },
     ],
   },

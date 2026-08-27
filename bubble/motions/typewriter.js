@@ -8,11 +8,17 @@
 // 循環、要能在暫停時算出同一幀。所以那個狀態機被攤平成一張時間軸表，再變成一支
 // 對 phase 的純函式：同一個 phase 永遠得到同一個畫面，沒有累積狀態、沒有漂移。
 //
-// 四段時長是「相對權重」而不是絕對毫秒，理由跟 melt/shatter 一樣:loopDuration
-// 是這個模組的主時鐘，所有模式都掛在它下面。把權重正規化進 loopDuration 之後，
-// 拉「循環秒數」就是整段打字一起變快變慢，而四條滑桿只管彼此的比例——換成絕對
-// 毫秒的話兩者會互相打架，總長超過 loopDuration 時句子會被截在一半。面板的讀數
-// 會把權重換算回實際毫秒顯示，所以手感仍然是「每字 55 毫秒」那種直覺。
+// 四段時長是絕對時間（每字幾毫秒、停留幾秒），loopDuration 反過來由它們算出來。
+//
+// 第一版是反過來的：四段是相對權重，正規化進固定的 loopDuration——跟 melt/shatter
+// 一致。那對其他模式成立，對這個模式不成立，因為只有這個模式的「內容長度」是使用者
+// 隨時在改的輸入，而且量級差很大。把預設的三句（共 15 字）換成「hi」之後，總權重從
+// 101 掉到 29，但 8 秒沒變，於是每字從 79ms 變成 275ms——字打得越少反而越慢，而且
+// 8 秒裡有 5.5 秒在乾等。這與任何人對打字的直覺都相反。
+//
+// 改成絕對時間之後，「每字 55 毫秒」就真的是 55 毫秒，與文字長短無關；循環秒數變成
+// 推導出來的結果（見 bubble.js 的 syncTypewriterLoopDuration），面板上那條滑桿在這個
+// 模式因此收起來，改用讀數顯示算出來的總長。
 //
 // shader 端完全不重算這條時間軸:CPU 每幀把「哪幾格、各自的成形進度、游標在哪」
 // 打包成一張 1D 資料貼圖送過去（見 bubble.js 的 updateTypewriterUniforms)。研究
@@ -21,20 +27,20 @@
 export default function createTypewriterMotion(P, deps) {
   const phrases = deps.phrases;
 
-  // 一句話的四段：打字、停留、刪除、句間空檔。回傳的是權重，不是秒。
-  function segmentWeights(length) {
-    const type = Math.max(0, P.typeCharTime) * length;
+  // 一句話的四段：打字、停留、刪除、句間空檔。單位是秒。
+  // typeCharTime / typeEraseTime 的滑桿單位是毫秒／字，其餘兩條是秒。
+  function segmentSeconds(length) {
+    const type = (Math.max(0, P.typeCharTime) / 1000) * length;
     const hold = Math.max(0, P.typeHold);
-    const erase = Math.max(0, P.typeEraseTime) * length;
+    const erase = (Math.max(0, P.typeEraseTime) / 1000) * length;
     const gap = Math.max(0, P.typeGap);
     return { type, hold, erase, gap, total: type + hold + erase + gap };
   }
 
-  // 整輪的總權重。長度不同的句子各自佔比不同——長句自然分到更多時間，這正是
-  // 原型的行為（每個字固定 55ms，句子越長打得越久）。
-  function cycleWeight() {
+  // 整輪的秒數。長句自然打得比短句久，這正是原型的行為（每個字固定 55ms）。
+  function cycleSeconds() {
     let total = 0;
-    for (const phrase of phrases()) total += segmentWeights(phrase.length).total;
+    for (const phrase of phrases()) total += segmentSeconds(phrase.length).total;
     return total;
   }
 
@@ -46,15 +52,19 @@ export default function createTypewriterMotion(P, deps) {
   function typeState(phase01) {
     const list = phrases();
     if (!list.length) return null;
-    const totalWeight = cycleWeight();
-    if (!(totalWeight > 0)) {
+    const total = cycleSeconds();
+    if (!(total > 0)) {
       // 四條滑桿全歸零：時間軸沒有長度，退化成「第一句完整顯示、不動」。這比
       // 除以零之後整行消失要合理得多。
       return { phrase: list[0], chars: list[0].length, charFrac: 1, erasing: false };
     }
-    let cursor = phase01 * totalWeight;
+    // phase 是 fract(t / loopDuration)，而 loopDuration 已經被設成 cycleSeconds
+    // （見 bubble.js 的 syncTypewriterLoopDuration），所以這裡乘回去就是「現在走到
+    // 這一輪的第幾秒」。萬一兩者不同步（loopDuration 被滑桿上下限夾住），整輪仍然
+    // 完整播完，只是整體快慢與絕對毫秒對不上——不會壞掉，只是讀數不準。
+    let cursor = phase01 * total;
     for (const phrase of list) {
-      const seg = segmentWeights(phrase.length);
+      const seg = segmentSeconds(phrase.length);
       if (cursor >= seg.total) { cursor -= seg.total; continue; }
       const L = phrase.length;
       if (cursor < seg.type) {
@@ -79,23 +89,9 @@ export default function createTypewriterMotion(P, deps) {
     return { phrase: list[0], chars: 0, charFrac: 0, erasing: false };
   }
 
-  // 把權重換算成實際毫秒，只給面板讀數用。
-  function segmentMilliseconds() {
-    const list = phrases();
-    const totalWeight = cycleWeight();
-    if (!list.length || !(totalWeight > 0)) return { char: 0, hold: 0, erase: 0, gap: 0 };
-    const perWeight = (P.loopDuration * 1000) / totalWeight;
-    return {
-      char: P.typeCharTime * perWeight,
-      hold: P.typeHold * perWeight,
-      erase: P.typeEraseTime * perWeight,
-      gap: P.typeGap * perWeight,
-    };
-  }
-
   // 整行不做剛體變換。字本身就是主體，再讓它整體晃動只會讓人讀不出字——
   // 液態感全部由每個字自己的成形曲線負責。回 null 走「沒有剛體動態」那條路。
   function shapeRigidMotion() { return null; }
 
-  return { typeState, segmentMilliseconds, shapeRigidMotion, cycleWeight };
+  return { typeState, segmentSeconds, cycleSeconds, shapeRigidMotion };
 }

@@ -26,7 +26,11 @@ if [[ -z "$PORT" ]]; then
 fi
 
 URL="http://127.0.0.1:${PORT}/"
-python3 -m http.server "$PORT" >/dev/null 2>&1 &
+# 用專案自帶的 serve.py，不要用內建的 http.server：後者不會送
+# Cache-Control: no-store，Chrome 在一般重新整理（非強制）時可能直接吃自己
+# 快取的舊版 .js，改完檔案、甚至重開分頁都還是看到舊畫面——serve.py 的
+# FastRequestHandler 就是為了堵住這個問題才寫的（見 serve.py 開頭註解）。
+python3 serve.py "$PORT" >/dev/null 2>&1 &
 SERVER_PID=$!
 
 cleanup() {

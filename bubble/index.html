@@ -56,7 +56,12 @@
       <option value="cinematic" hidden>分裂（舊值 cinematic）</option>
       <option value="pulse" hidden>脈動呼吸 Pulse（已移除）</option>
     </select><span class="val"></span></div>
-    <div class="row" id="loopDurationRow" data-gate="!static"><label>循環秒數</label><input type="range" id="loopDuration" min="4" max="30" step="0.5" value="12"><span class="val" id="loopDuration_v"></span></div>
+    <div class="row" id="loopDurationRow" data-gate="!static !typewriter"><label>循環秒數</label><input type="range" id="loopDuration" min="4" max="30" step="0.5" value="12"><span class="val" id="loopDuration_v"></span></div>
+    <!-- 打字模式的循環秒數是由下面四段時間軸自己算出來的（見 bubble.js 的
+         syncTypewriterLoopDuration），不是使用者調的滑桿——四段時間軸才是
+         使用者心裡「多快」的來源，循環秒數只是它們的總和。改成可調滑桿的話，
+         使用者一拉，四段時間軸跟循環秒數就會互相打架。 -->
+    <div class="row noteRow" id="typeLoopInfoRow" data-gate="typewriter"><label>循環總長</label><span class="val" id="typeLoopInfo"></span></div>
     <div class="modeBlock" data-gate="formation">
     <div class="row" id="holdBreathRow"><label>定格呼吸</label><input type="range" id="holdBreath" min="0" max="0.2" step="0.005" value="0.05"><span class="val" id="holdBreath_v"></span></div>
     <div class="row" id="formationVarietyRow"><label>軌跡多樣性</label><input type="range" id="formationVariety" min="0" max="1" step="0.01" value="0.35"><span class="val" id="formationVariety_v"></span></div>

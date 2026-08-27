@@ -2431,7 +2431,8 @@ const {
 } = createResearchMotion(P);
 const {
   typeState: typewriterState,
-  segmentMilliseconds: typewriterSegmentMs,
+  segmentSeconds: typewriterSegmentSeconds,
+  cycleSeconds: typewriterCycleSeconds,
 } = createTypewriterMotion(P, { phrases: () => typewriterPhrases });
 let shapeRigidNow = null;
 const shapeRigidVec = new THREE.Vector3();
@@ -3615,7 +3616,14 @@ function scheduleGlyphRebuild() {
 function ensureGlyphAtlas(force = false) {
   if (P.motion !== 'typewriter') return;
   const text = String(P.typeText ?? '');
-  if (!force && glyphAtlasText === text && glyphAtlas) return;
+  if (!force && glyphAtlasText === text && glyphAtlas) {
+    // 圖集沒變，不必重烘，但循環秒數還是得同步：切離打字模式又切回來時，
+    // MOTION_MEMORY_KEYS 那段會先把 loopDuration 滑桿還原成這個模式記憶的舊值
+    // （可能是還沒算過的占位值），這裡要蓋回真正由四段時間軸算出來的總和，
+    // 不能因為「圖集沒變」就連這件事也一起跳過。
+    refreshTypewriterReadouts();
+    return;
+  }
   typewriterPhrases = parsePhrases(text);
   const t0 = performance.now();
   const next = typewriterPhrases.length ? bakeGlyphAtlas(typewriterPhrases) : null;
@@ -3660,57 +3668,84 @@ function updateTypewriterUniforms(phase) {
   }
   const limit = typewriterLineLimit();
   const visible = Math.min(state.chars, limit);
-  let slot = 0;
+  // 置中基準用「這句話的總長」，不是目前打出來的字數。用可見字數置中的話，每打
+  // 一個字整行中心點都會跟著移動——兩三個字的短句尤其明顯，看起來是整行在抖，
+  // 不是在長。錨點只在換句時才變，同一句話從頭打到尾／刪到底都是同一個寬度。
+  // shaders.js 的 typeGlyphEdge／typewriterDistance 用同一個值置中，兩邊必須一致。
+  const anchor = Math.min(state.phrase.length, limit);
+  // 資料貼圖的格 i 對應這個字在句子裡的第 i 個位置——跟 shader 端置中用的 slot
+  // 是同一個索引，不能像第一版那樣「跳過查不到的字元再往前補位」，否則 CPU 這邊
+  // 緊縮過的順序會跟 shader 用位置算出來的 cx 對不上，字會全部錯位。查不到的字元
+  // （目前只有超出 MAX_ATLAS_GLYPHS 被截斷的情況）直接留空，那個位置上就是一段
+  // 空白，不是把後面的字往前推。
   for (let i = 0; i < visible; i++) {
     const idx = glyphAtlas.indexOf.get(state.phrase[i]);
-    if (idx === undefined) continue;
+    const o = i * 4;
+    if (idx === undefined) { glyphData[o + 1] = 0; continue; }
     // 最後一格是正在打（或正在刪）的那一個，成形進度來自時間軸；其餘都已就位。
     const reveal = i === state.chars - 1 ? state.charFrac : 1;
-    const o = slot * 4;
     glyphData[o] = idx;
     glyphData[o + 1] = reveal;
     glyphData[o + 2] = 0;
     glyphData[o + 3] = 0;
-    slot++;
   }
-  // 空白字元在圖集裡確實有一格（全正距離），所以上面不會被 continue 掉；
-  // 這裡只是把沒用到的格子清乾淨，避免上一幀的殘值被 x 切片剔除誤讀。
-  for (let i = slot; i < MAX_TYPE_GLYPHS; i++) glyphData[i * 4 + 1] = 0;
+  // 空白字元在圖集裡確實有一格（全正距離），所以上面不會被 continue 掉；這裡把
+  // 錨點寬度以外的格子清乾淨，避免上一句換過來的殘值被 x 切片剔除誤讀。
+  for (let i = visible; i < MAX_TYPE_GLYPHS; i++) glyphData[i * 4 + 1] = 0;
   glyphDataTexture.needsUpdate = true;
 
   const advance = glyphAtlas.advance * Math.max(0.1, P.typeTracking);
   const size = Math.max(0.01, P.typeSize);
-  uniforms.uTypeLine.value.set(advance, size, glyphAtlas.baseline, slot);
+  uniforms.uTypeLine.value.set(advance, size, glyphAtlas.baseline, anchor);
   uniforms.uTypeShape.value.set(P.typeDepth, P.typeBevel, P.typeGrow, glyphAtlas.feature);
 
-  // 游標：行尾往右半格。閃爍相位鎖在循環上（每循環固定的整數次閃爍），這樣
-  // 循環接回去時不會出現半亮的一幀。
+  // 游標：跟著「目前實際打出來的字數」走（不是錨點寬度），行尾往右半格。
+  // 閃爍相位鎖在循環上（每循環固定的整數次閃爍），這樣循環接回去時不會出現
+  // 半亮的一幀。
   const caretWidth = Math.max(0, P.typeCaretWidth) * size * 0.5;
   if (caretWidth > 0.001) {
     const advWorld = advance * size;
-    const x0 = -(slot - 1) * 0.5 * advWorld;
+    const x0 = -(anchor - 1) * 0.5 * advWorld;
     // slot 0 在最左，游標站在最後一格的右邊；一格都沒有時停在行中央。
-    const caretX = slot > 0 ? x0 + slot * advWorld : 0;
+    const caretX = visible > 0 ? x0 + visible * advWorld : 0;
     const blinks = Math.max(1, Math.round(P.loopDuration / 0.53));
     const on = fract(phase * blinks) < 0.5 ? 1 : 0;
     uniforms.uTypeCaret.value.set(caretX, size * 0.18, caretWidth, on);
   } else uniforms.uTypeCaret.value.set(0, 0, 0, 0);
 
   // 包圍球半徑。這個模式的形狀是橫向鋪開的一行字，不是聚在原點的水滴群，
-  // 所以邊界得自己算——沿用水滴分佈算出來的半徑會把行尾整段裁掉。
-  return (slot * advance * size) * 0.5 + size * 0.9;
+  // 所以邊界得自己算——沿用水滴分佈算出來的半徑會把行尾整段裁掉。用錨點寬度
+  // 而不是目前字數，這樣打字過程中邊界不會忽大忽小、跟著鏡頭一起抖。
+  return (anchor * advance * size) * 0.5 + size * 0.9;
+}
+
+// 四段時間軸是使用者調的絕對時間，循環秒數是它們的總和——跟其他模式反過來
+// （其他模式是循環秒數在前，各段時長是循環秒數的比例）。所以這個模式底下，
+// 循環秒數不是滑桿，是這個函式算出來直接寫進 P.loopDuration 與 uLoopDuration
+// 的結果。呼叫時機：切進打字模式、文字改變（換句數／句長）、四段時長任何一條
+// 被拖動。
+function syncTypewriterLoopDuration() {
+  if (P.motion !== 'typewriter') return;
+  const total = Math.max(0.5, typewriterCycleSeconds());
+  P.loopDuration = total;
+  if (uniforms && uniforms.uLoopDuration) uniforms.uLoopDuration.value = total;
+  const info = document.getElementById('typeLoopInfo');
+  if (info) info.textContent = total.toFixed(2) + ' s';
 }
 
 function refreshTypewriterReadouts() {
-  const ms = typewriterSegmentMs();
+  syncTypewriterLoopDuration();
   const show = (key, value) => {
     const el = document.getElementById(key + '_v');
     if (el) el.textContent = value;
   };
-  show('typeCharTime', ms.char >= 1 ? Math.round(ms.char) + ' ms/字' : '瞬間');
-  show('typeHold', (ms.hold / 1000).toFixed(2) + ' s');
-  show('typeEraseTime', ms.erase >= 1 ? Math.round(ms.erase) + ' ms/字' : '瞬間');
-  show('typeGap', (ms.gap / 1000).toFixed(2) + ' s');
+  // 這四條現在就是使用者調的絕對值，讀數只是把滑桿的原始單位（毫秒/字級的
+  // typeCharTime、typeEraseTime；秒級的 typeHold、typeGap）換成好讀的字串，
+  // 不再需要拿循環秒數換算。
+  show('typeCharTime', P.typeCharTime > 0 ? Math.round(P.typeCharTime) + ' ms/字' : '瞬間');
+  show('typeHold', P.typeHold.toFixed(2) + ' s');
+  show('typeEraseTime', P.typeEraseTime > 0 ? Math.round(P.typeEraseTime) + ' ms/字' : '瞬間');
+  show('typeGap', P.typeGap.toFixed(2) + ' s');
   const info = document.getElementById('typeTextInfo');
   if (info) {
     if (!glyphAtlas) info.textContent = '沒有文字';

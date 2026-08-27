@@ -1108,61 +1108,78 @@ float typeGlyphEdge(vec2 xy, float slot, float count){
   if (reveal < 0.004) return 1e9;
   float size = max(uTypeLine.y, 0.001);
   float adv = uTypeLine.x * size;
-  // 行置中：slot 0 在最左。
+  // 行置中：slot 0 在最左。count 是 uTypeLine.w，語意是「這句話的總長」（見
+  // bubble.js 的 anchorLen），不是目前打出來的字數——用可見字數置中的話，每打一個
+  // 字整行的中心點都會跟著移動，兩三個字的短句尤其明顯，看起來是整行在抖而不是
+  // 在長。固定用總長置中，字只會往兩側長出、不會重新置中。
   float cx = (slot - (count - 1.0) * 0.5) * adv;
 
-  // 液態長出。DOM 版的 c.current++ 是字元瞬間出現，在這裡會「啪」一下跳出來很廉價。
+  // 取樣一律用「真實比例」的字形——這是這一版最關鍵的修正。第一版在這裡對 x/y
+  // 做不等比縮放（寬度先鼓、高度從基線壓扁再長開），問題是 SDF 一旦被非等比縮放，
+  // 保留下來的只有「零等值面」（輪廓本身還在正確位置），中間的距離場整個扭曲，
+  // 而擠出用的是這個扭曲後的距離值。壓得越扁，扭曲越嚴重——實測預設參數下
+  // 「P」被壓扁到某個中間畫面時，看起來完全是另一個字「F」；「D」看起來像「7」。
+  // 這不是筆畫模糊或崩裂，是形狀本身在動畫過程中真的變成了別的字，比崩裂更糟：
+  // 崩裂還看得出「這裡出問題了」，長成別的字看起來像打錯字。
   //
-  // 第一版用的是等比縮放（x/y 同一個 squash），結果新字是「一個小點放大成字」——
-  // 讀起來是縮放，不是液體。液體從基線被擠出來的樣子是：寬度一開始就在（甚至因為
-  // 表面張力略微鼓出），高度才從零長起來。所以這裡改成非等比：
-  //   rise  縱向，以基線（世界 y = 0）為錨點從 0 長到 1
-  //   widen 橫向，未成形時略寬，收尾時回到 1
-  float grow = clamp(uTypeShape.z, 0.0, 1.0);
-  float emerge = 1.0 - reveal;
-  // rise 有下限：它是除數，太小的話下面 yLocal 會爆掉，整個場退化成「處處都是很小
-  // 的正距離」，march 步長被壓到極小。0.12 已經扁到看不出字形，夠用。
-  float rise = mix(1.0, mix(1.0, 0.12, grow), emerge);
-  float widen = 1.0 + emerge * grow * 0.22;
-
-  // 世界座標 → 格內座標。兩個縮放各自的錨點不同（rise 錨在基線、widen 錨在字心），
-  // 所以要分開反推，不能寫成一個向量除法。
-  float xLocal = (xy.x - cx) / widen;
-  float yLocal = xy.y / rise;
-  // 格中心在基線上方 baseline × 字級處，扣掉之後才是格內座標。
-  vec2 tileUV = vec2(xLocal, yLocal - uTypeLine.z * size) / size + 0.5;
+  // 換掉整套機制：字形本身永遠用真實比例取樣（不擠壓），液態長出改成「一道從基線
+  // 往上升的截平面」跟真實形狀做 SDF 交集——液面以下的部分完整可見，液面以上的
+  // 部分被切掉。這跟液體真的從容器底部往上填是同一件事，字的比例全程不變，改變的
+  // 只有「填到多高」，所以不會有任何一幀看起來像別的字。
+  float baselineWorld = uTypeLine.z * size;
+  vec2 tileUV = (xy - vec2(cx, baselineWorld)) / size + 0.5;
   vec2 safeUV = clamp(tileUV, vec2(0.0), vec2(1.0));
   float raw = typeAtlasSample(g.x, safeUV);
-  // 圖集存的是「格單位」的距離，換回世界要乘上 size；非等比縮放後的真實距離無法
-  // 只用一個係數表示，取兩軸較小的那個是保守的低估——低估對 raymarch 安全（步小
-  // 一點），高估會直接穿進字裡面。
-  float d = raw * size * min(widen, rise);
-  // 取樣盒外：延續盒緣的正距離，再加上「離開盒子」那一段。少了這一段，被 rise 壓扁
-  // 的格子在盒外會回傳一個很小的正值，march 得一步一步爬過整片空白。
-  // svgShapeDistance 用同樣的手法處理它的 3×3 取樣盒。
-  vec2 boxHalf = vec2(0.5 * size * widen, 0.5 * size * rise);
-  vec2 over = abs(xy - vec2(cx, uTypeLine.z * size * rise)) - boxHalf;
+  float d = raw * size;
+  // 取樣盒外：延續盒緣的正距離，再加上「離開盒子」那一段，讓盒外的步長不會被
+  // 壓得太小。手法跟 svgShapeDistance 的 3×3 取樣盒一致。
+  vec2 boxHalf = vec2(0.5 * size);
+  vec2 over = abs(xy - vec2(cx, baselineWorld)) - boxHalf;
   d += length(max(over, vec2(0.0)));
-  // 未成形時把距離場整體膨脹，細節被磨圓成一團——表面張力先把筆畫拉成液團，
-  // 收尾才收出字的邊。這是「液態」與「淡入」的差別所在。
-  return d - emerge * grow * 0.05 * size;
+
+  float grow = clamp(uTypeShape.z, 0.0, 1.0);
+  // 液面高度：從略低於基線（蓋住多數字母的下伸部）長到蓋過整格上緣（安全地蓋過
+  // 大寫字母與筆畫最高點）。grow 是總開關：0 時液面直接鎖在最高，字元一出現就是
+  // 完整形狀（對應 DOM 原型 c.current++ 那種瞬間出現）；1 時液面確實跟著 reveal
+  // 從底往上升滿整格。
+  float fillTop = baselineWorld + size * 0.5;
+  float fillStart = baselineWorld - size * 0.3;
+  float fillLevel = mix(fillTop, mix(fillStart, fillTop, reveal), grow);
+  // 液面本身留一點鼓起（表面張力的視覺痕跡），而不是一刀切的平面——半徑跟其他
+  // 液態表面用的量級一致，太大會看起來像整個字泡在圓角裡。
+  float meniscus = 0.035 * size;
+  float wipe = xy.y - fillLevel;
+  // SDF 交集（-smin(-a,-b,k) 是 smooth-max，兩場都要滿足才算在形狀內）：字形
+  // 與液面以下同時成立的地方才是實體，液面以上一律被切掉，不管字形本身怎麼說。
+  return -smin(-d, -wipe, meniscus);
 }
 
 float typewriterDistance(vec3 p){
+  // 這句話的總長（固定），不是目前打出來的字數——見 typeGlyphEdge 的 cx 註解。
+  // 還沒出現的格子 reveal 已在 CPU 端清成 0，typeGlyphEdge 自己會跳過，所以拿
+  // 總長當迴圈上限並不會多畫出還沒打的字，只是讓置中基準穩定。
   float count = uTypeLine.w;
   if (count < 0.5) return 1e9;
   float size = max(uTypeLine.y, 0.001);
   float adv = uTypeLine.x * size;
   float x0 = -(count - 1.0) * 0.5 * adv;
 
-  // x 軸切片剔除：字沿 x 等距排列，所以任一點只有最近的三格可能是最小值。
+  // x 軸切片剔除：字沿 x 等距排列，所以任一點只有最近幾格可能是最小值。
   // 少了這一步，每個 march step 要對 24 格各取一次樣，這個模式就不可能跑。
-  // 三格（而不是兩格）是因為每格覆蓋的世界寬度比 advance 大——圖集刻意留了
-  // padding，相鄰格在世界空間是重疊的。取少了會高估距離，而高估距離的 SDF
-  // 會讓 raymarch 過衝、穿進字裡面。
+  //
+  // 窗口原本只有 3 格（±1），實測在鏡頭極近＋極斜（貼近字、視角接近側面）時會
+  // 讓相鄰字母的側壁在畫面上互相穿插——不是誰被裁掉，是兩個字的厚度疊在一起，
+  // 但視覺上讀起來就像某個字缺了一角。用「靜態方體」在同樣的距離／角度下對照
+  // 過：單一物體完全乾淨，只有多字並排的這條路徑會壞，證明問題出在這個窗口
+  // 太窄，不是 raymarch 精度或字形本身的問題——窄窗口在正面／中距離時夠用，
+  // 但視線幾乎貼著字面走時，真正該納入比較的候選格會超出 ±1 的範圍。
+  // 放到 ±4（9 格）在同一組重現條件（QU、字級 2、鏡頭距離 2.8～5、水平視角
+  // -45°）下測過，乾淨。9 格對每個 march step 是三倍的取樣成本，但這個模式的
+  // 內層迴圈本來就遠低於其他模式的上限（見診斷面板「內層實際跑幾次」），有
+  // 餘裕撐得住。
   float k = floor((p.x - x0) / adv + 0.5);
   float edge = 1e9;
-  for (int j = -1; j <= 1; j++) {
+  for (int j = -4; j <= 4; j++) {
     float slot = k + float(j);
     if (slot < -0.5 || slot > count - 0.5) continue;
     edge = min(edge, typeGlyphEdge(p.xy, slot, count));
@@ -1187,7 +1204,20 @@ float typewriterDistance(vec3 p){
   // 每條筆畫各自往外長一圈之後直接黏成一團黑影。夾制之後同一組參數在中英文都成立，
   // 使用者不必為了換一種文字重調滑桿。
   float bevel = min(max(uTypeShape.y, 0.0001), max(uTypeShape.w, 0.002) * size * 0.75);
-  float depth = abs(p.z) - uTypeShape.x;
+  // 擠出厚度也要夾在特徵尺度之下，理由跟圓角一樣但問題本身不同：這不是「黏成一團」，
+  // 是「筆畫變成一根跟自己粗細不成比例的柱子」。預設厚度 0.18 是照拉丁字調的，筆畫
+  // 粗、柱子的長寬比還算合理；中文筆畫細很多（「哈」量出來的特徵尺度只有 0.0325），
+  // 同一個厚度變成柱子比筆畫還粗超過 5 倍，鏡頭只要有一點側傾，每一筆各自的側壁就會
+  // 露出來，疊成一堆認不出字形的碎塊——跟角度無關，是柱子本身的長寬比失衡，只是側視角
+  // 讓它現形。
+  //
+  // 倍率是實測夾出來的，不是算出來的：一開始夾在 2.5 倍，鏡頭拉近＋側傾 42° 時
+  // 筆畫較密的「囉」仍然碎；收到 1.1 倍才在同一組重現條件下讀得出來。碎的門檻本來
+  // 就跟著筆畫密度與鏡頭距離一起變動，這個倍率只能收斂到「預設安全」，不是保證
+  // 任何極端組合都完美——鏡頭貼得比這更近、角度轉得更側，複雜字仍可能碎，那不是
+  // 這道夾制能單獨解掉的。拉丁字筆畫粗得多，1.1 倍通常仍大於預設 0.18，不受影響。
+  float depthCap = max(uTypeShape.w, 0.002) * size * 1.1;
+  float depth = abs(p.z) - min(max(uTypeShape.x, 0.0001), depthCap);
   return -smin(-edge, -depth, bevel);
 }
 #endif // FEATURE_TYPEWRITER
