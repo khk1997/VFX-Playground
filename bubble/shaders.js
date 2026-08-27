@@ -1100,8 +1100,56 @@ float typeAtlasSample(float idx, vec2 tileUV){
   return (texture2D(uTypeAtlas, uv).r - 0.5) * 2.0 * uTypeAtlasInfo.w;
 }
 
-// 單一格字的 2D 距離（還沒擠出）。slot 是它在行內的位置。
-float typeGlyphEdge(vec2 xy, float slot, float count){
+// 圖集版的三次 B-spline 取樣，理由跟 shape-field 那邊的 sampleShapeField 完全一樣
+// （見那邊的說明）：硬體雙線性只有 C0 連續，梯度在每條 texel 邊界跳一次，法線
+// 因此會沿著曲線一格一格地跳——這正是使用者截圖裡那圈「格狀」的來源，字放大到
+// 接近圖集烘焙解析度（拉丁 64²、中文 144²）時特別明顯，肉眼看起來像低面數模型的
+// 平面拼接，不是單純的鋸齒。三次 B-spline 梯度連續，用 4 次雙線性取樣合成 16
+// taps 的權重（Sigg & Hadwiger 的快速三階濾波）。
+//
+// 跟 sampleShapeField 的差別只在於這裡是圖集：取樣範圍要夾在單一格自己的版面內，
+// 不能跨到隔壁字。每格四周本來就留了約 19% 的透明 padding（見 glyph-field.js 的
+// EM_RATIO），bicubic 最多探出 1.5 texel，遠小於這圈 padding，只要先把 tileUV
+// 夾回格子本體（跟上面 typeAtlasSample 同一招），taps 就不會越界到鄰居格。
+float typeAtlasSampleSmooth(float idx, vec2 tileUV){
+  float cols = uTypeAtlasInfo.x;
+  float rows = uTypeAtlasInfo.y;
+  float tile = uTypeAtlasInfo.z;
+  float col = mod(idx, cols);
+  float row = floor(idx / cols);
+  vec2 origin = vec2(col, row) * tile;
+  vec2 atlasSize = vec2(cols, rows) * tile;
+
+  vec2 inset = clamp(tileUV, vec2(0.5 / tile), vec2(1.0 - 0.5 / tile));
+  vec2 coord = inset * tile - 0.5;
+  vec2 base = floor(coord);
+  vec2 f = coord - base;
+  vec2 f2 = f * f;
+  vec2 f3 = f2 * f;
+  vec2 w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0;
+  vec2 w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+  vec2 w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0;
+  vec2 w3 = f3 / 6.0;
+  vec2 s0 = w0 + w1;
+  vec2 s1 = w2 + w3;
+  vec2 t0 = base + 0.5 + w1 / s0 - 1.0;
+  vec2 t1 = base + 0.5 + w3 / s1 + 1.0;
+  vec2 uv0 = (origin + t0) / atlasSize;
+  vec2 uv1 = (origin + t1) / atlasSize;
+  float a = texture2D(uTypeAtlas, vec2(uv0.x, uv0.y)).r;
+  float b = texture2D(uTypeAtlas, vec2(uv1.x, uv0.y)).r;
+  float c = texture2D(uTypeAtlas, vec2(uv0.x, uv1.y)).r;
+  float d = texture2D(uTypeAtlas, vec2(uv1.x, uv1.y)).r;
+  float raw = mix(mix(a, b, s1.x), mix(c, d, s1.x), s1.y);
+  return (raw - 0.5) * 2.0 * uTypeAtlasInfo.w;
+}
+
+// 單一格字的 2D 距離（還沒擠出）。slot 是它在行內的位置。smoothShape 沿用
+// svgShapeDistance 的同一個省成本手法：raymarch 步進只需要保守的距離值，次
+// texel 的差異不影響收斂，所以步進迴圈仍用便宜的單次雙線性；只有 calcNormal
+// 求梯度（法線）時才切到 16-tap 的三次 B-spline，讓「格狀」只在真正決定明暗的
+// 那一步被磨平，不必每個 march step 都多付 4 倍取樣成本。
+float typeGlyphEdge(vec2 xy, float slot, float count, bool smoothShape){
   vec4 g = texture2D(uTypeGlyphData, vec2((slot + 0.5) / TYPE_MAX, 0.5));
   float reveal = clamp(g.y, 0.0, 1.0);
   // 完全還沒出現的格子直接跳過。這不只是省成本：reveal→0 時下面的除法會炸。
@@ -1129,7 +1177,7 @@ float typeGlyphEdge(vec2 xy, float slot, float count){
   float baselineWorld = uTypeLine.z * size;
   vec2 tileUV = (xy - vec2(cx, baselineWorld)) / size + 0.5;
   vec2 safeUV = clamp(tileUV, vec2(0.0), vec2(1.0));
-  float raw = typeAtlasSample(g.x, safeUV);
+  float raw = smoothShape ? typeAtlasSampleSmooth(g.x, safeUV) : typeAtlasSample(g.x, safeUV);
   float d = raw * size;
   // 取樣盒外：延續盒緣的正距離，再加上「離開盒子」那一段，讓盒外的步長不會被
   // 壓得太小。手法跟 svgShapeDistance 的 3×3 取樣盒一致。
@@ -1154,7 +1202,7 @@ float typeGlyphEdge(vec2 xy, float slot, float count){
   return -smin(-d, -wipe, meniscus);
 }
 
-float typewriterDistance(vec3 p){
+float typewriterDistance(vec3 p, bool smoothShape){
   // 這句話的總長（固定），不是目前打出來的字數——見 typeGlyphEdge 的 cx 註解。
   // 還沒出現的格子 reveal 已在 CPU 端清成 0，typeGlyphEdge 自己會跳過，所以拿
   // 總長當迴圈上限並不會多畫出還沒打的字，只是讓置中基準穩定。
@@ -1182,7 +1230,7 @@ float typewriterDistance(vec3 p){
   for (int j = -4; j <= 4; j++) {
     float slot = k + float(j);
     if (slot < -0.5 || slot > count - 0.5) continue;
-    edge = min(edge, typeGlyphEdge(p.xy, slot, count));
+    edge = min(edge, typeGlyphEdge(p.xy, slot, count, smoothShape));
   }
 
   // 游標。DOM 版是一個閃爍的 .caret span；這裡是行尾的一根液柱，閃爍相位鎖在
@@ -1198,26 +1246,34 @@ float typewriterDistance(vec3 p){
   // 擠出。與 svgShapeDistance 同一個作法：smooth-max 只圓化正面與側壁的交界，
   // 半徑由獨立的圓角參數控制。
   //
-  // 圓角要夾在字形的特徵尺度（烘焙時量到的最細筆畫半厚，見 glyph-field.js）之下。
-  // 沒有這道夾制，繁體字會壞得很難懂：圓角是世界單位的絕對值，而「態」的筆畫間隙
-  // 只有 0.04 世界單位左右，一個對拉丁字母剛好的圓角（0.056）就大過整條間隙，
-  // 每條筆畫各自往外長一圈之後直接黏成一團黑影。夾制之後同一組參數在中英文都成立，
-  // 使用者不必為了換一種文字重調滑桿。
-  float bevel = min(max(uTypeShape.y, 0.0001), max(uTypeShape.w, 0.002) * size * 0.75);
-  // 擠出厚度也要夾在特徵尺度之下，理由跟圓角一樣但問題本身不同：這不是「黏成一團」，
-  // 是「筆畫變成一根跟自己粗細不成比例的柱子」。預設厚度 0.18 是照拉丁字調的，筆畫
-  // 粗、柱子的長寬比還算合理；中文筆畫細很多（「哈」量出來的特徵尺度只有 0.0325），
-  // 同一個厚度變成柱子比筆畫還粗超過 5 倍，鏡頭只要有一點側傾，每一筆各自的側壁就會
-  // 露出來，疊成一堆認不出字形的碎塊——跟角度無關，是柱子本身的長寬比失衡，只是側視角
-  // 讓它現形。
+  // 圓角／厚度要不要夾在字形特徵尺度（烘焙時量到的最細筆畫半厚）之下，只在
+  // CJK 圖集才需要——中文筆畫細，圓角/厚度大過筆畫間隙會黏成一團或讓每一筆
+  // 變成跟自己粗細不成比例的柱子（見下面兩段個別註解）。這道夾制第一版是
+  // 對所有語言一律套用，結果實測發現連拉丁字的「預設值」都被夾住了：
+  // 64² 圖集量出來的特徵尺度只有 0.0387（世界單位，size=1 時），圓角預設
+  // 0.056、厚度預設 0.18 都遠大於它，夾完只剩 0.0238／0.0349——使用者調的
+  // 圓角、厚度滑桿超過某個值之後完全沒有視覺變化，因為早被壓在更小的值。
+  // 判斷「是不是 CJK」不必另外傳一顆 uniform：CJK 圖集固定烘在 144²、拉丁
+  // 固定 64²（見 glyph-field.js 的 TILE／TILE_CJK），uTypeAtlasInfo.z 本來就
+  // 帶著這個資訊。
+  bool cjkAtlas = uTypeAtlasInfo.z > 100.0;
+  // 圓角：沒有這道夾制，繁體字會壞得很難懂——圓角是世界單位的絕對值，而「態」
+  // 的筆畫間隙只有 0.04 世界單位左右，一個對拉丁字母剛好的圓角（0.056）就大過
+  // 整條間隙，每條筆畫各自往外長一圈之後直接黏成一團黑影。
+  float bevel = cjkAtlas
+    ? min(max(uTypeShape.y, 0.0001), max(uTypeShape.w, 0.002) * size * 0.75)
+    : max(uTypeShape.y, 0.0001);
+  // 擠出厚度：中文筆畫細很多（「哈」量出來的特徵尺度只有 0.0325），拉丁字的
+  // 預設厚度 0.18 套在中文筆畫上會變成一根比自己粗細還粗超過 5 倍的柱子，
+  // 鏡頭只要有一點側傾，每一筆各自的側壁就會露出來，疊成一堆認不出字形的
+  // 碎塊——跟角度無關，是柱子本身的長寬比失衡，只是側視角讓它現形。
   //
-  // 倍率是實測夾出來的，不是算出來的：一開始夾在 2.5 倍，鏡頭拉近＋側傾 42° 時
-  // 筆畫較密的「囉」仍然碎；收到 1.1 倍才在同一組重現條件下讀得出來。碎的門檻本來
-  // 就跟著筆畫密度與鏡頭距離一起變動，這個倍率只能收斂到「預設安全」，不是保證
-  // 任何極端組合都完美——鏡頭貼得比這更近、角度轉得更側，複雜字仍可能碎，那不是
-  // 這道夾制能單獨解掉的。拉丁字筆畫粗得多，1.1 倍通常仍大於預設 0.18，不受影響。
+  // 倍率是實測夾出來的，不是算出來的：一開始夾在 2.5 倍，鏡頭拉近＋側傾 42°
+  // 時筆畫較密的「囉」仍然碎；收到 1.1 倍才在同一組重現條件下讀得出來。碎的
+  // 門檻本來就跟著筆畫密度與鏡頭距離一起變動，這個倍率只能收斂到「預設安全」，
+  // 不是保證任何極端組合都完美。
   float depthCap = max(uTypeShape.w, 0.002) * size * 1.1;
-  float depth = abs(p.z) - min(max(uTypeShape.x, 0.0001), depthCap);
+  float depth = abs(p.z) - (cjkAtlas ? min(max(uTypeShape.x, 0.0001), depthCap) : max(uTypeShape.x, 0.0001));
   return -smin(-edge, -depth, bevel);
 }
 #endif // FEATURE_TYPEWRITER
@@ -1270,7 +1326,7 @@ float mapScene(vec3 p, bool smoothShape){
 // 用 min 而不是 smin：預設沒有主滴（count 0），而使用者若把主滴拉出來，那些水滴
 // 的身分是繞著行走的墨滴，不該跟字融成一團。
 #ifdef FEATURE_TYPEWRITER
-  d = min(d, typewriterDistance(p));
+  d = min(d, typewriterDistance(p, smoothShape));
 #endif
   // 衛星滴以「會釋放的 smin」與頸部相連：成形期 blend 高（細絲上的鼓包），
   // 掐斷時 blend→0，smin 退化為硬 min → 成為自由滴。

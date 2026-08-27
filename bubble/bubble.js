@@ -588,6 +588,12 @@ const SELECT_DEFAULTS = {
   motion: 'static',
   shapeSource: 'svg',
   shapeQuality: 'balanced',
+  // 抗鋸齒程度：全螢幕 raymarch shader 沒有多邊形邊緣可以靠 MSAA 磨平（見 initGL
+  // 建立 renderer 時關閉 antialias 的說明），畫面唯一能消鋸齒的手段是把渲染解析度
+  // 拉高過顯示解析度、再讓瀏覽器縮小回去——也就是超取樣。這個滑桿控制的正是超取樣
+  // 倍率，不是 MSAA。'medium'（×1）等於原本寫死的行為，不改預設觀感；非 Retina
+  // 螢幕想要更平滑或效能吃緊的機器想換流暢度，可以自己往上或往下調。
+  antialiasLevel: 'medium',
   jellyStyle: 'bounce',
   // 稜光光芒的打燈圖樣（見 shaders.js 的 prismBeamField）。grid 是原本唯一的
   // 那一種，其餘四種共用同一組座標與遮罩，只換亮度在方向球上的分布。
@@ -766,6 +772,9 @@ const SELECTS = {
   shapeSource: { uniform: 'uShapeType', map: { svg: 1, gltf: 2 } },
   // 僅控制下一次 GLB 烘焙尺寸，沒有對應 shader uniform。
   shapeQuality: { uniform: '', map: { performance: 48, balanced: 80, high: 128 } },
+  // 超取樣倍率，沒有對應 shader uniform——直接乘進 renderer 的 pixel ratio
+  // （見 applyAntialiasLevel）。medium=×1 是原本寫死的行為。
+  antialiasLevel: { uniform: '', map: { low: 0.75, medium: 1, high: 1.5, ultra: 2 } },
   // 果凍底下的兩條分支。同樣沒有 shader uniform——差別純粹在 CPU 這邊走哪一條
   // 變換（見 updateDropUniforms 的 jelly 分支）。
   //
@@ -1772,13 +1781,18 @@ function shaderFeatures() {
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
 let pmremGenerator = null, pmremTarget = null;
 let inited = false;
-const maxRenderDpr = DIAG.lowres ? 1 : PREVIEW ? 1 : mobileRenderQuery.matches
+// 裝置本身撐得住的解析度上限，不受使用者「抗鋸齒」偏好影響——DIAG.lowres／
+// PREVIEW 場景本來就該固定走最省資源那一路，不該被手動調高的超取樣蓋過去。
+const deviceMaxDpr = DIAG.lowres ? 1 : PREVIEW ? 1 : mobileRenderQuery.matches
   ? Math.min(window.devicePixelRatio || 1, 1.5)
   : Math.min(window.devicePixelRatio || 1, 2);
+// 這兩個原本是 const，現在會被 applyAntialiasLevel() 依使用者選的超取樣倍率
+// 重算，所以改 let。倍率 ×1（預設）時算出來的值跟原本寫死的一模一樣。
+let maxRenderDpr = deviceMaxDpr;
 // 拖曳時的解析度。fragment 成本與像素面積成線性（實測 1/12 像素 → 1/8.5 幀時），
 // 所以這個下限是互動流暢度最大的單一槓桿：舊版桌面只從 2.0 降到 1.75，像素僅少
 // 23%；降到 1.25 後只剩 39%。放手後會立刻回到 maxRenderDpr。
-const minRenderDpr = DIAG.lowres ? 1 : PREVIEW ? 1 : Math.min(maxRenderDpr, 1.25);
+let minRenderDpr = DIAG.lowres ? 1 : PREVIEW ? 1 : Math.min(maxRenderDpr, 1.25);
 let qualityDpr = maxRenderDpr;
 let qualitySteps = PREVIEW ? 56 : mobileRenderQuery.matches ? 64 : 88;
 let qualitySampleStarted = performance.now();
@@ -4242,6 +4256,24 @@ function refreshRenderQuality() {
   }
 }
 
+// 使用者手動選的超取樣倍率套進 deviceMaxDpr。全螢幕 raymarch shader 沒有多邊形
+// 邊緣，MSAA 幫不上忙（見 initGL 建立 renderer 時關閉 antialias 的說明）；唯一能
+// 消鋸齒的手段就是把渲染解析度拉高過顯示解析度，讓瀏覽器把畫面縮小回去時順便
+// 平滑掉——這正是 renderer.setPixelRatio 在做的事，這裡只是讓使用者自己決定
+// 倍率，而不是被 devicePixelRatio 和寫死的 1.5／2 上限卡死。
+//
+// mobile 版的自動降載（sampleRenderQuality）會在這個新上限之下繼續運作：它只在
+// qualityDpr 掉到 minRenderDpr 或升回 maxRenderDpr 之間切換，兩者都已經按新倍率
+// 重算過，所以兩套機制不會互相打架。
+function applyAntialiasLevel() {
+  if (DIAG.lowres || PREVIEW) return; // 這兩個場景一律鎖最省資源那一路，不給覆寫
+  const multiplier = SELECTS.antialiasLevel.map[P.antialiasLevel] ?? 1;
+  maxRenderDpr = deviceMaxDpr * multiplier;
+  minRenderDpr = Math.min(maxRenderDpr, 1.25 * multiplier);
+  qualityDpr = maxRenderDpr;
+  refreshRenderQuality();
+}
+
 function sampleRenderQuality(now) {
   if (PREVIEW || !mobileRenderQuery.matches) return;
   // 節流期間不要取樣：這時候的 30fps 是我們自己壓的，不是 GPU 跟不上。混進統計
@@ -4570,6 +4602,7 @@ function bindControls() {
       if (key === 'shapeQuality' && previousValue !== P[key]) {
         scheduleGLBRebuild();
       }
+      if (key === 'antialiasLevel') applyAntialiasLevel();
       if ((key === 'motion' || key === 'shapeSource') && previousValue !== P[key]) {
         ensureShapeForCurrentSource();
       }

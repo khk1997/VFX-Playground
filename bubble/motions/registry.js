@@ -177,8 +177,8 @@ export const MOTIONS = {
     dolly: false,
     overrides: {
       materialStyle: 'universal',
-      // 一行字是橫向鋪開的，鏡頭得退遠一點才裝得下。
-      cameraDistance: 9.4,
+      // 鏡頭距離不覆寫——沿用跟形狀匯聚、穿梭環繞等大多數模式一樣的共用預設
+      // （DEFAULTS.cameraDistance，見 bubble.js），不再是打字模式自己的 9.4。
       // 刻意不是正面。第一版鏡頭幾乎正對著字，而擠出的字正面與背面是兩片平行的
       // 平面——平行界面幾乎不折射，於是只有輪廓那一圈有玻璃感，中間看起來是空的，
       // 整個字讀成一條描邊。斜一點才看得到側壁，厚度也才變成看得見的東西。
@@ -199,21 +199,30 @@ export const MOTIONS = {
         value: 'LIQUID\nGLASS\nTYPE',
       },
       {
-        key: 'typeSize', label: '字級', min: 0.2, max: 1.2, step: 0.01, value: 0.82,
+        // 使用者實測後定案：1.5 比先前調過的 0.82／0.95 都更大——鏡頭距離改回跟
+        // 其他模式共用的預設之後，字需要更大才能撐滿畫面。上限跟著從 1.2 拉高到
+        // 4：字級圖集取樣已經換成三次 B-spline（見 typeAtlasSampleSmooth），放到
+        // 這個放大倍率邊緣依然平滑，不會露出圖集烘焙解析度的格狀。
+        key: 'typeSize', label: '字級', min: 0.2, max: 4, step: 0.01, value: 1.5,
       },
       {
-        key: 'typeTracking', label: '字距', min: 0.6, max: 1.6, step: 0.01, value: 1,
+        // 1（第一版）是圖集本身的 advance，字距剛好等於字寬，相鄰字幾乎貼在一起，
+        // 密度太高、不容易一眼分開每個字母。1.15 留出可讀的呼吸間隔。
+        key: 'typeTracking', label: '字距', min: 0.6, max: 1.6, step: 0.01, value: 1.15,
       },
       {
-        // 0.11（第一版）在斜視下仍然偏薄，側壁只有一線；0.18 才讓字讀成一塊實心
-        // 玻璃而不是一片壓克力。上限保留 0.4，再厚字腔就會被側壁吃掉。
-        key: 'typeDepth', label: '擠出厚度', min: 0.02, max: 0.4, step: 0.005, value: 0.18,
+        // 使用者實測後定案：0.07 比先前調過的 0.18／0.26 都薄很多，字讀起來更像
+        // 一片薄玻璃／壓克力，而不是厚實的玻璃塊——是刻意選的手感，不是回退。
+        key: 'typeDepth', label: '擠出厚度', min: 0.02, max: 0.4, step: 0.005, value: 0.07,
       },
       {
-        key: 'typeBevel', label: '邊緣圓角', min: 0, max: 0.12, step: 0.002, value: 0.056,
+        // 配合上面的薄擠出，圓角也收到 0.01——薄片本來就不需要大圓角，稜邊維持
+        // 俐落。
+        key: 'typeBevel', label: '邊緣圓角', min: 0, max: 0.12, step: 0.002, value: 0.01,
       },
       {
-        key: 'typeGrow', label: '液態長出', min: 0, max: 1, step: 0.01, value: 0.6,
+        // 關閉：字直接完整出現，不做基線往上長的液態動畫。
+        key: 'typeGrow', label: '液態長出', min: 0, max: 1, step: 0.01, value: 0,
       },
       {
         // 不能叫 typeCaret：uniform 名稱是從 key 自動推導的（'u' + 首字大寫），
