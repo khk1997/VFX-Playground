@@ -121,6 +121,7 @@ uniform float uResearchIconTailTip;
 uniform float uResearchIconSpread;
 uniform float uResearchIconStagger;
 uniform float uResearchIconDepth;
+uniform float uResearchExitMode;
 
 // icon 相對於外殼玻璃的折射率。內外是同一種液態玻璃,材質流程完全共用,只有這個
 // 比值不同 —— 大於 1 表示內部這一坨比外殼更「稠」,光路彎得更多,所以看得出形狀。
@@ -1274,11 +1275,34 @@ float researchIconStage(
   //   drain    本體的體積往腳裡轉移:本體收、腳脹、中間頸縮。
   //   collapse 剩下那顆珠收乾。液滴收乾的最後一刻是塌陷,所以這一段短而快;
   //            因為只剩一顆小珠、對比低,快也不會變成重音。
-  float sink = smoothstep(RESEARCH_EXIT_SINK - exitEarly, 0.88 - exitEarly, t);
-  float drain = smoothstep(RESEARCH_EXIT_DRAIN - exitEarly, 0.95, t);
-  float collapse = smoothstep(0.94, 1.0, t);
-  float bodyK = 1.0 - drain;
-  float tailK = (1.0 + drain * 1.4) * (1.0 - collapse);
+  // 三種消失方式,由「消失方式(試用)」選單切換,挑定後把沒選上的拿掉。
+  //
+  // 共同的約束:這是重複播的背景,所以不能有重音;而且必須原地完成 —— 橫向移動
+  // 會把視線帶走,還會把收尾送到殼壁那圈追蹤死角(icon 只在外殼進出點之間畫得
+  // 出來)。三種都不改變輪廓的辨識度,這是上一版「流進腳裡」最大的問題:本體
+  // 垮成一團之後才消失,看起來像壞掉而不是離開。
+  //
+  //   0 光學溶解   形狀完全不動,折射率降到 1.0,在光學上與周圍玻璃無法分辨。
+  //                零重音的極限,而且是這個材質獨有的做法。
+  //   1 往深處退去 沿 z 往遠離鏡頭的方向漂。前方玻璃變厚,體積吸收自然加重 ——
+  //                淡出是物理算出來的,不是乘一個 alpha。
+  //   2 原地塌陷   等向收縮,但用表面張力的曲線:前段幾乎不動,最後急收。
+  //                液滴收乾就是這樣,等速縮小才會像「被關掉」。
+  int exitMode = int(uResearchExitMode + 0.5);
+  float exitScale = 1.0;
+  float exitZ = 0.0;
+  if (exitMode == 1) {
+    float k = smoothstep(RESEARCH_EXIT_SINK - exitEarly, 1.0, t);
+    exitZ = -k * 0.34;
+    exitScale = 1.0 - smoothstep(0.90, 1.0, t);
+  } else if (exitMode == 2) {
+    float k = smoothstep(RESEARCH_EXIT_DRAIN - exitEarly, 1.0, t);
+    exitScale = 1.0 - k * k * k;
+  }
+  // 模式 0 的形狀完全不動:它的消失發生在著色端(見 researchIconDissolve)。
+  // 本體與腳都維持原樣,不再有瀝乾。
+  float bodyK = 1.0;
+  float tailK = 1.0;
 
   // 黏性:斷開前被頸子拉著、沿發射軸扯長;斷開後表面張力收回球形,會收過頭,
   // 所以疊上同一個彈簧的振盪。
@@ -1288,7 +1312,7 @@ float researchIconStage(
   float chat = researchChatPulse(phase, chatAt)
     + researchChatPulse(phase, chatAt + 0.16);
 
-  float scale = size * grow * (1.0 + chat * 0.035);
+  float scale = size * grow * exitScale * (1.0 + chat * 0.035);
   if (scale < 0.001) return 1e4;
 
   // 起點是往內縮過的芽位置,不是錨點本身(見 RESEARCH_BUD_INSET)。
@@ -1300,9 +1324,9 @@ float researchIconStage(
   // 「要結束了」的訊號,不需要另外強調。
   float orbit = t * TAU;
   center += vec3(cos(orbit + angle), sin(orbit + angle), sin(orbit * 0.7 + angle))
-    * vec3(0.020, 0.017, 0.015) * travel * (1.0 - sink);
-  // 沉降。
-  center.y -= sink * 0.030;
+    * vec3(0.020, 0.017, 0.015) * travel;
+  // 往深處退去(僅模式 1)。
+  center.z += exitZ;
   // 說話時朝對方傾一點。兩顆落點在 x 上左右對稱,「對方」就是 -x 方向。
   center.x -= sign(target.x) * chat * 0.022;
 
@@ -1433,6 +1457,19 @@ void researchTraceIconExit(vec3 ro, vec3 rd, out vec3 exitPoint, out float pathL
   // 取的法線也是連續的,不論追蹤有沒有真的抵達表面。寧可讓極少數射線拿到
   // 稍微不精確的法線,也不要留一個會沿等值線炸開的二元切換。
   pathLength = t;
+}
+
+// 模式 0 專用:這一點所屬的那顆 icon 溶解到什麼程度(0 未溶解,1 完全溶進介質)。
+//
+// 「是哪一顆」用 x 的正負判斷就夠了,不必把整個 stage 再算一次:兩顆的錨點分居
+// 左右,落點也由 spread 對稱決定(下限 0.05),各自守在自己那一側,不會越界。
+float researchIconDissolve(vec3 p){
+  if (int(uResearchExitMode + 0.5) != 0) return 0.0;
+  float phase = fract(uTime / max(uLoopDuration, 0.001));
+  bool isA = p.x > 0.0;
+  float t = isA ? fract(phase - RESEARCH_BIRTH_A) : fract(phase - RESEARCH_BIRTH_B);
+  float early = isA ? 0.0 : 0.02;
+  return smoothstep(0.80 - early, 0.99, t);
 }
 
 bool researchTraceIcon(vec3 ro, vec3 rd, float maxDistance, out vec3 hitPoint){
@@ -2713,7 +2750,12 @@ void main(){
         // 在上面的 bounce 分支裡可能已經被改寫成 bounceDir。這一段一律用當時存下來
         // 的 researchInsideDir，否則 icon 的入射方向會跟命中它的那條射線對不起來。
         if (researchIconHit) {
-          vec3 iconIn = refract(researchInsideDir, researchIconN, 1.0 / researchIconRelIOR());
+          // 折射率往 1.0 收 = 與周圍玻璃索引匹配 = 光學上不存在。eta 為 1 時
+          // refract 是恆等,Fresnel 的 F0 也歸零,所以下面整條路徑會自然退化成
+          // 「沒有這顆 icon」的結果,不需要另外分支。
+          float relIOR = mix(researchIconRelIOR(), 1.0,
+            researchIconDissolve(researchIconPoint));
+          vec3 iconIn = refract(researchInsideDir, researchIconN, 1.0 / relIOR);
           vec3 iconDir = dot(iconIn, iconIn) > 0.0001 ? normalize(iconIn) : researchInsideDir;
           vec3 iconExitPoint;
           float iconPath;
@@ -2723,7 +2765,7 @@ void main(){
           // 一律用出口點上的法線。舊版在追蹤失敗時改用 -researchIconN，那是一個
           // 逐像素的二元切換，正是同心紋路的來源（見 researchTraceIconExit 的註解）。
           vec3 iconExitN = researchIconNormal(iconExitPoint);
-          vec3 iconOut = refract(iconDir, -iconExitN, researchIconRelIOR());
+          vec3 iconOut = refract(iconDir, -iconExitN, relIOR);
           // 由稠往稀出去,掠射角會全內反射(refract 回傳零向量)。真正的玻璃在
           // 這裡會把光彈回內部,而那正是參考照片裡內側那圈亮邊的來源,所以
           // fallback 用反射而不是「直接放行」。
@@ -2737,9 +2779,7 @@ void main(){
           if (dot(shellOut, shellOut) < 0.0001) shellOut = iconOut;
           vec3 iconTransmitted = backgroundSample(normalize(shellOut), roughBlur).rgb;
           float iconFacing = clamp(dot(-researchInsideDir, researchIconN), 0.0, 1.0);
-          float iconF0 = pow(
-            (researchIconRelIOR() - 1.0) / (researchIconRelIOR() + 1.0), 2.0
-          );
+          float iconF0 = pow((relIOR - 1.0) / (relIOR + 1.0), 2.0);
           float iconFres = iconF0 + (1.0 - iconF0) * pow(1.0 - iconFacing, 5.0);
           vec3 iconReflection = sampleEnvironmentBackdrop(
             reflect(researchInsideDir, researchIconN), roughBlur
@@ -2754,7 +2794,10 @@ void main(){
           // 的話會用外殼方向重新取樣、把 icon 洗掉)與稜光光芒的座標。
           transmissionDir = normalize(shellOut);
           // icon 把光彎掉多少 —— 色散的強度項要用。
-          researchIconBend = clamp(length(shellOut - researchInsideDir) * 0.55, 0.0, 1.0);
+          // 溶解之後這顆在光學上已經不存在,偏折量也該跟著歸零,否則 icon 那塊
+          // 會留下一片沒有來由的色散。
+          researchIconBend = clamp(length(shellOut - researchInsideDir) * 0.55, 0.0, 1.0)
+            * (1.0 - researchIconDissolve(researchIconPoint));
         }
 #endif
 

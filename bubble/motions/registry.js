@@ -229,6 +229,19 @@ export const MOTIONS = {
         key: 'researchIconDepth', label: 'icon 前後錯位',
         min: -0.3, max: 0.3, step: 0.005, value: 0.025,
       },
+      {
+        // 臨時的比較用選單:三種消失方式擺在一起讓人直接用眼睛挑,挑完把沒選上的
+        // 拿掉。前兩版退場都是我單方面選一種做出來再被否決,這樣來回太慢。
+        //
+        // 用數字當 option value,才走得到 bindControls 既有的「數值型控制項」那條
+        // 路徑(同 staticShape 的做法),不必為一個字串型 select 另開特例。
+        key: 'researchExitMode', label: '消失方式(試用)', type: 'select', value: 0,
+        options: [
+          { value: 0, label: '光學溶解' },
+          { value: 1, label: '往深處退去' },
+          { value: 2, label: '原地塌陷' },
+        ],
+      },
     ],
   },
   typewriter: {
