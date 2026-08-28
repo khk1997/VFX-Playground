@@ -1009,7 +1009,34 @@ const float RESEARCH_SIDE_SOFT = 0.06;
 // 接點上被 fract 切斷 —— 隆起會在 phase 0 那一幀憑空跳出一塊。
 #define RESEARCH_ANTICIPATE 0.06
 #define RESEARCH_BIRTH_A 0.08
-#define RESEARCH_BIRTH_B 0.22
+// B 只比 A 晚 0.06(約 0.27 秒),兩顆一前一後像一次對答,而不是各演各的。
+// 舊值 0.22 差太多:B 還沒長出來 A 就快演完了,「兩顆並存」只佔循環的三成。
+#define RESEARCH_BIRTH_B 0.14
+// 每顆的壽命,以及淡出的起點。壽命必須跟淡出的終點一致,scale 才會剛好在生命
+// 結束那一刻歸零。最晚出生的 B 在 0.14 + 0.84 = 0.98 收完,留 0.02 給 loop 接點。
+#define RESEARCH_LIFE 0.84
+#define RESEARCH_FADE_IN 0.72
+// 芽的出生位置相對於錨點的內縮比例。
+//
+// 錨點在殼壁上(半徑約 0.698,水滴半徑 0.76),而 icon 只在外殼的進入點與出射點
+// 之間被追蹤 —— 芽長在錨點上的話有一半在殼外,那段根本畫不出來,看起來就是
+// 「移動到殼內一段距離後才憑空出現」。
+//
+// 把出生位置往內縮,但錨點本身不動:外殼的隆起是用 normalize(anchor) 定位的,
+// 只看方向不看半徑,所以隆起仍然落在殼壁的同一點;頸子的遠端也仍然拉到錨點,
+// 還是連著殼壁。動的只有芽自己,現在它完整落在可追蹤的範圍內。
+#define RESEARCH_BUD_INSET 0.78
+// 衛星水滴:液柱夾斷幾乎必定在斷點留下一顆小珠子,再被兩端吸收。這是賣「這是
+// 液體」最便宜也最有效的細節 —— 少了它,再怎麼調曲線都像「兩個物件分開」而不是
+// 「一坨液體斷了」。
+//
+// R 取 0.034:0.018(頸子被砍掉時的粗細)在實際算繪尺寸下只有約 11 像素,幾乎
+// 看不見;0.080 又大到跟腳差不多、看起來像第三顆 icon。MIN 是收掉的下限,
+// 理由同 NECK_SAFE_R —— 半徑掉到跟法線取樣間距(0.0018)同量級就會開始算出
+// 垃圾法線,寧可在還有幾個像素寬的時候乾脆消失。
+#define RESEARCH_SAT_R 0.034
+#define RESEARCH_SAT_MIN 0.008
+#define RESEARCH_SAT_LIFE 0.16
 // 頸子從開始變細到完全夾斷的區間(以每顆自己的區域時間計)。
 #define RESEARCH_NECK_START 0.13
 #define RESEARCH_NECK_END 0.21
@@ -1168,7 +1195,7 @@ float researchIconOne(
 float researchIconStage(
   vec3 p, float t, vec3 anchor, vec3 target, float size, float tailX, float angle
 ){
-  if (t < 0.0 || t > 0.74) return 1e4;
+  if (t < 0.0 || t > RESEARCH_LIFE) return 1e4;
 
   // 長大:體積從幾乎沒有長到滿。這一段幾乎還沒開始移動,所以看起來是「鼓出來」。
   float grow = smoothstep(0.0, 0.17, t);
@@ -1196,21 +1223,42 @@ float researchIconStage(
   // 黏性:斷開前被頸子拉著、沿發射軸扯長;斷開後表面張力把它收回球形,
   // 但會收過頭,所以疊上同一個彈簧的振盪。
   float stretch = (1.0 - smoothstep(0.04, RESEARCH_NECK_END, t)) * 0.55 + ring * 0.34;
-  float fade = 1.0 - smoothstep(0.62, 0.74, t);
+  float fade = 1.0 - smoothstep(RESEARCH_FADE_IN, RESEARCH_LIFE, t);
 
   float scale = size * grow * fade;
   if (scale < 0.001) return 1e4;
 
-  vec3 center = mix(anchor, target, travel);
+  // 起點是往內縮過的芽位置,不是錨點本身(見 RESEARCH_BUD_INSET)。
+  vec3 center = mix(anchor * RESEARCH_BUD_INSET, target, travel);
   // 位置用同一組彈簧參數:斷開的瞬間往內衝過頭,再被拉回來。方向取
   // anchor→target 那條軸,所以回彈永遠沿著它飛出來的方向,不會斜掉。
-  center += (target - anchor) * ring * 0.10;
+  center += (target - anchor * RESEARCH_BUD_INSET) * ring * 0.10;
   float orbit = t * TAU;
   // 漂浮只在脫離之後才有意義,還黏在壁上的時候乘上 travel 壓掉。
   center += vec3(cos(orbit + angle), sin(orbit + angle), sin(orbit * 0.7 + angle))
     * vec3(0.020, 0.017, 0.015) * travel;
 
   float body = researchIconOne(p, center, scale, angle, tailX, stretch);
+  vec3 foot = center + vec3(tailX * 0.148, -0.208, 0.0) * scale;
+
+  // 衛星水滴。夾斷的那一刻生出來,懸在斷點,然後一邊縮小一邊被殼壁吸回去。
+  //
+  // 必須放在下面那個「頸子太細就整段不畫」的 early-return 之前 —— 它正好是在
+  // 頸子消失之後才登場的,放在後面就永遠畫不到。
+  //
+  // 用 min() 而不是 smin():它跟本體是分開的兩顆,中間沒有要融接的縫,而 smin
+  // 會在兩者之間拉出一條不存在的軟連結。
+  float satAge = t - RESEARCH_NECK_END;
+  if (satAge > 0.0) {
+    float k = satAge / RESEARCH_SAT_LIFE;
+    // 1 - k*k:剛斷開時幾乎不縮,越後面收得越快,像被表面張力一口吸走。
+    float satR = RESEARCH_SAT_R * (1.0 - k * k);
+    if (satR > RESEARCH_SAT_MIN) {
+      // 斷點大約在頸子中段偏錨點那一側;之後往錨點漂,表示被殼壁吸收。
+      vec3 satPos = mix(mix(anchor, foot, 0.45), anchor, smoothstep(0.0, 1.0, k));
+      body = min(body, length(p - satPos) - satR);
+    }
+  }
 
   // 頸子:從腳尖拉回 anchor,半徑隨 neck 收細。
   //
@@ -1239,7 +1287,6 @@ float researchIconStage(
   float nr = 0.075 * neck * min(1.0, scale / 0.35);
   if (nr < NECK_SAFE_R) return body;
 
-  vec3 foot = center + vec3(tailX * 0.148, -0.208, 0.0) * scale;
   float neckD = researchRoundCone(p, foot, anchor, nr, max(nr * 0.55, NECK_SAFE_R * 0.4));
   return researchSmin(body, neckD, max(0.055 * neck, NECK_SAFE_R * 0.3));
 }
@@ -1248,16 +1295,16 @@ float researchIconMap(vec3 p){
   float phase = fract(uTime / max(uLoopDuration, 0.001));
   // A 在右、小顆,腳往右下;B 在左、大顆,腳往左下 —— 兩隻腳方向相反。
   // anchor 落在外殼內壁偏下的位置,與腳同一側,芽才會從腳的方向長出來。
-  // B 晚 0.14 出生,兩顆錯開;最晚的一顆在 0.18 + 0.74 = 0.92 收完,loop 接得回去。
+  // 兩顆錯開 0.06;最晚的 B 在 0.14 + 0.84 = 0.98 收完,loop 接得回去。
   float a = researchIconStage(
     p, phase - RESEARCH_BIRTH_A,
     researchAnchor(1.0), vec3(0.235, 0.055, 0.025),
-    0.76, 1.0, 0.10
+    0.82, 1.0, 0.10
   );
   float b = researchIconStage(
     p, phase - RESEARCH_BIRTH_B,
     researchAnchor(-1.0), vec3(-0.235, -0.055, -0.02),
-    1.08, -1.0, -0.16
+    1.00, -1.0, -0.16
   );
   return min(a, b);
 }
