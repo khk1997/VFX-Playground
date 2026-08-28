@@ -713,6 +713,12 @@ const MOTION_SCOPED_KEYS = [
   // 這兩條是稜光光芒的遮罩，跟上面那四條同一組；原本漏了，靜態模式要用自己的
   // 值就得連它們一起按模式記憶，否則調完切走再切回來會被別的模式蓋掉。
   'rayBeamFresnelMask', 'rayBeamNoiseScale',
+  // 稜光光芒的其餘控制項。上面那六條早就按模式記憶了，剩下這些沒列，於是
+  // registry 的 override 寫不回控制項——研究模式要一整組指定的光芒設定，
+  // 缺一條就會沿用全域值，看起來像 override 沒生效。
+  'rayBeamRings', 'rayBeamGlow', 'rayBeamSpeed',
+  'rayBeamAzimuth', 'rayBeamElevation', 'rayBeamRefract', 'rayBeamNoiseMask',
+  'rayDispersionEnabled', 'rayBeamPattern',
   'spectralCausticEnabled',
   // 藝術色散的開關，跟上面的光譜焦散開關同一個身分。
   'dispersionEnabled',
@@ -722,7 +728,17 @@ const MOTION_SCOPED_KEYS = [
   // Research 的外殼需要比一般水滴低很多的 FBM 起伏；列入模式記憶後 registry
   // 的 wobble override 才會真的寫回控制項與 uniform，而不是仍沿用全域 0.305。
   'wobble',
+  // 起伏的時間項。研究模式要把外殼定格（wobbleSpeed 0），而 wobble 本身保留，
+  // 所以兩條都得按模式記憶，只列 wobble 會讓外殼照樣流動。
+  'wobbleSpeed',
   'materialStyle',
+  // 材質那一組。必須排在 materialStyle 後面：切換材質類型會由
+  // switchMaterialProfile 還原該類型記住的整組材質值，而模式記憶是照這個陣列
+  // 的順序逐一寫回的，排在後面模式的 override 才蓋得過材質類型的 profile。
+  'transmission', 'reflect', 'materialExposure', 'roughness', 'fresnel', 'ior',
+  // 水滴形態這兩條同樣沒列進來，所以 research overrides 裡的 viscosity 0.82 /
+  // surfaceTension 0.92 從來沒被寫回控制項，面板一直是全域的 0.78 / 0.82。
+  'viscosity', 'surfaceTension',
   // 這一組波紋參數是靜態模式與毛細波共用的同一批控制項（見 registry.js 的
   // capillaryTextureUI），但兩個模式要的預設不一樣：毛細波是整個模式的主角，
   // 靜態模式只是拿它在幾何體表面做一層很淡的質感。不按模式記憶的話，把靜態
@@ -4093,6 +4109,7 @@ function initGL() {
     uResearchShellAmount: { value: P.researchShellAmount },
     uResearchShellSpeed: { value: P.researchShellSpeed },
     uResearchShellDensity: { value: P.researchShellDensity },
+    uResearchIconIOR: { value: P.researchIconIOR },
     // 打字模式。字形圖集在切進這個模式時才烘（見 scheduleGlyphRebuild），在那之前
     // 綁一張 1x1 的空貼圖——取樣器一定要綁著東西，某些驅動會直接拒絕未綁定的
     // sampler，即使 runtime 永遠不會走到那個分支。

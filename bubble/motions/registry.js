@@ -133,10 +133,35 @@ export const MOTIONS = {
       cameraDistance: 4.8,
       spin: 0,
       wobble: 0.05,
+      // 外殼起伏定格。這個模式的主角是內部那兩顆 icon，外殼再自己流動會搶掉
+      // 注意力；wobble 保留（起伏的「形狀」還在），只把時間項關掉。
+      wobbleSpeed: 0,
       viscosity: 0.82,
       surfaceTension: 0.92,
-      transmission: 0.97,
-      roughness: 0.035,
+      // 以下整組材質與 RAY 色散是這個模式的指定外觀，逐項寫死而不是只列出
+      // 與全域 DEFAULTS 不同的幾個 —— 全域預設之後若被調動，這裡不該跟著漂。
+      transmission: 1,
+      reflect: 1.6,
+      materialExposure: 1,
+      roughness: 0.16,
+      fresnel: 0.45,
+      ior: 1.17,
+      rayDispersionEnabled: true,
+      rayBeamPattern: 'grid',
+      rayBeamIntensity: 17.55,
+      rayBeamSeparation: 0.055,
+      rayBeamChroma: 1.5,
+      rayBeamZoom: 6,
+      rayBeamRings: 2.5,
+      rayBeamGlow: 1,
+      rayBeamSpeed: 0,
+      rayBeamAzimuth: -54,
+      rayBeamElevation: 0,
+      rayBeamRefract: 1,
+      rayBeamFresnelMask: 0.33,
+      rayBeamNoiseMask: 1,
+      rayBeamNoiseScale: 1.6,
+      spectralCausticEnabled: false,
       dispersionEnabled: true,
       dispersionSeparation: 0.24,
     },
@@ -156,6 +181,13 @@ export const MOTIONS = {
       {
         key: 'researchBreath', label: '整體呼吸幅度',
         min: 0, max: 0.06, step: 0.001, value: 0.018,
+      },
+      {
+        // 這是內部 icon「相對於外殼玻璃」的折射率，不是絕對值，所以它會跟著
+        // 材質那根 IOR 滑桿一起走。1 代表與外殼完全相同 —— 光學上分辨不出來，
+        // icon 會直接消失，因此下限留在 1.02 而不是 1。
+        key: 'researchIconIOR', label: 'icon 折射率(相對外殼)',
+        min: 1.02, max: 2.2, step: 0.01, value: 1.2,
       },
     ],
   },

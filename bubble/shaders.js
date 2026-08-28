@@ -114,6 +114,13 @@ uniform float uWobbleSpeed;
 uniform float uResearchShellAmount;
 uniform float uResearchShellSpeed;
 uniform float uResearchShellDensity;
+uniform float uResearchIconIOR;
+
+// icon 相對於外殼玻璃的折射率。內外是同一種液態玻璃,材質流程完全共用,只有這個
+// 比值不同 —— 大於 1 表示內部這一坨比外殼更「稠」,光路彎得更多,所以看得出形狀。
+// 等於 1 時在光學上與外殼無法分辨(icon 直接消失),而小於等於 0 會讓 refract 的
+// eta 變成除以零,所以這裡夾住下限,不信任外部傳進來的值。
+float researchIconRelIOR(){ return max(uResearchIconIOR, 1.02); }
 // 打字模式。字形距離場圖集（glyph-field.js 烘的）與整行的排版／擠出參數。
 // 每一格字自己的資料（哪一個字形、成形進度）走 uTypeGlyphData 這張 1D 資料貼圖，
 // 跟 uMicroDrops 同一個手法——GLSL ES 1.0 對 uniform 陣列的非常數索引限制不一，
@@ -994,6 +1001,61 @@ float sdTorus(vec3 p, float majorR, float minorR){
 // uResearchShellAmount 成正比，所以這個比例在滑桿拉到上限 0.08 時同樣成立。
 const float RESEARCH_SIDE_SOFT = 0.06;
 
+// 兩顆 icon 的出生時刻與錨點方向。外殼的隆起／漣漪、icon 的頸子與位置都要讀
+// 同一組值，所以集中在這裡 —— 分成兩份各自寫死,遲早會漂掉一邊。
+//
+// A 的出生時刻不能小於預備動作的長度(0.06)：預備動作發生在區域時間 t 為負的
+// 那一段,而 t = phase - birth。birth 若小於 0.06,那段會落到 phase < 0,在 loop
+// 接點上被 fract 切斷 —— 隆起會在 phase 0 那一幀憑空跳出一塊。
+#define RESEARCH_ANTICIPATE 0.06
+#define RESEARCH_BIRTH_A 0.08
+#define RESEARCH_BIRTH_B 0.22
+// 頸子從開始變細到完全夾斷的區間(以每顆自己的區域時間計)。
+#define RESEARCH_NECK_START 0.13
+#define RESEARCH_NECK_END 0.21
+
+// sideSign 為 +1 是右邊那顆(A)、-1 是左邊那顆(B)。
+vec3 researchAnchor(float sideSign){
+  return vec3(sideSign * 0.575, -0.395, sideSign * 0.03);
+}
+
+// 內部 icon 的誕生在外殼上留下的痕跡：先鼓起、放開、再盪一圈漣漪。
+//
+// 這一段存在的理由是因果。原本外殼完全不知道殼裡在發生什麼事,兩顆 icon 像貼在
+// 玻璃球裡的貼紙;有了預備動作,誕生才是「被外殼頂出來的」而不是憑空的。順帶
+// 解掉一個渲染限制:icon 只在外殼的進入點與出射點之間被追蹤(researchTraceIcon
+// 的 maxDistance 就是那段光程),冒芽時它有一半在殼外,根本畫不出來 —— 而外殼
+// 本身永遠看得見,所以「長出來」這件事交給外殼演比交給 icon 演可靠。
+//
+// 兩項都必須 C1 連續。這個偏移量直接減進距離場,法線是對同一個場做中央差分,
+// 任何梯度跳變都會被折射放大成一條亮線(理由同上面 RESEARCH_SIDE_SOFT 那段)。
+// 所以距離量取 ad = 1 - dot(q, an):它在錨點正中央對角度是二次的,不像 length()
+// 或 acos() 會在中心留下一個尖點。
+float researchShellEvent(vec3 q, float sideSign, float t){
+  vec3 an = normalize(researchAnchor(sideSign));
+  float ad = 1.0 - dot(q, an);
+
+  // 預備動作:出生前 RESEARCH_ANTICIPATE 這段時間鼓起來,頂到最高點芽才冒出;
+  // 頸子夾斷的同時放掉,所以「放開」與「斷裂」是同一個瞬間。
+  float swellAmt = smoothstep(-RESEARCH_ANTICIPATE, 0.0, t)
+    * (1.0 - smoothstep(RESEARCH_NECK_START, RESEARCH_NECK_END, t));
+  float swell = exp(-ad * 26.0) * swellAmt * 0.080;
+
+  // 反作用力:夾斷瞬間從錨點擴出去的一圈漣漪。不設時間上界,靠 exp 自己衰減到
+  // 遠小於一個像素(age=0.5 時只剩 5e-5),這樣就沒有「關掉」那一幀的跳變;
+  // 起手的 smoothstep 則保證 age=0 那一刻是從 0 長出來的。
+  float age = t - RESEARCH_NECK_END;
+  float ripple = 0.0;
+  if (age > 0.0) {
+    ripple = sin((ad * 7.0 - age * 9.0) * 3.0)
+      * exp(-age * 11.0)
+      * exp(-ad * 3.0)
+      * smoothstep(0.0, 0.015, age)
+      * 0.013;
+  }
+  return swell + ripple;
+}
+
 float researchShellOffset(vec3 p){
   vec3 q = normalize(p - uDrops[0].xyz + vec3(0.0001));
   float phase01 = fract(uTime / max(uLoopDuration, 0.001));
@@ -1010,52 +1072,193 @@ float researchShellOffset(vec3 p){
   float lateral = sqrt(q.x * q.x + k2);
   float lower = 0.5 * (sqrt(q.y * q.y + k2) - q.y);
   float side = smoothstep(-0.15, 0.9, lateral + lower * 0.55);
-  return lobes * side * uResearchShellAmount;
+  // 誕生事件不乘 uResearchShellAmount。那根滑桿控制的是「環境起伏」的振幅,
+  // 拉到 0 的語意是外殼平滑,不該連帶把因果關係一起關掉。
+  float events = researchShellEvent(q, 1.0, phase01 - RESEARCH_BIRTH_A)
+    + researchShellEvent(q, -1.0, phase01 - RESEARCH_BIRTH_B);
+  return lobes * side * uResearchShellAmount + events;
 }
 
-float researchCapsule(vec3 p, vec3 a, vec3 b, float r){
-  vec3 pa = p - a, ba = b - a;
-  float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-  return length(pa - ba * h) - r;
+// 平滑併集。k 是融合半徑：兩個面靠近到 k 以內時,接縫會被拉成圓角而不是硬折。
+// 這裡不能用 min()——內物件的法線同樣是中央差分求得的,硬折會在透射玻璃裡被
+// 放大成一條亮線(理由與上面 RESEARCH_SIDE_SOFT 那段註解相同)。
+float researchSmin(float a, float b, float k){
+  float h = clamp(0.5 + 0.5 * (b - a) / max(k, 0.0001), 0.0, 1.0);
+  return mix(b, a, h) - k * h * (1.0 - h);
 }
 
-float researchTorusZ(vec3 p, float majorR, float minorR){
-  return length(vec2(length(p.xy) - majorR, p.z)) - minorR;
+// 橢球。r 三軸半徑;回傳的是有界近似(iq 的二階式),比 length(p/r)-1 準得多,
+// 對 sphere tracing 的步長友善。
+float researchEllipsoid(vec3 p, vec3 r){
+  float k0 = length(p / r);
+  float k1 = length(p / (r * r));
+  return k0 * (k0 - 1.0) / max(k1, 0.0001);
 }
 
-float researchIconOne(vec3 p, vec3 center, float scale, float angle){
+// 圓錐膠囊:a 端半徑 r1、b 端半徑 r2 的圓錐,兩端各封一個球。對話泡的腳需要
+// 「粗端接本體、細端收成尖」,等半徑的膠囊做不出來,所以用這個。
+float researchRoundCone(vec3 p, vec3 a, vec3 b, float r1, float r2){
+  vec3 ba = b - a;
+  float l2 = dot(ba, ba);
+  float rr = r1 - r2;
+  float a2 = l2 - rr * rr;
+  float il2 = 1.0 / max(l2, 0.000001);
+  vec3 pa = p - a;
+  float y = dot(pa, ba);
+  float z = y - l2;
+  vec3 xp = pa * l2 - ba * y;
+  float x2 = dot(xp, xp);
+  float y2 = y * y * l2;
+  float z2 = z * z * l2;
+  // a2 = l2 - rr*rr 必須為正，最後一行才有意義：那裡是 sqrt(x2 * a2 * il2)，
+  // a2 為負就是開負數根，回傳 NaN。而 NaN 會一路傳進 researchSmin 的 clamp()，
+  // clamp(NaN, 0, 1) 的結果是驅動相依的 —— 畫面上時而整片亂掉、時而正常，
+  // 換台機器又不一樣，正是這個未定義行為的典型症狀。
+  //
+  // a2 <= 0 的幾何意義是「圓錐比兩端半徑差還短」，也就是小的那顆端球完全被
+  // 大的那顆包住，整個形狀退化成單一顆球。直接回傳那顆球，而不是硬算下去。
+  if (a2 <= 0.0) {
+    return r1 >= r2 ? length(p - a) - r1 : length(p - b) - r2;
+  }
+  float k = sign(rr) * rr * rr * x2;
+  if (sign(z) * a2 * z2 > k) return sqrt(x2 + z2) * il2 - r2;
+  if (sign(y) * a2 * y2 < k) return sqrt(x2 + y2) * il2 - r1;
+  return (sqrt(x2 * a2 * il2) + y * rr) * il2 - r1;
+}
+
+// 對話泡:略寬於高的圓潤本體,加一隻從底緣長出來的短腳。
+// 腳刻意做短、末端不收成針尖(r2 沒有小很多),整體才圓潤;smin 的 k 拉到 0.05,
+// 讓腳與本體之間是一段飽滿的頸子而不是硬接上去的一根錐。
+// z 軸壓成約 2/3,保留厚度讓 researchIconNormal 產生正常的折射法線。
+// tailX 決定腳倒向哪一邊,兩顆用相反符號。
+//
+// stretch 是黏性拉伸量:沿發射軸(局部 x)拉長,另外兩軸等比收窄,體積大致守恆,
+// 所以看起來是被扯成長條而不是整顆變大。距離場除以縮放後就不再是距離,回傳前
+// 必須乘回最小的那個縮放係數才重新是合法的下界,sphere tracing 才不會跨過表面。
+float researchIconOne(
+  vec3 p, vec3 center, float scale, float angle, float tailX, float stretch
+){
   p = (p - center) / max(scale, 0.001);
   float c = cos(angle), s = sin(angle);
   p.xy = mat2(c, -s, s, c) * p.xy;
-  float ring = researchTorusZ(p, 0.17, 0.026);
-  float tail = researchCapsule(
-    p,
-    vec3(-0.095, -0.122, 0.0),
-    vec3(-0.155, -0.194, 0.0),
-    0.025
+  float sx = max(1.0 + stretch, 0.20);
+  float sr = 1.0 / sqrt(sx);
+  vec3 q = vec3(p.x / sx, p.y / sr, p.z / sr);
+  float body = researchEllipsoid(q, vec3(0.198, 0.180, 0.120));
+  float tail = researchRoundCone(
+    q,
+    vec3(tailX * 0.060, -0.116, 0.0),
+    vec3(tailX * 0.148, -0.208, 0.0),
+    0.074,
+    0.036
   );
-  return min(ring, tail) * scale;
+  return researchSmin(body, tail, 0.050) * min(sx, sr) * scale;
+}
+
+// 一顆 icon 的完整生命週期,以它自己的區域時間 t 表示(t = phase 減掉出生時刻)。
+//
+// 造型上的重點是「它是從外殼上長出來的」,不是憑空出現在半空中再飄進來:
+// anchor 是外殼內壁上的一點,芽從那裡冒出來、長大,期間一直有一段頸子連回
+// anchor;頸子收細到斷掉,才真的變成一顆獨立的 icon。腳(researchIconOne 的
+// tail)就長在頸子那一側,所以斷開後留下的那隻腳,正是它剛才連著外殼的地方 ——
+// 「從各自的腳長出來」在幾何上是這樣成立的。
+//
+// 生命週期外回傳一個很大的值,讓呼叫端整段跳過;researchIconMap 在 march 迴圈、
+// 法線的 6 次取樣、以及內部出口追蹤裡都會被呼叫,這個 early-out 值得留。
+float researchIconStage(
+  vec3 p, float t, vec3 anchor, vec3 target, float size, float tailX, float angle
+){
+  if (t < 0.0 || t > 0.74) return 1e4;
+
+  // 長大:體積從幾乎沒有長到滿。這一段幾乎還沒開始移動,所以看起來是「鼓出來」。
+  float grow = smoothstep(0.0, 0.17, t);
+  // 往內移動。窗口刻意排到斷裂之後才真正加速。
+  //
+  // 舊版是 smoothstep(0.12, 0.32)，與頸子的收束窗 (0.14, 0.30) 幾乎完全重疊：
+  // 本體一邊往內飛、頸子一邊變細，等到頸子可以消失時本體已經走了九成路程，
+  // 頸子被拉成半徑 0.035、長度 0.38 —— 長寬比 11:1 的一根麵條。真實的液柱撐
+  // 不到那麼細長（Rayleigh–Plateau：長寬比超過 π 就會自己夾斷），所以那條
+  // 拖著不走的細絲不是曲線調得不好，是它根本不該還連著。
+  float travel = smoothstep(0.10, 0.42, t);
+  // 頸子的粗細。要的形狀是「維持飽滿 → 最後俯衝 → 乾淨歸零」。
+  //
+  // pow(1 - nx, 0.35) 給出前兩段：它在窗口中段還有 0.78、0.45，末段才陡降。
+  // 但它的尾巴永遠碰不到 0（nx = 0.999 時仍有 0.089），那正是上一版拖著細絲的
+  // 主因之一 —— 而且方向剛好搞反了：註解寫「收束集中在最後」，實際 pow 的指數
+  // 小於 1 是把小值放大，尾巴反而更長。後面乘上的 smoothstep 專門負責第三段，
+  // 把窗口最後 15% 壓成真正的 0，斷得乾淨。
+  float nx = smoothstep(RESEARCH_NECK_START, RESEARCH_NECK_END, t);
+  float neck = pow(1.0 - nx, 0.35) * (1.0 - smoothstep(0.85, 1.0, nx));
+  // 斷開之後的阻尼振盪，起點就是夾斷的那一刻。衰減常數取到生命週期結束前
+  // 殘量 exp(-9 * 0.53) ≈ 0.008，再乘上淡出，不會有跳接。
+  float post = max(t - RESEARCH_NECK_END, 0.0);
+  float ring = exp(-post * 9.0) * sin(post * 30.0);
+  // 黏性:斷開前被頸子拉著、沿發射軸扯長;斷開後表面張力把它收回球形,
+  // 但會收過頭,所以疊上同一個彈簧的振盪。
+  float stretch = (1.0 - smoothstep(0.04, RESEARCH_NECK_END, t)) * 0.55 + ring * 0.34;
+  float fade = 1.0 - smoothstep(0.62, 0.74, t);
+
+  float scale = size * grow * fade;
+  if (scale < 0.001) return 1e4;
+
+  vec3 center = mix(anchor, target, travel);
+  // 位置用同一組彈簧參數:斷開的瞬間往內衝過頭,再被拉回來。方向取
+  // anchor→target 那條軸,所以回彈永遠沿著它飛出來的方向,不會斜掉。
+  center += (target - anchor) * ring * 0.10;
+  float orbit = t * TAU;
+  // 漂浮只在脫離之後才有意義,還黏在壁上的時候乘上 travel 壓掉。
+  center += vec3(cos(orbit + angle), sin(orbit + angle), sin(orbit * 0.7 + angle))
+    * vec3(0.020, 0.017, 0.015) * travel;
+
+  float body = researchIconOne(p, center, scale, angle, tailX, stretch);
+
+  // 頸子:從腳尖拉回 anchor,半徑隨 neck 收細。
+  //
+  // 半徑不收到 0 —— 一旦跟半徑跟 researchIconNormal 的取樣間距 h(=0.0018)同量級,
+  // 有限差分算法線就會失真:兩側取樣點會落在頸子的「另一邊」，算出來的斜率不再
+  // 逼近真正梯度,而是在頸子周圍震盪。螢幕上看起來是一圈一圈的同心紋路，位置
+  // 隨頸子夾斷發生在哪一幀而定 —— 兩次錄影紋路出現在不同地方，正是因為每次
+  // uTime 走到那個危險窗口的畫面不一樣，不是隨機的顯示卡問題。march 的最小
+  // 步進(0.0012)同樣逼近這個量級，追蹤本身也會開始跳著命中或落空，是同一批
+  // 症狀的第二個成因。
+  //
+  // 修法是不讓頸子撐著抖到看不見，而是半徑一旦薄過安全下限就整段砍掉、直接
+  // 回傳 body。NECK_SAFE_R 取 h 的 8 倍、march 最小步進的 12 倍，兩邊都留了
+  // 安全邊界；砍掉的那一小段本來就只剩約 icon 半徑 7% 的粗細，肉眼看不出來，
+  // 遠比讓它抖成指紋紋路乾淨。
+  const float NECK_SAFE_R = 0.014;
+  // 頸子的粗細必須跟著芽一起長，不能一出生就用滿粗。
+  //
+  // 頸子是從腳尖拉回 anchor 的圓錐，而出生瞬間 travel 與 ring 都還是 0，center
+  // 精確等於 anchor —— 於是圓錐長度只剩「腳尖偏移 × scale」，scale 接近 0 時
+  // 長度趨近 0，但半徑仍是固定的 0.075。圓錐比兩端半徑差還短，就是上面
+  // researchRoundCone 裡 a2 <= 0 的退化情形。那條路徑現在有防護了，但更根本的
+  // 做法是不要製造出這種畸形圓錐：半徑隨 scale 等比縮放，長度與半徑就同步變化，
+  // 比例維持正常。芽還很微小時 nr 自然掉到 NECK_SAFE_R 以下，頸子整段不畫 ——
+  // 那個階段的芽本來就貼在殼壁上，不需要頸子來表達「連著」。
+  float nr = 0.075 * neck * min(1.0, scale / 0.35);
+  if (nr < NECK_SAFE_R) return body;
+
+  vec3 foot = center + vec3(tailX * 0.148, -0.208, 0.0) * scale;
+  float neckD = researchRoundCone(p, foot, anchor, nr, max(nr * 0.55, NECK_SAFE_R * 0.4));
+  return researchSmin(body, neckD, max(0.055 * neck, NECK_SAFE_R * 0.3));
 }
 
 float researchIconMap(vec3 p){
   float phase = fract(uTime / max(uLoopDuration, 0.001));
-  float revealA = smoothstep(0.08, 0.32, phase)
-    * (1.0 - smoothstep(0.82, 0.94, phase));
-  float revealB = smoothstep(0.22, 0.50, phase)
-    * (1.0 - smoothstep(0.80, 0.92, phase));
-  float travelA = smoothstep(0.06, 0.44, phase);
-  float travelB = smoothstep(0.20, 0.60, phase);
-  float orbit = phase * TAU;
-  vec3 centerA = mix(vec3(0.55, -0.035, 0.03), vec3(0.095, 0.035, 0.025), travelA);
-  vec3 centerB = mix(vec3(-0.56, 0.07, -0.035), vec3(-0.10, -0.045, -0.02), travelB);
-  centerA += vec3(cos(orbit), sin(orbit), sin(orbit * 0.7)) * vec3(0.022, 0.018, 0.016);
-  centerB += vec3(cos(-orbit + 1.1), sin(-orbit + 1.1), cos(orbit * 0.8)) * vec3(0.020, 0.017, 0.014);
-  float a = revealA > 0.001
-    ? researchIconOne(p, centerA, 0.90 * revealA, 0.10 + sin(orbit) * 0.08)
-    : 1e4;
-  float b = revealB > 0.001
-    ? researchIconOne(p, centerB, 0.82 * revealB, -0.16 + cos(orbit) * 0.07)
-    : 1e4;
+  // A 在右、小顆,腳往右下;B 在左、大顆,腳往左下 —— 兩隻腳方向相反。
+  // anchor 落在外殼內壁偏下的位置,與腳同一側,芽才會從腳的方向長出來。
+  // B 晚 0.14 出生,兩顆錯開;最晚的一顆在 0.18 + 0.74 = 0.92 收完,loop 接得回去。
+  float a = researchIconStage(
+    p, phase - RESEARCH_BIRTH_A,
+    researchAnchor(1.0), vec3(0.235, 0.055, 0.025),
+    0.76, 1.0, 0.10
+  );
+  float b = researchIconStage(
+    p, phase - RESEARCH_BIRTH_B,
+    researchAnchor(-1.0), vec3(-0.235, -0.055, -0.02),
+    1.08, -1.0, -0.16
+  );
   return min(a, b);
 }
 
@@ -1068,13 +1271,57 @@ vec3 researchIconNormal(vec3 p){
   ));
 }
 
+// 從 icon 內部往前走到另一側表面。與外殼的 traceExitSurface 同構,只是距離場
+// 換成 researchIconMap,出口法線用 researchIconNormal 的 6 tap 而不是 calcNormal
+// 的 10 tap —— icon 的距離場比 mapScene 便宜很多,沒必要共用那支。
+void researchTraceIconExit(vec3 ro, vec3 rd, out vec3 exitPoint, out float pathLength){
+  // 步進地板從 0.0025 提到 0.006、步數從 24 提到 32。
+  //
+  // 從內部做 sphere tracing 有個陷阱:步進係數 0.70 小於 1,只會幾何逼近出口
+  // 表面、永遠不會真的跨過去,真正讓 d 轉正的是那個地板。所以「最壞情況能走
+  // 多遠」= 步數 × 地板 —— 舊值是 24 × 0.0025 = 0.06,而大顆 icon 光是本體
+  // 直徑就有 0.43。穿過中心的射線靠幾何成長 7 步就出去了,但接近切線的射線
+  // |d| 一路都很小,整段都在吃地板,走到 0.06 就用完預算。那些正是輪廓附近、
+  // 以及沿著被壓扁的 z 軸(半徑只有 0.12)進來的射線,佔比並不低。
+  //
+  // 新值保證覆蓋 32 × 0.006 = 0.19,配上中段的幾何成長,實際遠超過 icon 尺寸。
+  // 地板 0.006 仍遠小於最細的特徵(頸子已由 NECK_SAFE_R 保證至少 0.014),不會
+  // 跨過任何畫得出來的東西。
+  float t = 0.004;
+  for (int i = 0; i < 32; i++) {
+    exitPoint = ro + rd * t;
+    float d = researchIconMap(exitPoint);
+    if (d > 0.0) { pathLength = t; return; }
+    // 在內部 d 是負的,-d 才是到表面的下界。
+    t += max(-d * 0.70, 0.006);
+    if (t > 1.2) break;
+  }
+  // 走不完也不回報失敗。呼叫端原本是用一個 bool 去二選一法線,而「這條射線
+  // 走得完嗎」剛好是內部光程的等值線函數 —— 通過/失敗的邊界沿著等光程輪廓
+  // 走,於是螢幕上長出一圈一圈的同心紋路,位置隨動畫飄移。
+  //
+  // 這裡改成永遠回傳「最後走到的那一點」:它是射線的連續函數,所以在它上面
+  // 取的法線也是連續的,不論追蹤有沒有真的抵達表面。寧可讓極少數射線拿到
+  // 稍微不精確的法線,也不要留一個會沿等值線炸開的二元切換。
+  pathLength = t;
+}
+
 bool researchTraceIcon(vec3 ro, vec3 rd, float maxDistance, out vec3 hitPoint){
   float t = 0.006;
-  for (int i = 0; i < 28; i++) {
+  // 步數從 28 提到 40：下面的步進係數為了 smin 的頸部調得比較保守，同樣的步數
+  // 走不完整條弦，遠端那顆 icon 會整個消失。
+  for (int i = 0; i < 40; i++) {
     hitPoint = ro + rd * t;
     float d = researchIconMap(hitPoint);
     if (d < 0.0012) return true;
-    t += max(d * 0.72, 0.0012);
+    // smin 併集不再是嚴格 Lipschitz(頸部附近會低估距離),步長係數比一般
+    // sphere tracing 保守,否則兩顆球中間那條頸子會被跨過去、出現破洞。
+    //
+    // 地板從 0.0012 提到 0.0025:掠射過 icon 輪廓的射線 d 一路很小、整段都在
+    // 吃地板,40 步只走得了 0.048,還沒穿過水滴就用完預算而漏打,在輪廓邊緣
+    // 留下沿等值線分布的破洞。頸子的粗細已由 NECK_SAFE_R 保證至少 0.014,
+    // 是新地板的 5.6 倍,不會被跨過去。
+    t += max(d * 0.58, 0.0025);
     if (t > maxDistance) break;
   }
   return false;
@@ -2255,6 +2502,8 @@ void main(){
   vec3 researchIconPoint = vec3(0.0);
   vec3 researchIconN = vec3(0.0, 0.0, 1.0);
   vec3 researchInsideDir = rd;
+  float researchIconFres = 0.0;
+  float researchIconBend = 0.0;
 #endif
   bool needsEnvironmentTransmission =
     uBgMode == 0 && uHasEnv == 1
@@ -2324,12 +2573,79 @@ void main(){
         // 畫面九成以上的內容走這條路徑，接上這裡滑桿才真的有感。
         refractedBg = backgroundSample(exitDir, roughBlur).rgb;
 
+#ifdef FEATURE_RESEARCH
+        // 內部物件與外殼是同一種液態玻璃,只有折射率不同,所以它不該自己疊一層
+        // 顏色 —— 它要走的是跟外殼一模一樣的流程:折射進去、量光程、折射出來、
+        // 用同一支 backgroundSample 取環境、用同一組係數吸收。合成點放在這裡
+        // (而不是 finalColor 算完之後)也是同一個理由:refractedBg 的語意就是
+        // 「透過玻璃看到的東西」,把它換成 icon 的玻璃,後面的 Fresnel、薄膜、
+        // 高光、色散就會照常疊在上面,不必再各補一份。
+        // 註：icon 是用「尚未發生全內反射彈跳」的那條方向追到的，而 insideDir
+        // 在上面的 bounce 分支裡可能已經被改寫成 bounceDir。這一段一律用當時存下來
+        // 的 researchInsideDir，否則 icon 的入射方向會跟命中它的那條射線對不起來。
+        if (researchIconHit) {
+          vec3 iconIn = refract(researchInsideDir, researchIconN, 1.0 / researchIconRelIOR());
+          vec3 iconDir = dot(iconIn, iconIn) > 0.0001 ? normalize(iconIn) : researchInsideDir;
+          vec3 iconExitPoint;
+          float iconPath;
+          researchTraceIconExit(
+            researchIconPoint + iconDir * 0.004, iconDir, iconExitPoint, iconPath
+          );
+          // 一律用出口點上的法線。舊版在追蹤失敗時改用 -researchIconN，那是一個
+          // 逐像素的二元切換，正是同心紋路的來源（見 researchTraceIconExit 的註解）。
+          vec3 iconExitN = researchIconNormal(iconExitPoint);
+          vec3 iconOut = refract(iconDir, -iconExitN, researchIconRelIOR());
+          // 由稠往稀出去,掠射角會全內反射(refract 回傳零向量)。真正的玻璃在
+          // 這裡會把光彈回內部,而那正是參考照片裡內側那圈亮邊的來源,所以
+          // fallback 用反射而不是「直接放行」。
+          if (dot(iconOut, iconOut) < 0.0001) iconOut = reflect(iconDir, iconExitN);
+          iconOut = normalize(iconOut);
+          // 出了 icon 之後還要穿過外殼那一面。這裡沿用主射線已經算好的出口面,
+          // 省下第三次 traceExitSurface(它自帶 march + 10 tap 的 calcNormal)。
+          // 近似的是「從哪一點出去」,折射率與環境取樣都與外殼逐字相同;icon 只
+          // 佔畫面很小一塊,出口面在那個立體角內幾乎沒有變化。
+          vec3 shellOut = refract(iconOut, -exitNormal, uIOR);
+          if (dot(shellOut, shellOut) < 0.0001) shellOut = iconOut;
+          vec3 iconTransmitted = backgroundSample(normalize(shellOut), roughBlur).rgb;
+          float iconFacing = clamp(dot(-researchInsideDir, researchIconN), 0.0, 1.0);
+          float iconF0 = pow(
+            (researchIconRelIOR() - 1.0) / (researchIconRelIOR() + 1.0), 2.0
+          );
+          float iconFres = iconF0 + (1.0 - iconF0) * pow(1.0 - iconFacing, 5.0);
+          vec3 iconReflection = sampleEnvironmentBackdrop(
+            reflect(researchInsideDir, researchIconN), roughBlur
+          );
+          iconFres = clamp(iconFres, 0.0, 1.0);
+          researchIconFres = iconFres;
+          refractedBg = mix(iconTransmitted, iconReflection, iconFres);
+          // icon 內部那一段光程併進總光程,體積吸收因此自然變厚一點。
+          pathLength += iconPath;
+          // 這條射線最後其實是沿著 shellOut 離開的,不是外殼單獨算出來的 exitDir。
+          // transmissionDir 下游還有兩個讀者:HDRI 的 uEnvRefraction 混合(不接手
+          // 的話會用外殼方向重新取樣、把 icon 洗掉)與稜光光芒的座標。
+          transmissionDir = normalize(shellOut);
+          // icon 把光彎掉多少 —— 色散的強度項要用。
+          researchIconBend = clamp(length(shellOut - researchInsideDir) * 0.55, 0.0, 1.0);
+        }
+#endif
+
         // 白色背景也保留極淡的虛擬棚燈漸層，讓折射方向產生可見形變。
         float bend = clamp(length(exitDir - rd) * 0.55 + backRim * 0.18, 0.0, 1.0);
         // 只有折射真正彎曲、或背面接近掠射角時才產生局部稜鏡分離。
         // 平坦正視區維持無色透明，避免退化成整圈彩虹描邊。
         dispersionNormal = exitNormal;
         localPrism = clamp(bend * 1.35 + backRim * 0.75, 0.0, 1.0);
+#ifdef FEATURE_RESEARCH
+        // icon 也是玻璃,而且比外殼更稠、把光彎得更多,可是色散的強度項 localPrism
+        // 原本只讀外殼的偏折量,結果 icon 那一塊變成沒有色散的死區 —— 明明是折射
+        // 最強的地方。這一行把 icon 造成的偏折併進去。
+        //
+        // 注意順序:localPrism 在上一行才被指派,加成必須放在它之後,放進前面那個
+        // 換掉 refractedBg 的區塊會被這一行整個蓋掉。
+        if (researchIconHit) {
+          localPrism = clamp(localPrism + researchIconBend * 1.45, 0.0, 1.0);
+        }
+#endif
         refractedBg *= mix(vec3(1.0), vec3(0.965, 0.985, 1.0), bend);
         volumeAbsorption = exp(-vec3(0.045, 0.018, 0.005) * pathLength);
 
@@ -2756,6 +3072,16 @@ void main(){
 #ifdef FEATURE_DISPERSION   // 單獨隔離：色散／光譜 dispersion / spectral
   if (dispersionStrength > 0.001) {
     float artOpd = artisticDispersionOPD(p, N, -rd);
+#ifdef FEATURE_RESEARCH
+    // 光程差的取樣點換成 icon 自己的表面與法線。只加強度不換座標的話,彩帶的
+    // 花紋仍然是外殼的,看起來會像「外殼的色散剛好蓋在 icon 上」;換過來之後
+    // 條紋才跟著 icon 的曲面走,讀得出來是那顆內含物在分光。
+    if (researchIconHit) {
+      artOpd = artisticDispersionOPD(
+        researchIconPoint, researchIconN, -researchInsideDir
+      );
+    }
+#endif
     float dispersionPeriod = 205.0 * max(0.35, uCausticScale);
     float spectrumCoordinate = fract(
       artOpd / dispersionPeriod
@@ -3058,18 +3384,22 @@ void main(){
 
 #ifdef FEATURE_RESEARCH
   if (researchIconHit) {
-    float iconFacing = clamp(dot(-researchInsideDir, researchIconN), 0.0, 1.0);
-    float iconFresnel = 0.07 + 0.93 * pow(1.0 - iconFacing, 4.0);
-    vec3 iconReflection = sampleEnvironmentBackdrop(
-      reflect(researchInsideDir, researchIconN),
-      roughBlur * 0.24
+    // icon 的「表面」項。上面換掉 refractedBg 處理的是穿過去的部分，但在深色背景
+    // 下 backgroundSample 回傳的就是背景色，純折射等於看不見 —— 外殼本身也一樣，
+    // 它之所以讀得出形狀，靠的是這一層 Fresnel 環境反射（sampleEnvironmentBackdrop
+    // 走的是程序化棚燈，不會跟著背景一起變黑）。內含物既然是同一種液態玻璃，就
+    // 該拿到同一項，而不是自己配一個顏色疊上去。
+    //
+    // 權重用的是上面算好的 researchIconFres：那是 icon 與外殼折射率比值算出來的
+    // Schlick 項，法線正對時很低、掠射時接近 1，所以呈現出來是一圈亮邊加上薄薄的
+    // 面反射 —— 跟參考照片裡「暗心亮邊」的內部氣泡是同一個成因。uFresnel 讓它跟
+    // 著材質滑桿走。
+    float iconRim = clamp(researchIconFres * (0.35 + uFresnel), 0.0, 1.0);
+    vec3 iconSpec = sampleEnvironmentBackdrop(
+      reflect(researchInsideDir, researchIconN), roughBlur * 0.35
     );
-    vec3 iconTone = vec3(0.06, 0.22, 0.34) * (0.30 + iconFacing * 0.20)
-      + iconReflection * (0.12 + iconFresnel * 0.42)
-      + vec3(0.20, 0.62, 0.94) * iconFresnel * 0.32;
-    // 先以透射吸收壓暗，再 screen 進第二表面的反射；內物件因此有自己的厚度與法線。
-    finalColor *= vec3(0.72, 0.80, 0.86);
-    finalColor = 1.0 - (1.0 - finalColor) * (1.0 - clamp(iconTone, 0.0, 0.82));
+    // screen 合成：亮處不會爆掉，暗處等於直接加上去。
+    finalColor = 1.0 - (1.0 - finalColor) * (1.0 - clamp(iconSpec * iconRim, 0.0, 1.0));
   }
 #endif
 
