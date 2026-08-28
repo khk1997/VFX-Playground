@@ -1013,18 +1013,30 @@ const float RESEARCH_SIDE_SOFT = 0.06;
 // 那一段,而 t = phase - birth。birth 若小於 0.06,那段會落到 phase < 0,在 loop
 // 接點上被 fract 切斷 —— 隆起會在 phase 0 那一幀憑空跳出一塊。
 #define RESEARCH_ANTICIPATE 0.06
-#define RESEARCH_BIRTH_A 0.08
+#define RESEARCH_BIRTH_A 0.0
 // B 只比 A 晚 0.06(約 0.27 秒),兩顆一前一後像一次對答,而不是各演各的。
 // 舊值 0.22 差太多:B 還沒長出來 A 就快演完了,「兩顆並存」只佔循環的三成。
 #define RESEARCH_BIRTH_B 0.14
 // 每顆的壽命,以及淡出的起點。壽命必須跟淡出的終點一致,scale 才會剛好在生命
 // 結束那一刻歸零。最晚出生的 B 在 0.14 + 0.84 = 0.98 收完,留 0.02 給 loop 接點。
-#define RESEARCH_LIFE 0.84
-// 退場的起點。這之後不再是單純縮小消失,而是「靠近 → 被拉回自己的錨點並拉長 →
-// 碎成小水珠收回殼壁」三拍(見 researchIconStage 尾段)。
-#define RESEARCH_EXIT_START 0.62
-// 退場小水珠的基準半徑(會再乘上該顆 icon 的 size)。
-#define RESEARCH_EXIT_BEAD_R 0.045
+// 每顆 icon 的生命週期現在正好填滿一整個循環,兩顆錯開 RESEARCH_BIRTH_B。
+//
+// 這是為了「重複播的背景」改的。舊版是兩顆一起生、一起死,中間留下約一成的
+// 空景 —— 而外殼的環境起伏被設成靜止,那段時間畫面上真的什麼都不動,看起來
+// 像卡住。生命週期填滿整圈之後,任何時刻都是一顆在消融、另一顆在冒芽或停留,
+// 沒有全體歸零的瞬間,也就沒有接縫。同框時間反而從 49% 變成約 52%。
+//
+// 代價:區域時間不再有「不在生命週期內」這種狀態,原本那個 early-out 失效,
+// 兩顆每次都要算。成本增加不多但不是零。
+#define RESEARCH_LIFE 1.0
+// 退場三拍。都以區域時間計,而且必須在 1.0 之前收乾淨 —— 區域時間是繞圈的,
+// 拖過 1.0 會和自己的下一次出生重疊。
+#define RESEARCH_EXIT_SINK 0.76
+#define RESEARCH_EXIT_DRAIN 0.82
+// 幾何特徵的最小世界尺寸。小過這個的球或錐,中央差分會取到物體外面,算出來的
+// 是噪音而不是法線 —— 這條線在這個檔案裡已經付過三次學費(頸子、衛星、icon
+// 本體),統一用一個常數。
+#define RESEARCH_MIN_FEATURE 0.008
 // 芽的出生位置相對於錨點的內縮比例。
 //
 // 錨點在殼壁上(半徑約 0.698,水滴半徑 0.76),而 icon 只在外殼的進入點與出射點
@@ -1047,8 +1059,8 @@ const float RESEARCH_SIDE_SOFT = 0.06;
 #define RESEARCH_SAT_MIN 0.008
 #define RESEARCH_SAT_LIFE 0.16
 // 頸子從開始變細到完全夾斷的區間(以每顆自己的區域時間計)。
-#define RESEARCH_NECK_START 0.13
-#define RESEARCH_NECK_END 0.21
+#define RESEARCH_NECK_START 0.11
+#define RESEARCH_NECK_END 0.19
 
 // sideSign 為 +1 是右邊那顆(A)、-1 是左邊那顆(B)。
 vec3 researchAnchor(float sideSign){
@@ -1070,11 +1082,15 @@ vec3 researchAnchor(float sideSign){
 float researchShellEvent(vec3 q, float sideSign, float t){
   vec3 an = normalize(researchAnchor(sideSign));
   float ad = 1.0 - dot(q, an);
+  // 區域時間現在繞著整個循環走(0..1),預備動作發生在「出生之前」,也就是繞到
+  // 接近 1.0 的那一段。tb 把它換算成以出生為原點的有號時間 [-0.5, 0.5),預備
+  // 動作因此仍然是單純的 tb < 0 —— 不必為了接縫在時間軸上分兩段判斷。
+  float tb = t > 0.5 ? t - 1.0 : t;
 
   // 預備動作:出生前 RESEARCH_ANTICIPATE 這段時間鼓起來,頂到最高點芽才冒出;
   // 頸子夾斷的同時放掉,所以「放開」與「斷裂」是同一個瞬間。
-  float swellAmt = smoothstep(-RESEARCH_ANTICIPATE, 0.0, t)
-    * (1.0 - smoothstep(RESEARCH_NECK_START, RESEARCH_NECK_END, t));
+  float swellAmt = smoothstep(-RESEARCH_ANTICIPATE, 0.0, tb)
+    * (1.0 - smoothstep(RESEARCH_NECK_START, RESEARCH_NECK_END, tb));
   float swell = exp(-ad * 26.0) * swellAmt * 0.080;
 
   // 反作用力:夾斷瞬間從錨點擴出去的一圈漣漪。不設時間上界,靠 exp 自己衰減到
@@ -1110,8 +1126,8 @@ float researchShellOffset(vec3 p){
   float side = smoothstep(-0.15, 0.9, lateral + lower * 0.55);
   // 誕生事件不乘 uResearchShellAmount。那根滑桿控制的是「環境起伏」的振幅,
   // 拉到 0 的語意是外殼平滑,不該連帶把因果關係一起關掉。
-  float events = researchShellEvent(q, 1.0, phase01 - RESEARCH_BIRTH_A)
-    + researchShellEvent(q, -1.0, phase01 - RESEARCH_BIRTH_B);
+  float events = researchShellEvent(q, 1.0, fract(phase01 - RESEARCH_BIRTH_A))
+    + researchShellEvent(q, -1.0, fract(phase01 - RESEARCH_BIRTH_B));
   return lobes * side * uResearchShellAmount + events;
 }
 
@@ -1171,8 +1187,12 @@ float researchRoundCone(vec3 p, vec3 a, vec3 b, float r1, float r2){
 // stretch 是黏性拉伸量:沿發射軸(局部 x)拉長,另外兩軸等比收窄,體積大致守恆,
 // 所以看起來是被扯成長條而不是整顆變大。距離場除以縮放後就不再是距離,回傳前
 // 必須乘回最小的那個縮放係數才重新是合法的下界,sphere tracing 才不會跨過表面。
+// bodyK / tailK 讓本體與腳各自縮放。退場時本體收、腳脹,視覺上就是這顆泡泡
+// 往自己的尾巴裡瀝乾 —— 質量往低處流、頸縮、最後剩一顆珠,和開頭那段頸子是
+// 同一套液體文法,而且完全原地完成,不會把視線帶到殼壁那個追蹤死角。
 float researchIconOne(
-  vec3 p, vec3 center, float scale, float angle, float tailX, float stretch
+  vec3 p, vec3 center, float scale, float angle, float tailX, float stretch,
+  float bodyK, float tailK
 ){
   p = (p - center) / max(scale, 0.001);
   float c = cos(angle), s = sin(angle);
@@ -1180,19 +1200,31 @@ float researchIconOne(
   float sx = max(1.0 + stretch, 0.20);
   float sr = 1.0 / sqrt(sx);
   vec3 q = vec3(p.x / sx, p.y / sr, p.z / sr);
-  float body = researchEllipsoid(q, vec3(0.198, 0.180, 0.120));
+  // 兩塊各自判斷還畫不畫得出來。任一塊的最小特徵掉到 RESEARCH_MIN_FEATURE 以下
+  // 就整塊不畫 —— 硬撐著算只會得到噪音法線。缺席的一塊回傳 1e4,而 researchSmin
+  // 遇到 1e4 會精確退化成另一邊(h 被 clamp 到端點),所以不必為此另外分支。
+  float body = 1e4;
+  if (0.120 * bodyK * scale > RESEARCH_MIN_FEATURE) {
+    body = researchEllipsoid(q, vec3(0.198, 0.180, 0.120) * bodyK);
+  }
   // 尾端半徑由滑桿控制。下限 0.010 是刻意的：局部 0.010 換算成世界尺度約 0.008，
   // 仍是法線取樣間距 h(0.0018) 的 4.5 倍。真正的針尖會讓中央差分取到物體外面，
   // 算出噪音法線——跟 icon 太小時同一個坑。
-  float tailTip = mix(0.055, 0.010, clamp(uResearchIconTailTip, 0.0, 1.0));
-  float tail = researchRoundCone(
-    q,
-    vec3(tailX * 0.060, -0.116, 0.0),
-    vec3(tailX * 0.148, -0.208, 0.0),
-    0.074,
-    tailTip
-  );
-  return researchSmin(body, tail, 0.050) * min(sx, sr) * scale;
+  float tail = 1e4;
+  float tailR = 0.074 * tailK;
+  if (tailR * scale > RESEARCH_MIN_FEATURE) {
+    float tailTip = mix(0.055, 0.010, clamp(uResearchIconTailTip, 0.0, 1.0)) * tailK;
+    tail = researchRoundCone(
+      q,
+      vec3(tailX * 0.060, -0.116, 0.0),
+      vec3(tailX * 0.148, -0.208, 0.0),
+      tailR,
+      max(tailTip, tailR * 0.2)
+    );
+  }
+  // 融合半徑跟著本體收:本體快消失時頸子也該收乾淨,否則會在腳上留一塊圓角殘肉。
+  float k = 0.050 * min(bodyK, 1.0) + 0.004;
+  return researchSmin(body, tail, k) * min(sx, sr) * scale;
 }
 
 // 一顆 icon 的完整生命週期,以它自己的區域時間 t 表示(t = phase 減掉出生時刻)。
@@ -1215,114 +1247,78 @@ float researchChatPulse(float ph, float at){
   return exp(-d * 14.0) * sin(d * 42.0);
 }
 
-// 退場閃光的強度。兩顆各自融回殼壁的那一刻把色散推上去,再放掉。
-//
-// 起段不是瞬間跳到 1:那會是一幀之內從 0 到滿,正是我們一路在修的那種彈出。
-// 0.012 的上升約 3 個影格,快到仍然像「閃一下」,但畫面是連續的。
-float researchFlashAt(float ph, float at){
-  // 同 researchChatPulse:用 fract 讓餘波跨得過 loop 接點。
-  //
-  // B 的閃光在相位 0.96,衰減本來就會延續到下一圈。舊版寫成 ph - at,ph 繞回 0
-  // 時 d 變成負數、整個歸零 —— 實測畫面亮度在一幀之內從 52.9 掉回 45.6,接縫上
-  // 一個看得見的跳動。
-  //
-  // 衰減係數 55 是量出來的:22 太慢,兩道閃光(相隔 0.06)會糊成一整段變亮的區間,
-  // 佔掉超過一成的循環,那不叫閃。55 大約 0.05 相位(0.22 秒)收乾淨,兩道各自
-  // 分明。
-  float d = fract(ph - at + 1.0);
-  if (d > 0.18) return 0.0;
-  return smoothstep(0.0, 0.012, d) * exp(-max(d - 0.012, 0.0) * 55.0);
-}
-
 float researchIconStage(
   vec3 p, float phase, float t, vec3 anchor, vec3 target,
-  float size, float tailX, float angle, float chatAt
+  float size, float tailX, float angle, float chatAt, float exitEarly
 ){
-  if (t < 0.0 || t > RESEARCH_LIFE) return 1e4;
+  float grow = smoothstep(0.0, 0.14, t);
+  float travel = smoothstep(0.09, 0.40, t);
 
-  // 長大:體積從幾乎沒有長到滿。這一段幾乎還沒開始移動,所以看起來是「鼓出來」。
-  float grow = smoothstep(0.0, 0.17, t);
-  // 往內移動。窗口刻意排到斷裂之後才真正加速。
-  //
-  // 舊版是 smoothstep(0.12, 0.32)，與頸子的收束窗 (0.14, 0.30) 幾乎完全重疊：
-  // 本體一邊往內飛、頸子一邊變細，等到頸子可以消失時本體已經走了九成路程，
-  // 頸子被拉成半徑 0.035、長度 0.38 —— 長寬比 11:1 的一根麵條。真實的液柱撐
-  // 不到那麼細長（Rayleigh–Plateau：長寬比超過 π 就會自己夾斷），所以那條
-  // 拖著不走的細絲不是曲線調得不好，是它根本不該還連著。
-  float travel = smoothstep(0.10, 0.42, t);
-  // 頸子的粗細。要的形狀是「維持飽滿 → 最後俯衝 → 乾淨歸零」。
-  //
-  // pow(1 - nx, 0.35) 給出前兩段：它在窗口中段還有 0.78、0.45，末段才陡降。
-  // 但它的尾巴永遠碰不到 0（nx = 0.999 時仍有 0.089），那正是上一版拖著細絲的
-  // 主因之一 —— 而且方向剛好搞反了：註解寫「收束集中在最後」，實際 pow 的指數
-  // 小於 1 是把小值放大，尾巴反而更長。後面乘上的 smoothstep 專門負責第三段，
-  // 把窗口最後 15% 壓成真正的 0，斷得乾淨。
+  // 頸子:先維持飽滿、末段俯衝、再用一段硬收束切乾淨(見 researchIconOne 上方
+  // 對 pow 尾巴的說明)。
   float nx = smoothstep(RESEARCH_NECK_START, RESEARCH_NECK_END, t);
   float neck = pow(1.0 - nx, 0.35) * (1.0 - smoothstep(0.85, 1.0, nx));
-  // 斷開之後的阻尼振盪，起點就是夾斷的那一刻。衰減常數取到生命週期結束前
-  // 殘量 exp(-9 * 0.53) ≈ 0.008，再乘上淡出，不會有跳接。
+
+  // 夾斷後的阻尼振盪。
   float post = max(t - RESEARCH_NECK_END, 0.0);
   float ring = exp(-post * 9.0) * sin(post * 30.0);
-  // 黏性:斷開前被頸子拉著、沿發射軸扯長;斷開後表面張力把它收回球形,
-  // 但會收過頭,所以疊上同一個彈簧的振盪。
+
+  // ---- 退場三拍 ----
+  //
+  // 這是重複播的背景,所以退場不能有重音,也不能有句號 —— 任何明確的收束都會
+  // 變成節拍點,讓人意識到「這東西會重播」。三拍都在原地完成:移動會把視線帶走,
+  // 而且會走到殼壁那圈追蹤死角(icon 只在外殼進出點之間被畫得出來)。
+  //
+  //   sink     漂浮停下、微微下沉。「這一顆說完了」,但不強調。
+  //   drain    本體的體積往腳裡轉移:本體收、腳脹、中間頸縮。
+  //   collapse 剩下那顆珠收乾。液滴收乾的最後一刻是塌陷,所以這一段短而快;
+  //            因為只剩一顆小珠、對比低,快也不會變成重音。
+  float sink = smoothstep(RESEARCH_EXIT_SINK - exitEarly, 0.88 - exitEarly, t);
+  float drain = smoothstep(RESEARCH_EXIT_DRAIN - exitEarly, 0.95, t);
+  float collapse = smoothstep(0.94, 1.0, t);
+  float bodyK = 1.0 - drain;
+  float tailK = (1.0 + drain * 1.4) * (1.0 - collapse);
+
+  // 黏性:斷開前被頸子拉著、沿發射軸扯長;斷開後表面張力收回球形,會收過頭,
+  // 所以疊上同一個彈簧的振盪。
   float stretch = (1.0 - smoothstep(0.04, RESEARCH_NECK_END, t)) * 0.55 + ring * 0.34;
 
-  // ---- 退場的三拍 ----
-  //
-  // 這是一段 loop,所以退場必須讓人覺得「這一輪演完了」,而不是「東西壞掉了」。
-  // 四散的碎裂看起來像故障,而且接不回開頭;所以方向一律往自己的錨點收攏 ——
-  // 那正是它出生的地方,首尾呼應,循環才閉得起來。
-  //
-  //   lean  靠近對方一下,像對話收尾。也接住 A3 對答的最後一拍。
-  //   pull  被拉回自己的錨點,同時沿著回去的方向拉長成水滴。
-  //   burst 本體讓位給幾顆小水珠,由它們飛完剩下的路。
-  float lean = smoothstep(RESEARCH_EXIT_START, RESEARCH_EXIT_START + 0.06, t)
-    * (1.0 - smoothstep(RESEARCH_EXIT_START + 0.06, RESEARCH_EXIT_START + 0.14, t));
-  float pull = smoothstep(RESEARCH_EXIT_START + 0.04, RESEARCH_EXIT_START + 0.16, t);
-  float burst = smoothstep(RESEARCH_EXIT_START + 0.12, RESEARCH_LIFE - 0.02, t);
-
-  // 對答表演。停留期兩顆輪流「說話」:微微鼓一下、朝對方傾一點,一來一往兩次。
-  // 幅度刻意很小(縮放 3.5%、位移 0.022),大了就變成卡通而不是玻璃。
-  // 拍點寫在全域相位上,兩顆才錯得開;各自的第二拍在第一拍之後 0.16。
+  // 對答。拍點寫在全域相位上,兩顆才交錯得開;幅度刻意很小,大了就變成卡通。
   float chat = researchChatPulse(phase, chatAt)
     + researchChatPulse(phase, chatAt + 0.16);
 
-  // 本體在 burst 期間縮掉,由小水珠接手。
-  float scale = size * grow * (1.0 - burst) * (1.0 + chat * 0.035);
+  float scale = size * grow * (1.0 + chat * 0.035);
+  if (scale < 0.001) return 1e4;
 
   // 起點是往內縮過的芽位置,不是錨點本身(見 RESEARCH_BUD_INSET)。
-  vec3 center = mix(anchor * RESEARCH_BUD_INSET, target, travel);
-  // 位置用同一組彈簧參數:斷開的瞬間往內衝過頭,再被拉回來。方向取
-  // anchor→target 那條軸,所以回彈永遠沿著它飛出來的方向,不會斜掉。
-  center += (target - anchor * RESEARCH_BUD_INSET) * ring * 0.10;
+  vec3 budStart = anchor * RESEARCH_BUD_INSET;
+  vec3 center = mix(budStart, target, travel);
+  center += (target - budStart) * ring * 0.10;
+
+  // 漂浮。脫離之後才有意義,退場開始後跟著 sink 收掉 —— 動作停下來本身就是
+  // 「要結束了」的訊號,不需要另外強調。
   float orbit = t * TAU;
-  // 漂浮只在脫離之後才有意義,還黏在壁上的時候乘上 travel 壓掉。
   center += vec3(cos(orbit + angle), sin(orbit + angle), sin(orbit * 0.7 + angle))
-    * vec3(0.020, 0.017, 0.015) * travel;
-
-  // 說話時朝對方傾一點。兩顆的落點在 x 上左右對稱,所以「對方」就是 -x 方向。
+    * vec3(0.020, 0.017, 0.015) * travel * (1.0 - sink);
+  // 沉降。
+  center.y -= sink * 0.030;
+  // 說話時朝對方傾一點。兩顆落點在 x 上左右對稱,「對方」就是 -x 方向。
   center.x -= sign(target.x) * chat * 0.022;
-  // 退場第一拍:再靠近一下,收掉這段對話。
-  center.x -= sign(target.x) * lean * 0.05;
-  // 記下還沒被拉回去之前的位置 —— 小水珠是從這裡出發的。
-  vec3 centerSettled = center;
-  // 退場第二拍:被拉回自己的錨點。
-  center = mix(center, anchor, pull * 0.55);
-  // 拉長成水滴,頭朝外殼。burst 之後本體已經在讓位,不必再拉。
-  stretch += pull * (1.0 - burst) * 0.5;
 
-  // 把 icon 收在外殼裡。
+  // 拖曳。腳是重的部分,加速時應該落後於本體 —— 少了這個,整顆是剛體平移,
+  // 一眼就看得出是程式在跑參數而不是動畫。
   //
-  // 半徑取 uDrops[0].w 而不是滑桿值：那是 CPU 每幀寫進來的實際半徑，已經含了
-  // 呼吸與形變，所以牆在哪是跟著動的。再減掉外殼起伏的振幅（那是往內凹的那半）
-  // 與 icon 自己的最大半徑，才是圓心能到的極限。
-  //
-  // 順帶修掉一個既有的耦合問題：icon 的尺寸是絕對世界單位，不隨「水滴大小」縮放，
-  // 所以把水滴調小到 0.4 左右時，icon 本來會直接穿出殼外。現在會被收回來。
-  //
-  // 夾制是軟的。硬 clamp 會在使用者同時拉大「大小」與「間距」時突然頂死，看起來
-  // 像滑桿壞了；這裡讓它在 75% 以內完全不動、之後平滑漸近極限，兩段在接點的
-  // 斜率都是 1，不會有折角。
+  // 用整顆傾斜來表達,而不是單獨位移腳:angle 會一起轉動本體與腳,一個純量就
+  // 做到了,而且傾斜本身也是動畫裡表達加速的標準手法。速度取 travel 那條
+  // smoothstep 的解析導數。
+  float tu = clamp((t - 0.09) / 0.31, 0.0, 1.0);
+  float travelVel = 6.0 * tu * (1.0 - tu) / 0.31;
+  float lead = angle - travelVel * 0.025 * sign(target.x - budStart.x);
+
+  // 把 icon 收在外殼裡。半徑取 uDrops[0].w(CPU 每幀寫入的實際半徑,已含呼吸與
+  // 形變),再扣掉外殼起伏與 icon 自身半徑。夾制是軟的:75% 以內完全自由,之後
+  // 平滑漸近極限,接點兩側斜率都是 1。硬 clamp 會在同時拉大「大小」與「間距」時
+  // 突然頂死,看起來像滑桿壞了。
   float iconReach = 0.198 * scale;
   float wallLimit = max(uDrops[0].w - abs(uResearchShellAmount) - iconReach, 0.02);
   float cr = length(center);
@@ -1333,89 +1329,29 @@ float researchIconStage(
     center *= soft / max(cr, 0.0001);
   }
 
-  // 本體與退場的小水珠要分開判斷。burst 期間 scale 會收到 0,而那正是小水珠
-  // 登場的時候 —— 用一個涵蓋全域的 early-out 會把它們一起丟掉。
-  float d = 1e4;
-  if (scale > 0.001) {
-  float body = researchIconOne(p, center, scale, angle, tailX, stretch);
+  float d = researchIconOne(p, center, scale, lead, tailX, stretch, bodyK, tailK);
   vec3 foot = center + vec3(tailX * 0.148, -0.208, 0.0) * scale;
 
-  // 衛星水滴。夾斷的那一刻生出來,懸在斷點,然後一邊縮小一邊被殼壁吸回去。
-  //
-  // 必須放在下面那個「頸子太細就整段不畫」的 early-return 之前 —— 它正好是在
-  // 頸子消失之後才登場的,放在後面就永遠畫不到。
-  //
-  // 用 min() 而不是 smin():它跟本體是分開的兩顆,中間沒有要融接的縫,而 smin
-  // 會在兩者之間拉出一條不存在的軟連結。
+  // 衛星水滴:液柱夾斷幾乎必定在斷點留下一顆小珠子,再被兩端吸收。
   float satAge = t - RESEARCH_NECK_END;
   if (satAge > 0.0) {
     float k = satAge / RESEARCH_SAT_LIFE;
-    // 1 - k*k:剛斷開時幾乎不縮,越後面收得越快,像被表面張力一口吸走。
-    //
-    // 前面再乘一段極短的長入。少了它,這顆珠子會在一幀之內從無變成滿尺寸 ——
-    // 實測那一下讓夾斷瞬間的畫面變化量跳到平常的 6 倍(關掉衛星就掉回 3 倍),
-    // 是看得見的一下彈出。0.06 的生命約等於 3 個影格,快到仍然像「啪一聲斷開」,
-    // 但不再是憑空出現。
+    // 1 - k*k 收得先慢後快;前面那段極短的長入是為了不讓它在一幀之內從無變成
+    // 滿尺寸 —— 實測那一下是看得見的彈出。
     float satR = RESEARCH_SAT_R * (1.0 - k * k) * smoothstep(0.0, 0.06, k);
-    if (satR > RESEARCH_SAT_MIN) {
-      // 斷點大約在頸子中段偏錨點那一側;之後往錨點漂,表示被殼壁吸收。
+    if (satR > RESEARCH_MIN_FEATURE) {
       vec3 satPos = mix(mix(anchor, foot, 0.45), anchor, smoothstep(0.0, 1.0, k));
-      body = min(body, length(p - satPos) - satR);
+      d = min(d, length(p - satPos) - satR);
     }
   }
 
-  // 頸子:從腳尖拉回 anchor,半徑隨 neck 收細。
-  //
-  // 半徑不收到 0 —— 一旦跟半徑跟 researchIconNormal 的取樣間距 h(=0.0018)同量級,
-  // 有限差分算法線就會失真:兩側取樣點會落在頸子的「另一邊」，算出來的斜率不再
-  // 逼近真正梯度,而是在頸子周圍震盪。螢幕上看起來是一圈一圈的同心紋路，位置
-  // 隨頸子夾斷發生在哪一幀而定 —— 兩次錄影紋路出現在不同地方，正是因為每次
-  // uTime 走到那個危險窗口的畫面不一樣，不是隨機的顯示卡問題。march 的最小
-  // 步進(0.0012)同樣逼近這個量級，追蹤本身也會開始跳著命中或落空，是同一批
-  // 症狀的第二個成因。
-  //
-  // 修法是不讓頸子撐著抖到看不見，而是半徑一旦薄過安全下限就整段砍掉、直接
-  // 回傳 body。NECK_SAFE_R 取 h 的 8 倍、march 最小步進的 12 倍，兩邊都留了
-  // 安全邊界；砍掉的那一小段本來就只剩約 icon 半徑 7% 的粗細，肉眼看不出來，
-  // 遠比讓它抖成指紋紋路乾淨。
+  // 頸子:從腳尖拉回 anchor。半徑跟著芽一起長,比例才不會退化成畸形圓錐
+  // (見 researchRoundCone 裡 a2 <= 0 的說明)。細過安全下限就整段不畫。
   const float NECK_SAFE_R = 0.014;
-  // 頸子的粗細必須跟著芽一起長，不能一出生就用滿粗。
-  //
-  // 頸子是從腳尖拉回 anchor 的圓錐，而出生瞬間 travel 與 ring 都還是 0，center
-  // 精確等於 anchor —— 於是圓錐長度只剩「腳尖偏移 × scale」，scale 接近 0 時
-  // 長度趨近 0，但半徑仍是固定的 0.075。圓錐比兩端半徑差還短，就是上面
-  // researchRoundCone 裡 a2 <= 0 的退化情形。那條路徑現在有防護了，但更根本的
-  // 做法是不要製造出這種畸形圓錐：半徑隨 scale 等比縮放，長度與半徑就同步變化，
-  // 比例維持正常。芽還很微小時 nr 自然掉到 NECK_SAFE_R 以下，頸子整段不畫 ——
-  // 那個階段的芽本來就貼在殼壁上，不需要頸子來表達「連著」。
   float nr = 0.075 * neck * min(1.0, scale / 0.35);
   if (nr >= NECK_SAFE_R) {
     float neckD = researchRoundCone(p, foot, anchor, nr, max(nr * 0.55, NECK_SAFE_R * 0.4));
-    body = researchSmin(body, neckD, max(0.055 * neck, NECK_SAFE_R * 0.3));
-  }
-  d = body;
-  }
-
-  // 退場第三拍:碎成幾顆小水珠,各自飛完剩下的路、被殼壁吸收。
-  //
-  // 方向全部朝錨點收攏,不是四散 —— 理由見上面退場那段註解。三顆錯開出發,
-  // 半徑用 1 - bp*bp 收(先慢後快,像被表面張力吸走),並且和衛星水滴共用同一個
-  // 下限:小過取樣間距的球會算出噪音法線,寧可在還有幾個像素寬時就收掉。
-  if (burst > 0.001) {
-    for (int i = 0; i < 3; i++) {
-      float fi = float(i);
-      float bp = clamp((burst - fi * 0.14) / 0.72, 0.0, 1.0);
-      if (bp <= 0.0) continue;
-      float br = RESEARCH_EXIT_BEAD_R * size * (1.0 - bp * bp);
-      if (br < RESEARCH_SAT_MIN) continue;
-      vec3 spread = vec3(
-        cos(fi * 2.4 + angle) * 0.055,
-        sin(fi * 2.4 + angle) * 0.045,
-        sin(fi * 1.7) * 0.030
-      );
-      vec3 bpos = mix(centerSettled + spread, anchor, bp);
-      d = min(d, length(p - bpos) - br);
-    }
+    d = researchSmin(d, neckD, max(0.055 * neck, NECK_SAFE_R * 0.3));
   }
   return d;
 }
@@ -1431,15 +1367,21 @@ float researchIconMap(vec3 p){
   float stagger = uResearchIconStagger;
   // 對答的拍點寫在全域相位上:A 先開口(0.44),B 回應(0.52),各自的第二拍
   // 在自己的第一拍之後 0.16。四拍剛好落在兩顆都已就位、還沒開始退場的區間。
+  // 區域時間用 fract 繞圈:生命週期填滿整個循環,不再有「還沒出生／已經死了」
+  // 這種狀態,兩顆一前一後永遠都在場(見 RESEARCH_LIFE 上方的說明)。
+  //
+  // 對答拍點落在兩顆都已就位、都還沒開始退場的區間(A 停留 0.26–0.76,
+  // B 停留 0.40–0.90,交集 0.40–0.76)。exitEarly 讓兩顆的消融長度差一點,
+  // 眼睛才抓不到規律。
   float a = researchIconStage(
-    p, phase, phase - RESEARCH_BIRTH_A,
+    p, phase, fract(phase - RESEARCH_BIRTH_A),
     researchAnchor(1.0), vec3(spread, stagger, 0.025),
-    max(uResearchIconSizeA, 0.2), 1.0, 0.10, 0.44
+    max(uResearchIconSizeA, 0.2), 1.0, 0.10, 0.46, 0.0
   );
   float b = researchIconStage(
-    p, phase, phase - RESEARCH_BIRTH_B,
+    p, phase, fract(phase - RESEARCH_BIRTH_B),
     researchAnchor(-1.0), vec3(-spread, -stagger, -0.02),
-    max(uResearchIconSizeB, 0.2), -1.0, -0.16, 0.52
+    max(uResearchIconSizeB, 0.2), -1.0, -0.16, 0.54, 0.02
   );
   // 用 smin 而不是 min。間距可調之後兩顆就可能被推到相鄰，而 min 在交界會留下
   // 梯度硬折——硬折在折射玻璃裡會被放大成一條亮線（同 RESEARCH_SIDE_SOFT 那段）。
@@ -2829,19 +2771,6 @@ void main(){
         // 換掉 refractedBg 的區塊會被這一行整個蓋掉。
         if (researchIconHit) {
           localPrism = clamp(localPrism + researchIconBend * 1.45, 0.0, 1.0);
-        }
-        // 退場閃光。兩顆各自融回殼壁的那一刻,整顆球閃過一道彩虹再歸零。
-        //
-        // 掛在 localPrism 上而不是自己疊一層顏色:那是色散的強度項,推它等於讓
-        // 既有的藝術色散與稜光光芒一起亮起來,顏色與質地都還是這塊玻璃自己的。
-        // 這也是這個 shader 獨有、別的材質做不出來的收尾,成本近乎零。
-        //
-        // 不限定 researchIconHit —— 閃的是整顆球,不是只有 icon 佔的那幾個像素。
-        {
-          float exitPhase = fract(uTime / max(uLoopDuration, 0.001));
-          float flash = researchFlashAt(exitPhase, RESEARCH_BIRTH_A + RESEARCH_LIFE - 0.02)
-            + researchFlashAt(exitPhase, RESEARCH_BIRTH_B + RESEARCH_LIFE - 0.02);
-          localPrism = clamp(localPrism + min(flash, 1.0) * 0.85, 0.0, 1.0);
         }
 #endif
         refractedBg *= mix(vec3(1.0), vec3(0.965, 0.985, 1.0), bend);
