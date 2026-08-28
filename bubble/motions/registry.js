@@ -158,9 +158,9 @@ export const MOTIONS = {
       rayBeamAzimuth: -54,
       rayBeamElevation: 0,
       rayBeamRefract: 1,
-      rayBeamFresnelMask: 0.33,
+      rayBeamFresnelMask: 0.57,
       rayBeamNoiseMask: 1,
-      rayBeamNoiseScale: 1.6,
+      rayBeamNoiseScale: 0.7,
       spectralCausticEnabled: false,
       dispersionEnabled: true,
       dispersionSeparation: 0.24,
@@ -168,7 +168,7 @@ export const MOTIONS = {
     params: [
       {
         key: 'researchShellAmount', label: '外殼起伏大小',
-        min: 0, max: 0.08, step: 0.001, value: 0.022,
+        min: 0, max: 0.08, step: 0.001, value: 0.04,
       },
       {
         key: 'researchShellSpeed', label: '外殼起伏速度',
@@ -176,11 +176,11 @@ export const MOTIONS = {
       },
       {
         key: 'researchShellDensity', label: '外殼起伏密度',
-        min: 0.4, max: 2.2, step: 0.05, value: 1,
+        min: 0.4, max: 2.2, step: 0.05, value: 0.5,
       },
       {
         key: 'researchBreath', label: '整體呼吸幅度',
-        min: 0, max: 0.06, step: 0.001, value: 0.018,
+        min: 0, max: 0.06, step: 0.001, value: 0.02,
       },
       {
         // 這是內部 icon「相對於外殼玻璃」的折射率，不是絕對值，所以它會跟著
@@ -198,18 +198,18 @@ export const MOTIONS = {
         // （h = 0.0018）的 8 倍以上，否則中央差分算出來的法線是噪音而不是梯度
         // ——那正是先前 icon 剛冒出來時滿是同心紋路的成因。臨界值約 0.15。
         key: 'researchIconSizeA', label: 'icon A 大小(右)',
-        min: 0.2, max: 1.6, step: 0.01, value: 0.82,
+        min: 0.2, max: 1.6, step: 0.01, value: 1.14,
       },
       {
         key: 'researchIconSizeB', label: 'icon B 大小(左)',
-        min: 0.2, max: 1.6, step: 0.01, value: 1.0,
+        min: 0.2, max: 1.6, step: 0.01, value: 1.12,
       },
       {
         // 0 = 圓鈍，1 = 相當尖。不做到真正的針尖：尾端半徑同樣不能細過取樣間距，
         // 所以對應的錐體末端半徑只從 0.055 收到 0.010（世界尺度約 0.008，仍是
         // h 的 4.5 倍）。
         key: 'researchIconTailTip', label: '尾巴尖度',
-        min: 0, max: 1, step: 0.01, value: 0.42,
+        min: 0, max: 1, step: 0.01, value: 1,
       },
       {
         // 本體的寬高比。1.0 是正圓,越大越扁寬。
@@ -218,38 +218,25 @@ export const MOTIONS = {
         // 才讀得出「對話框」—— 寬度是承載「裡面裝著話」這個意義的地方。
         // 厚度(z)不跟著變,維持扁平的玻璃片感。
         key: 'researchIconAspect', label: '本體扁度',
-        min: 1.0, max: 1.9, step: 0.01, value: 1.45,
+        min: 1.0, max: 1.9, step: 0.01, value: 1.5,
       },
       {
         // 兩顆對稱移動。開「間距 + 高度錯位」兩根，而不是每顆各給 X/Y 四根：
         // 面板已經很長，而實務上要調的就是「離多開」與「錯多少」。真的需要單獨
         // 挪某一顆再加。Z 軸不開——透過外殼折射幾乎看不出差別。
         key: 'researchIconSpread', label: 'icon 間距',
-        min: 0.05, max: 0.45, step: 0.005, value: 0.235,
+        min: 0.05, max: 0.45, step: 0.005, value: 0.31,
       },
       {
         key: 'researchIconStagger', label: 'icon 高度錯位',
-        min: -0.3, max: 0.3, step: 0.005, value: 0.055,
+        min: -0.3, max: 0.3, step: 0.005, value: -0.14,
       },
       {
         // 前後(z)錯位。我先前判斷「透過外殼折射幾乎看不出差別」而沒有開這一根,
         // 那個判斷太武斷:外殼本身就是一片厚透鏡,z 一動,放大率、前方玻璃的
         // 體積吸收、以及兩顆互相的遮擋順序都會跟著變,是讀得出來的。
         key: 'researchIconDepth', label: 'icon 前後錯位',
-        min: -0.3, max: 0.3, step: 0.005, value: 0.025,
-      },
-      {
-        // 臨時的比較用選單:三種消失方式擺在一起讓人直接用眼睛挑,挑完把沒選上的
-        // 拿掉。前兩版退場都是我單方面選一種做出來再被否決,這樣來回太慢。
-        //
-        // 用數字當 option value,才走得到 bindControls 既有的「數值型控制項」那條
-        // 路徑(同 staticShape 的做法),不必為一個字串型 select 另開特例。
-        key: 'researchExitMode', label: '消失方式(試用)', type: 'select', value: 0,
-        options: [
-          { value: 0, label: '光學溶解' },
-          { value: 1, label: '往深處退去' },
-          { value: 2, label: '原地塌陷' },
-        ],
+        min: -0.3, max: 0.3, step: 0.005, value: 0.2,
       },
     ],
   },

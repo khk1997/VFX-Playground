@@ -14,7 +14,7 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=research-aspect-1';
+} from './motions/registry.js?v=research-defaults-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
@@ -1092,7 +1092,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=research-aspect-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=research-defaults-1';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
@@ -4117,7 +4117,6 @@ function initGL() {
     uResearchIconSpread: { value: P.researchIconSpread },
     uResearchIconStagger: { value: P.researchIconStagger },
     uResearchIconDepth: { value: P.researchIconDepth },
-    uResearchExitMode: { value: P.researchExitMode },
     // 打字模式。字形圖集在切進這個模式時才烘（見 scheduleGlyphRebuild），在那之前
     // 綁一張 1x1 的空貼圖——取樣器一定要綁著東西，某些驅動會直接拒絕未綁定的
     // sampler，即使 runtime 永遠不會走到那個分支。
