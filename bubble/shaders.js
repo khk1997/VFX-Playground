@@ -1020,7 +1020,11 @@ const float RESEARCH_SIDE_SOFT = 0.06;
 // 每顆的壽命,以及淡出的起點。壽命必須跟淡出的終點一致,scale 才會剛好在生命
 // 結束那一刻歸零。最晚出生的 B 在 0.14 + 0.84 = 0.98 收完,留 0.02 給 loop 接點。
 #define RESEARCH_LIFE 0.84
-#define RESEARCH_FADE_IN 0.72
+// 退場的起點。這之後不再是單純縮小消失,而是「靠近 → 被拉回自己的錨點並拉長 →
+// 碎成小水珠收回殼壁」三拍(見 researchIconStage 尾段)。
+#define RESEARCH_EXIT_START 0.62
+// 退場小水珠的基準半徑(會再乘上該顆 icon 的 size)。
+#define RESEARCH_EXIT_BEAD_R 0.045
 // 芽的出生位置相對於錨點的內縮比例。
 //
 // 錨點在殼壁上(半徑約 0.698,水滴半徑 0.76),而 icon 只在外殼的進入點與出射點
@@ -1201,8 +1205,38 @@ float researchIconOne(
 //
 // 生命週期外回傳一個很大的值,讓呼叫端整段跳過;researchIconMap 在 march 迴圈、
 // 法線的 6 次取樣、以及內部出口追蹤裡都會被呼叫,這個 early-out 值得留。
+// 對答用的單次脈衝:在 at 那一刻迅速鼓起,振盪一兩下就靜下來。
+// 事件之前恆為 0,所以兩顆各自的拍點互不干擾。
+float researchChatPulse(float ph, float at){
+  // fract 而不是相減:拍點的餘波可能跨過 loop 接點,直接用 ph - at 在 ph 繞回 0
+  // 時會變成負數而被當成「還沒發生」,餘波就在接縫上被硬切掉。
+  float d = fract(ph - at + 1.0);
+  if (d > 0.35) return 0.0;
+  return exp(-d * 14.0) * sin(d * 42.0);
+}
+
+// 退場閃光的強度。兩顆各自融回殼壁的那一刻把色散推上去,再放掉。
+//
+// 起段不是瞬間跳到 1:那會是一幀之內從 0 到滿,正是我們一路在修的那種彈出。
+// 0.012 的上升約 3 個影格,快到仍然像「閃一下」,但畫面是連續的。
+float researchFlashAt(float ph, float at){
+  // 同 researchChatPulse:用 fract 讓餘波跨得過 loop 接點。
+  //
+  // B 的閃光在相位 0.96,衰減本來就會延續到下一圈。舊版寫成 ph - at,ph 繞回 0
+  // 時 d 變成負數、整個歸零 —— 實測畫面亮度在一幀之內從 52.9 掉回 45.6,接縫上
+  // 一個看得見的跳動。
+  //
+  // 衰減係數 55 是量出來的:22 太慢,兩道閃光(相隔 0.06)會糊成一整段變亮的區間,
+  // 佔掉超過一成的循環,那不叫閃。55 大約 0.05 相位(0.22 秒)收乾淨,兩道各自
+  // 分明。
+  float d = fract(ph - at + 1.0);
+  if (d > 0.18) return 0.0;
+  return smoothstep(0.0, 0.012, d) * exp(-max(d - 0.012, 0.0) * 55.0);
+}
+
 float researchIconStage(
-  vec3 p, float t, vec3 anchor, vec3 target, float size, float tailX, float angle
+  vec3 p, float phase, float t, vec3 anchor, vec3 target,
+  float size, float tailX, float angle, float chatAt
 ){
   if (t < 0.0 || t > RESEARCH_LIFE) return 1e4;
 
@@ -1232,10 +1266,29 @@ float researchIconStage(
   // 黏性:斷開前被頸子拉著、沿發射軸扯長;斷開後表面張力把它收回球形,
   // 但會收過頭,所以疊上同一個彈簧的振盪。
   float stretch = (1.0 - smoothstep(0.04, RESEARCH_NECK_END, t)) * 0.55 + ring * 0.34;
-  float fade = 1.0 - smoothstep(RESEARCH_FADE_IN, RESEARCH_LIFE, t);
 
-  float scale = size * grow * fade;
-  if (scale < 0.001) return 1e4;
+  // ---- 退場的三拍 ----
+  //
+  // 這是一段 loop,所以退場必須讓人覺得「這一輪演完了」,而不是「東西壞掉了」。
+  // 四散的碎裂看起來像故障,而且接不回開頭;所以方向一律往自己的錨點收攏 ——
+  // 那正是它出生的地方,首尾呼應,循環才閉得起來。
+  //
+  //   lean  靠近對方一下,像對話收尾。也接住 A3 對答的最後一拍。
+  //   pull  被拉回自己的錨點,同時沿著回去的方向拉長成水滴。
+  //   burst 本體讓位給幾顆小水珠,由它們飛完剩下的路。
+  float lean = smoothstep(RESEARCH_EXIT_START, RESEARCH_EXIT_START + 0.06, t)
+    * (1.0 - smoothstep(RESEARCH_EXIT_START + 0.06, RESEARCH_EXIT_START + 0.14, t));
+  float pull = smoothstep(RESEARCH_EXIT_START + 0.04, RESEARCH_EXIT_START + 0.16, t);
+  float burst = smoothstep(RESEARCH_EXIT_START + 0.12, RESEARCH_LIFE - 0.02, t);
+
+  // 對答表演。停留期兩顆輪流「說話」:微微鼓一下、朝對方傾一點,一來一往兩次。
+  // 幅度刻意很小(縮放 3.5%、位移 0.022),大了就變成卡通而不是玻璃。
+  // 拍點寫在全域相位上,兩顆才錯得開;各自的第二拍在第一拍之後 0.16。
+  float chat = researchChatPulse(phase, chatAt)
+    + researchChatPulse(phase, chatAt + 0.16);
+
+  // 本體在 burst 期間縮掉,由小水珠接手。
+  float scale = size * grow * (1.0 - burst) * (1.0 + chat * 0.035);
 
   // 起點是往內縮過的芽位置,不是錨點本身(見 RESEARCH_BUD_INSET)。
   vec3 center = mix(anchor * RESEARCH_BUD_INSET, target, travel);
@@ -1246,6 +1299,17 @@ float researchIconStage(
   // 漂浮只在脫離之後才有意義,還黏在壁上的時候乘上 travel 壓掉。
   center += vec3(cos(orbit + angle), sin(orbit + angle), sin(orbit * 0.7 + angle))
     * vec3(0.020, 0.017, 0.015) * travel;
+
+  // 說話時朝對方傾一點。兩顆的落點在 x 上左右對稱,所以「對方」就是 -x 方向。
+  center.x -= sign(target.x) * chat * 0.022;
+  // 退場第一拍:再靠近一下,收掉這段對話。
+  center.x -= sign(target.x) * lean * 0.05;
+  // 記下還沒被拉回去之前的位置 —— 小水珠是從這裡出發的。
+  vec3 centerSettled = center;
+  // 退場第二拍:被拉回自己的錨點。
+  center = mix(center, anchor, pull * 0.55);
+  // 拉長成水滴,頭朝外殼。burst 之後本體已經在讓位,不必再拉。
+  stretch += pull * (1.0 - burst) * 0.5;
 
   // 把 icon 收在外殼裡。
   //
@@ -1269,6 +1333,10 @@ float researchIconStage(
     center *= soft / max(cr, 0.0001);
   }
 
+  // 本體與退場的小水珠要分開判斷。burst 期間 scale 會收到 0,而那正是小水珠
+  // 登場的時候 —— 用一個涵蓋全域的 early-out 會把它們一起丟掉。
+  float d = 1e4;
+  if (scale > 0.001) {
   float body = researchIconOne(p, center, scale, angle, tailX, stretch);
   vec3 foot = center + vec3(tailX * 0.148, -0.208, 0.0) * scale;
 
@@ -1321,10 +1389,35 @@ float researchIconStage(
   // 比例維持正常。芽還很微小時 nr 自然掉到 NECK_SAFE_R 以下，頸子整段不畫 ——
   // 那個階段的芽本來就貼在殼壁上，不需要頸子來表達「連著」。
   float nr = 0.075 * neck * min(1.0, scale / 0.35);
-  if (nr < NECK_SAFE_R) return body;
+  if (nr >= NECK_SAFE_R) {
+    float neckD = researchRoundCone(p, foot, anchor, nr, max(nr * 0.55, NECK_SAFE_R * 0.4));
+    body = researchSmin(body, neckD, max(0.055 * neck, NECK_SAFE_R * 0.3));
+  }
+  d = body;
+  }
 
-  float neckD = researchRoundCone(p, foot, anchor, nr, max(nr * 0.55, NECK_SAFE_R * 0.4));
-  return researchSmin(body, neckD, max(0.055 * neck, NECK_SAFE_R * 0.3));
+  // 退場第三拍:碎成幾顆小水珠,各自飛完剩下的路、被殼壁吸收。
+  //
+  // 方向全部朝錨點收攏,不是四散 —— 理由見上面退場那段註解。三顆錯開出發,
+  // 半徑用 1 - bp*bp 收(先慢後快,像被表面張力吸走),並且和衛星水滴共用同一個
+  // 下限:小過取樣間距的球會算出噪音法線,寧可在還有幾個像素寬時就收掉。
+  if (burst > 0.001) {
+    for (int i = 0; i < 3; i++) {
+      float fi = float(i);
+      float bp = clamp((burst - fi * 0.14) / 0.72, 0.0, 1.0);
+      if (bp <= 0.0) continue;
+      float br = RESEARCH_EXIT_BEAD_R * size * (1.0 - bp * bp);
+      if (br < RESEARCH_SAT_MIN) continue;
+      vec3 spread = vec3(
+        cos(fi * 2.4 + angle) * 0.055,
+        sin(fi * 2.4 + angle) * 0.045,
+        sin(fi * 1.7) * 0.030
+      );
+      vec3 bpos = mix(centerSettled + spread, anchor, bp);
+      d = min(d, length(p - bpos) - br);
+    }
+  }
+  return d;
 }
 
 float researchIconMap(vec3 p){
@@ -1336,15 +1429,17 @@ float researchIconMap(vec3 p){
   // 共平面——那點深度差在折射下看得出來，但不值得再開一根滑桿。
   float spread = uResearchIconSpread;
   float stagger = uResearchIconStagger;
+  // 對答的拍點寫在全域相位上:A 先開口(0.44),B 回應(0.52),各自的第二拍
+  // 在自己的第一拍之後 0.16。四拍剛好落在兩顆都已就位、還沒開始退場的區間。
   float a = researchIconStage(
-    p, phase - RESEARCH_BIRTH_A,
+    p, phase, phase - RESEARCH_BIRTH_A,
     researchAnchor(1.0), vec3(spread, stagger, 0.025),
-    max(uResearchIconSizeA, 0.2), 1.0, 0.10
+    max(uResearchIconSizeA, 0.2), 1.0, 0.10, 0.44
   );
   float b = researchIconStage(
-    p, phase - RESEARCH_BIRTH_B,
+    p, phase, phase - RESEARCH_BIRTH_B,
     researchAnchor(-1.0), vec3(-spread, -stagger, -0.02),
-    max(uResearchIconSizeB, 0.2), -1.0, -0.16
+    max(uResearchIconSizeB, 0.2), -1.0, -0.16, 0.52
   );
   // 用 smin 而不是 min。間距可調之後兩顆就可能被推到相鄰，而 min 在交界會留下
   // 梯度硬折——硬折在折射玻璃裡會被放大成一條亮線（同 RESEARCH_SIDE_SOFT 那段）。
@@ -2734,6 +2829,19 @@ void main(){
         // 換掉 refractedBg 的區塊會被這一行整個蓋掉。
         if (researchIconHit) {
           localPrism = clamp(localPrism + researchIconBend * 1.45, 0.0, 1.0);
+        }
+        // 退場閃光。兩顆各自融回殼壁的那一刻,整顆球閃過一道彩虹再歸零。
+        //
+        // 掛在 localPrism 上而不是自己疊一層顏色:那是色散的強度項,推它等於讓
+        // 既有的藝術色散與稜光光芒一起亮起來,顏色與質地都還是這塊玻璃自己的。
+        // 這也是這個 shader 獨有、別的材質做不出來的收尾,成本近乎零。
+        //
+        // 不限定 researchIconHit —— 閃的是整顆球,不是只有 icon 佔的那幾個像素。
+        {
+          float exitPhase = fract(uTime / max(uLoopDuration, 0.001));
+          float flash = researchFlashAt(exitPhase, RESEARCH_BIRTH_A + RESEARCH_LIFE - 0.02)
+            + researchFlashAt(exitPhase, RESEARCH_BIRTH_B + RESEARCH_LIFE - 0.02);
+          localPrism = clamp(localPrism + min(flash, 1.0) * 0.85, 0.0, 1.0);
         }
 #endif
         refractedBg *= mix(vec3(1.0), vec3(0.965, 0.985, 1.0), bend);
