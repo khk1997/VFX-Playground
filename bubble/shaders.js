@@ -118,6 +118,7 @@ uniform float uResearchIconIOR;
 uniform float uResearchIconSizeA;
 uniform float uResearchIconSizeB;
 uniform float uResearchIconTailTip;
+uniform float uResearchIconAspect;
 uniform float uResearchIconSpread;
 uniform float uResearchIconStagger;
 uniform float uResearchIconDepth;
@@ -1205,9 +1206,14 @@ float researchIconOne(
   // 兩塊各自判斷還畫不畫得出來。任一塊的最小特徵掉到 RESEARCH_MIN_FEATURE 以下
   // 就整塊不畫 —— 硬撐著算只會得到噪音法線。缺席的一塊回傳 1e4,而 researchSmin
   // 遇到 1e4 會精確退化成另一邊(h 被 clamp 到端點),所以不必為此另外分支。
+  // 本體的三軸。y 是基準,x 由「本體扁度」拉寬,z(厚度)不跟著變 —— 參考的
+  // 玻璃對話框是一片扁平的板,寬度變了厚度不該跟著變。
+  //
+  // 最小半軸恆為 z,所以下面的可見性判斷只需要看 0.120,與扁度無關。
+  float aspect = clamp(uResearchIconAspect, 1.0, 2.2);
   float body = 1e4;
   if (0.120 * bodyK * scale > RESEARCH_MIN_FEATURE) {
-    body = researchEllipsoid(q, vec3(0.198, 0.180, 0.120) * bodyK);
+    body = researchEllipsoid(q, vec3(0.180 * aspect, 0.180, 0.120) * bodyK);
   }
   // 尾端半徑由滑桿控制。下限 0.010 是刻意的：局部 0.010 換算成世界尺度約 0.008，
   // 仍是法線取樣間距 h(0.0018) 的 4.5 倍。真正的針尖會讓中央差分取到物體外面，
@@ -1344,7 +1350,8 @@ float researchIconStage(
   // 形變),再扣掉外殼起伏與 icon 自身半徑。夾制是軟的:75% 以內完全自由,之後
   // 平滑漸近極限,接點兩側斜率都是 1。硬 clamp 會在同時拉大「大小」與「間距」時
   // 突然頂死,看起來像滑桿壞了。
-  float iconReach = 0.198 * scale;
+  // 最大半徑是 x 軸,會被「本體扁度」拉寬,夾制得跟著走,不然拉寬之後會穿出殼外。
+  float iconReach = 0.180 * clamp(uResearchIconAspect, 1.0, 2.2) * scale;
   float wallLimit = max(uDrops[0].w - abs(uResearchShellAmount) - iconReach, 0.02);
   float cr = length(center);
   float freeR = wallLimit * 0.75;
