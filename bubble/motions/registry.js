@@ -222,6 +222,13 @@ export const MOTIONS = {
         key: 'researchIconStagger', label: 'icon 高度錯位',
         min: -0.3, max: 0.3, step: 0.005, value: 0.055,
       },
+      {
+        // 前後(z)錯位。我先前判斷「透過外殼折射幾乎看不出差別」而沒有開這一根,
+        // 那個判斷太武斷:外殼本身就是一片厚透鏡,z 一動,放大率、前方玻璃的
+        // 體積吸收、以及兩顆互相的遮擋順序都會跟著變,是讀得出來的。
+        key: 'researchIconDepth', label: 'icon 前後錯位',
+        min: -0.3, max: 0.3, step: 0.005, value: 0.025,
+      },
     ],
   },
   typewriter: {

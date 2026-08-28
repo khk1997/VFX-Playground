@@ -120,6 +120,7 @@ uniform float uResearchIconSizeB;
 uniform float uResearchIconTailTip;
 uniform float uResearchIconSpread;
 uniform float uResearchIconStagger;
+uniform float uResearchIconDepth;
 
 // icon 相對於外殼玻璃的折射率。內外是同一種液態玻璃,材質流程完全共用,只有這個
 // 比值不同 —— 大於 1 表示內部這一坨比外殼更「稠」,光路彎得更多,所以看得出形狀。
@@ -1365,6 +1366,7 @@ float researchIconMap(vec3 p){
   // 共平面——那點深度差在折射下看得出來，但不值得再開一根滑桿。
   float spread = uResearchIconSpread;
   float stagger = uResearchIconStagger;
+  float depth = uResearchIconDepth;
   // 對答的拍點寫在全域相位上:A 先開口(0.44),B 回應(0.52),各自的第二拍
   // 在自己的第一拍之後 0.16。四拍剛好落在兩顆都已就位、還沒開始退場的區間。
   // 區域時間用 fract 繞圈:生命週期填滿整個循環,不再有「還沒出生／已經死了」
@@ -1375,12 +1377,12 @@ float researchIconMap(vec3 p){
   // 眼睛才抓不到規律。
   float a = researchIconStage(
     p, phase, fract(phase - RESEARCH_BIRTH_A),
-    researchAnchor(1.0), vec3(spread, stagger, 0.025),
+    researchAnchor(1.0), vec3(spread, stagger, depth),
     max(uResearchIconSizeA, 0.2), 1.0, 0.10, 0.46, 0.0
   );
   float b = researchIconStage(
     p, phase, fract(phase - RESEARCH_BIRTH_B),
-    researchAnchor(-1.0), vec3(-spread, -stagger, -0.02),
+    researchAnchor(-1.0), vec3(-spread, -stagger, -depth),
     max(uResearchIconSizeB, 0.2), -1.0, -0.16, 0.54, 0.02
   );
   // 用 smin 而不是 min。間距可調之後兩顆就可能被推到相鄰，而 min 在交界會留下
