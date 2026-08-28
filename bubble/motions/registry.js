@@ -189,6 +189,39 @@ export const MOTIONS = {
         key: 'researchIconIOR', label: 'icon 折射率(相對外殼)',
         min: 1.02, max: 2.2, step: 0.01, value: 1.2,
       },
+      {
+        // 兩顆各自給一根，而不是「大小 + 差異比」那種間接參數化：這是美術調校，
+        // 直接操作比換算好用。
+        //
+        // 下限 0.2 是算出來的，不是隨手填：本體最短半軸是 0.120 × size，拉伸時
+        // 還要再乘約 0.8，而它必須維持在 researchIconNormal 的取樣間距
+        // （h = 0.0018）的 8 倍以上，否則中央差分算出來的法線是噪音而不是梯度
+        // ——那正是先前 icon 剛冒出來時滿是同心紋路的成因。臨界值約 0.15。
+        key: 'researchIconSizeA', label: 'icon A 大小(右)',
+        min: 0.2, max: 1.6, step: 0.01, value: 0.82,
+      },
+      {
+        key: 'researchIconSizeB', label: 'icon B 大小(左)',
+        min: 0.2, max: 1.6, step: 0.01, value: 1.0,
+      },
+      {
+        // 0 = 圓鈍，1 = 相當尖。不做到真正的針尖：尾端半徑同樣不能細過取樣間距，
+        // 所以對應的錐體末端半徑只從 0.055 收到 0.010（世界尺度約 0.008，仍是
+        // h 的 4.5 倍）。
+        key: 'researchIconTailTip', label: '尾巴尖度',
+        min: 0, max: 1, step: 0.01, value: 0.42,
+      },
+      {
+        // 兩顆對稱移動。開「間距 + 高度錯位」兩根，而不是每顆各給 X/Y 四根：
+        // 面板已經很長，而實務上要調的就是「離多開」與「錯多少」。真的需要單獨
+        // 挪某一顆再加。Z 軸不開——透過外殼折射幾乎看不出差別。
+        key: 'researchIconSpread', label: 'icon 間距',
+        min: 0.05, max: 0.45, step: 0.005, value: 0.235,
+      },
+      {
+        key: 'researchIconStagger', label: 'icon 高度錯位',
+        min: -0.3, max: 0.3, step: 0.005, value: 0.055,
+      },
     ],
   },
   typewriter: {

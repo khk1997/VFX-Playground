@@ -115,6 +115,11 @@ uniform float uResearchShellAmount;
 uniform float uResearchShellSpeed;
 uniform float uResearchShellDensity;
 uniform float uResearchIconIOR;
+uniform float uResearchIconSizeA;
+uniform float uResearchIconSizeB;
+uniform float uResearchIconTailTip;
+uniform float uResearchIconSpread;
+uniform float uResearchIconStagger;
 
 // icon 相對於外殼玻璃的折射率。內外是同一種液態玻璃,材質流程完全共用,只有這個
 // 比值不同 —— 大於 1 表示內部這一坨比外殼更「稠」,光路彎得更多,所以看得出形狀。
@@ -1172,12 +1177,16 @@ float researchIconOne(
   float sr = 1.0 / sqrt(sx);
   vec3 q = vec3(p.x / sx, p.y / sr, p.z / sr);
   float body = researchEllipsoid(q, vec3(0.198, 0.180, 0.120));
+  // 尾端半徑由滑桿控制。下限 0.010 是刻意的：局部 0.010 換算成世界尺度約 0.008，
+  // 仍是法線取樣間距 h(0.0018) 的 4.5 倍。真正的針尖會讓中央差分取到物體外面，
+  // 算出噪音法線——跟 icon 太小時同一個坑。
+  float tailTip = mix(0.055, 0.010, clamp(uResearchIconTailTip, 0.0, 1.0));
   float tail = researchRoundCone(
     q,
     vec3(tailX * 0.060, -0.116, 0.0),
     vec3(tailX * 0.148, -0.208, 0.0),
     0.074,
-    0.036
+    tailTip
   );
   return researchSmin(body, tail, 0.050) * min(sx, sr) * scale;
 }
@@ -1238,6 +1247,28 @@ float researchIconStage(
   center += vec3(cos(orbit + angle), sin(orbit + angle), sin(orbit * 0.7 + angle))
     * vec3(0.020, 0.017, 0.015) * travel;
 
+  // 把 icon 收在外殼裡。
+  //
+  // 半徑取 uDrops[0].w 而不是滑桿值：那是 CPU 每幀寫進來的實際半徑，已經含了
+  // 呼吸與形變，所以牆在哪是跟著動的。再減掉外殼起伏的振幅（那是往內凹的那半）
+  // 與 icon 自己的最大半徑，才是圓心能到的極限。
+  //
+  // 順帶修掉一個既有的耦合問題：icon 的尺寸是絕對世界單位，不隨「水滴大小」縮放，
+  // 所以把水滴調小到 0.4 左右時，icon 本來會直接穿出殼外。現在會被收回來。
+  //
+  // 夾制是軟的。硬 clamp 會在使用者同時拉大「大小」與「間距」時突然頂死，看起來
+  // 像滑桿壞了；這裡讓它在 75% 以內完全不動、之後平滑漸近極限，兩段在接點的
+  // 斜率都是 1，不會有折角。
+  float iconReach = 0.198 * scale;
+  float wallLimit = max(uDrops[0].w - abs(uResearchShellAmount) - iconReach, 0.02);
+  float cr = length(center);
+  float freeR = wallLimit * 0.75;
+  if (cr > freeR) {
+    float soft = freeR + (wallLimit - freeR)
+      * (1.0 - exp(-(cr - freeR) / max(wallLimit - freeR, 0.0001)));
+    center *= soft / max(cr, 0.0001);
+  }
+
   float body = researchIconOne(p, center, scale, angle, tailX, stretch);
   vec3 foot = center + vec3(tailX * 0.148, -0.208, 0.0) * scale;
 
@@ -1252,7 +1283,12 @@ float researchIconStage(
   if (satAge > 0.0) {
     float k = satAge / RESEARCH_SAT_LIFE;
     // 1 - k*k:剛斷開時幾乎不縮,越後面收得越快,像被表面張力一口吸走。
-    float satR = RESEARCH_SAT_R * (1.0 - k * k);
+    //
+    // 前面再乘一段極短的長入。少了它,這顆珠子會在一幀之內從無變成滿尺寸 ——
+    // 實測那一下讓夾斷瞬間的畫面變化量跳到平常的 6 倍(關掉衛星就掉回 3 倍),
+    // 是看得見的一下彈出。0.06 的生命約等於 3 個影格,快到仍然像「啪一聲斷開」,
+    // 但不再是憑空出現。
+    float satR = RESEARCH_SAT_R * (1.0 - k * k) * smoothstep(0.0, 0.06, k);
     if (satR > RESEARCH_SAT_MIN) {
       // 斷點大約在頸子中段偏錨點那一側;之後往錨點漂,表示被殼壁吸收。
       vec3 satPos = mix(mix(anchor, foot, 0.45), anchor, smoothstep(0.0, 1.0, k));
@@ -1296,17 +1332,24 @@ float researchIconMap(vec3 p){
   // A 在右、小顆,腳往右下;B 在左、大顆,腳往左下 —— 兩隻腳方向相反。
   // anchor 落在外殼內壁偏下的位置,與腳同一側,芽才會從腳的方向長出來。
   // 兩顆錯開 0.06;最晚的 B 在 0.14 + 0.84 = 0.98 收完,loop 接得回去。
+  // 落點由「間距」與「高度錯位」對稱決定。z 保留原本的小幅前後差，讓兩顆不完全
+  // 共平面——那點深度差在折射下看得出來，但不值得再開一根滑桿。
+  float spread = uResearchIconSpread;
+  float stagger = uResearchIconStagger;
   float a = researchIconStage(
     p, phase - RESEARCH_BIRTH_A,
-    researchAnchor(1.0), vec3(0.235, 0.055, 0.025),
-    0.82, 1.0, 0.10
+    researchAnchor(1.0), vec3(spread, stagger, 0.025),
+    max(uResearchIconSizeA, 0.2), 1.0, 0.10
   );
   float b = researchIconStage(
     p, phase - RESEARCH_BIRTH_B,
-    researchAnchor(-1.0), vec3(-0.235, -0.055, -0.02),
-    1.00, -1.0, -0.16
+    researchAnchor(-1.0), vec3(-spread, -stagger, -0.02),
+    max(uResearchIconSizeB, 0.2), -1.0, -0.16
   );
-  return min(a, b);
+  // 用 smin 而不是 min。間距可調之後兩顆就可能被推到相鄰，而 min 在交界會留下
+  // 梯度硬折——硬折在折射玻璃裡會被放大成一條亮線（同 RESEARCH_SIDE_SOFT 那段）。
+  // 融合半徑取小：離得遠時與 min 沒有可見差異，靠近時才自然拉出液體的頸子。
+  return researchSmin(a, b, 0.03);
 }
 
 vec3 researchIconNormal(vec3 p){
