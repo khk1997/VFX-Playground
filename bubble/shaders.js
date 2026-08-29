@@ -1167,6 +1167,51 @@ float researchProceduralTexture(
   return clamp(wave * textureGain, -1.0, 1.0);
 }
 
+// 三種自創的外殼動態,跟上面的六種程序紋理並存,不是取代——選單裡各佔一格
+// (值 7/8/9,避開毛細波沿用的 0-6 編號)。
+//
+// 駐波:兩組不同頻率的正弦疊加,時間項讓圖案緩慢旋轉。跟毛細波的「Wave」
+// (單純 sin(travelPhase))不同,這裡是兩項相乘再疊加第三項,花紋更複雜;
+// 保留成獨立選項而不是併進 Wave,兩種讀起來確實不一樣。
+float researchShellStanding(vec3 q, float density, float phase){
+  return sin(q.x * 4.6 * density + phase)
+    * sin(q.y * 3.8 * density - phase)
+    + 0.55 * sin((q.x - q.y + q.z) * 7.2 * density + phase * 2.0);
+}
+
+// 湍流:液面持續翻湧,而不是規律脹縮。取樣點用 loopNoiseOffset 在雜訊空間裡
+// 走一圈——那是專案裡薄膜干涉、毛細波、稜光光芒共用的循環安全手法:走的是
+// 一個閉合圓,phase 回到 0 時取樣點精確位移回原點,uTime 本身也已經是對
+// loopDuration 取過 mod 的值(見 frame() 的 simT),所以不需要另外處理接縫。
+// 跟毛細波的 Noise/Voronoi 不同:那兩個是沿單一行進軸平移的格點雜訊,這個是
+// 3D fbm 直接布滿整個殼面,質地更接近液面翻湧而不是紋理平移。
+float researchShellTurbulence(vec3 q, float density, float speed){
+  vec3 flow = loopNoiseOffset(speed * 0.6);
+  // fbmFast 的量級比駐波的 sin 疊加略小,乘 1.8 讓兩種風格在同一根「起伏大小」
+  // 滑桿下手感相近,不必為了換風格重新調整振幅。
+  return fbmFast(q * (2.6 * density) + flow) * 1.8;
+}
+
+// 脈動:液面像是被此起彼落地輕拍,而不是穩態起伏。特徵在時間軸上(斷續的
+// 拍打),不是空間上——沿用駐波的空間花紋當底,只是不再連續驅動它,而是用
+// 離散的阻尼衝擊:液面被拍一下、回彈、靜下來,直到下一拍。空間花紋在每次
+// 觸發時換一個新的旋轉角(hash 出來的),讀起來才不會每次拍打都拍在同一個
+// 花紋上。角度變換的時刻正好是 envelope 衰減到 0 的時刻(local 從 1 繞回 0
+// 那一刻,floor(phase01*repeats) 同時進位),所以形狀切換不會被看見。
+float researchShellPulse(vec3 q, float density, float phase01, float speed){
+  // repeats 是每圈的觸發次數,跟駐波的 cycles 同一個語意——兩者都用「起伏速度」
+  // 這根滑桿。必須是整數,循環邊界(phase01=0/1)才能精確接回同一個值。
+  float repeats = max(1.0, floor(speed + 0.5));
+  float beat = floor(phase01 * repeats);
+  float local = fract(phase01 * repeats);
+  // 先衝過去、再回彈、靜下來——跟頸子夾斷後的阻尼振盪是同一套數學。local 走到
+  // 1(即將進位)時 exp(-7*1) ≈ 9.1e-4,衰減到可忽略,下一拍接上不會有跳接。
+  float envelope = exp(-local * 7.0) * sin(local * 14.0);
+  float spatialPhase = hash11(beat * 3.71 + 1.3) * TAU;
+  float spatial = researchShellStanding(q, density, spatialPhase);
+  return spatial * envelope * 1.6;
+}
+
 float researchShellOffset(vec3 p){
   vec3 q = normalize(p - uDrops[0].xyz + vec3(0.0001));
   float phase01 = fract(uTime / max(uLoopDuration, 0.001));
@@ -1176,7 +1221,8 @@ float researchShellOffset(vec3 p){
 
   // 「無」(6,跟毛細波同一個編號)只把紋理本身歸零,不是整段提早 return——
   // 下面的側面遮罩與誕生事件跟紋理選擇無關,選「無」時外殼仍該呼吸、icon
-  // 誕生時仍該有隆起。
+  // 誕生時仍該有隆起。7/8/9 是三種自創動態(駐波/湍流/脈動),跟 0-6 的毛細波
+  // 紋理並存於同一個選單,不是取代關係。
   float textureType = uResearchShellTexture;
   float pattern = 0.0;
   if (textureType < 5.5) {
@@ -1190,6 +1236,12 @@ float researchShellOffset(vec3 p){
     pattern = researchProceduralTexture(
       textureType, field, lateral, travelPhase, density, fieldTravel, fieldPeriod
     );
+  } else if (textureType < 7.5) {
+    pattern = researchShellStanding(q, density, phase);
+  } else if (textureType < 8.5) {
+    pattern = researchShellTurbulence(q, density, uResearchShellSpeed);
+  } else if (textureType < 9.5) {
+    pattern = researchShellPulse(q, density, phase01, uResearchShellSpeed);
   }
 
   float k2 = RESEARCH_SIDE_SOFT * RESEARCH_SIDE_SOFT;

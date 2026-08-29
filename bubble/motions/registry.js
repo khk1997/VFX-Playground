@@ -167,10 +167,12 @@ export const MOTIONS = {
     },
     params: [
       {
-        // 跟毛細波的「程序紋理」是同一份詞彙與數學(見 shaders.js 的
+        // 0-6 跟毛細波的「程序紋理」是同一份詞彙與數學(見 shaders.js 的
         // researchProceduralTexture),只是餵進去的座標換成外殼自己的球面
-        // 方向,而不是毛細波的行進方向場。「起伏大小」「起伏速度」「起伏密度」
-        // 三根滑桿六種紋理共用,語意依紋理各自解讀。
+        // 方向,而不是毛細波的行進方向場。7-9 是三種自創動態(駐波/湍流/脈動,
+        // 見 researchShellStanding/Turbulence/Pulse),跟前面七種並存,不是
+        // 取代關係。「起伏大小」「起伏速度」「起伏密度」三根滑桿全部十種共用,
+        // 語意依各自的公式解讀。
         //
         // 「無」用 6 而不是插在 0——理由跟毛細波那份保留註解一樣:0–5 的編號
         // 用意是「跟毛細波的 capillaryTexture 值一一對應」，方便理解，不是
@@ -184,6 +186,9 @@ export const MOTIONS = {
           { value: 3, label: 'Gabor' },
           { value: 4, label: 'Gradient' },
           { value: 5, label: 'Magic' },
+          { value: 7, label: '駐波 Standing Wave' },
+          { value: 8, label: '湍流 Turbulence' },
+          { value: 9, label: '脈動 Pulse' },
         ],
       },
       {
