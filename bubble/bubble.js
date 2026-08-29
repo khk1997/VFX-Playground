@@ -14,7 +14,7 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=shell-styles-1';
+} from './motions/registry.js?v=shell-texture-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
@@ -23,7 +23,7 @@ import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-sha
 import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-76';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
-import createResearchMotion from './motions/research.js?v=shell-styles-1';
+import createResearchMotion from './motions/research.js?v=shell-texture-1';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
@@ -1092,7 +1092,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=shell-styles-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=shell-texture-1';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
@@ -1586,7 +1586,10 @@ function variantState() {
     svgNormals,
     // 毛細波的程序紋理現在也服務靜態模式：兩者共用同一支 capillarySurfaceOffset，
     // 只是分別套在形狀場（毛細波）與程序化 SDF（靜態的內建幾何）上。
-    capillaryTexture: P.motion === 'capillary' || P.motion === 'static',
+    // 私語(research)的外殼紋理跟毛細波共用同一份 Noise／Voronoi 等函式
+    // (見 shaders.js 的 researchProceduralTexture)，所以也要編進這個旗標。
+    capillaryTexture: P.motion === 'capillary' || P.motion === 'static'
+      || P.motion === 'research',
     // 靜態模式選了內建幾何（staticShape 0-6）時才編譯程序化 SDF；選了「匯入」
     // （staticShape 7）就完全交給上面的 shapeField 走形狀場，兩邊不同時混進 d。
     staticShape: P.motion === 'static' && P.staticShape !== 7,
@@ -4109,7 +4112,7 @@ function initGL() {
     uResearchShellAmount: { value: P.researchShellAmount },
     uResearchShellSpeed: { value: P.researchShellSpeed },
     uResearchShellDensity: { value: P.researchShellDensity },
-    uResearchShellStyle: { value: P.researchShellStyle },
+    uResearchShellTexture: { value: P.researchShellTexture },
     uResearchIconIOR: { value: P.researchIconIOR },
     uResearchIconSizeA: { value: P.researchIconSizeA },
     uResearchIconSizeB: { value: P.researchIconSizeB },

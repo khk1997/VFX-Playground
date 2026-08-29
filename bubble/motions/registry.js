@@ -167,14 +167,23 @@ export const MOTIONS = {
     },
     params: [
       {
-        // 三種外殼動態互斥切換,不是疊加開關 —— 疊加會讓參數互相打架、難以預期。
-        // 下面的「起伏大小」「起伏速度」「起伏密度」三根滑桿三種都共用,語意
-        // 依風格各自解讀(細節見 shaders.js 的 researchShellOffset)。
-        key: 'researchShellStyle', label: '外殼動態', type: 'select', value: 0,
+        // 跟毛細波的「程序紋理」是同一份詞彙與數學(見 shaders.js 的
+        // researchProceduralTexture),只是餵進去的座標換成外殼自己的球面
+        // 方向,而不是毛細波的行進方向場。「起伏大小」「起伏速度」「起伏密度」
+        // 三根滑桿六種紋理共用,語意依紋理各自解讀。
+        //
+        // 「無」用 6 而不是插在 0——理由跟毛細波那份保留註解一樣:0–5 的編號
+        // 用意是「跟毛細波的 capillaryTexture 值一一對應」，方便理解，不是
+        // 因為有舊檔案相容性負擔（這是全新參數）。
+        key: 'researchShellTexture', label: '程序紋理', type: 'select', value: 0,
         options: [
-          { value: 0, label: '駐波 Standing Wave' },
-          { value: 1, label: '湍流 Turbulence' },
-          { value: 2, label: '脈動 Pulse' },
+          { value: 6, label: '無' },
+          { value: 0, label: 'Wave' },
+          { value: 1, label: 'Noise' },
+          { value: 2, label: 'Voronoi' },
+          { value: 3, label: 'Gabor' },
+          { value: 4, label: 'Gradient' },
+          { value: 5, label: 'Magic' },
         ],
       },
       {
