@@ -14,7 +14,7 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=whisper-rename-1';
+} from './motions/registry.js?v=shell-styles-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
@@ -23,7 +23,7 @@ import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-sha
 import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-76';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
-import createResearchMotion from './motions/research.js?v=whisper-rename-1';
+import createResearchMotion from './motions/research.js?v=shell-styles-1';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
@@ -1092,7 +1092,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=whisper-rename-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=shell-styles-1';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
@@ -4109,6 +4109,7 @@ function initGL() {
     uResearchShellAmount: { value: P.researchShellAmount },
     uResearchShellSpeed: { value: P.researchShellSpeed },
     uResearchShellDensity: { value: P.researchShellDensity },
+    uResearchShellStyle: { value: P.researchShellStyle },
     uResearchIconIOR: { value: P.researchIconIOR },
     uResearchIconSizeA: { value: P.researchIconSizeA },
     uResearchIconSizeB: { value: P.researchIconSizeB },

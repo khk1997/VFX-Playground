@@ -167,6 +167,17 @@ export const MOTIONS = {
     },
     params: [
       {
+        // 三種外殼動態互斥切換,不是疊加開關 —— 疊加會讓參數互相打架、難以預期。
+        // 下面的「起伏大小」「起伏速度」「起伏密度」三根滑桿三種都共用,語意
+        // 依風格各自解讀(細節見 shaders.js 的 researchShellOffset)。
+        key: 'researchShellStyle', label: '外殼動態', type: 'select', value: 0,
+        options: [
+          { value: 0, label: '駐波 Standing Wave' },
+          { value: 1, label: '湍流 Turbulence' },
+          { value: 2, label: '脈動 Pulse' },
+        ],
+      },
+      {
         key: 'researchShellAmount', label: '外殼起伏大小',
         min: 0, max: 0.08, step: 0.001, value: 0.04,
       },

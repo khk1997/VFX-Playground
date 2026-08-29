@@ -114,6 +114,7 @@ uniform float uWobbleSpeed;
 uniform float uResearchShellAmount;
 uniform float uResearchShellSpeed;
 uniform float uResearchShellDensity;
+uniform float uResearchShellStyle;
 uniform float uResearchIconIOR;
 uniform float uResearchIconSizeA;
 uniform float uResearchIconSizeB;
@@ -1109,6 +1110,58 @@ float researchShellEvent(vec3 q, float sideSign, float t){
   return swell + ripple;
 }
 
+// 駐波:兩組不同頻率的正弦疊加,時間項讓圖案緩慢旋轉。原本唯一的外殼動態,
+// 現在是三選一其中一種。所有時間倍率都是整數諧波,phase=TAU 時精確接回
+// phase=0,外殼可以持續起伏而不必在每輪末尾淡回圓球——這個循環安全的手法
+// 三種風格都要各自維持,細節見各自的說明。
+float researchShellStanding(vec3 q, float density, float phase){
+  return sin(q.x * 4.6 * density + phase)
+    * sin(q.y * 3.8 * density - phase)
+    + 0.55 * sin((q.x - q.y + q.z) * 7.2 * density + phase * 2.0);
+}
+
+// 湍流:液面持續翻湧,而不是規律脹縮。取樣點用 loopNoiseOffset 在雜訊空間裡
+// 走一圈——那是專案裡薄膜干涉、毛細波、稜光光芒共用的循環安全手法:走的是
+// 一個閉合圓,phase 回到 0 時取樣點精確位移回原點,uTime 本身也已經是對
+// loopDuration 取過 mod 的值(見 frame() 的 simT),所以不需要另外處理接縫。
+float researchShellTurbulence(vec3 q, float density, float speed){
+  vec3 flow = loopNoiseOffset(speed * 0.6);
+  // fbmFast 的量級比駐波的 sin 疊加略小,乘 1.8 讓兩種風格在同一根「起伏大小」
+  // 滑桿下手感相近,不必為了換風格重新調整振幅。
+  return fbmFast(q * (2.6 * density) + flow) * 1.8;
+}
+
+// 脈動:液面像是被此起彼落地輕拍,而不是穩態起伏。六個錨點固定在殼面上
+// (hash 出來的方向,不隨時間變),各自每圈觸發一次阻尼振盪,彼此錯開起跳
+// 時間。跟 researchShellEvent 用的是同一套「指數衰減 × 正弦」,差別是那邊
+// 綁在 icon 誕生上,這裡是外殼自己周期性的呼吸。
+//
+// 衰減常數需要讓 age 走到 1.0(下一次觸發前)時已衰減到可忽略——exp(-9.5*1.0)
+// ≈ 7.5e-5,遠小於一個像素能分辨的量級,所以每個錨點在自己的循環邊界上
+// 是連續的,不會有跳接。
+// 脈動的特徵該在時間軸上(斷續的拍打),不是空間上。第一版把六個錨點各自
+// 局部鼓包,結果任一時刻只有一兩個在明顯振盪、每個又只影響一小塊面積,整體
+// 覆蓋率遠低於駐波與湍流,縮圖尺度下幾乎看不出差異。
+//
+// 改成沿用駐波的空間花紋當底(覆蓋率與另外兩種一致),只是不再連續驅動它,而是
+// 用離散的阻尼衝擊——液面被拍一下、回彈、靜下來,直到下一拍。空間花紋在每次
+// 觸發時換一個新的旋轉角(hash 出來的),讀起來才不會每次拍打都拍在同一個花紋
+// 上。角度變換的時刻正好是 envelope 衰減到 0 的時刻(local 從 1 繞回 0 那一刻,
+// floor(phase01*repeats) 同時進位),所以形狀切換不會被看見。
+float researchShellPulse(vec3 q, float density, float phase01, float speed){
+  // repeats 是每圈的觸發次數,跟駐波的 cycles 同一個語意——兩者都用「起伏速度」
+  // 這根滑桿。必須是整數,循環邊界(phase01=0/1)才能精確接回同一個值。
+  float repeats = max(1.0, floor(speed + 0.5));
+  float beat = floor(phase01 * repeats);
+  float local = fract(phase01 * repeats);
+  // 先衝過去、再回彈、靜下來——跟頸子夾斷後的阻尼振盪是同一套數學。local 走到
+  // 1(即將進位)時 exp(-7*1) ≈ 9.1e-4,衰減到可忽略,下一拍接上不會有跳接。
+  float envelope = exp(-local * 7.0) * sin(local * 14.0);
+  float spatialPhase = hash11(beat * 3.71 + 1.3) * TAU;
+  float spatial = researchShellStanding(q, density, spatialPhase);
+  return spatial * envelope * 1.6;
+}
+
 float researchShellOffset(vec3 p){
   vec3 q = normalize(p - uDrops[0].xyz + vec3(0.0001));
   float phase01 = fract(uTime / max(uLoopDuration, 0.001));
@@ -1116,11 +1169,17 @@ float researchShellOffset(vec3 p){
   float phase = phase01 * TAU * cycles;
   // 三個不同頻率的低幅度鼓包；權重偏在側面與下緣，保留主體圓形可讀性。
   float density = max(uResearchShellDensity, 0.1);
-  // 所有時間倍率都是整數諧波，phase=TAU 時精確接回 phase=0；外殼可以持續
-  // 起伏而不必在每輪末尾淡回圓球。
-  float lobes = sin(q.x * 4.6 * density + phase)
-    * sin(q.y * 3.8 * density - phase)
-    + 0.55 * sin((q.x - q.y + q.z) * 7.2 * density + phase * 2.0);
+
+  int style = int(uResearchShellStyle + 0.5);
+  float pattern;
+  if (style == 1) {
+    pattern = researchShellTurbulence(q, density, uResearchShellSpeed);
+  } else if (style == 2) {
+    pattern = researchShellPulse(q, density, phase01, uResearchShellSpeed);
+  } else {
+    pattern = researchShellStanding(q, density, phase);
+  }
+
   float k2 = RESEARCH_SIDE_SOFT * RESEARCH_SIDE_SOFT;
   float lateral = sqrt(q.x * q.x + k2);
   float lower = 0.5 * (sqrt(q.y * q.y + k2) - q.y);
@@ -1129,7 +1188,7 @@ float researchShellOffset(vec3 p){
   // 拉到 0 的語意是外殼平滑,不該連帶把因果關係一起關掉。
   float events = researchShellEvent(q, 1.0, fract(phase01 - RESEARCH_BIRTH_A))
     + researchShellEvent(q, -1.0, fract(phase01 - RESEARCH_BIRTH_B));
-  return lobes * side * uResearchShellAmount + events;
+  return pattern * side * uResearchShellAmount + events;
 }
 
 // 平滑併集。k 是融合半徑：兩個面靠近到 k 以內時,接縫會被拉成圓角而不是硬折。
