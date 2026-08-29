@@ -1,6 +1,6 @@
 'use strict';
 
-// 研究中：低幅度的液態外殼呼吸，以及兩顆延遲生成、互相繞行的內部玻璃核。
+// 私語：低幅度的液態外殼呼吸，以及兩顆延遲生成、互相繞行的內部玻璃核。
 // 這一版先使用既有 metaball 管線驗證節奏；真正的 SVG glyph 厚度留給下一階段。
 export default function createResearchMotion(P) {
   // 外殼全程保持液態起伏；時間項使用整數諧波，因此不需要在首尾淡回圓球。
@@ -28,7 +28,7 @@ export default function createResearchMotion(P) {
   function dropPosition(index, phase, out) {
     const cycles = Math.max(0, Math.round(P.researchShellSpeed));
     const a = phase * Math.PI * 2 * cycles;
-    // 主滴只負責完整外殼；兩個 glyph 由研究模式專用 shader 畫在殼內。
+    // 主滴只負責完整外殼；兩個 glyph 由私語模式專用 shader 畫在殼內。
     out.set(0, 0, 0);
     return {
       reveal: 1,

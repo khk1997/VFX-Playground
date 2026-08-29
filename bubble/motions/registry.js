@@ -120,7 +120,7 @@ export const MOTIONS = {
     dolly: false,
   },
   research: {
-    label: '研究中 Research',
+    label: '私語 Whisper',
     uniform: 9,
     usesShapeField: false,
     gate: 'research',

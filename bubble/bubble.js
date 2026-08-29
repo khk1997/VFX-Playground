@@ -14,7 +14,7 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=research-defaults-1';
+} from './motions/registry.js?v=whisper-rename-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
@@ -23,7 +23,7 @@ import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-sha
 import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-76';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
-import createResearchMotion from './motions/research.js?v=research-4';
+import createResearchMotion from './motions/research.js?v=whisper-rename-1';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
@@ -714,7 +714,7 @@ const MOTION_SCOPED_KEYS = [
   // 值就得連它們一起按模式記憶，否則調完切走再切回來會被別的模式蓋掉。
   'rayBeamFresnelMask', 'rayBeamNoiseScale',
   // 稜光光芒的其餘控制項。上面那六條早就按模式記憶了，剩下這些沒列，於是
-  // registry 的 override 寫不回控制項——研究模式要一整組指定的光芒設定，
+  // registry 的 override 寫不回控制項——私語模式要一整組指定的光芒設定，
   // 缺一條就會沿用全域值，看起來像 override 沒生效。
   'rayBeamRings', 'rayBeamGlow', 'rayBeamSpeed',
   'rayBeamAzimuth', 'rayBeamElevation', 'rayBeamRefract', 'rayBeamNoiseMask',
@@ -725,10 +725,10 @@ const MOTION_SCOPED_KEYS = [
   'cameraDistance', 'cameraRotationX', 'cameraRotationY',
   // 環繞幅度也是構圖的一部分，跟上面三條鏡頭參數同一組。
   'spin',
-  // Research 的外殼需要比一般水滴低很多的 FBM 起伏；列入模式記憶後 registry
+  // 私語的外殼需要比一般水滴低很多的 FBM 起伏；列入模式記憶後 registry
   // 的 wobble override 才會真的寫回控制項與 uniform，而不是仍沿用全域 0.305。
   'wobble',
-  // 起伏的時間項。研究模式要把外殼定格（wobbleSpeed 0），而 wobble 本身保留，
+  // 起伏的時間項。私語模式要把外殼定格（wobbleSpeed 0），而 wobble 本身保留，
   // 所以兩條都得按模式記憶，只列 wobble 會讓外殼照樣流動。
   'wobbleSpeed',
   'materialStyle',
@@ -1092,7 +1092,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=research-defaults-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=whisper-rename-1';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
