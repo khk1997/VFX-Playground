@@ -213,6 +213,9 @@ uniform float uShapeBScale;
 uniform mat3  uShapeRigidRot;
 uniform vec3  uShapeRigidOffset;
 uniform vec3  uShapeRigidScale;
+uniform mat3  uShapeRigid2Rot;
+uniform vec3  uShapeRigid2Offset;
+uniform vec3  uShapeRigid2Scale;
 uniform float uContactLead;
 uniform float uShapeDepth;
 uniform float uShapeSoftness;
@@ -1891,11 +1894,17 @@ float mapScene(vec3 p, bool smoothShape){
     vec3 rigidP = p - uShapeRigidOffset;
     vec3 unrotatedP = rigidP * uShapeRigidRot;
     vec3 shapeP = (unrotatedP / uShapeRigidScale) / uShapeScale;
+    // 形狀 B 走自己的那一組剛體變換（形狀變形模式的「形狀 B（第二組）」）。
+    // 兩個通道本來就各自取樣一次，這裡只是餵進不同的座標，不是多取樣一次。
+    // 其餘模式 CPU 端把第二組寫成跟第一組相同的值，等價於共用一份。
+    vec3 rigid2P = p - uShapeRigid2Offset;
+    vec3 unrotated2P = rigid2P * uShapeRigid2Rot;
+    vec3 shape2P = (unrotated2P / uShapeRigid2Scale) / uShapeScale;
     // 形狀 A/B 各自的獨立倍率再疊一層，跟 uShapeScale 是同一種均勻縮放，只是
     // 分開套在各自的通道上。fromCh/toCh 哪個是 A、哪個是 B 由 uShapeMorph 決定
-    // （見下方），所以要先分出 shapeP 對應 A、B 各自的本地座標。
+    // （見下方），所以要先分出 A、B 各自的本地座標。
     vec3 shapePA = shapeP / uShapeAScale;
-    vec3 shapePB = shapeP / uShapeBScale;
+    vec3 shapePB = shape2P / uShapeBScale;
     float detailD;
     if (uShapeMorph > 0.5) {
       // 兩顆形狀同時在場：舊的被「消失波前」削掉，新的被「出現波前」放出來，

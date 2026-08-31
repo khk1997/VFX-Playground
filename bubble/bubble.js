@@ -14,16 +14,16 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=morph-shape2-1';
+} from './motions/registry.js?v=morph-shape2-2';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-76';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=morph-shape2-1';
-import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=morph-shape2-1';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=morph-shape2-2';
+import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=morph-shape2-2';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
-import createResearchMotion from './motions/research.js?v=morph-shape2-1';
+import createResearchMotion from './motions/research.js?v=morph-shape2-2';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
@@ -1112,7 +1112,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=morph-shape2-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=morph-shape2-2';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
@@ -3308,6 +3308,22 @@ function updateDropUniforms(t) {
       shapeRigidNow ? shapeRigidNow.scaleY : 1,
       shapeRigidNow ? shapeRigidNow.scaleZ : 1,
     );
+    // 形狀 B 的實體。只有形狀變形模式會有第二組；其餘模式沿用第一組的值，
+    // 讓 shader 那條 B 通道等價於改動前的共用一份（其餘模式根本不走 B 通道，
+    // 但寫成一致的值可以避免任何殘留狀態在切模式時漏出來）。
+    const rigidB = shapeRigid2Now || shapeRigidNow;
+    if (rigidB) uniforms.uShapeRigid2Rot.value.copy(rigidB.rotation);
+    else uniforms.uShapeRigid2Rot.value.identity();
+    uniforms.uShapeRigid2Offset.value.set(
+      rigidB ? (rigidB.offsetX || 0) : 0,
+      rigidB ? rigidB.offsetY : 0,
+      0,
+    );
+    uniforms.uShapeRigid2Scale.value.set(
+      rigidB ? rigidB.scaleX : 1,
+      rigidB ? rigidB.scaleY : 1,
+      rigidB ? rigidB.scaleZ : 1,
+    );
     // 融化一併關掉：contactLead 是「形狀在已抵達水滴附近先成形」，前提是形狀還在
     // 成形中。融化的 uShapeProgress 恆為 1、形狀始終完整，這條規則就只剩副作用——
     // 它的影響半徑 0.72 遠大於水滴本身，等於幾顆「不侵蝕球」隨著水滴墜落掃過造型，
@@ -4355,6 +4371,9 @@ function initGL() {
     uShapeRigidRot: { value: new THREE.Matrix3() },
     uShapeRigidOffset: { value: new THREE.Vector3() },
     uShapeRigidScale: { value: new THREE.Vector3(1, 1, 1) },
+    uShapeRigid2Rot: { value: new THREE.Matrix3() },
+    uShapeRigid2Offset: { value: new THREE.Vector3() },
+    uShapeRigid2Scale: { value: new THREE.Vector3(1, 1, 1) },
     // contactLead（形狀在已抵達水滴附近先成形）是形狀匯聚專用的邏輯。崩解噴濺
     // 是它的反向過程，同一條規則會變成「形狀黏著碎片不肯消失、碎片之間先溶掉」，
     // 在輪廓上結出一顆顆瘤；融化則是形狀從頭到尾完整，沒有「先成形」可言，只剩
