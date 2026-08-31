@@ -139,6 +139,7 @@ uniform vec4  uTypeAtlasInfo;  // x：圖集列數，y：行數，z：每格解�
 uniform vec4  uTypeLine;       // x：字距（格單位），y：字級，z：基線位移，w：可見字數
 uniform vec4  uTypeShape;      // x：擠出厚度，y：邊緣圓角，z：液態長出，w：字形特徵尺度
 uniform vec4  uTypeCaret;      // xy：游標中心，z：半寬，w：>0.5 代表這一幀亮著
+uniform float uTypeCaretDepth;  // 游標自己的擠出厚度，跟字形的 uTypeShape.x 分開
 uniform vec2  uElasticEvent;    // x：事件包絡，y：傳播進度
 uniform float uElasticStrength;
 uniform float uElasticDensity;
@@ -1745,16 +1746,6 @@ float typewriterDistance(vec3 p, bool smoothShape){
     edge = min(edge, typeGlyphEdge(p.xy, slot, count, smoothShape));
   }
 
-  // 游標。DOM 版是一個閃爍的 .caret span；這裡是行尾的一根液柱，閃爍相位鎖在
-  // 循環上（見 bubble.js），所以循環接回去時不會跳。
-  if (uTypeCaret.w > 0.5 && uTypeCaret.z > 0.001) {
-    vec2 halfExtent = vec2(uTypeCaret.z, size * 0.36);
-    vec2 q = abs(p.xy - uTypeCaret.xy) - halfExtent + vec2(size * 0.05);
-    float caret = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - size * 0.05;
-    edge = min(edge, caret);
-  }
-  if (edge > 1e8) return 1e9;
-
   // 擠出。與 svgShapeDistance 同一個作法：smooth-max 只圓化正面與側壁的交界，
   // 半徑由獨立的圓角參數控制。
   //
@@ -1764,7 +1755,24 @@ float typewriterDistance(vec3 p, bool smoothShape){
   // 自行拉滑桿要承擔的取捨，不由程式自動夾住。
   float bevel = max(uTypeShape.y, 0.0001);
   float depth = abs(p.z) - max(uTypeShape.x, 0.0001);
-  return -smin(-edge, -depth, bevel);
+  float d3 = edge > 1e8 ? 1e9 : -smin(-edge, -depth, bevel);
+
+  // 游標。DOM 版是一個閃爍的 .caret span；這裡是行尾的一根液柱，閃爍相位鎖在
+  // 循環上（見 bubble.js），所以循環接回去時不會跳。
+  //
+  // 厚度跟字形分開算，不是併進上面同一個 edge 再共用一次擠出——共用的話游標的
+  // 「厚度」只能等於字的擠出厚度，使用者要能把兩者錯開調，游標就得有自己的
+  // depth 通道，各自 smin 擠出後再取 min 合併成最終的 3D 距離場。圓角沿用同一個
+  // bevel：兩個都是液態表面，共用圓角手感一致，也少一根滑桿。
+  if (uTypeCaret.w > 0.5 && uTypeCaret.z > 0.001) {
+    vec2 halfExtent = vec2(uTypeCaret.z, size * 0.36);
+    vec2 q = abs(p.xy - uTypeCaret.xy) - halfExtent + vec2(size * 0.05);
+    float caret = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - size * 0.05;
+    float caretDepth = abs(p.z) - max(uTypeCaretDepth, 0.0001);
+    d3 = min(d3, -smin(-caret, -caretDepth, bevel));
+  }
+
+  return d3;
 }
 #endif // FEATURE_TYPEWRITER
 

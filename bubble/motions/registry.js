@@ -365,6 +365,15 @@ export const MOTIONS = {
         // 一個 float。撞名是靜默的——uniforms[uName] 存在就寫，沒有任何警告。
         key: 'typeCaretWidth', label: '游標寬度', min: 0, max: 0.4, step: 0.01, value: 0.16,
       },
+      {
+        // 游標自己的擠出厚度，跟字形的「擠出厚度」(typeDepth) 分開——原本兩者
+        // 共用同一個 uTypeShape.x：游標的 2D 輪廓先併進字形的 edge 場再一起擠出，
+        // 厚度不可能只調游標不動字形。現在兩個場先各自擠出成 3D 再取 min 合併，
+        // 圓角(typeBevel)仍共用一份，兩個都是液態表面，共用手感一致。
+        // 預設值跟 typeDepth 一樣，銜接舊行為——切過來的當下畫面不會變，
+        // 想錯開再各自調。
+        key: 'typeCaretDepth', label: '游標厚度', min: 0.02, max: 0.4, step: 0.005, value: 0.115,
+      },
       // 以下四條是絕對時間，不是相對權重——循環秒數由它們的總和推導出來（見
       // motions/typewriter.js 開頭與 bubble.js 的 syncTypewriterLoopDuration）。
       // 第一版走相對權重，結果把示範文字從三句短句換成兩個字的「hi」時，總權重

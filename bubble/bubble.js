@@ -14,7 +14,7 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=shell-texture-2';
+} from './motions/registry.js?v=type-caret-depth-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
@@ -23,7 +23,7 @@ import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-sha
 import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-76';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
-import createResearchMotion from './motions/research.js?v=shell-texture-2';
+import createResearchMotion from './motions/research.js?v=type-caret-depth-1';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
@@ -1092,7 +1092,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=shell-texture-2';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=type-caret-depth-1';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
@@ -4130,6 +4130,7 @@ function initGL() {
     uTypeLine: { value: new THREE.Vector4(0.6, P.typeSize, 0.22, 0) },
     uTypeShape: { value: new THREE.Vector4(P.typeDepth, P.typeBevel, P.typeGrow, 0) },
     uTypeCaret: { value: new THREE.Vector4(0, 0, 0, 0) },
+    uTypeCaretDepth: { value: P.typeCaretDepth },
     uElasticEvent: { value: elasticEvent },
     uElasticStrength: { value: P.elasticStrength },
     uElasticDensity: { value: P.elasticDensity },
