@@ -14,16 +14,16 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=type-caret-depth-1';
+} from './motions/registry.js?v=morph-shape2-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-76';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=svg-shape-76';
-import createShapeRigidMotion from './motions/shapeRigid.js?v=svg-shape-76';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=morph-shape2-1';
+import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=morph-shape2-1';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
-import createResearchMotion from './motions/research.js?v=type-caret-depth-1';
+import createResearchMotion from './motions/research.js?v=morph-shape2-1';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
@@ -564,6 +564,18 @@ const DEFAULTS = {              // 數值滑桿
   shapeBreathe: 0.05,
   shapeBob: 0.08,
   shapeSquash: 0.35,
+  // 第二組：只有形狀變形模式用得到，形狀 B 自己的旋轉／呼吸／浮動，跟上面
+  // 那組（形狀 A）分開調。跟第一組共用「造型動態」總開關，開關本身不分組。
+  // 預設值跟第一組不同（Y 軸旋轉、無 Z 軸），這樣沒調過的使用者切到形狀變形
+  // 也能立刻看出兩顆形狀動得不一樣，而不是預設值剛好長得一樣看不出差別。
+  shape2MotionCycles: 1,
+  shape2MotionEase: 0.3,
+  shape2SpinX: 0,
+  shape2SpinY: 14,
+  shape2SpinZ: 0,
+  shape2Breathe: 0.05,
+  shape2Bob: 0.08,
+  shape2Squash: 0.35,
   // 形狀 A（來源）／形狀 B（變形目標）各自的大小倍率，1 = 原尺寸。兩者獨立，
   // 不共用同一個縮放，才能讓來源跟變形目標各自放大縮小。
   shapeAScale: 1,
@@ -1042,6 +1054,14 @@ const fmt = {
   shapeBreathe: v => Math.round(v * 100) + '%',
   shapeBob: v => v.toFixed(2),
   shapeSquash: v => Math.round(v * 100) + '%',
+  shape2MotionCycles: v => Math.round(v) + ' 圈/循環',
+  shape2MotionEase: v => Math.round(v * 100) + '%',
+  shape2SpinX: v => v.toFixed(0) + '°',
+  shape2SpinY: v => v.toFixed(0) + '°',
+  shape2SpinZ: v => v.toFixed(0) + '°',
+  shape2Breathe: v => Math.round(v * 100) + '%',
+  shape2Bob: v => v.toFixed(2),
+  shape2Squash: v => Math.round(v * 100) + '%',
   shapeAScale: v => 'x' + v.toFixed(2),
   shapeBScale: v => 'x' + v.toFixed(2),
   jellyPokes: v => Math.round(v) + ' 下/循環',
@@ -1092,7 +1112,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=type-caret-depth-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=morph-shape2-1';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
@@ -2444,6 +2464,7 @@ const { meltDrop } = createMeltMotion(P, { bottomAnchors: () => meltBottomAnchor
 // 配對表由 bubble.js 這邊持有（它才知道形狀什麼時候換），morph.js 只負責讀。
 const {
   morphTimeline: morphTimelineOf, morphFronts, morphDropPosition, morphRadiusFactor,
+  morphShapeBlend,
 } = createMorphMotion(P);
 
 // 造型本身的剛體動態（見 motions/shapeRigid.js）。每幀在 updateDropUniforms
@@ -2489,6 +2510,49 @@ function applyShapeRigid(x, y, z, out) {
   out.x += offsetX || 0;
   out.y += offsetY;
   return out;
+}
+
+// 形狀變形的「第二組」——形狀 B 自己的旋轉／呼吸／浮動，跟形狀 A（也就是上面
+// 的 shapeRigidNow）分開算。只有形狀變形模式會算這個，其餘模式維持 null，
+// applyShapeRigidBlend 在那些模式底下退化成跟 applyShapeRigid 完全一樣的結果。
+let shapeRigid2Now = null;
+const shapeRigid2Euler = new THREE.Euler();
+const shapeRigid2Mat4 = new THREE.Matrix4();
+const shapeRigid2Rot = new THREE.Matrix3();
+// 混合兩組剛體變換時裝中間結果的暫存向量，不能跟 shapeRigidVec 共用——
+// 兩組都要先各自算完整個變換後的位置，才能對兩個「已經是最終座標」的點
+// 取插值；共用一顆會被下一組覆寫掉上一組的結果。
+const shapeRigidBlendA = new THREE.Vector3();
+const shapeRigidBlendB = new THREE.Vector3();
+// blend：0＝完全套用第一組（形狀 A），1＝完全套用第二組（形狀 B），中間值
+// 對兩組「已經套用完剛體變換的最終位置」取線性插值——不是對角度／縮放本身
+// 插值。角度插值在小振幅（滑桿上限 45°）下不會有萬向鎖或角度繞遠路的問題，
+// 但對最終位置插值同時更省——兩顆旋轉矩陣本來就要在算 shapeRigidNow／
+// shapeRigid2Now 時各自建好一次（每幀一次，不是每顆水滴一次），這裡對每顆
+// 水滴只是多做一次矩陣套用＋一次向量線性插值，不必再建新矩陣。
+// 沒有第二組（非形狀變形模式，或造型動態關閉）時直接退化成 applyShapeRigid，
+// 這樣呼叫端不用先判斷「這個模式有沒有第二組」再決定要叫哪一個函式。
+function applyShapeRigidBlend(x, y, z, blend, out) {
+  if (!shapeRigid2Now || blend <= 0) return applyShapeRigid(x, y, z, out);
+  if (!shapeRigidNow || blend >= 1) {
+    const { rotation, offsetX, offsetY, scaleX, scaleY, scaleZ } = shapeRigid2Now;
+    out.set(x * scaleX, y * scaleY, z * scaleZ).applyMatrix3(rotation);
+    out.x += offsetX || 0;
+    out.y += offsetY;
+    return out;
+  }
+  applyShapeRigid(x, y, z, shapeRigidBlendA);
+  {
+    const { rotation, offsetX, offsetY, scaleX, scaleY, scaleZ } = shapeRigid2Now;
+    shapeRigidBlendB.set(x * scaleX, y * scaleY, z * scaleZ).applyMatrix3(rotation);
+    shapeRigidBlendB.x += offsetX || 0;
+    shapeRigidBlendB.y += offsetY;
+  }
+  return out.set(
+    shapeRigidBlendA.x + (shapeRigidBlendB.x - shapeRigidBlendA.x) * blend,
+    shapeRigidBlendA.y + (shapeRigidBlendB.y - shapeRigidBlendA.y) * blend,
+    shapeRigidBlendA.z + (shapeRigidBlendB.z - shapeRigidBlendA.z) * blend,
+  );
 }
 
 // 微滴的自由軌道在 updateMicroDrops 直接呼叫 freeOrbitPosition，需要自己的暫存向量。
@@ -2583,7 +2647,12 @@ function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false) {
     }
     if (morphing) {
       morphDropPosition(morphMicroPairs, i, phase, formationPosNow);
-      applyShapeRigid(formationPosNow.x, formationPosNow.y, formationPosNow.z, formationPosNow);
+      // 微滴跟主滴用同一份分組邏輯——沒有這個的話，微滴會全部套第一組（形狀 A）
+      // 的動態，跟主滴各轉各的，輪廓細節看起來會跟主體錯開。
+      const microBlend = morphShapeBlend(morphMicroPairs, i, phase);
+      applyShapeRigidBlend(
+        formationPosNow.x, formationPosNow.y, formationPosNow.z, microBlend, formationPosNow,
+      );
       microDropData[o] = formationPosNow.x;
       microDropData[o + 1] = formationPosNow.y;
       microDropData[o + 2] = formationPosNow.z;
@@ -2819,6 +2888,26 @@ function updateDropUniforms(t) {
     shapeRigidRot.setFromMatrix4(shapeRigidMat4.makeRotationFromEuler(shapeRigidEuler));
     shapeRigidNow.rotation = shapeRigidRot;
   }
+  // 第二組（形狀 B）只在形狀變形模式底下才有意義——其餘模式只有一顆形狀，
+  // 沒有「另一顆」可以套第二組參數。跟第一組共用同一個「造型動態」總開關：
+  // 開關本身不分組，分的是開了之後兩組各自的數值。
+  shapeRigid2Now = (P.motion === 'morph' && P.shapeMotionOn)
+    ? computeShapeRigid({
+      cycles: P.shape2MotionCycles,
+      ease: P.shape2MotionEase,
+      spinX: P.shape2SpinX,
+      spinY: P.shape2SpinY,
+      spinZ: P.shape2SpinZ,
+      breathe: P.shape2Breathe,
+      bob: P.shape2Bob,
+      squash: P.shape2Squash,
+    }, phase)
+    : null;
+  if (shapeRigid2Now) {
+    shapeRigid2Euler.set(shapeRigid2Now.angleX, shapeRigid2Now.angleY, shapeRigid2Now.angleZ, 'XYZ');
+    shapeRigid2Rot.setFromMatrix4(shapeRigid2Mat4.makeRotationFromEuler(shapeRigid2Euler));
+    shapeRigid2Now.rotation = shapeRigid2Rot;
+  }
   const energy = 0.55 + P.flowSpeed * 0.9;
   const amount = formationAmount(phase);
   const fidelityAbsorb = isFormationMotion(P.motion) && shapeField
@@ -2907,7 +2996,7 @@ function updateDropUniforms(t) {
 
   for (let i = 0; i < MAX_DROPS; i++) {
     const { h1, h2, h3, radius } = dropSeeds[i];
-    let x = 0, y = 0, z = 0, radiusFactor = 1;
+    let x = 0, y = 0, z = 0, radiusFactor = 1, morphBlend = 0;
     // 崩解噴濺的半徑不走 freeRadius 那條（見 shatterFragmentRadius），改記下
     // 這顆碎片配到的錨點，等下面統一由它的局部厚度算大小。
     let shatterTarget = null;
@@ -2962,6 +3051,9 @@ function updateDropUniforms(t) {
       y = formationPosNow.y;
       z = formationPosNow.z;
       radiusFactor = morphRadiusFactor(morphPairs, i, phase, morphSolid);
+      // 這顆水滴此刻偏向形狀 A 還是形狀 B，餵給下面的 applyShapeRigidBlend，
+      // 讓它在飛行途中混合兩組造型動態，而不是整場套同一份。
+      morphBlend = morphShapeBlend(morphPairs, i, phase);
     } else if (jelly) {
       // 果凍預設沒有水滴（count 0）。使用者調高的話讓它們貼在表面錨點上，
       // 下面的 applyShapeRigid 會把果凍的形變一併套上去，水滴因此跟著一起
@@ -3012,8 +3104,10 @@ function updateDropUniforms(t) {
     // weave/shatter/melt/morph/formation 這五種都是拿形狀本地空間的錨點算
     // 位置，造型的剛體動態要在這裡套進去，水滴才會跟著造型一起轉/浮/呼吸，
     // 而不是各動各的。'split' 等不用形狀場的模式 shapeRigidNow 恆為 null。
-    if (shapeRigidNow) {
-      applyShapeRigid(x, y, z, shapeRigidVec);
+    // 形狀變形用 blend 版本：非 morph 模式 morphBlend 恆為 0，退化成跟
+    // applyShapeRigid 完全一樣（見該函式開頭 blend<=0 的 early return）。
+    if (shapeRigidNow || shapeRigid2Now) {
+      applyShapeRigidBlend(x, y, z, morphBlend, shapeRigidVec);
       x = shapeRigidVec.x; y = shapeRigidVec.y; z = shapeRigidVec.z;
     }
     const freeRadius = P.radius * radius * radiusFactor;

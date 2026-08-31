@@ -249,5 +249,22 @@ function morphRadiusFactor(pairs, i, phase, solid) {
     : 1 + P.morphSwell * Math.sin(Math.PI * u);
 }
 
-  return { morphTimeline, morphFronts, morphDropPosition, morphRadiusFactor };
+// 這顆水滴此刻偏向形狀 A 還是形狀 B，0=完全在 A、1=完全在 B。給「造型動態」
+// 分組用：形狀 A 與形狀 B 各自的旋轉／呼吸／浮動不一樣時，飛行中的水滴要拿
+// 這個值去混合兩組剛體變換，而不是整場共用同一份（見 bubble.js 的
+// applyShapeRigidBlend）。
+//
+// dropProgress 的 u 定義是「沿目前這一趟（去程或回程）的進度」，去程與回程
+// from/to 是反過來的，所以不能直接拿 u 當「偏向 B」的量——回程時 u=0 是在 B、
+// u=1 是回到 A，得用 back 把它轉正。
+function morphShapeBlend(pairs, i, phase) {
+  if (!pairs.length) return 0;
+  const { back } = morphTimeline(phase);
+  const { u } = dropProgress(pairs, i, phase);
+  return back ? 1 - u : u;
+}
+
+  return {
+    morphTimeline, morphFronts, morphDropPosition, morphRadiusFactor, morphShapeBlend,
+  };
 }

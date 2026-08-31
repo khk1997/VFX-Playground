@@ -207,6 +207,20 @@
       <div class="row"><label>呼吸縮放</label><input type="range" id="shapeBreathe" min="0" max="0.3" step="0.005" value="0.05"><span class="val" id="shapeBreathe_v"></span></div>
       <div class="row"><label>浮動幅度</label><input type="range" id="shapeBob" min="0" max="0.3" step="0.005" value="0.08"><span class="val" id="shapeBob_v"></span></div>
       <div class="row"><label>擠壓拉伸</label><input type="range" id="shapeSquash" min="0" max="1" step="0.01" value="0.35"><span class="val" id="shapeSquash_v"></span></div>
+      <!-- 第二組只在形狀變形模式顯示：其餘模式只有一顆形狀，沒有「另一顆」
+           可以套第二組參數。跟上面共用同一個「造型動態」開關與 details 收合，
+           只是多一層 data-gate="morph" 收起自己這一段。 -->
+      <div data-gate="morph">
+        <div class="effectSubhead">形狀 B（第二組）</div>
+        <div class="row"><label>循環圈數</label><input type="range" id="shape2MotionCycles" min="1" max="4" step="1" value="1"><span class="val" id="shape2MotionCycles_v"></span></div>
+        <div class="row"><label>回彈感</label><input type="range" id="shape2MotionEase" min="0" max="1" step="0.01" value="0.3"><span class="val" id="shape2MotionEase_v"></span></div>
+        <div class="row"><label>旋轉幅度 X</label><input type="range" id="shape2SpinX" min="0" max="45" step="1" value="0"><span class="val" id="shape2SpinX_v"></span></div>
+        <div class="row"><label>旋轉幅度 Y</label><input type="range" id="shape2SpinY" min="0" max="45" step="1" value="14"><span class="val" id="shape2SpinY_v"></span></div>
+        <div class="row"><label>旋轉幅度 Z</label><input type="range" id="shape2SpinZ" min="0" max="45" step="1" value="0"><span class="val" id="shape2SpinZ_v"></span></div>
+        <div class="row"><label>呼吸縮放</label><input type="range" id="shape2Breathe" min="0" max="0.3" step="0.005" value="0.05"><span class="val" id="shape2Breathe_v"></span></div>
+        <div class="row"><label>浮動幅度</label><input type="range" id="shape2Bob" min="0" max="0.3" step="0.005" value="0.08"><span class="val" id="shape2Bob_v"></span></div>
+        <div class="row"><label>擠壓拉伸</label><input type="range" id="shape2Squash" min="0" max="1" step="0.01" value="0.35"><span class="val" id="shape2Squash_v"></span></div>
+      </div>
     </details>
   </details>
 
@@ -529,6 +543,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=type-caret-depth-1"></script>
+<script type="module" src="./bubble.js?v=morph-shape2-1"></script>
 </body>
 </html>
