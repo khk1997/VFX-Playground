@@ -251,6 +251,11 @@
       <div data-gate="morph" class="row"><button class="fileBtn" id="morphTargetBtn">選擇變形目標 SVG…</button></div>
       <div data-gate="morph" class="row"><button class="fileBtn" id="morphTargetResetBtn">還原內建變形目標</button></div>
       <div data-gate="morph" class="row"><label>形狀 B 大小</label><input type="range" id="shapeBScale" min="0.4" max="1.8" step="0.02" value="1"><span class="val" id="shapeBScale_v"></span></div>
+      <!-- 形狀 B 自己的邊緣液化。上面那根「邊緣液化」在形狀變形模式下只作用在
+           形狀 A —— 兩顆形狀的距離場各自帶著自己的通道身分走完全程，所以粗細
+           本來就能分開調，只是先前共用同一顆 uniform（見 shaders.js 的
+           shapeSoftnessFor）。 -->
+      <div data-gate="morph" class="row"><label>形狀 B 邊緣液化</label><input type="range" id="shapeSoftnessB" min="0" max="0.25" step="0.005" value="0"><span class="val" id="shapeSoftnessB_v"></span></div>
       <div data-gate="morph" id="morphTargetState" class="note">上方匯入的是形狀 A（變形前），這裡匯入形狀 B（變形後）。兩個槽共用上方的「形狀來源」，不能一個 SVG、一個 GLB——兩種距離場的編碼方式不同，疊不進同一張貼圖。沒有匯入時使用內建預設（SVG 是星形、GLB 是多面體）。「形狀 A/B 大小」各自獨立縮放兩顆形狀本體，互不影響。</div>
       <input type="file" id="morphTargetInput" accept=".svg,image/svg+xml" hidden>
     </div>
@@ -546,6 +551,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=export-loopdur-1"></script>
+<script type="module" src="./bubble.js?v=shape-softness-b-1"></script>
 </body>
 </html>

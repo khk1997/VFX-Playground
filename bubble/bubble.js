@@ -14,16 +14,16 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=export-loopdur-1';
+} from './motions/registry.js?v=shape-softness-b-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-76';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=export-loopdur-1';
-import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=export-loopdur-1';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=shape-softness-b-1';
+import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=shape-softness-b-1';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
-import createResearchMotion from './motions/research.js?v=export-loopdur-1';
+import createResearchMotion from './motions/research.js?v=shape-softness-b-1';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
@@ -372,6 +372,7 @@ const DEFAULTS = {              // 數值滑桿
   gatherDuration: 0.25,
   shapeDepth: 0.1,
   shapeSoftness: 0,
+  shapeSoftnessB: 0,
   shapeEdgeBevel: 0.025,
   shapeLiquid: 0.1,
   shapeLiquidPosition: 2,
@@ -976,6 +977,7 @@ const fmt = {
   gatherDuration: v => (v * P.loopDuration).toFixed(1) + 's',
   shapeDepth: v => v.toFixed(2),
   shapeSoftness: v => v.toFixed(3),
+  shapeSoftnessB: v => v.toFixed(3),
   shapeEdgeBevel: v => v.toFixed(3),
   shapeLiquid: v => Math.round(v * 100) + '%',
   shapeLiquidPosition: v => `分佈 ${Math.round(v) + 1}`,
@@ -1113,7 +1115,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=export-loopdur-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=shape-softness-b-1';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
@@ -3393,6 +3395,12 @@ function updateDropUniforms(t) {
     const finalSurfaceGuard = Math.min(P.shapeSoftness, 0.02);
     uniforms.uShapeSoftness.value = P.shapeSoftness * (1 - fidelityAbsorb)
       + finalSurfaceGuard * fidelityAbsorb;
+    // 形狀 B 走同一條公式，只是吃自己那根滑桿。形狀變形模式沒有匯聚吸收
+    // （fidelityAbsorb 恆為 0），這裡照抄同一份寫法是為了讓兩顆形狀在任何
+    // 模式下的行為都一致，而不是各自有一套規則。
+    const finalSurfaceGuardB = Math.min(P.shapeSoftnessB, 0.02);
+    uniforms.uShapeSoftnessB.value = P.shapeSoftnessB * (1 - fidelityAbsorb)
+      + finalSurfaceGuardB * fidelityAbsorb;
     uniforms.uMicroBlend.value = Math.max(
       0.02,
       (effectiveViscosity * 0.60 + P.shapeSoftness * 0.35) * mergeScale,
@@ -4410,6 +4418,7 @@ function initGL() {
     uPrimitiveTubeRatio: { value: P.primitiveTubeRatio },
     uShapeDepth: { value: P.shapeDepth },
     uShapeSoftness: { value: P.shapeSoftness },
+    uShapeSoftnessB: { value: P.shapeSoftnessB },
     uShapeEdgeBevel: { value: P.shapeEdgeBevel },
     uShapeLiquid: { value: P.shapeLiquid },
     uShapeLiquidSize: { value: P.shapeLiquidSize },

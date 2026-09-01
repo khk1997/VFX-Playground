@@ -220,6 +220,9 @@ uniform vec3  uShapeRigid2Scale;
 uniform float uContactLead;
 uniform float uShapeDepth;
 uniform float uShapeSoftness;
+// 形狀 B 自己的邊緣液化。形狀變形模式下兩顆形狀各有一份，其餘模式場上只有
+// 形狀 A（ch 恆為 0），這顆用不到（見 shapeSoftnessFor）。
+uniform float uShapeSoftnessB;
 uniform float uShapeEdgeBevel;
 uniform float uShapeLiquid;
 uniform float uShapeLiquidSize;
@@ -587,6 +590,13 @@ float sampleShapeField(vec2 uv, int ch){
 // smoothShape 只在 calcNormal 求梯度時開啟。ray march 只需要一個保守的距離值，
 // 次 texel 的差異不影響步長，因此在 march 迴圈裡用單次雙線性取樣就夠 ——
 // 每步 4 taps 降回 1 tap，實測省下約 7%，畫面差異低於算繪雜訊。
+// ch 就是通道身分：0＝形狀 A、1＝形狀 B（見 sampleShapeField 的 ch 註解）。
+// 兩顆形狀的距離場本來就各自帶著自己的 ch 走完全程，所以邊緣液化只要在這裡
+// 依 ch 取對應的那一份，兩顆就能各自調粗細，不需要任何額外的分支或取樣。
+float shapeSoftnessFor(int ch){
+  return ch == 1 ? uShapeSoftnessB : uShapeSoftness;
+}
+
 float svgShapeDistance(vec3 p, bool smoothShape, int ch){
   vec2 uv = p.xy / 3.0 + 0.5;
   vec2 safeUv = clamp(uv, vec2(0.0), vec2(1.0));
@@ -628,7 +638,7 @@ float svgShapeDistance(vec3 p, bool smoothShape, int ch){
       result = smin(result, movingDrop, drop.w);
     }
   }
-  return result - uShapeSoftness;
+  return result - shapeSoftnessFor(ch);
 }
 // ch 的意義與 sampleShapeField 相同：形狀變形模式把第二顆形狀的體素圖集放在
 // g 通道，其餘情況 r=g=b 都是同一個值。
@@ -665,7 +675,7 @@ float volumeShapeDistance(vec3 p, int ch){
   // 補不到半個 voxel 的解析度感知 guard；128³ 歸零，不改高品質輪廓。
   float lowResolution = clamp((128.0 - n) / 80.0, 0.0, 1.0);
   float topologyGuard = voxelSize * 0.48 * lowResolution;
-  float edge = mix(z0, z1, f.z) * voxelSize - uShapeSoftness - topologyGuard;
+  float edge = mix(z0, z1, f.z) * voxelSize - shapeSoftnessFor(ch) - topologyGuard;
   vec3 outside = max(gridP - (n - 1.0), vec3(0.0)) + max(-gridP, vec3(0.0));
   return edge + length(outside) * voxelSize;
 }
