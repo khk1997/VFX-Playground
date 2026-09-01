@@ -21,9 +21,14 @@
   const fpsCustom = document.getElementById('exportFpsCustom');
   const fpsCustomField = document.getElementById('exportFpsCustomField');
   const duration = document.getElementById('exportDuration');
-  // 面板上的「循環秒數」。輸出秒數預設就是它 —— 一個完整循環，接縫剛好接得起來。
-  // 使用者自己動過秒數之後就不再跟隨，改以填的值為準（要客製長度的情形）。
-  const loopDuration = document.getElementById('loopDuration');
+  // 引擎回報的「這個模式實際的循環秒數」。輸出秒數預設就是它 —— 一個完整循環，
+  // 接縫剛好接得起來。使用者自己動過秒數之後就不再跟隨，改以填的值為準。
+  //
+  // 這裡刻意不讀 #loopDuration 那根滑桿：打字與靜態模式的循環秒數不是滑桿決定的
+  // （滑桿被 data-gate 藏起來），打字是由四段時間軸推導的，而且那根 range 的 min
+  // 是 4，2.47 這種值寫進去會被 DOM 夾成 4 —— 面板顯示 2.47、匯出卻是 4，序列就
+  // 不是一個完整循環。改由 bubble.js 廣播 P.loopDuration 的真值（prism-loop-duration）。
+  let engineLoopDuration = null;
   let durationCustomized = false;
   const start = document.getElementById('exportStart');
   const progress = document.getElementById('exportProgress');
@@ -64,8 +69,10 @@
   }
 
   function followLoopDuration() {
-    if (durationCustomized || !loopDuration) return;
-    duration.value = Number(loopDuration.value);
+    if (durationCustomized || !(engineLoopDuration > 0)) return;
+    // 推導出來的秒數不是整齊的 0.5 倍數（打字模式常見 2.47 這種值），保留兩位小數
+    // 就好——多的位數對幀數換算沒有意義，卻會讓數字框看起來很吵。
+    duration.value = Math.round(engineLoopDuration * 100) / 100;
   }
 
   function syncSequence() {
@@ -168,8 +175,12 @@
     durationCustomized = true;
     syncSequence();
   });
-  // 面板的循環秒數改動時，還沒被客製的輸出秒數跟著走。
-  loopDuration?.addEventListener('input', () => {
+  // 引擎回報循環秒數改變時（拉滑桿、切模式、打字模式的時間軸或文字變動），
+  // 還沒被客製的輸出秒數跟著走。
+  window.addEventListener('prism-loop-duration', event => {
+    const seconds = Number(event.detail && event.detail.seconds);
+    if (!(seconds > 0)) return;
+    engineLoopDuration = seconds;
     followLoopDuration();
     syncSequence();
   });

@@ -14,16 +14,16 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=type-soft-1';
+} from './motions/registry.js?v=export-loopdur-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-76';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=type-soft-1';
-import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=type-soft-1';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=export-loopdur-1';
+import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=export-loopdur-1';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
-import createResearchMotion from './motions/research.js?v=type-soft-1';
+import createResearchMotion from './motions/research.js?v=export-loopdur-1';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
@@ -1113,7 +1113,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=type-soft-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=export-loopdur-1';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
@@ -4005,6 +4005,26 @@ function updateTypewriterUniforms(phase) {
 // 循環秒數不是滑桿，是這個函式算出來直接寫進 P.loopDuration 與 uLoopDuration
 // 的結果。呼叫時機：切進打字模式、文字改變（換句數／句長）、四段時長任何一條
 // 被拖動。
+// 把「這個模式實際的循環秒數」廣播出去給匯出面板。
+//
+// 匯出面板原本是直接讀 #loopDuration 這根滑桿的 value，那在打字（與靜態）模式
+// 下是錯的：這兩個模式的循環秒數不是滑桿決定的（滑桿本身就被 data-gate 藏起來），
+// 打字是由四段時間軸加總推導出來、直接寫進 P.loopDuration 的。更糟的是那根 range
+// 的 min 是 4，bindControls 的 el.value = P[key] 把 2.47 寫進去時會被 DOM 夾成 4，
+// 於是面板顯示 2.47、匯出秒數卻顯示 4，匯出的序列就不是一個完整循環。
+//
+// 用「每幀比對、變了才發事件」而不是在每個會改動 P.loopDuration 的地方各補一次
+// 呼叫：改動路徑有好幾條（滑桿、切模式套用 registry 預設、打字的四段時間軸、
+// 文字內容改變），逐一補呼叫遲早會漏掉一條，而漏掉的那條就是下一個這種 bug。
+// 成本是一次浮點數比較。
+let lastBroadcastLoopDuration = null;
+function broadcastLoopDuration() {
+  const seconds = P.loopDuration;
+  if (!(seconds > 0) || seconds === lastBroadcastLoopDuration) return;
+  lastBroadcastLoopDuration = seconds;
+  window.dispatchEvent(new CustomEvent('prism-loop-duration', { detail: { seconds } }));
+}
+
 function syncTypewriterLoopDuration() {
   if (P.motion !== 'typewriter') return;
   const total = Math.max(0.5, typewriterCycleSeconds());
@@ -5593,6 +5613,9 @@ const PAUSE_ICON = '<rect x="5" y="4" width="3.2" height="12" rx="1" fill="curre
 const PLAY_ICON = '<path d="M6 4.2v11.6a.9.9 0 0 0 1.37.76l9.2-5.8a.9.9 0 0 0 0-1.52l-9.2-5.8A.9.9 0 0 0 6 4.2Z" fill="currentColor"/>';
 function isPaused() { return userPaused || extPaused || shapeConverting || exportJob || document.hidden; }
 function requestPausedRender() {
+  // 暫停時 frame() 不跑，但循環秒數仍可能被改（拉時間軸、換模式、改文字），
+  // 匯出對話框也常常是在暫停狀態下打開的，所以這條路也要廣播。
+  broadcastLoopDuration();
   if ((!userPaused && !extPaused) || shapeConverting || exportJob || document.hidden || pausedRenderRaf) return;
   pausedRenderRaf = requestAnimationFrame(() => {
     pausedRenderRaf = 0;
@@ -6562,6 +6585,7 @@ function updateExportCameraPreview() {
 let simT = 0;
 function frame(now) {
   rafId = requestAnimationFrame(frame);
+  broadcastLoopDuration();
   // 一定要在更新 last 之前就 return：last 沒動，下一張真正算繪的影格才會拿到
   // 累積起來的 dt，動畫速度維持不變，只是更新得比較疏。
   if (shouldSkipFrame(now)) return;

@@ -517,7 +517,10 @@
         <div class="exportInlineFields">
           <label>幀率<select id="exportFps"><option>24</option><option selected>30</option><option>60</option><option value="custom">自訂…</option></select></label>
           <label id="exportFpsCustomField" hidden>自訂幀率<input id="exportFpsCustom" type="number" min="1" max="240" step="1" value="30"></label>
-          <label>秒數<input id="exportDuration" type="number" min="1" max="30" step="0.5" value="12"></label>
+          <!-- step/min 放寬到 0.01/0.5：打字模式的循環秒數是四段時間軸加總推導出來的，
+               常是 2.47 這種值；step="0.5" 會讓它變成 :invalid，min="1" 則擋掉更短的句子
+               （syncTypewriterLoopDuration 的下限是 0.5）。 -->
+          <label>秒數<input id="exportDuration" type="number" min="0.5" max="30" step="0.01" value="12"></label>
         </div>
         <p class="exportHelp">輸出為依序命名的 PNG，完成後封裝成 ZIP。秒數預設跟著面板的「循環秒數」走，剛好是一個完整循環；手動改過之後就以你填的為準。</p>
       </section>
@@ -534,7 +537,7 @@
   </form>
 </dialog>
 
-<script src="./bubble-export-ui.js?v=7"></script>
+<script src="./bubble-export-ui.js?v=8"></script>
 
 <script type="importmap">
 { "imports": {
@@ -543,6 +546,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=type-soft-1"></script>
+<script type="module" src="./bubble.js?v=export-loopdur-1"></script>
 </body>
 </html>
