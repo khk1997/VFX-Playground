@@ -360,6 +360,15 @@ export const MOTIONS = {
         key: 'typeGrow', label: '液態長出', min: 0, max: 1, step: 0.01, value: 0,
       },
       {
+        // 跟其他模式面板上那根「邊緣液化」(shapeSoftness) 是同一個功能、同一個
+        // 單位：把字形距離場整體外推，筆畫變粗、靠近的筆畫熔在一起。範圍與級距
+        // 都照抄 index.html 那根，兩邊調起來手感一致。
+        //
+        // 跟上面的「液態長出」是兩件事：那個是字怎麼出現（液面從基線往上填），
+        // 這個是字本身多粗。預設 0＝關閉，切進模式當下跟以前一模一樣。
+        key: 'typeSoftness', label: '邊緣液化', min: 0, max: 0.25, step: 0.005, value: 0,
+      },
+      {
         // 不能叫 typeCaret：uniform 名稱是從 key 自動推導的（'u' + 首字大寫），
         // 那樣會撞上 shader 端那顆 vec4 uTypeCaret，通用綁定迴圈會把它整個覆寫成
         // 一個 float。撞名是靜默的——uniforms[uName] 存在就寫，沒有任何警告。

@@ -14,16 +14,16 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=morph-shape2-2';
+} from './motions/registry.js?v=type-soft-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-76';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=morph-shape2-2';
-import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=morph-shape2-2';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=type-soft-1';
+import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=type-soft-1';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
-import createResearchMotion from './motions/research.js?v=morph-shape2-2';
+import createResearchMotion from './motions/research.js?v=type-soft-1';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
@@ -878,6 +878,7 @@ function uniformNameFor(key) {
 const fmt = {
   typeDepth: v => v.toFixed(3),
   typeBevel: v => v.toFixed(3),
+  typeSoftness: v => (v <= 0 ? '關閉' : v.toFixed(3)),
   thickness: v => v.toFixed(0) + 'nm',
   thickVar: v => '±' + v.toFixed(0),
   noiseScale: v => 'x' + v.toFixed(1),
@@ -1112,7 +1113,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=morph-shape2-2';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=type-soft-1';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
@@ -4028,6 +4029,7 @@ function refreshTypewriterReadouts() {
   show('typeGap', P.typeGap.toFixed(2) + ' s');
   show('typeDepth', fmt.typeDepth(P.typeDepth));
   show('typeBevel', fmt.typeBevel(P.typeBevel));
+  show('typeSoftness', fmt.typeSoftness(P.typeSoftness));
   const info = document.getElementById('typeTextInfo');
   if (info) {
     if (!glyphAtlas) info.textContent = '沒有文字';
@@ -4241,6 +4243,7 @@ function initGL() {
     uTypeShape: { value: new THREE.Vector4(P.typeDepth, P.typeBevel, P.typeGrow, 0) },
     uTypeCaret: { value: new THREE.Vector4(0, 0, 0, 0) },
     uTypeCaretDepth: { value: P.typeCaretDepth },
+    uTypeSoftness: { value: P.typeSoftness },
     uElasticEvent: { value: elasticEvent },
     uElasticStrength: { value: P.elasticStrength },
     uElasticDensity: { value: P.elasticDensity },

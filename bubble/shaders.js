@@ -140,6 +140,7 @@ uniform vec4  uTypeLine;       // x：字距（格單位），y：字級，z：�
 uniform vec4  uTypeShape;      // x：擠出厚度，y：邊緣圓角，z：液態長出，w：字形特徵尺度
 uniform vec4  uTypeCaret;      // xy：游標中心，z：半寬，w：>0.5 代表這一幀亮著
 uniform float uTypeCaretDepth;  // 游標自己的擠出厚度，跟字形的 uTypeShape.x 分開
+uniform float uTypeSoftness;    // 邊緣液化：把字形距離場整體外推，筆畫變粗、細節熔合
 uniform vec2  uElasticEvent;    // x：事件包絡，y：傳播進度
 uniform float uElasticStrength;
 uniform float uElasticDensity;
@@ -1700,6 +1701,17 @@ float typeGlyphEdge(vec2 xy, float slot, float count, bool smoothShape){
   vec2 boxHalf = vec2(0.5 * size);
   vec2 over = abs(xy - vec2(cx, baselineWorld)) - boxHalf;
   d += length(max(over, vec2(0.0)));
+
+  // 邊緣液化。跟其他模式那根「邊緣液化」（uShapeSoftness，見 sampleShapeField
+  // 結尾的 result - uShapeSoftness）是同一件事、同一個單位：把距離場整體外推，
+  // 等值面往外跑，筆畫因此變粗，靠得近的筆畫會先熔在一起——液體在表面張力下
+  // 該有的樣子。常數位移不改變梯度，距離場仍然合法，raymarch 不需要任何保護。
+  //
+  // 套在盒外延續項之後：先讓盒外是連續的正距離，再一起外推，否則盒緣會被推成
+  // 一圈矩形實體（uShapeSoftness 當年就踩過這個，見 sampleShapeField 的註解）。
+  //
+  // 位置在液面交集之前：只把「字」變粗，不動「液態長出」的液面高度。
+  d -= uTypeSoftness;
 
   float grow = clamp(uTypeShape.z, 0.0, 1.0);
   // 液面高度：從略低於基線（蓋住多數字母的下伸部）長到蓋過整格上緣（安全地蓋過
