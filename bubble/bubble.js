@@ -14,16 +14,16 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=whisper-ui-2';
+} from './motions/registry.js?v=absorb-2';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-76';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=whisper-ui-2';
-import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=whisper-ui-2';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=absorb-2';
+import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=absorb-2';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
-import createResearchMotion from './motions/research.js?v=whisper-ui-2';
+import createResearchMotion from './motions/research.js?v=absorb-2';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
@@ -342,6 +342,11 @@ const DEFAULTS = {              // 數值滑桿
   flowSpeed: 0.47,
   reflect: 1.6,
   transmission: 1.0,
+  // 體積吸收的濃度。1 是這根滑桿出現以前寫死的值（見 shaders.js 的
+  // volumeAbsorption），所以預設不動任何模式的外觀；往上拉是「同一坨液體更濃」
+  // —— 光程長的地方變暗偏青、邊緣薄的地方仍然清透，那是眼睛判斷「這東西有
+  // 厚度」的主要線索。
+  absorb: 1,
   materialExposure: 1,
   // 液態薄膜專用的低頻塑形：0 回到純透明膜，1 完整加入厚度暗部、膜褶遮蔽
   // 與非對稱反射卡。通用玻璃模式不讀取這個值。
@@ -645,6 +650,10 @@ const TOGGLE_DEFAULTS = {
 };
 const COLOR_DEFAULTS  = {
   bgColor: '#000000',
+  // 液體本身的顏色（穿過參考厚度之後剩下的光，見 shaders.js 的
+  // absorbCoefficient）。這個值配上濃度 ×1，算出來就是這兩個控制項出現以前
+  // 寫死的吸收係數，所以預設外觀不變。
+  absorbColor: '#68b2e7',
   // 液態薄膜原本各自寫死一個偏藍紫色常數的 5 處，現在各自開一個選色器直接
   // 取代常數，選色器選什麼顏色，畫面上那一處就是那個顏色。預設值都是原本
   // 那個常數本身，維持改動前的外觀。
@@ -820,6 +829,7 @@ const SELECTS = {
 };
 const COLORS = {
   bgColor: 'uBgColor',
+  absorbColor: 'uAbsorbColor',
   membraneBaseColor: 'uMembraneBaseColor',
   membraneVeilColor: 'uMembraneVeilColor',
   membraneReflectionColor: 'uMembraneReflectionColor',
@@ -967,6 +977,7 @@ const fmt = {
   filmBlur: v => v.toFixed(2),
   reflect: v => 'x' + v.toFixed(2),
   transmission: v => v.toFixed(2),
+  absorb: v => '×' + v.toFixed(2),
   materialExposure: v => 'x' + v.toFixed(2),
   membraneDepth: v => Math.round(v * 100) + '%',
   ior: v => v.toFixed(2),
@@ -1128,7 +1139,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=whisper-ui-2';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=absorb-2';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
@@ -4370,6 +4381,8 @@ function initGL() {
     uEnvRefraction: { value: P.envRefraction },
     uReflect:    { value: P.reflect },
     uTransmission: { value: P.transmission },
+    uAbsorb: { value: P.absorb },
+    uAbsorbColor: { value: new THREE.Color().setStyle(P.absorbColor, THREE.LinearSRGBColorSpace) },
     uMaterialExposure: { value: P.materialExposure },
     uMembraneDepth: { value: P.membraneDepth },
     uRoughness:  { value: P.roughness },
@@ -4704,6 +4717,10 @@ function syncPanelToUniforms() {
   for (const key of Object.keys(TOGGLES)) applyToggle(key);
   for (const key of Object.keys(COLORS)) {
     if (key === 'bgColor') setBgColorUniform(P[key]);
+    // 吸收色不是「一道光的顏色」而是「每個通道剩下多少」的比例，所以要的是選色
+    // 器上那三個原始數值，不能讓 three 的色彩管理把它當 sRGB 轉成線性（那會把
+    // 比例整個扭掉）。同 uBgColor 的作法。
+    else if (key === 'absorbColor') uniforms[COLORS[key]].value.setStyle(P[key], THREE.LinearSRGBColorSpace);
     else uniforms[COLORS[key]].value.set(P[key]);
   }
   document.body.style.background = (P.bgMode === 'hdri') ? '#000' : P.bgColor;
@@ -5078,6 +5095,8 @@ function bindControls() {
     const update = () => {
       P[key] = el.value;
       if (key === 'bgColor') setBgColorUniform(el.value);
+      // 見上面 applyAllUniforms 裡同一個特例的說明。
+      else if (key === 'absorbColor') { if (uniforms) uniforms[uName].value.setStyle(el.value, THREE.LinearSRGBColorSpace); }
       else if (uniforms) uniforms[uName].value.set(el.value);
       if (key === 'bgColor') {
         document.body.style.background = (P.bgMode === 'hdri') ? '#000' : el.value;

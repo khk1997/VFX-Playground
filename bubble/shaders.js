@@ -323,6 +323,11 @@ uniform vec3  uBgColor;
 uniform float uEnvRefraction;
 uniform float uReflect;
 uniform float uTransmission;
+// 體積吸收：濃度倍率與液體顏色。預設（×1 與 #68b2e7）算出來的係數就是這兩個
+// 控制項出現以前寫死的 vec3(0.045, 0.018, 0.005)，誤差在 8-bit 選色器的捨入
+// 範圍內 —— 預設不改變任何模式的外觀。
+uniform float uAbsorb;
+uniform vec3  uAbsorbColor;
 uniform float uMaterialExposure;
 uniform float uMembraneDepth;
 // 液態薄膜原本各自寫死一個藍紫色常數的 5 處，各自開一顆 uniform 直接取代
@@ -3098,7 +3103,19 @@ void main(){
         }
 #endif
         refractedBg *= mix(vec3(1.0), vec3(0.965, 0.985, 1.0), bend);
-        volumeAbsorption = exp(-vec3(0.045, 0.018, 0.005) * pathLength);
+        // 比爾–朗伯定律：穿過的液體越厚，被吸走的光越多，而且各波長吸得不一樣
+        // 快。這就是「看起來有體積」的來源 —— 厚的地方濃、薄的邊緣清透。
+        //
+        // 選色器給的是「穿過參考厚度之後還剩下多少光」，也就是液體本身看起來的
+        // 顏色（同 Blender 的 Volume Absorption 與 glTF 的 attenuationColor：
+        // 選藍色就得到藍色的液體）。20.0 是那個參考厚度，取這個值是為了讓預設
+        // 落在選色器好操作的中段：係數本身很小，若用「走 1 單位剩多少」來表達，
+        // 所有可用的顏色會全部擠在 244–255 那一小段裡，滑一格就過頭。
+        //
+        // clamp 的兩端各有理由：0 會讓 log 發散成 -inf，1 則是完全不吸收 ——
+        // 純白因此等於把這個效果關掉，濃度滑桿再拉也沒有作用，那是對的語意。
+        vec3 absorbCoefficient = -log(clamp(uAbsorbColor, 0.002, 0.999)) / 20.0;
+        volumeAbsorption = exp(-absorbCoefficient * max(uAbsorb, 0.0) * pathLength);
 
         // 背面使用低成本 2-octave 厚度場，產生內部彩色折線與融合區層次。
         //

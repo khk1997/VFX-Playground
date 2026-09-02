@@ -306,6 +306,8 @@
     <div class="row" id="membraneShadeColorRow"><label>立體暗部色</label><input type="color" id="membraneShadeColor" value="#85b8e6"><span class="val"></span></div>
     <div class="row"><label>反射強度</label><input type="range" id="reflect" min="0" max="2" step="0.02" value="1.6"><span class="val" id="reflect_v"></span></div>
     <div class="row"><label>透射率</label><input type="range" id="transmission" min="0" max="1" step="0.01" value="0.96"><span class="val" id="transmission_v"></span></div>
+    <div class="row"><label>體積吸收</label><input type="range" id="absorb" min="0" max="10" step="0.05" value="1"><span class="val" id="absorb_v"></span></div>
+    <div class="row"><label>吸收色</label><input type="color" id="absorbColor" value="#68b2e7"><span class="val"></span></div>
     <div class="row"><label>材質曝光</label><input type="range" id="materialExposure" min="0.25" max="2.5" step="0.05" value="1"><span class="val" id="materialExposure_v"></span></div>
     <div class="row"><label>粗糙度</label><input type="range" id="roughness" min="0" max="1" step="0.01" value="0"><span class="val" id="roughness_v"></span></div>
     <div class="row"><label>邊緣光</label><input type="range" id="fresnel" min="0" max="3" step="0.05" value="0.8"><span class="val" id="fresnel_v"></span></div>
@@ -554,6 +556,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=whisper-ui-2"></script>
+<script type="module" src="./bubble.js?v=absorb-2"></script>
 </body>
 </html>
