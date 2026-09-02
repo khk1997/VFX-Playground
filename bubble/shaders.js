@@ -3845,6 +3845,33 @@ void main(){
     );
   }
 #endif // FEATURE_LIQUID_FILM_DEPTH：液態薄膜深度 membrane depth
+#ifdef FEATURE_RESEARCH
+  if (researchIconHit) {
+    // icon 的「表面」項。上面換掉 refractedBg 處理的是穿過去的部分，但在深色背景
+    // 下 backgroundSample 回傳的就是背景色，純折射等於看不見 —— 外殼本身也一樣，
+    // 它之所以讀得出形狀，靠的是這一層 Fresnel 環境反射（sampleEnvironmentBackdrop
+    // 走的是程序化棚燈，不會跟著背景一起變黑）。內含物既然是同一種液態玻璃，就
+    // 該拿到同一項，而不是自己配一個顏色疊上去。
+    //
+    // 權重用的是上面算好的 researchIconFres：那是 icon 與外殼折射率比值算出來的
+    // Schlick 項，法線正對時很低、掠射時接近 1，所以呈現出來是一圈亮邊加上薄薄的
+    // 面反射 —— 跟參考照片裡「暗心亮邊」的內部氣泡是同一個成因。uFresnel 讓它跟
+    // 著材質滑桿走。
+    float iconRim = clamp(researchIconFres * (0.35 + uFresnel), 0.0, 1.0);
+    vec3 iconSpec = sampleEnvironmentBackdrop(
+      reflect(researchInsideDir, researchIconN), roughBlur * 0.35
+    );
+    // screen 合成：亮處不會爆掉，暗處等於直接加上去。
+    //
+    // 位置很關鍵：必須在下面那段通用玻璃的 over 合成「之前」。這一圈亮邊是水滴
+    // 的自身能量（內部界面的 Fresnel 反射），不是透射過來的背景，所以它必須進到
+    // universalOwnEnergy 與 universalCovered 裡。放在後面的話，去背輸出那條路
+    // （見結尾的 uTransparentBackground 分支）是拿 universalOwnEnergy 反解的，
+    // 會整個略過這一圈亮邊 —— 症狀就是「viewer 看得到氣泡邊界，去背 PNG 疊回
+    // 黑底卻淡掉了」，而且 alpha 也沒把它算進覆蓋率。
+    finalColor = 1.0 - (1.0 - finalColor) * (1.0 - clamp(iconSpec * iconRim, 0.0, 1.0));
+  }
+#endif
   // 通用玻璃的 over 合成。finalColor 此刻是「黑場上的水滴自身能量」，也就是
   // premultiplied 的顏色；covered 是它佔掉的比例，剩下的 (1 - covered) 讓折射
   // 過來的背景通過。透射本身仍帶波長選擇性（material.transmission 是干涉反射
@@ -3884,26 +3911,6 @@ void main(){
   // 這一行是精確的恆等運算。
   finalColor = clampOutput(finalColor * beamAbsorb);
 
-#ifdef FEATURE_RESEARCH
-  if (researchIconHit) {
-    // icon 的「表面」項。上面換掉 refractedBg 處理的是穿過去的部分，但在深色背景
-    // 下 backgroundSample 回傳的就是背景色，純折射等於看不見 —— 外殼本身也一樣，
-    // 它之所以讀得出形狀，靠的是這一層 Fresnel 環境反射（sampleEnvironmentBackdrop
-    // 走的是程序化棚燈，不會跟著背景一起變黑）。內含物既然是同一種液態玻璃，就
-    // 該拿到同一項，而不是自己配一個顏色疊上去。
-    //
-    // 權重用的是上面算好的 researchIconFres：那是 icon 與外殼折射率比值算出來的
-    // Schlick 項，法線正對時很低、掠射時接近 1，所以呈現出來是一圈亮邊加上薄薄的
-    // 面反射 —— 跟參考照片裡「暗心亮邊」的內部氣泡是同一個成因。uFresnel 讓它跟
-    // 著材質滑桿走。
-    float iconRim = clamp(researchIconFres * (0.35 + uFresnel), 0.0, 1.0);
-    vec3 iconSpec = sampleEnvironmentBackdrop(
-      reflect(researchInsideDir, researchIconN), roughBlur * 0.35
-    );
-    // screen 合成：亮處不會爆掉，暗處等於直接加上去。
-    finalColor = 1.0 - (1.0 - finalColor) * (1.0 - clamp(iconSpec * iconRim, 0.0, 1.0));
-  }
-#endif
 
   float outputAlpha = 1.0;
   if (uTransparentBackground == 1) {
