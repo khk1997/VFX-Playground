@@ -237,6 +237,12 @@ uniform vec3 uTint;
 uniform float uTransparent;
 uniform float uExposure;
 uniform int uToneMap;
+uniform float uAberration;
+uniform float uVignette;
+uniform float uGrain;
+uniform float uGrainScale;
+uniform float uGrainSeed;
+uniform float uAspect;
 
 // 0 無：只交給輸出格式夾掉，等於後處理加入之前的行為。
 // 1 Reinhard：c/(1+c)，任何量級都收得進 0–1，但整體會偏灰。
@@ -251,19 +257,63 @@ vec3 applyToneMap(vec3 c){
   return c;
 }
 
+// 顆粒。用 gl_FragCoord 而不是 vUv 當座標，顆粒才是「底片上的」固定大小，不會跟著
+// 解析度變粗變細。uSeed 每個循環走整數步，所以動畫重播時顆粒的圖案精確重複 ——
+// 這是個會一直重播的背景，任何不循環的東西都會在接點上被看見。
+float grainNoise(vec2 p, float seed){
+  return fract(sin(dot(p, vec2(12.9898, 78.233)) + seed * 1.61803) * 43758.5453);
+}
+
 void main(){
+  vec2 centered = vUv - 0.5;
+
+  // 鏡頭色差：以畫面中心為原點，紅藍往相反方向徑向位移。中心無位移、邊緣最大 ——
+  // 真實鏡頭的橫向色差就是這個形狀。0 時三個取樣座標完全相同，等於沒有這一段。
+  vec2 uvR = 0.5 + centered * (1.0 + uAberration * 0.01);
+  vec2 uvB = 0.5 + centered * (1.0 - uAberration * 0.01);
+
   vec4 base = texture2D(uScene, vUv);
+  base.r = texture2D(uScene, uvR).r;
+  base.b = texture2D(uScene, uvB).b;
+
   // 光暈與眩光都是「加上去的光」，所以先加在一起再一起走曝光與色調映射 ——
-  // 分開套會讓同一道光在不同效果之間有不同的滾降。
-  vec3 bloom = texture2D(uBloom, vUv).rgb * uIntensity * uTint
-    + texture2D(uGlare, vUv).rgb;
+  // 分開套會讓同一道光在不同效果之間有不同的滾降。色差同樣要吃到它們，不然
+  // 光暈會是唯一沒有色差的東西，看起來像貼上去的。
+  vec3 bloom = vec3(
+    texture2D(uBloom, uvR).r,
+    texture2D(uBloom, vUv).g,
+    texture2D(uBloom, uvB).b
+  ) * uIntensity * uTint + vec3(
+    texture2D(uGlare, uvR).r,
+    texture2D(uGlare, vUv).g,
+    texture2D(uGlare, uvB).b
+  );
+
+  // 暗角在曝光與色調映射之前：它是鏡頭少收了光，不是事後把畫面壓暗。
+  // 用畫面對角線正規化，比例才不隨長寬比改變。
+  float vignette = 1.0;
+  if (uVignette > 0.0) {
+    float r = length(centered * vec2(uAspect, 1.0)) * 1.4142;
+    vignette = mix(1.0, 1.0 - smoothstep(0.35, 1.05, r), uVignette);
+  }
+
+  vec3 lit = (base.rgb * (uTransparent < 0.5 ? 1.0 : base.a) + bloom) * vignette * uExposure;
+  vec3 color = applyToneMap(lit);
+
+  // 顆粒最後才加，而且加在色調映射之後：它是底片／感光元件上的東西，不是場景裡的
+  // 光。暗部給多一點、亮部給少一點，跟真實的訊噪比一致。
+  if (uGrain > 0.0) {
+    float luma = dot(color, vec3(0.299, 0.587, 0.114));
+    float n = grainNoise(floor(gl_FragCoord.xy / max(uGrainScale, 0.25)), uGrainSeed) - 0.5;
+    color += n * uGrain * mix(1.0, 0.35, luma) * (uTransparent < 0.5 ? 1.0 : base.a);
+  }
+
   if (uTransparent < 0.5) {
-    gl_FragColor = vec4(applyToneMap((base.rgb + bloom) * uExposure), base.a);
+    gl_FragColor = vec4(color, base.a);
     return;
   }
-  vec3 premultiplied = applyToneMap((base.rgb * base.a + bloom) * uExposure);
   float alpha = clamp(base.a + max(bloom.r, max(bloom.g, bloom.b)), 0.0, 1.0);
-  gl_FragColor = vec4(premultiplied / max(alpha, 0.0001), alpha);
+  gl_FragColor = vec4(color / max(alpha, 0.0001), alpha);
 }
 `;
 
@@ -372,6 +422,12 @@ export function createPostChain(renderer) {
     uTransparent: { value: 0 },
     uExposure: { value: 1 },
     uToneMap: { value: 0 },
+    uAberration: { value: 0 },
+    uVignette: { value: 0 },
+    uGrain: { value: 0 },
+    uGrainScale: { value: 1 },
+    uGrainSeed: { value: 0 },
+    uAspect: { value: 1 },
   });
 
   // bloom 關著（強度 0）時整條模糊鏈都不跑，合成 pass 仍需要一張圖可以取樣。
@@ -531,6 +587,15 @@ export function createPostChain(renderer) {
     compositeMaterial.uniforms.uTransparent.value = params.transparent ? 1 : 0;
     compositeMaterial.uniforms.uExposure.value = params.exposure;
     compositeMaterial.uniforms.uToneMap.value = params.toneMap;
+    compositeMaterial.uniforms.uAberration.value = params.aberration;
+    compositeMaterial.uniforms.uVignette.value = params.vignette;
+    compositeMaterial.uniforms.uGrain.value = params.grain;
+    // 顆粒以「最終成品的像素」為單位：匯出是超採樣的，不除回去的話成品的顆粒會
+    // 細到看不見。
+    compositeMaterial.uniforms.uGrainScale.value = params.grainScale
+      * Math.max(1, params.superSample || 1);
+    compositeMaterial.uniforms.uGrainSeed.value = params.grainSeed;
+    compositeMaterial.uniforms.uAspect.value = width / Math.max(1, height);
     blit(compositeMaterial, target || null);
     renderer.setRenderTarget(null);
   }

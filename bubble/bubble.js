@@ -14,16 +14,16 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=post-glare-5';
+} from './motions/registry.js?v=post-lens-2';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-76';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=post-glare-5';
-import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=post-glare-5';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=post-lens-2';
+import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=post-lens-2';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
-import createResearchMotion from './motions/research.js?v=post-glare-5';
+import createResearchMotion from './motions/research.js?v=post-lens-2';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
@@ -358,6 +358,11 @@ const DEFAULTS = {              // 數值滑桿
   postExposure: 1,
   // 高光增益。只作用在接近上限的那一段（見 shaders.js 的 clampOutput），1 = 不動。
   highlightGain: 1,
+  // 鏡頭與底片。三者都是 0 = 沒有這個效果，所以不另外開開關。
+  postAberration: 0,
+  postVignette: 0,
+  postGrain: 0,
+  postGrainScale: 1.5,
   // 條紋光芒（Blender Glare 的 Streaks）。
   // 條數是「臂」的數量，不是軸數：濾波只沿著單一方向前進，一個方向長一條臂。
   streakCount: 4,
@@ -972,6 +977,10 @@ const fmt = {
   researchTextureDirZ: v => v.toFixed(2),
   postExposure: v => '×' + v.toFixed(2),
   highlightGain: v => '×' + v.toFixed(1),
+  postAberration: v => (v <= 0 ? '關閉' : v.toFixed(2)),
+  postVignette: v => (v <= 0 ? '關閉' : v.toFixed(2)),
+  postGrain: v => (v <= 0 ? '關閉' : v.toFixed(3)),
+  postGrainScale: v => v.toFixed(1) + 'px',
   streakCount: v => v.toFixed(0),
   streakAngle: v => v.toFixed(0) + '°',
   streakAttenuation: v => v.toFixed(2),
@@ -1200,8 +1209,8 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=post-glare-5';
-import { createPostChain } from './post.js?v=post-glare-5';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=post-lens-2';
+import { createPostChain } from './post.js?v=post-lens-2';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
@@ -5880,7 +5889,8 @@ const bloomTintColor = new THREE.Color();
 // 條件是「三者都在中性值」，不是只看 bloom。
 function postActive() {
   return P.bloomEnabled || P.streaksEnabled || P.ghostsEnabled
-    || P.postExposure !== 1 || P.postToneMap !== 'none' || P.highlightGain !== 1;
+    || P.postExposure !== 1 || P.postToneMap !== 'none' || P.highlightGain !== 1
+    || P.postAberration > 0 || P.postVignette > 0 || P.postGrain > 0;
 }
 
 function renderComposite(target = null, superSample = 1) {
@@ -5919,6 +5929,17 @@ function renderComposite(target = null, superSample = 1) {
     ghostSpread: P.ghostSpread,
     ghostChroma: P.ghostChroma,
     ghostIntensity: P.ghostIntensity,
+    aberration: P.postAberration,
+    vignette: P.postVignette,
+    grain: P.postGrain,
+    grainScale: P.postGrainScale,
+    // 顆粒的亂數種子。步數取「循環秒數 × 24」：顆粒因此以每秒 24 次更新（底片的
+    // 速率，比這慢會看成一格一格的閃爍），而步數是整數，所以每個循環的圖案精確
+    // 重複 —— 這是一段會重播的背景，不循環的東西會在接點上被看見。
+    grainSeed: Math.floor(
+      (uniforms.uTime.value / Math.max(0.001, uniforms.uLoopDuration.value)) % 1
+        * Math.max(1, Math.round(uniforms.uLoopDuration.value * 24)),
+    ),
     tint: bloomTintColor.setStyle(P.bloomTint, THREE.LinearSRGBColorSpace),
     // 去背輸出寫的是 straight alpha，光暈的取樣與合成都要換一套（見 post.js）。
     transparent,
