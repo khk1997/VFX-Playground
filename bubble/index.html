@@ -421,10 +421,18 @@
          它推的是「高於 1」的那一段，而那一段只有在畫進後處理的半浮點貼圖時才留
          得住。1 = 不動。 -->
     <div class="row"><label>高光增益</label><input type="range" id="highlightGain" min="1" max="10" step="0.1" value="1"><span class="val" id="highlightGain_v"></span></div>
+    <!-- 對照 Blender 的 Color Management → View Transform。AgX／Khronos PBR
+         Neutral／Filmic／ACES 都是即時擬合，跟 Blender 的完整 LUT／色彩空間
+         轉換不是逐位元相同（見 post.js 的 applyToneMap 開頭說明），觀感接近。
+         Blender 選單裡的 Filmic Log／False Color 是合成器的除錯顯示模式，
+         不適用於這裡，沒有提供。 -->
     <div class="row"><label>色調映射</label><select id="postToneMap">
-      <option value="none" selected>無</option>
+      <option value="none" selected>無（Standard）</option>
+      <option value="agx">AgX</option>
+      <option value="khronosNeutral">Khronos PBR Neutral</option>
+      <option value="filmic">Filmic</option>
+      <option value="aces">ACES</option>
       <option value="reinhard">Reinhard</option>
-      <option value="aces">ACES Filmic</option>
     </select><span class="val"></span></div>
     <div class="row"><label>鏡頭色差</label><input type="range" id="postAberration" min="0" max="1" step="0.01" value="0"><span class="val" id="postAberration_v"></span></div>
     <div class="row"><label>暗角</label><input type="range" id="postVignette" min="0" max="1" step="0.01" value="0"><span class="val" id="postVignette_v"></span></div>
@@ -597,6 +605,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=post-bloom-quality-1"></script>
+<script type="module" src="./bubble.js?v=tonemap-agx-1"></script>
 </body>
 </html>

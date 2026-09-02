@@ -240,16 +240,94 @@ uniform float uGrainScale;
 uniform float uGrainSeed;
 uniform float uAspect;
 
-// 0 無：只交給輸出格式夾掉，等於後處理加入之前的行為。
-// 1 Reinhard：c/(1+c)，任何量級都收得進 0–1，但整體會偏灰。
-// 2 ACES（Narkowicz 的曲線擬合）：高光滾降得更晚、對比保留得更好，是「電影感」
-//   那條。0.6 是把它對齊「1.0 大致仍是 1.0」的常用係數。
+// 對照 Blender 的色調映射選單（Color Management → View Transform）。除了 AgX、
+// Filmic、ACES 都是 LUT／完整色彩空間轉換，這裡放的是業界公認的即時擬合 ——
+// 跟 Godot／Bevy／Filament「支援 AgX」時用的是同一批公式，觀感接近但不是逐位元
+// 相同。Blender 選單裡的 Filmic Log 與 False Color 是合成器的除錯顯示模式，
+// 不是給成品用的色調映射，這裡不提供。
+//
+// 0 無      對應 Standard／Raw：只交給輸出格式夾掉，等於後處理加入之前的行為。
+// 1 Reinhard  c/(1+c)。不在 Blender 的選單裡，留著當最陽春的參考基準。
+// 2 ACES    Narkowicz 的曲線擬合，不是完整的 ACES RRT+ODT。高光滾降得晚、對比
+//           保留得好，是「電影感」那條。0.6 是把它對齊「1.0 大致仍是 1.0」的
+//           常用係數。
+// 3 AgX     矩陣＋log2 編碼＋多項式擬合，近似 Blender 預設的 AgX look。特徵是
+//           高光先偏黃再收，飽和色會被「拉回」而不是死白，這是 AgX 讀起來比
+//           Filmic 更耐看的原因。
+// 4 Khronos PBR Neutral   khronos.org 發布的公開規格，這裡是精確實作（不是
+//           近似）：中間調幾乎不動，只在高光壓縮並帶一點去飽和。glTF 生態系
+//           的標準檢視器都用這條，所以拿它跟其他軟體對圖最不容易對不起來。
+// 5 Filmic  Hable／Uncharted 2 算子，觀感類似但非 Blender Filmic 那條真正的
+//           曲線（那是一整份 LUT）。
+vec3 toneReinhard(vec3 c){ return c / (1.0 + c); }
+
+vec3 toneACES(vec3 c){
+  vec3 x = c * 0.6;
+  return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+}
+
+// 社群公認的 AgX 極簡擬合（Troy Sobotka 的 AgX 出發，經 Benjamin Wrensch 等人
+// 簡化成矩陣＋多項式版本，Godot 4 / Bevy 都採這一版）。
+const mat3 AGX_INSET = mat3(
+  0.856627153315983, 0.0951212405381588, 0.0482516061458583,
+  0.137318972929847, 0.761241990602591,  0.101439036467562,
+  0.11189821299995,  0.0767994186031903, 0.811302368396859
+);
+const mat3 AGX_OUTSET = mat3(
+  1.1271005818144368,  -0.1413297634984383,  -0.14132976349843826,
+  -0.11060664309660323,  1.157823702216272,  -0.11060664309660294,
+  -0.016493938717834573,-0.016493938717834257, 1.2519364065950405
+);
+vec3 agxContrastApprox(vec3 x){
+  vec3 x2 = x * x;
+  vec3 x4 = x2 * x2;
+  return 15.5 * x4 * x2 - 40.14 * x4 * x + 31.96 * x4
+    - 6.868 * x2 * x + 0.4298 * x2 + 0.1191 * x - 0.00232;
+}
+vec3 toneAgX(vec3 c){
+  const float minEv = -12.47393;
+  const float maxEv = 4.026069;
+  vec3 v = AGX_INSET * max(c, vec3(0.0));
+  v = max(v, vec3(1e-10));
+  v = (log2(v) - minEv) / (maxEv - minEv);
+  v = clamp(v, 0.0, 1.0);
+  v = agxContrastApprox(v);
+  v = AGX_OUTSET * v;
+  return pow(max(v, vec3(0.0)), vec3(2.2));
+}
+
+// Khronos PBR Neutral，逐字照官方參考實作：
+// https://github.com/KhronosGroup/glTF-Sample-Renderer/blob/main/source/Renderer/shaders/tonemapping.glsl
+vec3 tonePBRNeutral(vec3 c){
+  const float startCompression = 0.8 - 0.04;
+  const float desaturation = 0.15;
+  float x = min(c.r, min(c.g, c.b));
+  float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
+  c -= offset;
+  float peak = max(c.r, max(c.g, c.b));
+  if (peak < startCompression) return max(c, vec3(0.0));
+  float d = 1.0 - startCompression;
+  float newPeak = 1.0 - d * d / (peak + d - startCompression);
+  c *= newPeak / peak;
+  float g = 1.0 - 1.0 / (desaturation * (peak - newPeak) + 1.0);
+  return mix(c, vec3(newPeak), g);
+}
+
+vec3 toneFilmic(vec3 c){
+  const float A = 0.15, B = 0.50, C = 0.10, D = 0.20, E = 0.02, F = 0.30;
+  const float whiteScale = 1.0 / (((11.2 * (A * 11.2 + C * B) + D * E)
+    / (11.2 * (A * 11.2 + B) + D * F)) - E / F);
+  vec3 x = c * 2.0;
+  vec3 mapped = ((x * (A * x + C * B) + D * E) / (x * (A * x + B) + D * F)) - E / F;
+  return clamp(mapped * whiteScale, 0.0, 1.0);
+}
+
 vec3 applyToneMap(vec3 c){
-  if (uToneMap == 1) return c / (1.0 + c);
-  if (uToneMap == 2) {
-    vec3 x = c * 0.6;
-    return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
-  }
+  if (uToneMap == 1) return toneReinhard(c);
+  if (uToneMap == 2) return toneACES(c);
+  if (uToneMap == 3) return toneAgX(c);
+  if (uToneMap == 4) return tonePBRNeutral(c);
+  if (uToneMap == 5) return toneFilmic(c);
   return c;
 }
 

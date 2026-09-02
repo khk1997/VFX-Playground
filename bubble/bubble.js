@@ -14,16 +14,16 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=post-bloom-quality-1';
+} from './motions/registry.js?v=tonemap-agx-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-76';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=post-bloom-quality-1';
-import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=post-bloom-quality-1';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=tonemap-agx-1';
+import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=tonemap-agx-1';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
-import createResearchMotion from './motions/research.js?v=post-bloom-quality-1';
+import createResearchMotion from './motions/research.js?v=tonemap-agx-1';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
@@ -867,7 +867,9 @@ const SELECTS = {
   jellyStyle: { uniform: '', map: { poke: 0, bounce: 1 } },
   // 色調映射同樣沒有 uniform：它是後處理合成 pass 每幀直接讀的（見
   // renderComposite）。預設「無」＝只交給輸出格式夾掉，等於沒有這一段。
-  postToneMap: { uniform: '', map: { none: 0, reinhard: 1, aces: 2 } },
+  postToneMap: { uniform: '', map: {
+    none: 0, reinhard: 1, aces: 2, agx: 3, khronosNeutral: 4, filmic: 5,
+  } },
 };
 const COLORS = {
   bgColor: 'uBgColor',
@@ -1203,8 +1205,8 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=post-bloom-quality-1';
-import { createPostChain } from './post.js?v=post-bloom-quality-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=tonemap-agx-1';
+import { createPostChain } from './post.js?v=tonemap-agx-1';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
