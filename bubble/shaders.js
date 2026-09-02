@@ -332,8 +332,29 @@ uniform float uTransmission;
 // 量級一直都在，只是被最後那行 clamp 丟掉了。
 uniform float uHdrOutput;
 
+// 高光增益。只推「已經接近上限」的那一段，中間調幾乎不動 —— 所以它幾乎不改變
+// 畫面本身的樣子，改變的是餵給後處理的高光有多少量級可以溢出。
+//
+// 這根存在的理由：實測畫面峰值只有 1.25（黑底）到 2.2（HDRI），而 bloom 與眩光
+// 的門檻要能當「只取高光」用，高光就得明顯高過 1。沒有它，門檻只能壓到 0.5 以下，
+// 那等於把正常畫面也倒進去糊。
+//
+// 只在 HDR 輸出時生效：直接畫到 8-bit canvas 時被推上去的部分反正會被夾掉，
+// 開了也看不出差別，不如明確地不做。
+uniform float uHighlightGain;
+
 vec3 clampOutput(vec3 c){
-  return uHdrOutput > 0.5 ? max(c, vec3(0.0)) : clamp(c, 0.0, 1.0);
+  if (uHdrOutput > 0.5) {
+    c = max(c, vec3(0.0));
+    if (uHighlightGain > 1.0) {
+      float peak = max(c.r, max(c.g, c.b));
+      // 0.75 起算：低於這裡的完全不動，到 1.0 才吃滿增益。用 smoothstep 而不是
+      // 硬切，否則會在等亮度線上留下一圈看得見的邊。
+      c *= mix(1.0, uHighlightGain, smoothstep(0.75, 1.0, peak));
+    }
+    return c;
+  }
+  return clamp(c, 0.0, 1.0);
 }
 
 // 體積吸收：濃度倍率與液體顏色。預設（×1 與 #68b2e7）算出來的係數就是這兩個

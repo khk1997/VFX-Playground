@@ -14,16 +14,16 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=post-bloom-spread-2';
+} from './motions/registry.js?v=post-glare-5';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-76';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=post-bloom-spread-2';
-import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=post-bloom-spread-2';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=post-glare-5';
+import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=post-glare-5';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
-import createResearchMotion from './motions/research.js?v=post-bloom-spread-2';
+import createResearchMotion from './motions/research.js?v=post-glare-5';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
@@ -356,6 +356,21 @@ const DEFAULTS = {              // 數值滑桿
   // 曝光在後處理鏈的合成階段套用（在 tone map 之前、bloom 加進來之後），跟材質
   // 那根「材質曝光」不同：那一根改的是材質的能量，這一根改的是整張畫面。
   postExposure: 1,
+  // 高光增益。只作用在接近上限的那一段（見 shaders.js 的 clampOutput），1 = 不動。
+  highlightGain: 1,
+  // 條紋光芒（Blender Glare 的 Streaks）。
+  // 條數是「臂」的數量，不是軸數：濾波只沿著單一方向前進，一個方向長一條臂。
+  streakCount: 4,
+  streakAngle: 0,
+  // 每個取樣間距要衰減多少。越接近 1 光芒越長。
+  streakAttenuation: 0.88,
+  streakChroma: 0.5,
+  streakIntensity: 0.35,
+  // 鏡頭鬼影（Blender Glare 的 Ghosts）。
+  ghostCount: 4,
+  ghostSpread: 1,
+  ghostChroma: 0.6,
+  ghostIntensity: 0.35,
   bloomThreshold: 1,
   bloomKnee: 0.5,
   bloomIntensity: 0.6,
@@ -660,6 +675,8 @@ const TOGGLE_DEFAULTS = {
   // Bloom 總開關。關閉時 renderComposite 走原本那條「直接畫到輸出」的路，
   // 連 render target 都不會配置。
   bloomEnabled: false,
+  streaksEnabled: false,
+  ghostsEnabled: false,
   // 模式自己宣告的布林參數（registry 的 type: 'toggle'）。面板控制項由
   // buildExtendedMotionControls 生成，其餘一切（綁定、存檔、重設）都跟上面
   // 這幾顆手寫的開關走同一條路。
@@ -886,6 +903,8 @@ const TOGGLES = {
   formationFrontOn: () => {},
   // Bloom 不對應任何 uniform：它是 renderComposite 每幀直接讀的旗標。
   bloomEnabled: () => {},
+  streaksEnabled: () => {},
+  ghostsEnabled: () => {},
   // 私語模式的內部氣泡。shader 端只讀這一顆 uniform 決定畫不畫（見
   // researchBubbleMap），折射率與 icon 共用，不需要別的同步。
   researchBubbles: 'uResearchBubbles',
@@ -952,6 +971,16 @@ const fmt = {
   researchTextureDirY: v => v.toFixed(2),
   researchTextureDirZ: v => v.toFixed(2),
   postExposure: v => '×' + v.toFixed(2),
+  highlightGain: v => '×' + v.toFixed(1),
+  streakCount: v => v.toFixed(0),
+  streakAngle: v => v.toFixed(0) + '°',
+  streakAttenuation: v => v.toFixed(2),
+  streakChroma: v => v.toFixed(2),
+  streakIntensity: v => '×' + v.toFixed(2),
+  ghostCount: v => v.toFixed(0),
+  ghostSpread: v => v.toFixed(2),
+  ghostChroma: v => v.toFixed(2),
+  ghostIntensity: v => '×' + v.toFixed(2),
   bloomThreshold: v => v.toFixed(2),
   bloomKnee: v => v.toFixed(2),
   bloomIntensity: v => '×' + v.toFixed(2),
@@ -1171,8 +1200,8 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=post-bloom-spread-2';
-import { createPostChain } from './post.js?v=post-bloom-spread-2';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=post-glare-5';
+import { createPostChain } from './post.js?v=post-glare-5';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
@@ -4415,6 +4444,7 @@ function initGL() {
     uReflect:    { value: P.reflect },
     uTransmission: { value: P.transmission },
     uHdrOutput: { value: 0 },
+    uHighlightGain: { value: 1 },
     uAbsorb: { value: P.absorb },
     uAbsorbColor: { value: new THREE.Color().setStyle(P.absorbColor, THREE.LinearSRGBColorSpace) },
     uMaterialExposure: { value: P.materialExposure },
@@ -5243,6 +5273,8 @@ const GATES = {
   capillaryTextureOn:   () => Math.round(P.capillaryTexture) !== 6,
   // 後處理各效果的附屬參數：效果關掉時那些滑桿沒有作用，一併收起來。
   bloomOn:              () => P.bloomEnabled,
+  streaksOn:            () => P.streaksEnabled,
+  ghostsOn:             () => P.ghostsEnabled,
   // 私語的兩組附屬參數，理由同上：關掉／選「無」之後那些滑桿沒有作用。
   researchTextureOn:    () => Math.round(P.researchShellTexture) !== 6,
   researchBubblesOn:    () => P.researchBubbles,
@@ -5847,7 +5879,8 @@ const bloomTintColor = new THREE.Color();
 // 後處理是否真的要跑。曝光與色調映射即使沒開 bloom 也是有效的效果，所以旁路的
 // 條件是「三者都在中性值」，不是只看 bloom。
 function postActive() {
-  return P.bloomEnabled || P.postExposure !== 1 || P.postToneMap !== 'none';
+  return P.bloomEnabled || P.streaksEnabled || P.ghostsEnabled
+    || P.postExposure !== 1 || P.postToneMap !== 'none' || P.highlightGain !== 1;
 }
 
 function renderComposite(target = null, superSample = 1) {
@@ -5856,6 +5889,7 @@ function renderComposite(target = null, superSample = 1) {
   // 那條路徑的反預乘推導假設值域是 0–1（見主 shader 結尾），HDR 會讓它算出
   // 超出範圍的顏色。
   uniforms.uHdrOutput.value = (postActive() && !transparent) ? 1 : 0;
+  uniforms.uHighlightGain.value = P.highlightGain;
   if (!postActive()) {
     // 效果全關：完全走原本那條路（不配置 render target、不多任何一個 pass），
     // 畫面逐位元等於加入後處理之前。
@@ -5874,6 +5908,17 @@ function renderComposite(target = null, superSample = 1) {
     radius: P.bloomRadius,
     exposure: P.postExposure,
     toneMap: SELECTS.postToneMap.map[P.postToneMap],
+    streaks: P.streaksEnabled,
+    streakCount: P.streakCount,
+    streakAngle: P.streakAngle,
+    streakAttenuation: P.streakAttenuation,
+    streakChroma: P.streakChroma,
+    streakIntensity: P.streakIntensity,
+    ghosts: P.ghostsEnabled,
+    ghostCount: P.ghostCount,
+    ghostSpread: P.ghostSpread,
+    ghostChroma: P.ghostChroma,
+    ghostIntensity: P.ghostIntensity,
     tint: bloomTintColor.setStyle(P.bloomTint, THREE.LinearSRGBColorSpace),
     // 去背輸出寫的是 straight alpha，光暈的取樣與合成都要換一套（見 post.js）。
     transparent,

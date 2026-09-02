@@ -417,6 +417,10 @@
   <details class="group">
     <summary><h3>後處理 Post</h3></summary>
     <div class="row"><label>曝光</label><input type="range" id="postExposure" min="0.1" max="4" step="0.01" value="1"><span class="val" id="postExposure_v"></span></div>
+    <!-- 高光增益只在後處理跑著的時候有作用（見 shaders.js 的 clampOutput）：
+         它推的是「高於 1」的那一段，而那一段只有在畫進後處理的半浮點貼圖時才留
+         得住。1 = 不動。 -->
+    <div class="row"><label>高光增益</label><input type="range" id="highlightGain" min="1" max="10" step="0.1" value="1"><span class="val" id="highlightGain_v"></span></div>
     <div class="row"><label>色調映射</label><select id="postToneMap">
       <option value="none" selected>無</option>
       <option value="reinhard">Reinhard</option>
@@ -429,6 +433,23 @@
       <div class="row" data-gate="bloomOn"><label>強度</label><input type="range" id="bloomIntensity" min="0" max="3" step="0.01" value="0.6"><span class="val" id="bloomIntensity_v"></span></div>
       <div class="row" data-gate="bloomOn"><label>擴散範圍</label><input type="range" id="bloomRadius" min="0" max="1" step="0.01" value="0.7"><span class="val" id="bloomRadius_v"></span></div>
       <div class="row" data-gate="bloomOn"><label>光暈色</label><input type="color" id="bloomTint" value="#ffffff"><span class="val"></span></div>
+    </details>
+    <!-- 條紋與鬼影跟光暈共用同一份亮部取樣（同一個門檻）：它們講的是同一件事
+         ——畫面上哪些地方在發光。分兩份門檻只會讓兩個效果對不起來。 -->
+    <details class="subgroup" id="streaksGroup">
+      <summary><h4>條紋 Streaks</h4><span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="streaksEnabled"><span class="switchTrack" aria-hidden="true"></span></span></summary>
+      <div class="row" data-gate="streaksOn"><label>臂數</label><input type="range" id="streakCount" min="1" max="8" step="1" value="4"><span class="val" id="streakCount_v"></span></div>
+      <div class="row" data-gate="streaksOn"><label>角度</label><input type="range" id="streakAngle" min="0" max="180" step="1" value="0"><span class="val" id="streakAngle_v"></span></div>
+      <div class="row" data-gate="streaksOn"><label>長度</label><input type="range" id="streakAttenuation" min="0.5" max="0.98" step="0.01" value="0.88"><span class="val" id="streakAttenuation_v"></span></div>
+      <div class="row" data-gate="streaksOn"><label>色彩調變</label><input type="range" id="streakChroma" min="0" max="1" step="0.01" value="0.5"><span class="val" id="streakChroma_v"></span></div>
+      <div class="row" data-gate="streaksOn"><label>強度</label><input type="range" id="streakIntensity" min="0" max="3" step="0.01" value="0.35"><span class="val" id="streakIntensity_v"></span></div>
+    </details>
+    <details class="subgroup" id="ghostsGroup">
+      <summary><h4>鬼影 Ghosts</h4><span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="ghostsEnabled"><span class="switchTrack" aria-hidden="true"></span></span></summary>
+      <div class="row" data-gate="ghostsOn"><label>數量</label><input type="range" id="ghostCount" min="1" max="8" step="1" value="4"><span class="val" id="ghostCount_v"></span></div>
+      <div class="row" data-gate="ghostsOn"><label>間距</label><input type="range" id="ghostSpread" min="0.2" max="2" step="0.01" value="1"><span class="val" id="ghostSpread_v"></span></div>
+      <div class="row" data-gate="ghostsOn"><label>色散</label><input type="range" id="ghostChroma" min="0" max="1" step="0.01" value="0.6"><span class="val" id="ghostChroma_v"></span></div>
+      <div class="row" data-gate="ghostsOn"><label>強度</label><input type="range" id="ghostIntensity" min="0" max="3" step="0.01" value="0.35"><span class="val" id="ghostIntensity_v"></span></div>
     </details>
   </details>
 
@@ -578,6 +599,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=post-bloom-spread-2"></script>
+<script type="module" src="./bubble.js?v=post-glare-5"></script>
 </body>
 </html>
