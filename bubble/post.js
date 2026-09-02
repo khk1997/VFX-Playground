@@ -113,8 +113,13 @@ void main(){
 `;
 
 // 條紋光芒（Blender Glare 的 Streaks）。做法是 Kawase 的光條濾波：每一輪沿同一個
-// 方向取四個等距樣本、權重指數遞減，下一輪把步距乘四，三輪之後有效長度是 4^3 = 64
-// 個取樣間距 —— 用 12 次取樣換到一條很長的光芒，而不是老實地沿線積分幾百次。
+// 方向取四個等距樣本、權重指數遞減，下一輪把步距乘四 —— 用 16 次取樣換到一條很長
+// 的光芒，而不是老實地沿線積分上千次。
+//
+// 輪數是 STREAK_PASSES（4）。第一版只跑三輪，最遠只到 63 個取樣間距，換算成畫面
+// 是離光源約 250px 就沒了 —— 實測 320px 處還有 111/255，420px 剩 14，520px 是 0，
+// 也就是使用者說的「條紋效果蠻弱」：不是不夠亮，是不夠長。多跑一輪，步距 ×4，
+// 覆蓋範圍變成 255 個間距（整個畫面寬）。
 //
 // 色彩調變讓 RGB 三個通道用不同的衰減：紅衰得慢、藍衰得快，所以光芒外段偏暖、
 // 靠近光源偏冷。真實鏡頭的條紋來自光柵繞射，本來就有色散，少了這個會像一根塑膠棒。
@@ -138,74 +143,6 @@ void main(){
     acc += texture2D(uTex, uv).rgb * weight * inside;
   }
   gl_FragColor = vec4(acc, 1.0);
-}
-`;
-
-// 鏡頭鬼影（Blender Glare 的 Ghosts）。鬼影是光在鏡片組之間來回反射之後，落在
-// 「光源—畫面中心」連線上的一串像 —— 所以做法就是把亮部緩衝以中心為原點做不同
-// 倍率的縮放（含負值＝穿過中心翻到另一側）再疊起來。
-//
-// 取樣的來源是模糊過的那一層，不是銳利的亮部緩衝：真實的鬼影是嚴重離焦的光斑，
-// 拿銳利的圖去縮放會直接認得出原本的形狀（實測第一版看得出是球的輪廓弧線），
-// 那一眼就是假的。
-//
-// 兩個讓它像真鏡頭而不像貼圖的細節：
-//   1. RGB 各自用略微不同的倍率取樣，鬼影邊緣因此帶一圈色散。
-//   2. 越靠近畫面邊緣的鬼影越暗（真實鏡頭的鬼影在中心附近最亮），而且取樣點超出
-//      畫面時必須淡出，否則會沿著邊界拖出一條硬邊。
-const GHOST_FRAG = `
-precision highp float;
-varying vec2 vUv;
-uniform sampler2D uTex;
-uniform float uCount;
-uniform float uSpread;
-uniform float uIntensity;
-uniform float uChroma;
-uniform vec2 uSourceTexel;
-
-// 取樣來源是 1/32 解析度的那一層，放大回全螢幕時雙線性內插會留下軸向的方塊結構
-// —— 鬼影因此看起來是柔邊的長方形，而不是離焦的圓斑。四個對角補樣把那個結構抹掉，
-// 成本是每顆鬼影多九次取樣，而這一整個 pass 跑在四分之一解析度上。
-vec3 tap(vec2 uvR, vec2 uvG, vec2 uvB){
-  vec2 o = uSourceTexel * 0.75;
-  vec3 acc = vec3(0.0);
-  acc.r = 0.25 * (texture2D(uTex, uvR + o).r + texture2D(uTex, uvR - o).r
-    + texture2D(uTex, uvR + vec2(o.x, -o.y)).r + texture2D(uTex, uvR - vec2(o.x, -o.y)).r);
-  acc.g = 0.25 * (texture2D(uTex, uvG + o).g + texture2D(uTex, uvG - o).g
-    + texture2D(uTex, uvG + vec2(o.x, -o.y)).g + texture2D(uTex, uvG - vec2(o.x, -o.y)).g);
-  acc.b = 0.25 * (texture2D(uTex, uvB + o).b + texture2D(uTex, uvB - o).b
-    + texture2D(uTex, uvB + vec2(o.x, -o.y)).b + texture2D(uTex, uvB - vec2(o.x, -o.y)).b);
-  return acc;
-}
-
-vec3 sampleGhost(vec2 centered, float scale){
-  // 通道之間只差 1.5%：鬼影本來就離光源很遠，位移是「距離 × 比例」，1.5% 在畫面上
-  // 已經是好幾個像素的邊緣色散。第一版用 6%，結果三個通道整個分家，變成紅綠藍三條
-  // 分開的色棒，不是鏡頭鬼影。
-  vec2 uvR = 0.5 + centered * scale * (1.0 + uChroma * 0.015);
-  vec2 uvG = 0.5 + centered * scale;
-  vec2 uvB = 0.5 + centered * scale * (1.0 - uChroma * 0.015);
-  vec3 c = tap(uvR, uvG, uvB);
-  // 取樣點離開畫面就淡出，不然會沿著邊界拖出一條硬邊。
-  vec2 edge = abs(uvG - 0.5) * 2.0;
-  float inside = (1.0 - smoothstep(0.85, 1.0, max(edge.x, edge.y)));
-  return c * inside;
-}
-
-void main(){
-  vec2 centered = vUv - 0.5;
-  vec3 acc = vec3(0.0);
-  for (int i = 0; i < 8; i++) {
-    if (float(i) >= uCount) break;
-    float t = float(i);
-    // 倍率正負交錯：鬼影會分布在光源與中心連線的兩側。0.45 起跳、每顆遞增，
-    // 是照鏡頭鬼影常見的疏密感排的，不是均勻分布 —— 均勻分布看起來像刻意畫的。
-    float scale = (0.45 + 0.38 * t) * (mod(t, 2.0) < 0.5 ? -1.0 : 1.0);
-    // 越後面的鬼影越暗。
-    float weight = 1.0 / (1.0 + t * 0.85);
-    acc += sampleGhost(centered, scale) * weight;
-  }
-  gl_FragColor = vec4(acc * uIntensity, 1.0);
 }
 `;
 
@@ -343,10 +280,8 @@ function createTarget(width, height, type = THREE.HalfFloatType) {
 // 但匯出是 4× 超採樣：1080p 的成品換算成 7680×4320，半浮點 RGBA 就是 265MB。
 // 超過上限時退回 8-bit（高光在那裡會被夾掉，光暈比預覽弱），並且明講 —— 靜默地
 // 換掉輸出的成色是最糟的處理方式。
-// 鬼影取樣的那一層。第 4 層是 1/32 解析度 —— 要這麼糊是因為這個場景的亮部不是
-// 一顆小太陽，而是一顆玻璃球上細長的高光弧。用 1/8 去縮放，鬼影會清楚地讀成
-// 「那顆球的邊緣被搬過來」，一眼就假；糊到 1/32 之後才變成離焦的光斑。
-const GHOST_MIP = 4;
+// 條紋的迭代輪數。每多一輪，覆蓋距離乘四；成本是每個方向多一個 pass。
+const STREAK_PASSES = 4;
 const MAX_HDR_BYTES = 512 * 1024 * 1024;
 let hdrFallbackWarned = false;
 
@@ -401,14 +336,6 @@ export function createPostChain(renderer) {
     uStride: { value: 1 },
     uAtten: { value: new THREE.Vector3(0.9, 0.9, 0.9) },
   });
-  const ghostMaterial = makeMaterial(GHOST_FRAG, {
-    uTex: { value: null },
-    uSourceTexel: { value: new THREE.Vector2() },
-    uCount: { value: 3 },
-    uSpread: { value: 1 },
-    uIntensity: { value: 1 },
-    uChroma: { value: 0.5 },
-  });
   const copyMaterial = makeMaterial(COPY_FRAG, {
     uTex: { value: null },
     uScale: { value: 1 },
@@ -436,8 +363,8 @@ export function createPostChain(renderer) {
   blackPixel.needsUpdate = true;
 
   let sceneTarget = null;
-  // 眩光（條紋＋鬼影）的累積緩衝與 ping-pong。跑在四分之一解析度：條紋本來就是
-  // 大範圍的低頻結構，半解析度看不出差別，但 pass 數是四個方向 × 三輪。
+  // 條紋的累積緩衝與 ping-pong。跑在四分之一解析度：條紋本來就是大範圍的低頻
+  // 結構，半解析度看不出差別，但 pass 數是四個方向 × 四輪。
   let glareTarget = null;
   let glarePing = null;
   let glarePong = null;
@@ -522,11 +449,10 @@ export function createPostChain(renderer) {
 
     const wantsBloom = params.intensity > 0;
     const wantsStreaks = params.streaks && params.streakIntensity > 0;
-    const wantsGhosts = params.ghosts && params.ghostIntensity > 0;
 
-    // 亮部只取一次，bloom 與眩光共用同一張 —— 它們講的本來就是同一件事（畫面上
+    // 亮部只取一次，bloom 與條紋共用同一張 —— 它們講的本來就是同一件事（畫面上
     // 哪些地方在發光），分兩份門檻只會讓兩個效果對不起來。
-    if (wantsBloom || wantsStreaks || wantsGhosts) {
+    if (wantsBloom || wantsStreaks) {
       thresholdMaterial.uniforms.uScene.value = sceneTarget.texture;
       thresholdMaterial.uniforms.uThreshold.value = params.threshold;
       thresholdMaterial.uniforms.uKnee.value = params.knee;
@@ -534,10 +460,8 @@ export function createPostChain(renderer) {
       blit(thresholdMaterial, levels[0].down);
     }
 
-    // 降採鏈：bloom 需要全部的層，鬼影只需要前幾層（它拿模糊過的那一層當光斑）。
-    if (wantsBloom || wantsGhosts) {
-      const depth = wantsBloom ? levels.length : Math.min(levels.length, GHOST_MIP + 1);
-      for (let i = 1; i < depth; i++) {
+    if (wantsBloom) {
+      for (let i = 1; i < levels.length; i++) {
         const source = levels[i - 1];
         downMaterial.uniforms.uTex.value = source.down.texture;
         downMaterial.uniforms.uHalfTexel.value.set(0.5 / source.width, 0.5 / source.height);
@@ -545,13 +469,10 @@ export function createPostChain(renderer) {
       }
     }
 
-    let glareTexture = blackPixel;
-    if (wantsStreaks || wantsGhosts) {
-      glareTexture = renderGlare(params, wantsStreaks, wantsGhosts);
-    }
+    const glareTexture = wantsStreaks ? renderStreaks(params) : blackPixel;
 
     if (!wantsBloom) {
-      // 只有曝光／色調映射／眩光在用時，跳過升採鏈 —— 那是十幾個 pass，不該為了
+      // 只有曝光／色調映射／條紋在用時，跳過升採鏈 —— 那是十幾個 pass，不該為了
       // 一次乘法白跑。
       composite(target, params, blackPixel, glareTexture, 0);
       return;
@@ -600,23 +521,32 @@ export function createPostChain(renderer) {
     renderer.setRenderTarget(null);
   }
 
-  // 條紋與鬼影都疊進同一顆眩光緩衝，合成階段只多讀一張圖。
-  function renderGlare(params, wantsStreaks, wantsGhosts) {
+  // 每個方向的條紋都疊進同一顆緩衝，合成階段只多讀一張圖。
+  function renderStreaks(params) {
     const source = levels[0].down.texture;
     renderer.setRenderTarget(glareTarget);
     renderer.clear();
 
-    if (wantsStreaks) {
+    {
       const count = Math.max(1, Math.round(params.streakCount));
       const texel = 1 / glareTarget.width;
       // 每個通道的衰減。色彩調變讓紅衰得比藍慢，光芒外段因此偏暖。
-      // 通道之間的差距必須很小：權重是 atten^(stride*k)，指數最大會到 48，
-      // 差 1% 到了尾端就是 0.6 倍。第一版用 6%／12%，結果整條光芒變成純橙色。
-      const atten = params.streakAttenuation;
+      // 滑桿是「長度」0–1，這裡換算成每個取樣間距的衰減率。在對數空間內插：
+      // 0 → 0.80（很短的光暈），1 → 0.996（跨越整個畫面）。線性內插不行 ——
+      // 尾端的權重是 atten^255，0.99 與 0.995 差了 3.6 倍，靠近 1 的那一段必須
+      // 有足夠的解析度。
+      const t = Math.min(Math.max(params.streakLength, 0), 1);
+      const atten = Math.exp(-Math.exp(Math.log(0.2231) * (1 - t) + Math.log(0.0040) * t));
+      // 通道之間的差距必須很小：權重是 atten^(stride*k)，指數最大會到 192，
+      // 差 1% 到了尾端就整個分家。第一版用 6%／12%，結果整條光芒變成純橙色。
+      // 係數要跟著長度縮：權重是 atten^(stride*k)，四輪之後指數上看 192，1% 的
+      // 通道差在尾端就是 10 倍，光芒會斷成一段一段的色帶。除以 (1 + 長度 × 3)
+      // 讓短光芒仍有明顯色散、長光芒維持連續。
+      const chroma = params.streakChroma / (1 + t * 3);
       streakMaterial.uniforms.uAtten.value.set(
         atten,
-        atten * (1 - params.streakChroma * 0.010),
-        atten * (1 - params.streakChroma * 0.022),
+        atten * (1 - chroma * 0.010),
+        atten * (1 - chroma * 0.022),
       );
       for (let i = 0; i < count; i++) {
         // 方向平均分布在整圈。這裡不能只跑半圈 —— 濾波只沿著 +dir 前進（那是它
@@ -626,7 +556,7 @@ export function createPostChain(renderer) {
         const dirY = Math.sin(angle) * (glareTarget.width / glareTarget.height);
         let readTarget = glarePing;
         let writeTarget = glarePong;
-        for (let pass = 0; pass < 3; pass++) {
+        for (let pass = 0; pass < STREAK_PASSES; pass++) {
           const stride = Math.pow(4, pass);
           streakMaterial.uniforms.uTex.value = pass === 0 ? source : readTarget.texture;
           streakMaterial.uniforms.uStride.value = stride;
@@ -634,24 +564,16 @@ export function createPostChain(renderer) {
           blit(streakMaterial, writeTarget);
           const swap = readTarget; readTarget = writeTarget; writeTarget = swap;
         }
-        // 三輪之後結果在 readTarget（最後一次交換過）。每個方向的強度先除以方向數，
-        // 加起來才不會因為條紋變多而整體變亮 —— 數量那根滑桿只該改造型。
+        // 跑完之後結果在 readTarget（最後一次交換過）。除以 sqrt(方向數) 而不是
+        // 方向數：條紋的臂彼此不重疊，除以 count 等於「臂越多每條越暗」，四條就
+        // 只剩四分之一 —— 那正是它看起來弱的另一半原因。開平方是兩者的折衷：
+        // 臂變多時整體亮度略升，但單條不會塌掉。
         copyMaterial.uniforms.uTex.value = readTarget.texture;
-        copyMaterial.uniforms.uScale.value = params.streakIntensity / count;
+        copyMaterial.uniforms.uScale.value = params.streakIntensity / Math.sqrt(count);
         blit(copyMaterial, glareTarget, true);
       }
     }
 
-    if (wantsGhosts) {
-      const ghostSource = levels[Math.min(GHOST_MIP, levels.length - 1)];
-      ghostMaterial.uniforms.uTex.value = ghostSource.down.texture;
-      ghostMaterial.uniforms.uSourceTexel.value.set(1 / ghostSource.width, 1 / ghostSource.height);
-      ghostMaterial.uniforms.uCount.value = Math.round(params.ghostCount);
-      ghostMaterial.uniforms.uSpread.value = params.ghostSpread;
-      ghostMaterial.uniforms.uIntensity.value = params.ghostIntensity;
-      ghostMaterial.uniforms.uChroma.value = params.ghostChroma;
-      blit(ghostMaterial, glareTarget, true);
-    }
     return glareTarget.texture;
   }
 

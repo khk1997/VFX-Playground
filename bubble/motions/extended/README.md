@@ -13,7 +13,7 @@ To remove a mode:
 1. Delete its entry from `motions/registry.js`.
 2. Delete its option from `bubble/index.html`.
 3. Remove its import and `SAMPLERS` entry from `extended/index.js`.
-4. Delete the sampler file and its name from `tests/extended_motions.mjs`.
+4. Delete the sampler file.
 
 No branch in `bubble.js` needs to change. Mode-specific sliders are generated from the registry's
 `params` metadata and disappear automatically with the registry entry.
