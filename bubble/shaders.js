@@ -115,6 +115,16 @@ uniform float uResearchShellAmount;
 uniform float uResearchShellSpeed;
 uniform float uResearchShellDensity;
 uniform float uResearchShellTexture;
+// 紋理方向。三個分量合起來是一個向量,長度不重要(shader 會正規化),只有方向
+// 有意義;全為 0 時退回 +x。
+uniform float uResearchTextureDirX;
+uniform float uResearchTextureDirY;
+uniform float uResearchTextureDirZ;
+// 內部氣泡的開關（1 開、0 關）、顆數，與大小範圍（外殼半徑的倍數）。
+uniform float uResearchBubbles;
+uniform float uResearchBubbleCount;
+uniform float uResearchBubbleMin;
+uniform float uResearchBubbleMax;
 uniform float uResearchIconIOR;
 uniform float uResearchIconSizeA;
 uniform float uResearchIconSizeB;
@@ -1137,6 +1147,64 @@ float researchShellEvent(vec3 q, float sideSign, float t){
 // 私語沒有毛細波的「波場類型」(同心放射／定向推進／螺旋擴散)——外殼是封閉
 // 球面,沒有一個自然的「方向」可以做定向或放射波場,所以固定用兩個 q 分量
 // 當 field/lateral,不提供那三種波場選擇。
+// 這三支是私語自己的版本,不是拿毛細波那兩支來用。差別全部在「連續性」上:
+// 外殼的紋理是直接減進距離場的,法線是對同一個場做中央差分 —— 場只要有一處
+// 梯度跳變(C0 而不是 C1),折射就會把它放大成一條看得見的稜線,整片紋理於是
+// 讀起來像被切成一塊一塊的。毛細波那邊是拿來做橫向的表面位移、又疊在別的
+// 起伏上,同樣的公式在那裡看不出問題,所以那邊不動,這裡另寫一份。
+//
+// 值雜訊:淡入用五次式 f³(6f²-15f+10) 而不是 smoothstep 的 f²(3-2f)。三次式的
+// 二階導數在格線上是跳的,而法線是一階導數 —— 一階連續、二階不連續的場,在
+// 折射下就是沿著格線的一格一格明暗,正是「切塊」最典型的來源。五次式的一、二
+// 階導數在格點上都是 0,格線因此完全消失。
+float researchValueNoiseLoop(vec2 p, float period){
+  vec2 cell = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  float x0 = mod(cell.x, period);
+  float x1 = mod(cell.x + 1.0, period);
+  float a = hash11(dot(vec2(x0, cell.y), vec2(127.1, 311.7)));
+  float b = hash11(dot(vec2(x1, cell.y), vec2(127.1, 311.7)));
+  float c = hash11(dot(vec2(x0, cell.y + 1.0), vec2(127.1, 311.7)));
+  float d = hash11(dot(vec2(x1, cell.y + 1.0), vec2(127.1, 311.7)));
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// 細胞雜訊:取最近距離時用平滑最小值而不是 min()。兩個格點等距的那條線上,
+// min() 的梯度是硬折(左右兩邊各自指向不同的格點),那正好就是 Voronoi 的
+// 每一道邊界 —— 於是整片紋理被切成一塊一塊多邊形。平滑最小值把那道折線抹成
+// 一段有寬度的圓角,細胞感還在,邊界不再是稜線。
+float researchCellularLoop(vec2 p, float period){
+  vec2 cell = floor(p);
+  vec2 f = fract(p);
+  float nearest = 10.0;
+  for (int y = -1; y <= 1; y++) {
+    for (int x = -1; x <= 1; x++) {
+      vec2 offset = vec2(float(x), float(y));
+      vec2 sourceCell = cell + offset;
+      vec2 hashCell = vec2(mod(sourceCell.x, period), sourceCell.y);
+      float h = hash11(dot(hashCell, vec2(127.1, 311.7)));
+      vec2 site = offset + vec2(h, fract(h * 43.75)) * 0.72 + 0.14;
+      float dist = length(f - site);
+      // k = 0.14:比細胞尺寸(約 1.0)小一個量級,所以只影響邊界那一圈。
+      float hMix = clamp(0.5 + 0.5 * (nearest - dist) / 0.14, 0.0, 1.0);
+      nearest = mix(nearest, dist, hMix) - 0.14 * hMix * (1.0 - hMix);
+    }
+  }
+  return 1.0 - smoothstep(0.05, 0.78, nearest) * 2.0;
+}
+
+// 平滑飽和,取代原本的 clamp(wave * gain, -1, 1)。clamp 在飽和點是 C0:斜坡
+// 一路上去、突然變成平台,那個轉角同樣是梯度跳變。Noise 的 gain 是 1.35、
+// Magic 是 1.25,兩者經常撞到上限,於是滿面都是那種「削平的邊」。
+// |x| < 0.75 完全不動(絕大多數取樣落在這裡,外觀不變),之後指數地收向 ±1;
+// 接點兩側的值與斜率都相等,所以是 C1。
+float researchSoftLimit(float x){
+  float a = abs(x);
+  float soft = 1.0 - 0.25 * exp(-(a - 0.75) * 4.0);
+  return sign(x) * (a < 0.75 ? a : soft);
+}
+
 float researchProceduralTexture(
   float textureType, float field, float lateral, float travelPhase,
   float density, float fieldTravel, float fieldPeriod
@@ -1151,13 +1219,13 @@ float researchProceduralTexture(
     // fieldTravel 是 fieldPeriod 的整數倍時,函式內部的 mod(cell, fieldPeriod)
     // 在循環頭尾給出完全相同的雜湊,因此無縫。
     vec2 noiseP = vec2(field, lateral) * density * 1.35;
-    wave = capillaryValueNoiseFieldLoop(
+    wave = researchValueNoiseLoop(
       noiseP - vec2(fieldTravel, 0.0), fieldPeriod
     ) * 2.0 - 1.0;
     textureGain = 1.35;
   } else if (textureType < 2.5) {
     vec2 cellularP = vec2(field, lateral) * density * 1.15;
-    wave = capillaryCellularFieldLoop(
+    wave = researchCellularLoop(
       cellularP - vec2(fieldTravel, 0.0), fieldPeriod
     );
     textureGain = 1.10;
@@ -1170,7 +1238,11 @@ float researchProceduralTexture(
     // 兩個 field*density 項互相消掉,只剩 -travelPhase/TAU,純用 travelPhase
     // 表達,不必另外傳 movingA。
     float ramp = fract(-travelPhase / TAU);
-    wave = 1.0 - abs(ramp * 2.0 - 1.0) * 2.0;
+    // 三角波的頂點與谷底各是一個尖角,尖角在折射下就是一圈亮線。用 smoothstep
+    // 把三角波整形成 S 形:形狀(單調的爬升與下降)保留,兩端的尖角變成平順的
+    // 轉向,值域仍是 [-1, 1]。
+    float tri = 1.0 - abs(ramp * 2.0 - 1.0);
+    wave = (tri * tri * (3.0 - 2.0 * tri)) * 2.0 - 1.0;
   } else {
     float magicCross = lateral * density;
     wave = sin(travelPhase + sin(magicCross * 2.7) * 1.1)
@@ -1179,56 +1251,49 @@ float researchProceduralTexture(
     wave /= 1.45;
     textureGain = 1.25;
   }
-  return clamp(wave * textureGain, -1.0, 1.0);
+  return researchSoftLimit(wave * textureGain);
 }
 
-// 三種自創的外殼動態,跟上面的六種程序紋理並存,不是取代——選單裡各佔一格
-// (值 7/8/9,避開毛細波沿用的 0-6 編號)。
+// 自創的外殼動態「駐波」,跟上面的六種程序紋理並存,不是取代——選單裡佔一格
+// (值 7,避開毛細波沿用的 0-6 編號)。
 //
 // 駐波:兩組不同頻率的正弦疊加,時間項讓圖案緩慢旋轉。跟毛細波的「Wave」
 // (單純 sin(travelPhase))不同,這裡是兩項相乘再疊加第三項,花紋更複雜;
 // 保留成獨立選項而不是併進 Wave,兩種讀起來確實不一樣。
+//
+// 這裡原本還有「湍流」(3D fbm)與「脈動」(離散阻尼拍打)兩種,值 8/9。兩者
+// 都已移除:湍流的 fbm 起伏在這顆殼的尺度下讀起來只是雜訊,脈動的拍點在一段
+// 重複播的背景裡會變成重音。researchShellOffset 仍然接受 8/9 —— 舊的參數
+// 組合檔存得到那兩個值,一律導向駐波,而不是靜悄悄地變成沒有紋理。
+// q 是 researchTextureFrame 轉過的座標（沿軸／橫向／深度），不是原始球面方向 ——
+// 三根「紋理方向」滑桿因此同樣轉得動駐波的花紋。
 float researchShellStanding(vec3 q, float density, float phase){
   return sin(q.x * 4.6 * density + phase)
     * sin(q.y * 3.8 * density - phase)
     + 0.55 * sin((q.x - q.y + q.z) * 7.2 * density + phase * 2.0);
 }
 
-// 湍流:液面持續翻湧,而不是規律脹縮。取樣點用 loopNoiseOffset 在雜訊空間裡
-// 走一圈——那是專案裡薄膜干涉、毛細波、稜光光芒共用的循環安全手法:走的是
-// 一個閉合圓,phase 回到 0 時取樣點精確位移回原點,uTime 本身也已經是對
-// loopDuration 取過 mod 的值(見 frame() 的 simT),所以不需要另外處理接縫。
-// 跟毛細波的 Noise/Voronoi 不同:那兩個是沿單一行進軸平移的格點雜訊,這個是
-// 3D fbm 直接布滿整個殼面,質地更接近液面翻湧而不是紋理平移。
-float researchShellTurbulence(vec3 q, float density, float speed){
-  vec3 flow = loopNoiseOffset(speed * 0.6);
-  // fbmFast 的量級比駐波的 sin 疊加略小,乘 1.8 讓兩種風格在同一根「起伏大小」
-  // 滑桿下手感相近,不必為了換風格重新調整振幅。
-  return fbmFast(q * (2.6 * density) + flow) * 1.8;
-}
-
-// 脈動:液面像是被此起彼落地輕拍,而不是穩態起伏。特徵在時間軸上(斷續的
-// 拍打),不是空間上——沿用駐波的空間花紋當底,只是不再連續驅動它,而是用
-// 離散的阻尼衝擊:液面被拍一下、回彈、靜下來,直到下一拍。空間花紋在每次
-// 觸發時換一個新的旋轉角(hash 出來的),讀起來才不會每次拍打都拍在同一個
-// 花紋上。角度變換的時刻正好是 envelope 衰減到 0 的時刻(local 從 1 繞回 0
-// 那一刻,floor(phase01*repeats) 同時進位),所以形狀切換不會被看見。
-float researchShellPulse(vec3 q, float density, float phase01, float speed){
-  // repeats 是每圈的觸發次數,跟駐波的 cycles 同一個語意——兩者都用「起伏速度」
-  // 這根滑桿。必須是整數,循環邊界(phase01=0/1)才能精確接回同一個值。
-  float repeats = max(1.0, floor(speed + 0.5));
-  float beat = floor(phase01 * repeats);
-  float local = fract(phase01 * repeats);
-  // 先衝過去、再回彈、靜下來——跟頸子夾斷後的阻尼振盪是同一套數學。local 走到
-  // 1(即將進位)時 exp(-7*1) ≈ 9.1e-4,衰減到可忽略,下一拍接上不會有跳接。
-  float envelope = exp(-local * 7.0) * sin(local * 14.0);
-  float spatialPhase = hash11(beat * 3.71 + 1.3) * TAU;
-  float spatial = researchShellStanding(q, density, spatialPhase);
-  return spatial * envelope * 1.6;
+// 紋理座標的正交基底。三根「紋理方向」滑桿給的是沿軸方向,另外兩軸由它推出來,
+// 構造與毛細波的 capillarySurfaceOffset 逐字相同（reference 的挑法也是,那是為了
+// 避開 cross() 在方向接近 ±z 時退化）。回傳 vec3(沿軸, 橫向, 深度)。
+//
+// 預設方向 (1, 0, 0) 代進來剛好得到 (q.x, q.y, q.z),也就是加上這三根滑桿之前
+// 寫死的座標,所以預設值下畫面完全不變。
+vec3 researchTextureFrame(vec3 q){
+  vec3 dir = vec3(uResearchTextureDirX, uResearchTextureDirY, uResearchTextureDirZ);
+  float dirLength = length(dir);
+  vec3 direction = dirLength > 0.001 ? dir / dirLength : vec3(1.0, 0.0, 0.0);
+  vec3 reference = abs(direction.z) < 0.95 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+  vec3 acrossAxis = normalize(cross(reference, direction));
+  vec3 secondAxis = normalize(cross(direction, acrossAxis));
+  return vec3(dot(q, direction), dot(q, acrossAxis), dot(q, secondAxis));
 }
 
 float researchShellOffset(vec3 p){
   vec3 q = normalize(p - uDrops[0].xyz + vec3(0.0001));
+  // 紋理一律看這組轉過的座標,原始的 q 只留給下面的側面遮罩與誕生事件 ——
+  // 那兩者是「這顆殼的上下左右」與「錨點在哪」,跟花紋朝哪個方向無關。
+  vec3 t = researchTextureFrame(q);
   float phase01 = fract(uTime / max(uLoopDuration, 0.001));
   float cycles = floor(max(uResearchShellSpeed, 0.0) + 0.5);
   float phase = phase01 * TAU * cycles;
@@ -1236,13 +1301,13 @@ float researchShellOffset(vec3 p){
 
   // 「無」(6,跟毛細波同一個編號)只把紋理本身歸零,不是整段提早 return——
   // 下面的側面遮罩與誕生事件跟紋理選擇無關,選「無」時外殼仍該呼吸、icon
-  // 誕生時仍該有隆起。7/8/9 是三種自創動態(駐波/湍流/脈動),跟 0-6 的毛細波
-  // 紋理並存於同一個選單,不是取代關係。
+  // 誕生時仍該有隆起。7 是自創動態「駐波」,跟 0-6 的毛細波紋理並存於同一個
+  // 選單,不是取代關係。
   float textureType = uResearchShellTexture;
   float pattern = 0.0;
   if (textureType < 5.5) {
-    float field = q.x;
-    float lateral = q.y;
+    float field = t.x;
+    float lateral = t.y;
     float fieldPeriod = max(2.0, floor(density * 3.0 + 0.5));
     // fieldTravel 每圈前進 cycles 個 fieldPeriod——cycles 是整數,所以循環邊界
     // 精確對齊(理由同 researchShellEvent 上方那段駐波用整數諧波的說明)。
@@ -1251,12 +1316,9 @@ float researchShellOffset(vec3 p){
     pattern = researchProceduralTexture(
       textureType, field, lateral, travelPhase, density, fieldTravel, fieldPeriod
     );
-  } else if (textureType < 7.5) {
-    pattern = researchShellStanding(q, density, phase);
-  } else if (textureType < 8.5) {
-    pattern = researchShellTurbulence(q, density, uResearchShellSpeed);
-  } else if (textureType < 9.5) {
-    pattern = researchShellPulse(q, density, phase01, uResearchShellSpeed);
+  } else if (textureType > 6.5) {
+    // 6.5 以上一律是駐波:7 是它自己,8/9 是已移除的湍流／脈動,舊存檔導過來。
+    pattern = researchShellStanding(t, density, phase);
   }
 
   float k2 = RESEARCH_SIDE_SOFT * RESEARCH_SIDE_SOFT;
@@ -1508,6 +1570,84 @@ float researchIconStage(
   return d;
 }
 
+// 內部氣泡。參考照片裡的水球內部總有幾顆大小不一的泡泡 —— 有了它們,球體
+// 內部才是「一坨有體積的液體」而不是一層空殼包著兩顆 icon。
+//
+// 泡泡直接併進 researchIconMap 的距離場,而不是另外拉一條追蹤:併進去之後,
+// 折射整條路徑完全走 icon 那一套(同一個相對折射率 researchIconRelIOR、同一段
+// 內部光程吸收、同一份色散加成),不必複製一份渲染流程,也保證泡泡與 icon
+// 看起來就是同一種玻璃 —— 那正是「折射率跟 icon 共用」該有的實作方式。
+// 顆數的編譯上限。實際畫幾顆由「氣泡數量」滑桿決定(uResearchBubbleCount),
+// 這個常數只是迴圈的靜態邊界 —— GLSL ES 1.0 的迴圈上界必須是常數,不能直接
+// 拿 uniform 當上界。
+#define RESEARCH_BUBBLE_MAX 16
+
+// 每顆泡泡的四個亂數。用無理數倍數取小數(低差異序列)而不是 hash11 的 sin:
+// 這支函式每次距離場求值都要跑「目前顆數」次,而距離場一幀被呼叫上百萬次,
+// 省下的 sin 是實打實的;低差異序列的分佈也比雜湊均勻,泡泡不結團。
+//
+// 資料只跟 index 有關,所以「數量」滑桿是純粹的增減:已經在場上的泡泡不會因為
+// 多加一顆就整批換位置,只會在尾端多長一顆出來。
+vec4 researchBubbleRand(float i){
+  return fract(vec4(0.7548777, 0.5698403, 0.8191725, 0.3819660) * (i + 1.0));
+}
+
+float researchBubbleMap(vec3 p, float phase){
+  if (uResearchBubbles < 0.5) return 1e4;
+  // 外殼的實際半徑(CPU 每幀寫入,已含呼吸與形變)。泡泡的位置與大小全部以它
+  // 為單位,外殼脹縮時泡泡跟著被帶動,而不是釘死在世界座標上。
+  float shellR = max(uDrops[0].w, 0.05);
+  float count = max(uResearchBubbleCount, 0.0);
+  if (count < 0.5) return 1e4;
+  float d = 1e4;
+  for (int i = 0; i < RESEARCH_BUBBLE_MAX; i++) {
+    // 迴圈上界是編譯期常數,真正的顆數在這裡收 —— 滑桿調低時後面那幾圈整個
+    // 跳過,不是照跑完再把結果丟掉。
+    if (float(i) >= count) break;
+    vec4 rnd = researchBubbleRand(float(i));
+    // 方向:cos(theta) 均勻取樣才會在球面上均勻分佈,直接對 theta 取樣會擠在兩極。
+    float cy = rnd.x * 2.0 - 1.0;
+    float sy = sqrt(max(1.0 - cy * cy, 0.0));
+    float az = rnd.y * TAU;
+    vec3 dir = vec3(sy * cos(az), cy, sy * sin(az));
+    // 半徑用 rnd.w 的平方分佈:小泡泡多、大泡泡少,跟參考照片一致。
+    // 兩根滑桿定義範圍,rnd.w 的平方分佈讓小泡泡多、大泡泡少。上限被拉到比
+    // 下限小的時候取兩者較大值,而不是讓 mix 反轉 —— 反轉本身看不出來,只會
+    // 讓「最大」那根滑桿的行為變得無法解釋。
+    float rMin = max(uResearchBubbleMin, 0.0);
+    float rMax = max(uResearchBubbleMax, rMin);
+    float radius = mix(rMin, rMax, rnd.w * rnd.w) * shellR;
+    // 出生時刻落在兩顆 icon 的出生之間,各自再錯開一點 —— 全部同時彈出來會
+    // 讀成一次事件,錯開才像液體裡陸續冒出來的氣泡。
+    float birth = mix(RESEARCH_BIRTH_A, RESEARCH_BIRTH_B, rnd.z) + rnd.x * 0.05;
+    float t = fract(phase - birth);
+    // 生成就是縮放:長進來、整圈停留、末段收乾。收乾的時刻正好接回自己的下一次
+    // 出生,所以循環的接縫上沒有任何跳變(跟 icon 的生命週期同一套作法)。
+    float scale = smoothstep(0.0, 0.10, t) * (1.0 - smoothstep(0.88, 1.0, t));
+    float r = radius * scale;
+    // 太小的球中央差分會取到球外面,算出來的是噪音法線而不是梯度 —— 這條線
+    // 在這個檔案裡已經付過幾次學費(見 RESEARCH_MIN_FEATURE)。
+    if (r < RESEARCH_MIN_FEATURE) continue;
+    // 落點留在外圈:中間是兩顆 icon 的活動範圍,泡泡擠進去只會互相干擾,而
+    // 參考照片裡的泡泡本來也都靠近球的邊緣。limit 是「不穿出殼外」的上界,
+    // 已扣掉外殼起伏的振幅與泡泡自身半徑。
+    float limit = max(shellR - abs(uResearchShellAmount) - r, 0.02);
+    vec3 center = dir * (mix(0.72, 0.97, rnd.z) * limit);
+    // 晃動:跟著外殼輕輕搖。相位用整數諧波(1 圈與 2 圈),循環邊界精確接回;
+    // 幅度只有殼半徑的百分之幾,讀起來是「浮在液體裡」而不是「在飛」。
+    float a = phase * TAU;
+    center += vec3(
+      sin(a + rnd.y * TAU),
+      sin(a * 2.0 + rnd.z * TAU),
+      cos(a + rnd.w * TAU)
+    ) * 0.022 * shellR;
+    float cr = length(center);
+    if (cr > limit) center *= limit / cr;
+    d = min(d, length(p - center) - r);
+  }
+  return d;
+}
+
 float researchIconMap(vec3 p){
   float phase = fract(uTime / max(uLoopDuration, 0.001));
   // A 在右、小顆,腳往右下;B 在左、大顆,腳往左下 —— 兩隻腳方向相反。
@@ -1539,7 +1679,11 @@ float researchIconMap(vec3 p){
   // 用 smin 而不是 min。間距可調之後兩顆就可能被推到相鄰，而 min 在交界會留下
   // 梯度硬折——硬折在折射玻璃裡會被放大成一條亮線（同 RESEARCH_SIDE_SOFT 那段）。
   // 融合半徑取小：離得遠時與 min 沒有可見差異，靠近時才自然拉出液體的頸子。
-  return researchSmin(a, b, 0.03);
+  float icons = researchSmin(a, b, 0.03);
+  // 泡泡用更小的融合半徑併進來:它們不該跟 icon 黏成一坨(那是兩種東西),
+  // 但也不能用 min —— 剛好擦過 icon 的那條交界會是梯度硬折,在折射玻璃裡
+  // 就是一條亮線(同上)。0.012 只夠把交界抹成一圈細圓角。
+  return researchSmin(icons, researchBubbleMap(p, phase), 0.012);
 }
 
 vec3 researchIconNormal(vec3 p){

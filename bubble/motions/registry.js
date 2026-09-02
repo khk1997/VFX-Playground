@@ -169,10 +169,12 @@ export const MOTIONS = {
       {
         // 0-6 跟毛細波的「程序紋理」是同一份詞彙與數學(見 shaders.js 的
         // researchProceduralTexture),只是餵進去的座標換成外殼自己的球面
-        // 方向,而不是毛細波的行進方向場。7-9 是三種自創動態(駐波/湍流/脈動,
-        // 見 researchShellStanding/Turbulence/Pulse),跟前面七種並存,不是
-        // 取代關係。「起伏大小」「起伏速度」「起伏密度」三根滑桿全部十種共用,
-        // 語意依各自的公式解讀。
+        // 方向,而不是毛細波的行進方向場。7 是自創動態「駐波」(見
+        // researchShellStanding),跟前面七種並存,不是取代關係。「起伏大小」
+        // 「起伏速度」「起伏密度」三根滑桿全部共用,語意依各自的公式解讀。
+        //
+        // 曾經還有 8「湍流」與 9「脈動」,已移除(理由見 shaders.js 那支駐波
+        // 上方的註解)。舊參數組合檔存得到 8/9,shader 一律把它們當駐波畫。
         //
         // 「無」用 6 而不是插在 0——理由跟毛細波那份保留註解一樣:0–5 的編號
         // 用意是「跟毛細波的 capillaryTexture 值一一對應」，方便理解，不是
@@ -187,9 +189,63 @@ export const MOTIONS = {
           { value: 4, label: 'Gradient' },
           { value: 5, label: 'Magic' },
           { value: 7, label: '駐波 Standing Wave' },
-          { value: 8, label: '湍流 Turbulence' },
-          { value: 9, label: '脈動 Pulse' },
+          // 已移除的 8／9。留成隱藏選項的理由跟 index.html 的動態模式選單一樣:
+          // 舊的參數組合檔寫進來時 value 才不會被瀏覽器丟成空字串（接著被
+          // parseFloat 變成 NaN）。shader 端把 6.5 以上一律畫成駐波。
+          { value: 8, label: '湍流（已移除，等同駐波）', hidden: true },
+          { value: 9, label: '脈動（已移除，等同駐波）', hidden: true },
         ],
+      },
+      {
+        // 紋理方向。三根合起來是一個向量,shader 端正規化後由它長出一組正交座標
+        // (沿軸／橫向／深度),程序紋理與駐波都改用那組座標,而不是寫死的
+        // q.x／q.y/q.z —— 花紋因此可以在球面上轉到任何方向。作法與毛細波的
+        // 「波向 XYZ」逐字相同(見 shaders.js 的 capillarySurfaceOffset),連預設
+        // 的正交基底構造都共用同一段數學,兩個模式的手感才會一致。
+        //
+        // 預設 (1, 0, 0):代入那段構造剛好得到 along=q.x、across=q.y、depth=q.z,
+        // 也就是加上這三根滑桿之前的行為,既有的參數組合檔看起來不會變。
+        key: 'researchTextureDirX', label: '紋理方向 X', min: -1, max: 1, step: 0.05, value: 1,
+        gate: 'researchTextureOn',
+      },
+      {
+        key: 'researchTextureDirY', label: '紋理方向 Y', min: -1, max: 1, step: 0.05, value: 0,
+        gate: 'researchTextureOn',
+      },
+      {
+        key: 'researchTextureDirZ', label: '紋理方向 Z', min: -1, max: 1, step: 0.05, value: 0,
+        gate: 'researchTextureOn',
+      },
+      {
+        // 內部氣泡。開關而不是「數量」滑桿:顆數、大小、落點都是照參考照片配好的
+        // 一組(見 shaders.js 的 researchBubbleMap),要調的是「有沒有」。
+        // 折射率刻意不另外開一根 —— 泡泡與 icon 是同一種玻璃,共用
+        // 「icon 折射率(相對外殼)」那根滑桿。
+        key: 'researchBubbles', label: '內部氣泡', type: 'toggle', value: true,
+      },
+      {
+        // 顆數。上限 16 是 shader 端迴圈的編譯期上界(RESEARCH_BUBBLE_MAX),
+        // 兩邊必須一致 —— 這裡調高而那邊沒改的話,多出來的顆數不會出現。
+        // 0 等同關閉,但開關仍然留著:那是「這個效果要不要」,顆數是「多少顆」,
+        // 把調到一半的顆數記住、之後一鍵開回來,是兩種不同的操作。
+        key: 'researchBubbleCount', label: '氣泡數量', min: 0, max: 16, step: 1, value: 7,
+        gate: 'researchBubblesOn',
+      },
+      {
+        // 氣泡的大小範圍。兩顆值都是「外殼半徑的倍數」,不是世界尺度 —— 外殼
+        // 大小一改,氣泡跟著等比例走,不必重調。七顆的實際半徑落在這個區間裡,
+        // 分佈偏小(見 researchBubbleMap 的平方分佈),所以拉大上限是「多幾顆
+        // 明顯的大泡泡」,不是整批一起變大。
+        //
+        // 下限 0.01 大約是外殼半徑的 1%,再小就會細過法線取樣間距而消失
+        // (shader 端另有 RESEARCH_MIN_FEATURE 這條保險)。
+        key: 'researchBubbleMin', label: '氣泡最小', min: 0.01, max: 0.2, step: 0.005, value: 0.03,
+        gate: 'researchBubblesOn',
+      },
+      {
+        // 上限若被拉到比下限還小,shader 端會直接取兩者的最大值,不會反轉。
+        key: 'researchBubbleMax', label: '氣泡最大', min: 0.01, max: 0.2, step: 0.005, value: 0.12,
+        gate: 'researchBubblesOn',
       },
       {
         key: 'researchShellAmount', label: '外殼起伏大小',
@@ -624,10 +680,18 @@ export const MOTION_PARAMS = Object.fromEntries(entries.map(([key, motion]) => [
 // 明確是「數值滑桿」那一組，它的通用綁定迴圈對每個 key 一律 parseFloat——字串混
 // 進去會變成 NaN。改走一張獨立的表，跟 SELECTS／TOGGLES／COLORS 各有各的表是
 // 同一個作法。
+// 布林參數（type: 'toggle'）同理：它走的是 bubble.js 的 TOGGLES 那條路
+// （checkbox + applyToggle），不是滑桿那條 parseFloat 的路。
 const isTextParam = param => param.type === 'text';
+const isToggleParam = param => param.type === 'toggle';
 export const MOTION_PARAM_DEFAULTS = Object.fromEntries(
   entries.flatMap(([, motion]) => (motion.params || [])
-    .filter(param => !isTextParam(param))
+    .filter(param => !isTextParam(param) && !isToggleParam(param))
+    .map(param => [param.key, param.value])),
+);
+export const MOTION_TOGGLE_DEFAULTS = Object.fromEntries(
+  entries.flatMap(([, motion]) => (motion.params || [])
+    .filter(isToggleParam)
     .map(param => [param.key, param.value])),
 );
 export const MOTION_TEXT_DEFAULTS = Object.fromEntries(

@@ -13,17 +13,17 @@ import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
-  MOTION_TEXT_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=shape-softness-b-1';
+  MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
+} from './motions/registry.js?v=whisper-bubbles-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-76';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=shape-softness-b-1';
-import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=shape-softness-b-1';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=whisper-bubbles-1';
+import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=whisper-bubbles-1';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
-import createResearchMotion from './motions/research.js?v=shape-softness-b-1';
+import createResearchMotion from './motions/research.js?v=whisper-bubbles-1';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
@@ -638,6 +638,10 @@ const TOGGLE_DEFAULTS = {
   // 形狀匯聚的成型波前總開關（見 motions/formation.js 的「成型波前」）。關閉時
   // 退回舊的全域等距侵蝕，水滴也改回照 h3 亂數錯開抵達。
   formationFrontOn: true,
+  // 模式自己宣告的布林參數（registry 的 type: 'toggle'）。面板控制項由
+  // buildExtendedMotionControls 生成，其餘一切（綁定、存檔、重設）都跟上面
+  // 這幾顆手寫的開關走同一條路。
+  ...MOTION_TOGGLE_DEFAULTS,
 };
 const COLOR_DEFAULTS  = {
   bgColor: '#000000',
@@ -845,6 +849,9 @@ const TOGGLES = {
   // updateDropUniforms），不是這裡寫一次就固定的布林 uniform——關掉的當下還要
   // 把 uShapeCut 那組還原成其他模式看得懂的值。
   formationFrontOn: () => {},
+  // 私語模式的內部氣泡。shader 端只讀這一顆 uniform 決定畫不畫（見
+  // researchBubbleMap），折射率與 icon 共用，不需要別的同步。
+  researchBubbles: 'uResearchBubbles',
 };
 
 const DISPERSION_TOGGLE_KEYS = ['dispersionEnabled', 'rayDispersionEnabled', 'spectralCausticEnabled'];
@@ -904,6 +911,12 @@ const fmt = {
   capillaryDirectionX: v => v.toFixed(2),
   capillaryDirectionY: v => v.toFixed(2),
   capillaryDirectionZ: v => v.toFixed(2),
+  researchTextureDirX: v => v.toFixed(2),
+  researchTextureDirY: v => v.toFixed(2),
+  researchTextureDirZ: v => v.toFixed(2),
+  researchBubbleCount: v => v.toFixed(0),
+  researchBubbleMin: v => v.toFixed(3),
+  researchBubbleMax: v => v.toFixed(3),
   capillaryCrestSoftness: v => Math.round(v * 100) + '%',
   capillaryWarp: v => Math.round(v * 100) + '%',
   patternSpeed: v => 'x' + v.toFixed(2),
@@ -1115,7 +1128,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=shape-softness-b-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=whisper-bubbles-1';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
@@ -4253,6 +4266,13 @@ function initGL() {
     uResearchShellSpeed: { value: P.researchShellSpeed },
     uResearchShellDensity: { value: P.researchShellDensity },
     uResearchShellTexture: { value: P.researchShellTexture },
+    uResearchBubbles: { value: P.researchBubbles ? 1 : 0 },
+    uResearchBubbleCount: { value: P.researchBubbleCount },
+    uResearchBubbleMin: { value: P.researchBubbleMin },
+    uResearchBubbleMax: { value: P.researchBubbleMax },
+    uResearchTextureDirX: { value: P.researchTextureDirX },
+    uResearchTextureDirY: { value: P.researchTextureDirY },
+    uResearchTextureDirZ: { value: P.researchTextureDirZ },
     uResearchIconIOR: { value: P.researchIconIOR },
     uResearchIconSizeA: { value: P.researchIconSizeA },
     uResearchIconSizeB: { value: P.researchIconSizeB },
@@ -4754,7 +4774,18 @@ function buildExtendedMotionControls() {
         : 'input';
       const control = document.createElement(tag);
       control.id = param.key;
-      if (param.type === 'text') {
+      // 布林參數走面板既有的開關樣式（.toggleRow + 隱藏的 checkbox + 一條
+      // switchTrack），跟手寫在 index.html 裡的那幾顆開關長得一模一樣；
+      // 綁定與存檔也因此完全共用 TOGGLES 那條路，不必另外處理。
+      let track = null;
+      if (param.type === 'toggle') {
+        row.classList.add('toggleRow');
+        control.type = 'checkbox';
+        control.checked = Boolean(param.value);
+        track = document.createElement('span');
+        track.className = 'switchTrack';
+        track.setAttribute('aria-hidden', 'true');
+      } else if (param.type === 'text') {
         // 一行一句。rows 給 3 是「看得到三句、超過就自己捲」的折衷——面板本來就窄，
         // 再高會把下面的時間軸滑桿推出可視範圍。
         control.rows = 3;
@@ -4766,6 +4797,8 @@ function buildExtendedMotionControls() {
           const option = document.createElement('option');
           option.value = String(optionSpec.value);
           option.textContent = optionSpec.label;
+          // 已移除的舊值留成隱藏選項（見 registry 裡的說明）。
+          if (optionSpec.hidden) option.hidden = true;
           control.append(option);
         }
       } else {
@@ -4774,11 +4807,12 @@ function buildExtendedMotionControls() {
         control.max = String(param.max);
         control.step = String(param.step);
       }
-      control.value = String(param.value);
+      if (param.type !== 'toggle') control.value = String(param.value);
       const value = document.createElement('span');
       value.className = 'val';
       if (param.type !== 'select') value.id = `${param.key}_v`;
-      row.append(label, control, value);
+      if (track) row.append(label, control, track, value);
+      else row.append(label, control, value);
       block.append(row);
       // 文字輸入底下掛一行狀態：幾句、烘出幾個字形、字體有沒有 fallback。
       // 字體 fallback 是靜默的（fillText 找不到就換一套字形），沒有這行的話
@@ -4838,6 +4872,8 @@ function bindControls() {
       // 走 SELECTS 的字串型 select 在 change 時會自動呼叫 updateUIState() 與
       // syncShaderVariant()，但這兩個走的是這裡的數值型通用迴圈，得自己補。
       if (key === 'capillaryTexture') applyGates();
+      // 同理：私語的程序紋理選「無」時，紋理方向那三根滑桿要一起收起來。
+      if (key === 'researchShellTexture') applyGates();
       if (key === 'staticShape' && previousValue !== P[key]) {
         applyGates();
         // 內建幾何走程序化 SDF、匯入走形狀場，是兩支不同的 shader。少了這行，
@@ -5089,6 +5125,9 @@ const GATES = {
   staticShapeImport:    () => P.staticShape === 7,
   // 程序紋理的總開關：選「無」（6）時整組波紋參數都沒有作用，一併收起來。
   capillaryTextureOn:   () => Math.round(P.capillaryTexture) !== 6,
+  // 私語的兩組附屬參數，理由同上：關掉／選「無」之後那些滑桿沒有作用。
+  researchTextureOn:    () => Math.round(P.researchShellTexture) !== 6,
+  researchBubblesOn:    () => P.researchBubbles,
 };
 
 function gateOpen(spec) {
