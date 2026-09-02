@@ -270,7 +270,10 @@
     </div>
   </details>
 
-  <details class="group" data-gate="!capillary !static !typewriter" open>
+  <!-- 私語也排除：那個模式固定一顆主滴（就是外殼），這一組裡真正有作用的
+       水滴大小與表面起伏三根已經借進「動態」裡的「外殼 Shell」那一節（見
+       motions/registry.js 的 type: 'borrow'），其餘幾根在該模式下沒有作用。 -->
+  <details class="group" data-gate="!capillary !static !typewriter !research" open>
     <summary><h3>水滴形態 Droplets</h3></summary>
     <div class="row"><label>水滴數量</label><input type="range" id="count" min="0" max="12" step="1" value="2"><span class="val" id="count_v"></span></div>
     <div class="row"><label>水滴大小</label><input type="range" id="radius" min="0" max="1.1" step="0.01" value="0.4"><span class="val" id="radius_v"></span></div>
@@ -551,6 +554,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=whisper-ui-1"></script>
+<script type="module" src="./bubble.js?v=whisper-ui-2"></script>
 </body>
 </html>

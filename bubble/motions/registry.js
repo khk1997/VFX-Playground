@@ -167,6 +167,39 @@ export const MOTIONS = {
     },
     params: [
       {
+        // 外殼本身：大小、呼吸，以及那層雜訊起伏。這一節的四根滑桿有三根來自
+        // 通用的「水滴形態」那一組（radius / wobble…）—— 在這個模式裡它們講的
+        // 其實就是這顆外殼。type: 'borrow' 把既有的控制項整列搬進這一節（見
+        // bubble.js 的 syncBorrowedRows），不是另外開一份新參數：值、uniform、
+        // 參數組合檔全部沿用同一個 key，離開私語模式時原封不動搬回去。
+        //
+        // 通用組其餘幾根在這個模式下沒有作用，所以「水滴形態」整組在私語模式
+        // 收起來（見 index.html 的 gate）：黏性融合只在 count > 1 時進 smin，
+        // 而私語固定一顆；表面張力與慣性形變是拿水滴速度算的，私語的主滴定在
+        // 原點、速度恆為 0；漂浮範圍乘的是水滴自己的軌道，私語沒有軌道。
+        type: 'subgroup', label: '外殼 Shell',
+      },
+      {
+        // 通用名稱是「水滴大小」，但在這個模式裡它就是整顆外殼的半徑。
+        type: 'borrow', key: 'radius', label: '外殼大小',
+      },
+      {
+        key: 'researchBreath', label: '呼吸幅度',
+        min: 0, max: 0.06, step: 0.001, value: 0.02,
+      },
+      {
+        // 這三根是另一套起伏：fbm 雜訊直接加在距離場上，跟下一節的程序紋理是兩
+        // 個獨立的系統。名稱刻意跟紋理那三根區隔（起伏 vs 雜訊），不然「起伏
+        // 大小」與「表面起伏」放在同一個面板裡分不出誰是誰。
+        type: 'borrow', key: 'wobble', label: '表面雜訊',
+      },
+      {
+        type: 'borrow', key: 'wobbleScale', label: '雜訊尺度',
+      },
+      {
+        type: 'borrow', key: 'wobbleSpeed', label: '雜訊動畫',
+      },
+      {
         // 分節。往下到下一個 subgroup 為止的參數都收在這一節裡（見 bubble.js 的
         // buildExtendedMotionControls）。私語的參數多到攤平之後讀不出從屬關係 ——
         // 尤其「起伏大小／速度／密度」其實是程序紋理的振幅、速度與密度，跟紋理
@@ -237,15 +270,6 @@ export const MOTIONS = {
       {
         key: 'researchTextureDirZ', label: '方向 Z', min: -1, max: 1, step: 0.05, value: 0,
         gate: 'researchTextureOn',
-      },
-      {
-        // 呼吸跟紋理無關（它動的是整顆殼的體積，不是表面花紋），所以自成一節，
-        // 而不是掛在紋理那一節的尾巴。
-        type: 'subgroup', label: '外殼動態 Shell Motion',
-      },
-      {
-        key: 'researchBreath', label: '呼吸幅度',
-        min: 0, max: 0.06, step: 0.001, value: 0.02,
       },
       {
         // 帶開關的分節：key 一填，這個布林就長在小節標題上（沿用面板既有的
@@ -708,7 +732,11 @@ export const MOTION_PARAMS = Object.fromEntries(entries.map(([key, motion]) => [
 const isTextParam = param => param.type === 'text';
 const isToggleParam = param => param.type === 'toggle'
   || (param.type === 'subgroup' && Boolean(param.key));
-const isLayoutParam = param => param.type === 'subgroup' && !param.key;
+// 'borrow' 借的是別處既有的控制項（同一個 key、同一份 P、同一顆 uniform），
+// 這裡只是宣告「它在這個模式的面板上該站哪裡」，本身不帶預設值 —— 混進
+// MOTION_PARAM_DEFAULTS 的話會用 undefined 蓋掉那個參數真正的預設值。
+const isLayoutParam = param => (param.type === 'subgroup' && !param.key)
+  || param.type === 'borrow';
 export const MOTION_PARAM_DEFAULTS = Object.fromEntries(
   entries.flatMap(([, motion]) => (motion.params || [])
     .filter(param => !isTextParam(param) && !isToggleParam(param) && !isLayoutParam(param))

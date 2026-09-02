@@ -14,16 +14,16 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=whisper-ui-1';
+} from './motions/registry.js?v=whisper-ui-2';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-76';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=whisper-ui-1';
-import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=whisper-ui-1';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=whisper-ui-2';
+import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=whisper-ui-2';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
-import createResearchMotion from './motions/research.js?v=whisper-ui-1';
+import createResearchMotion from './motions/research.js?v=whisper-ui-2';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
@@ -1128,7 +1128,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=whisper-ui-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=whisper-ui-2';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
@@ -4805,6 +4805,17 @@ function buildExtendedMotionControls() {
         container = buildMotionSubgroup(param, block);
         continue;
       }
+      // 借來的控制項本體在別處（index.html 裡的通用組），這裡只放一個錨點標記
+      // 它該插在哪一格；真正的搬移在 syncBorrowedRows，隨模式切換來回。
+      if (param.type === 'borrow') {
+        const anchor = document.createElement('div');
+        anchor.className = 'borrowAnchor';
+        anchor.dataset.borrow = param.key;
+        if (param.label) anchor.dataset.borrowLabel = param.label;
+        anchor.style.display = 'none';
+        container.append(anchor);
+        continue;
+      }
       const row = document.createElement('div');
       row.className = 'row';
       row.id = `${param.key}Row`;
@@ -5211,7 +5222,65 @@ function applyGates() {
   });
 }
 
+// 借來的控制項：key -> 借出前的原位與原本的標籤。原位記的是「後面第一個這次
+// 不會被借走的兄弟」而不是索引或 nextSibling：同一組裡連續好幾列一起被借走時，
+// 索引會隨著前面幾列被抽走而位移，nextSibling 又可能自己也不在原位；記一個
+// 「留在原地不動」的參考點，插回去才穩。order 只用來決定歸還的先後。
+const borrowedRows = new Map();
+
+// 把宣告了 type: 'borrow' 的控制項搬進當前模式的小節，離開時搬回原位。
+//
+// 為什麼是「搬」而不是「在模式面板裡再開一份」：那些參數（水滴大小、表面起伏…）
+// 在私語模式裡講的就是外殼本身，是同一個 P、同一顆 uniform、參數組合檔裡的同一
+// 個 id。再開一份等於把同一個狀態放兩個地方，遲早要處理兩邊同步。
+function syncBorrowedRows() {
+  const wanted = new Map();
+  document.querySelectorAll('#extendedMotionControls .borrowAnchor').forEach(anchor => {
+    const block = anchor.closest('.modeBlock');
+    if (block && block.dataset.gate && !gateOpen(block.dataset.gate)) return;
+    wanted.set(anchor.dataset.borrow, anchor);
+  });
+
+  // 先全部歸還，再借需要的。同一個參考點前面若要放回好幾列，照借出時的先後
+  // 插入，順序才會還原成原本的樣子。
+  const returning = [...borrowedRows.entries()]
+    .filter(([key]) => !wanted.has(key))
+    .sort((a, b) => a[1].order - b[1].order);
+  for (const [key, state] of returning) {
+    const before = state.next && state.next.parentElement === state.parent ? state.next : null;
+    state.parent.insertBefore(state.row, before);
+    state.labelEl.textContent = state.label;
+    borrowedRows.delete(key);
+  }
+
+  // 這一輪會被搬走的列，用來找出「留在原地」的參考點。
+  const leaving = new Set([...wanted.keys()].filter(key => !borrowedRows.has(key)));
+  let order = 0;
+  for (const [key, anchor] of wanted) {
+    if (borrowedRows.has(key)) continue;
+    const row = document.getElementById(key)?.closest('.row');
+    const labelEl = row?.querySelector('label');
+    if (!row || !labelEl) continue;
+    const parent = row.parentElement;
+    let next = row.nextElementSibling;
+    while (next && leaving.has(next.querySelector('input, select')?.id)) next = next.nextElementSibling;
+    borrowedRows.set(key, {
+      row,
+      parent,
+      next,
+      order: order++,
+      label: labelEl.textContent,
+      labelEl,
+    });
+    // 插在錨點後面，順序就跟 registry 裡宣告的一樣。
+    anchor.after(row);
+    if (anchor.dataset.borrowLabel) labelEl.textContent = anchor.dataset.borrowLabel;
+  }
+}
+
 function updateUIState() {
+  // 閘門之前跑：搬完之後那幾列的祖先變了，閘門要看的是搬完的位置。
+  syncBorrowedRows();
   applyGates();
   const setFeatureState = (id, enabled) => {
     const group = document.getElementById(id);
