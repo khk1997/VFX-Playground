@@ -125,7 +125,7 @@ export const MOTIONS = {
     usesShapeField: false,
     gate: 'research',
     count: 1,
-    radius: 0.76,
+    radius: 0.71,
     loopDuration: 4.5,
     dolly: false,
     overrides: {
@@ -145,7 +145,7 @@ export const MOTIONS = {
       materialExposure: 1,
       roughness: 0.16,
       fresnel: 0.45,
-      ior: 1.17,
+      ior: 1.16,
       rayDispersionEnabled: true,
       rayBeamPattern: 'grid',
       rayBeamIntensity: 17.55,
@@ -164,6 +164,18 @@ export const MOTIONS = {
       spectralCausticEnabled: false,
       dispersionEnabled: true,
       dispersionSeparation: 0.24,
+      // 使用者實測後定案的後處理整組（2026-09-02 存檔匯入）：體積吸收拉濃，
+      // 顆粒放大顆粒感、縮小粒徑，開 Bloom 與條紋光芒各自給一組收斂過的手感。
+      // 其餘後處理欄位（門檻、強度、擴散範圍…）沒有列在這裡，維持全域預設 ——
+      // 使用者只調了這幾根，其餘沒有理由跟著漂。
+      absorb: 5.3,
+      postGrain: 0.033,
+      postGrainScale: 0.6,
+      bloomEnabled: true,
+      streaksEnabled: true,
+      streakCount: 2,
+      streakLength: 0.37,
+      streakIntensity: 0.55,
     },
     params: [
       {
@@ -185,7 +197,7 @@ export const MOTIONS = {
       },
       {
         key: 'researchBreath', label: '呼吸幅度',
-        min: 0, max: 0.06, step: 0.001, value: 0.02,
+        min: 0, max: 0.06, step: 0.001, value: 0.033,
       },
       {
         // 這三根是另一套起伏：fbm 雜訊直接加在距離場上，跟下一節的程序紋理是兩
@@ -283,7 +295,7 @@ export const MOTIONS = {
         // 兩邊必須一致 —— 這裡調高而那邊沒改的話,多出來的顆數不會出現。
         // 0 等同關閉,但開關仍然留著:那是「這個效果要不要」,顆數是「多少顆」,
         // 把調到一半的顆數記住、之後一鍵開回來,是兩種不同的操作。
-        key: 'researchBubbleCount', label: '數量', min: 0, max: 40, step: 1, value: 7,
+        key: 'researchBubbleCount', label: '數量', min: 0, max: 40, step: 1, value: 16,
         gate: 'researchBubblesOn',
       },
       {
@@ -294,12 +306,12 @@ export const MOTIONS = {
         //
         // 下限 0.01 大約是外殼半徑的 1%,再小就會細過法線取樣間距而消失
         // (shader 端另有 RESEARCH_MIN_FEATURE 這條保險)。
-        key: 'researchBubbleMin', label: '大小下限', min: 0.01, max: 0.2, step: 0.005, value: 0.03,
+        key: 'researchBubbleMin', label: '大小下限', min: 0.01, max: 0.2, step: 0.005, value: 0.015,
         gate: 'researchBubblesOn',
       },
       {
         // 上限若被拉到比下限還小,shader 端會直接取兩者的最大值,不會反轉。
-        key: 'researchBubbleMax', label: '大小上限', min: 0.01, max: 0.2, step: 0.005, value: 0.12,
+        key: 'researchBubbleMax', label: '大小上限', min: 0.01, max: 0.2, step: 0.005, value: 0.035,
         gate: 'researchBubblesOn',
       },
       {

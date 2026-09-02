@@ -14,16 +14,16 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=tonemap-agx-1';
+} from './motions/registry.js?v=research-preset-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-76';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=tonemap-agx-1';
-import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=tonemap-agx-1';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=research-preset-1';
+import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=research-preset-1';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
-import createResearchMotion from './motions/research.js?v=tonemap-agx-1';
+import createResearchMotion from './motions/research.js?v=research-preset-1';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
@@ -809,6 +809,12 @@ const MOTION_SCOPED_KEYS = [
   // 靜態模式只是拿它在幾何體表面做一層很淡的質感。不按模式記憶的話，把靜態
   // 想要的數值設成預設會連帶改掉毛細波，反之亦然。
   'capillaryTexture', 'capillaryHeight', 'capillaryRings', 'capillarySpeed',
+  // 後處理是全域一份 DEFAULTS/TOGGLE_DEFAULTS，跟材質那組同樣的道理：私語
+  // 指定了一組後處理手感（見 registry.js 的 overrides），沒有按模式記憶的話
+  // 這些值只會在切進私語的那一刻套用一次，之後被使用者調過、切到別的模式
+  // 再切回來就再也拿不回研究預設，而是沿用使用者上次調到的全域值。
+  'absorb', 'postGrain', 'postGrainScale',
+  'bloomEnabled', 'streaksEnabled', 'streakCount', 'streakLength', 'streakIntensity',
 ];
 function motionDefaultsFor(key) {
   const base = key in DEFAULTS ? DEFAULTS[key]
@@ -1205,8 +1211,8 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=tonemap-agx-1';
-import { createPostChain } from './post.js?v=tonemap-agx-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=research-preset-1';
+import { createPostChain } from './post.js?v=research-preset-1';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
