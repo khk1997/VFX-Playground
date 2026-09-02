@@ -112,14 +112,30 @@ uniform sampler2D uBloom;
 uniform float uIntensity;
 uniform vec3 uTint;
 uniform float uTransparent;
+uniform float uExposure;
+uniform int uToneMap;
+
+// 0 無：只交給輸出格式夾掉，等於後處理加入之前的行為。
+// 1 Reinhard：c/(1+c)，任何量級都收得進 0–1，但整體會偏灰。
+// 2 ACES（Narkowicz 的曲線擬合）：高光滾降得更晚、對比保留得更好，是「電影感」
+//   那條。0.6 是把它對齊「1.0 大致仍是 1.0」的常用係數。
+vec3 applyToneMap(vec3 c){
+  if (uToneMap == 1) return c / (1.0 + c);
+  if (uToneMap == 2) {
+    vec3 x = c * 0.6;
+    return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+  }
+  return c;
+}
+
 void main(){
   vec4 base = texture2D(uScene, vUv);
   vec3 bloom = texture2D(uBloom, vUv).rgb * uIntensity * uTint;
   if (uTransparent < 0.5) {
-    gl_FragColor = vec4(base.rgb + bloom, base.a);
+    gl_FragColor = vec4(applyToneMap((base.rgb + bloom) * uExposure), base.a);
     return;
   }
-  vec3 premultiplied = base.rgb * base.a + bloom;
+  vec3 premultiplied = applyToneMap((base.rgb * base.a + bloom) * uExposure);
   float alpha = clamp(base.a + max(bloom.r, max(bloom.g, bloom.b)), 0.0, 1.0);
   gl_FragColor = vec4(premultiplied / max(alpha, 0.0001), alpha);
 }
@@ -142,6 +158,29 @@ function createTarget(width, height, type = THREE.HalfFloatType) {
   target.texture.generateMipmaps = false;
   target.texture.colorSpace = THREE.NoColorSpace;
   return target;
+}
+
+// 全尺寸中間貼圖的型別。半浮點是為了留住高於 1 的高光（見主 shader 的
+// uHdrOutput）—— 沒有它，bloom 的門檻只能設在 1 以下，取出的是正常畫面的一部分
+// 而不是溢出的能量。
+//
+// 但匯出是 4× 超採樣：1080p 的成品換算成 7680×4320，半浮點 RGBA 就是 265MB。
+// 超過上限時退回 8-bit（高光在那裡會被夾掉，光暈比預覽弱），並且明講 —— 靜默地
+// 換掉輸出的成色是最糟的處理方式。
+const MAX_HDR_BYTES = 512 * 1024 * 1024;
+let hdrFallbackWarned = false;
+
+function sceneTypeFor(target) {
+  if (!target) return THREE.HalfFloatType;
+  const bytes = target.width * target.height * 8;
+  if (bytes <= MAX_HDR_BYTES) return THREE.HalfFloatType;
+  if (!hdrFallbackWarned) {
+    hdrFallbackWarned = true;
+    console.warn('[bubble] 這個匯出尺寸的 HDR 中間緩衝區超過 '
+      + Math.round(MAX_HDR_BYTES / 1024 / 1024) + 'MB，改用 8-bit：'
+      + '高光會被夾在 1，光暈會比預覽弱。降低輸出尺寸即可恢復。');
+  }
+  return THREE.UnsignedByteType;
 }
 
 export function createPostChain(renderer) {
@@ -182,7 +221,14 @@ export function createPostChain(renderer) {
     uIntensity: { value: 0.6 },
     uTint: { value: new THREE.Color(1, 1, 1) },
     uTransparent: { value: 0 },
+    uExposure: { value: 1 },
+    uToneMap: { value: 0 },
   });
+
+  // bloom 關著（強度 0）時整條模糊鏈都不跑，合成 pass 仍需要一張圖可以取樣。
+  const blackPixel = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
+  blackPixel.colorSpace = THREE.NoColorSpace;
+  blackPixel.needsUpdate = true;
 
   let sceneTarget = null;
   let levels = [];
@@ -248,11 +294,26 @@ export function createPostChain(renderer) {
       target ? target.width : drawingBufferSize.x,
       target ? target.height : drawingBufferSize.y,
       2 * Math.max(1, params.superSample || 1),
-      target ? THREE.UnsignedByteType : THREE.HalfFloatType,
+      sceneTypeFor(target),
     );
 
     renderer.setRenderTarget(sceneTarget);
     renderer.render(scene, camera);
+
+    // 只有曝光／色調映射在用時，跳過整條模糊鏈 —— 那是十幾個 pass，不該為了一次
+    // 乘法白跑。
+    if (params.intensity <= 0) {
+      compositeMaterial.uniforms.uScene.value = sceneTarget.texture;
+      compositeMaterial.uniforms.uBloom.value = blackPixel;
+      compositeMaterial.uniforms.uIntensity.value = 0;
+      compositeMaterial.uniforms.uTint.value.copy(params.tint);
+      compositeMaterial.uniforms.uTransparent.value = params.transparent ? 1 : 0;
+      compositeMaterial.uniforms.uExposure.value = params.exposure;
+      compositeMaterial.uniforms.uToneMap.value = params.toneMap;
+      blit(compositeMaterial, target || null);
+      renderer.setRenderTarget(null);
+      return;
+    }
 
     thresholdMaterial.uniforms.uScene.value = sceneTarget.texture;
     thresholdMaterial.uniforms.uThreshold.value = params.threshold;
@@ -289,6 +350,8 @@ export function createPostChain(renderer) {
     compositeMaterial.uniforms.uIntensity.value = params.intensity;
     compositeMaterial.uniforms.uTint.value.copy(params.tint);
     compositeMaterial.uniforms.uTransparent.value = params.transparent ? 1 : 0;
+    compositeMaterial.uniforms.uExposure.value = params.exposure;
+    compositeMaterial.uniforms.uToneMap.value = params.toneMap;
     blit(compositeMaterial, target || null);
     renderer.setRenderTarget(null);
   }

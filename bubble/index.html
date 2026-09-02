@@ -416,9 +416,15 @@
        跳過（見 bubble.js 的 renderComposite），畫面與加入這一段之前完全一致。 -->
   <details class="group">
     <summary><h3>後處理 Post</h3></summary>
+    <div class="row"><label>曝光</label><input type="range" id="postExposure" min="0.1" max="4" step="0.01" value="1"><span class="val" id="postExposure_v"></span></div>
+    <div class="row"><label>色調映射</label><select id="postToneMap">
+      <option value="none" selected>無</option>
+      <option value="reinhard">Reinhard</option>
+      <option value="aces">ACES Filmic</option>
+    </select><span class="val"></span></div>
     <details class="subgroup" id="bloomGroup">
       <summary><h4>光暈 Bloom</h4><span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="bloomEnabled"><span class="switchTrack" aria-hidden="true"></span></span></summary>
-      <div class="row" data-gate="bloomOn"><label>亮部門檻</label><input type="range" id="bloomThreshold" min="0" max="1" step="0.01" value="0.75"><span class="val" id="bloomThreshold_v"></span></div>
+      <div class="row" data-gate="bloomOn"><label>亮部門檻</label><input type="range" id="bloomThreshold" min="0" max="4" step="0.01" value="1"><span class="val" id="bloomThreshold_v"></span></div>
       <div class="row" data-gate="bloomOn"><label>門檻柔度</label><input type="range" id="bloomKnee" min="0" max="1" step="0.01" value="0.5"><span class="val" id="bloomKnee_v"></span></div>
       <div class="row" data-gate="bloomOn"><label>強度</label><input type="range" id="bloomIntensity" min="0" max="3" step="0.01" value="0.6"><span class="val" id="bloomIntensity_v"></span></div>
       <div class="row" data-gate="bloomOn"><label>擴散範圍</label><input type="range" id="bloomRadius" min="0" max="1" step="0.01" value="0.7"><span class="val" id="bloomRadius_v"></span></div>
@@ -572,6 +578,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=post-bloom-1"></script>
+<script type="module" src="./bubble.js?v=post-hdr-1"></script>
 </body>
 </html>

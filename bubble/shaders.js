@@ -323,6 +323,19 @@ uniform vec3  uBgColor;
 uniform float uEnvRefraction;
 uniform float uReflect;
 uniform float uTransmission;
+// 輸出是否保留高於 1 的量級。0（直接畫到 8-bit canvas，也是後處理加入之前的
+// 行為）時最後一步照舊夾在 0–1；1（畫進後處理的半浮點貼圖）時只擋負值。
+//
+// 這一顆存在的理由是 bloom：夾在 1 的畫面沒有「溢出來的能量」這種東西，門檻只能
+// 設在 1 以下，取出的是正常畫面的一部分，糊開之後是一層白霧而不是光。環境反射
+// （HDRI 經 PMREM 之後本來就可能遠大於 1）乘上反射強度與材質曝光，真正的高光
+// 量級一直都在，只是被最後那行 clamp 丟掉了。
+uniform float uHdrOutput;
+
+vec3 clampOutput(vec3 c){
+  return uHdrOutput > 0.5 ? max(c, vec3(0.0)) : clamp(c, 0.0, 1.0);
+}
+
 // 體積吸收：濃度倍率與液體顏色。預設（×1 與 #68b2e7）算出來的係數就是這兩個
 // 控制項出現以前寫死的 vec3(0.045, 0.018, 0.005)，誤差在 8-bit 選色器的捨入
 // 範圍內 —— 預設不改變任何模式的外觀。
@@ -3836,7 +3849,7 @@ void main(){
       0.0,
       1.0
     );
-    finalColor = clamp(finalColor + universalTransmitted * (1.0 - universalCovered), 0.0, 1.0);
+    finalColor = clampOutput(finalColor + universalTransmitted * (1.0 - universalCovered));
   }
 
   // 稜光光芒的減法那一半，套在「已經合成完背景」的顏色上。
@@ -3848,7 +3861,7 @@ void main(){
   // 對其餘材質同樣有效：universalGlass 為假時上面那個 if 整段跳過，但 finalColor
   // 此時也已經是合成完的顏色，乘上去的語意一致。暗底時 beamAbsorb 恆為 vec3(1)，
   // 這一行是精確的恆等運算。
-  finalColor = clamp(finalColor * beamAbsorb, 0.0, 1.0);
+  finalColor = clampOutput(finalColor * beamAbsorb);
 
 #ifdef FEATURE_RESEARCH
   if (researchIconHit) {

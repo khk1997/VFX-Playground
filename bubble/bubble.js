@@ -14,16 +14,16 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=post-bloom-1';
+} from './motions/registry.js?v=post-hdr-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-76';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=post-bloom-1';
-import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=post-bloom-1';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=post-hdr-1';
+import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=post-hdr-1';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
-import createResearchMotion from './motions/research.js?v=post-bloom-1';
+import createResearchMotion from './motions/research.js?v=post-hdr-1';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
@@ -350,10 +350,13 @@ const DEFAULTS = {              // 數值滑桿
   // 後處理。全部預設關閉（bloomEnabled 在 TOGGLE_DEFAULTS），關閉時整條鏈直接
   // 跳過，畫面逐位元等於加入後處理之前 —— 見 renderComposite。
   //
-  // 門檻預設 0.75 而不是 1.0：主 shader 最後一行是 clamp(finalColor, 0, 1)，
-  // 畫面沒有超過 1 的量級可以溢出（見 post.js 檔頭），門檻放在 1 等於永遠不
-  // 觸發。
-  bloomThreshold: 0.75,
+  // 門檻預設 1.0：後處理開著時主 shader 不再把輸出夾在 1（見 shaders.js 的
+  // uHdrOutput），高於 1 的部分就是物理上「溢出來」的能量，門檻放在那裡取出的
+  // 才是高光本身，而不是從正常畫面裡切一塊下來糊。
+  // 曝光在後處理鏈的合成階段套用（在 tone map 之前、bloom 加進來之後），跟材質
+  // 那根「材質曝光」不同：那一根改的是材質的能量，這一根改的是整張畫面。
+  postExposure: 1,
+  bloomThreshold: 1,
   bloomKnee: 0.5,
   bloomIntensity: 0.6,
   bloomRadius: 0.7,
@@ -611,6 +614,7 @@ const isFormationMotion = motion => motion === 'formation';
 // 匯入/顯示同一顆形狀，只是不吸收水滴、也不走 gather/hold/release 那套編排。
 // 判斷式與各模式的預設值現在都由 motions/registry.js 提供。
 const SELECT_DEFAULTS = {
+  postToneMap: 'none',
   bgMode: 'color',
   materialStyle: 'universal',
   colorMode: 'spectral',
@@ -841,6 +845,9 @@ const SELECTS = {
   // 就變成一條調了沒反應的死滑桿；而落地衝擊必須先壓扁、原地戳擊卻是先鼓起，
   // 同一組波形沒辦法同時是兩種極性。分支之後各自的參數才都是有效的。
   jellyStyle: { uniform: '', map: { poke: 0, bounce: 1 } },
+  // 色調映射同樣沒有 uniform：它是後處理合成 pass 每幀直接讀的（見
+  // renderComposite）。預設「無」＝只交給輸出格式夾掉，等於沒有這一段。
+  postToneMap: { uniform: '', map: { none: 0, reinhard: 1, aces: 2 } },
 };
 const COLORS = {
   bgColor: 'uBgColor',
@@ -944,6 +951,7 @@ const fmt = {
   researchTextureDirX: v => v.toFixed(2),
   researchTextureDirY: v => v.toFixed(2),
   researchTextureDirZ: v => v.toFixed(2),
+  postExposure: v => '×' + v.toFixed(2),
   bloomThreshold: v => v.toFixed(2),
   bloomKnee: v => v.toFixed(2),
   bloomIntensity: v => '×' + v.toFixed(2),
@@ -1163,8 +1171,8 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=post-bloom-1';
-import { createPostChain } from './post.js?v=post-bloom-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=post-hdr-1';
+import { createPostChain } from './post.js?v=post-hdr-1';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
@@ -4406,6 +4414,7 @@ function initGL() {
     uEnvRefraction: { value: P.envRefraction },
     uReflect:    { value: P.reflect },
     uTransmission: { value: P.transmission },
+    uHdrOutput: { value: 0 },
     uAbsorb: { value: P.absorb },
     uAbsorbColor: { value: new THREE.Color().setStyle(P.absorbColor, THREE.LinearSRGBColorSpace) },
     uMaterialExposure: { value: P.materialExposure },
@@ -5835,8 +5844,19 @@ const bloomTintColor = new THREE.Color();
 // 共用同一條鏈，所見才等於所得 —— 匯出漏接是這種功能最典型的破法。
 //
 // target 為 null 代表直接輸出到 canvas。
+// 後處理是否真的要跑。曝光與色調映射即使沒開 bloom 也是有效的效果，所以旁路的
+// 條件是「三者都在中性值」，不是只看 bloom。
+function postActive() {
+  return P.bloomEnabled || P.postExposure !== 1 || P.postToneMap !== 'none';
+}
+
 function renderComposite(target = null, superSample = 1) {
-  if (!P.bloomEnabled) {
+  const transparent = uniforms.uTransparentBackground.value === 1;
+  // 高於 1 的高光只有在「畫進後處理的半浮點貼圖」時才留得住。去背輸出例外：
+  // 那條路徑的反預乘推導假設值域是 0–1（見主 shader 結尾），HDR 會讓它算出
+  // 超出範圍的顏色。
+  uniforms.uHdrOutput.value = (postActive() && !transparent) ? 1 : 0;
+  if (!postActive()) {
     // 效果全關：完全走原本那條路（不配置 render target、不多任何一個 pass），
     // 畫面逐位元等於加入後處理之前。
     renderer.setRenderTarget(target);
@@ -5846,13 +5866,17 @@ function renderComposite(target = null, superSample = 1) {
   }
   if (!postChain) postChain = createPostChain(renderer);
   postChain.render(scene, camera, target, {
+    // bloom 關著時強度給 0：合成 pass 仍要跑（曝光與色調映射在那裡），但光暈
+    // 整條鏈的結果不參與。
     threshold: P.bloomThreshold,
     knee: P.bloomKnee,
-    intensity: P.bloomIntensity,
+    intensity: P.bloomEnabled ? P.bloomIntensity : 0,
     radius: P.bloomRadius,
+    exposure: P.postExposure,
+    toneMap: SELECTS.postToneMap.map[P.postToneMap],
     tint: bloomTintColor.setStyle(P.bloomTint, THREE.LinearSRGBColorSpace),
     // 去背輸出寫的是 straight alpha，光暈的取樣與合成都要換一套（見 post.js）。
-    transparent: uniforms.uTransparentBackground.value === 1,
+    transparent,
     // 匯出是超採樣的，模糊鏈要以「最終成品的尺寸」為基準展開，否則同一組參數在
     // 預覽與成品上的光暈大小會差一個超採樣倍率。
     superSample,
