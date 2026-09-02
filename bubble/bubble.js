@@ -14,16 +14,16 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=absorb-2';
+} from './motions/registry.js?v=post-bloom-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-76';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=absorb-2';
-import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=absorb-2';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=post-bloom-1';
+import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=post-bloom-1';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
-import createResearchMotion from './motions/research.js?v=absorb-2';
+import createResearchMotion from './motions/research.js?v=post-bloom-1';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
@@ -347,6 +347,16 @@ const DEFAULTS = {              // 數值滑桿
   // —— 光程長的地方變暗偏青、邊緣薄的地方仍然清透，那是眼睛判斷「這東西有
   // 厚度」的主要線索。
   absorb: 1,
+  // 後處理。全部預設關閉（bloomEnabled 在 TOGGLE_DEFAULTS），關閉時整條鏈直接
+  // 跳過，畫面逐位元等於加入後處理之前 —— 見 renderComposite。
+  //
+  // 門檻預設 0.75 而不是 1.0：主 shader 最後一行是 clamp(finalColor, 0, 1)，
+  // 畫面沒有超過 1 的量級可以溢出（見 post.js 檔頭），門檻放在 1 等於永遠不
+  // 觸發。
+  bloomThreshold: 0.75,
+  bloomKnee: 0.5,
+  bloomIntensity: 0.6,
+  bloomRadius: 0.7,
   materialExposure: 1,
   // 液態薄膜專用的低頻塑形：0 回到純透明膜，1 完整加入厚度暗部、膜褶遮蔽
   // 與非對稱反射卡。通用玻璃模式不讀取這個值。
@@ -643,6 +653,9 @@ const TOGGLE_DEFAULTS = {
   // 形狀匯聚的成型波前總開關（見 motions/formation.js 的「成型波前」）。關閉時
   // 退回舊的全域等距侵蝕，水滴也改回照 h3 亂數錯開抵達。
   formationFrontOn: true,
+  // Bloom 總開關。關閉時 renderComposite 走原本那條「直接畫到輸出」的路，
+  // 連 render target 都不會配置。
+  bloomEnabled: false,
   // 模式自己宣告的布林參數（registry 的 type: 'toggle'）。面板控制項由
   // buildExtendedMotionControls 生成，其餘一切（綁定、存檔、重設）都跟上面
   // 這幾顆手寫的開關走同一條路。
@@ -650,6 +663,8 @@ const TOGGLE_DEFAULTS = {
 };
 const COLOR_DEFAULTS  = {
   bgColor: '#000000',
+  // 光暈的顏色。白 = 不染色。
+  bloomTint: '#ffffff',
   // 液體本身的顏色（穿過參考厚度之後剩下的光，見 shaders.js 的
   // absorbCoefficient）。這個值配上濃度 ×1，算出來就是這兩個控制項出現以前
   // 寫死的吸收係數，所以預設外觀不變。
@@ -830,6 +845,9 @@ const SELECTS = {
 const COLORS = {
   bgColor: 'uBgColor',
   absorbColor: 'uAbsorbColor',
+  // 後處理的顏色不對應 uniform（它們是 post.js 每幀讀的），uniform 名稱留空，
+  // 由下面兩處的特例分支處理。
+  bloomTint: '',
   membraneBaseColor: 'uMembraneBaseColor',
   membraneVeilColor: 'uMembraneVeilColor',
   membraneReflectionColor: 'uMembraneReflectionColor',
@@ -859,6 +877,8 @@ const TOGGLES = {
   // updateDropUniforms），不是這裡寫一次就固定的布林 uniform——關掉的當下還要
   // 把 uShapeCut 那組還原成其他模式看得懂的值。
   formationFrontOn: () => {},
+  // Bloom 不對應任何 uniform：它是 renderComposite 每幀直接讀的旗標。
+  bloomEnabled: () => {},
   // 私語模式的內部氣泡。shader 端只讀這一顆 uniform 決定畫不畫（見
   // researchBubbleMap），折射率與 icon 共用，不需要別的同步。
   researchBubbles: 'uResearchBubbles',
@@ -924,6 +944,10 @@ const fmt = {
   researchTextureDirX: v => v.toFixed(2),
   researchTextureDirY: v => v.toFixed(2),
   researchTextureDirZ: v => v.toFixed(2),
+  bloomThreshold: v => v.toFixed(2),
+  bloomKnee: v => v.toFixed(2),
+  bloomIntensity: v => '×' + v.toFixed(2),
+  bloomRadius: v => v.toFixed(2),
   researchBubbleCount: v => v.toFixed(0),
   researchBubbleMin: v => v.toFixed(3),
   researchBubbleMax: v => v.toFixed(3),
@@ -1139,7 +1163,8 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=absorb-2';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=post-bloom-1';
+import { createPostChain } from './post.js?v=post-bloom-1';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
@@ -4716,6 +4741,7 @@ function syncPanelToUniforms() {
   }
   for (const key of Object.keys(TOGGLES)) applyToggle(key);
   for (const key of Object.keys(COLORS)) {
+    if (!COLORS[key]) continue;
     if (key === 'bgColor') setBgColorUniform(P[key]);
     // 吸收色不是「一道光的顏色」而是「每個通道剩下多少」的比例，所以要的是選色
     // 器上那三個原始數值，不能讓 three 的色彩管理把它當 sRGB 轉成線性（那會把
@@ -5094,7 +5120,8 @@ function bindControls() {
     const uName = COLORS[key];
     const update = () => {
       P[key] = el.value;
-      if (key === 'bgColor') setBgColorUniform(el.value);
+      if (!uName) { /* 後處理的顏色由 renderComposite 每幀直接讀 P */ }
+      else if (key === 'bgColor') setBgColorUniform(el.value);
       // 見上面 applyAllUniforms 裡同一個特例的說明。
       else if (key === 'absorbColor') { if (uniforms) uniforms[uName].value.setStyle(el.value, THREE.LinearSRGBColorSpace); }
       else if (uniforms) uniforms[uName].value.set(el.value);
@@ -5205,6 +5232,8 @@ const GATES = {
   staticShapeImport:    () => P.staticShape === 7,
   // 程序紋理的總開關：選「無」（6）時整組波紋參數都沒有作用，一併收起來。
   capillaryTextureOn:   () => Math.round(P.capillaryTexture) !== 6,
+  // 後處理各效果的附屬參數：效果關掉時那些滑桿沒有作用，一併收起來。
+  bloomOn:              () => P.bloomEnabled,
   // 私語的兩組附屬參數，理由同上：關掉／選「無」之後那些滑桿沒有作用。
   researchTextureOn:    () => Math.round(P.researchShellTexture) !== 6,
   researchBubblesOn:    () => P.researchBubbles,
@@ -5798,6 +5827,38 @@ const pauseBtnLabel = document.getElementById('playCtlLabel');
 const PAUSE_ICON = '<rect x="5" y="4" width="3.2" height="12" rx="1" fill="currentColor"/><rect x="11.8" y="4" width="3.2" height="12" rx="1" fill="currentColor"/>';
 const PLAY_ICON = '<path d="M6 4.2v11.6a.9.9 0 0 0 1.37.76l9.2-5.8a.9.9 0 0 0 0-1.52l-9.2-5.8A.9.9 0 0 0 6 4.2Z" fill="currentColor"/>';
 function isPaused() { return userPaused || extPaused || shapeConverting || exportJob || document.hidden; }
+// 後處理鏈。第一次真的要用到時才建立 —— 全部關閉時連 render target 都不該配置。
+let postChain = null;
+const bloomTintColor = new THREE.Color();
+
+// 所有輸出畫面的地方都走這一支：即時預覽、暫停時的單幀重畫、以及匯出。三條路
+// 共用同一條鏈，所見才等於所得 —— 匯出漏接是這種功能最典型的破法。
+//
+// target 為 null 代表直接輸出到 canvas。
+function renderComposite(target = null, superSample = 1) {
+  if (!P.bloomEnabled) {
+    // 效果全關：完全走原本那條路（不配置 render target、不多任何一個 pass），
+    // 畫面逐位元等於加入後處理之前。
+    renderer.setRenderTarget(target);
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(null);
+    return;
+  }
+  if (!postChain) postChain = createPostChain(renderer);
+  postChain.render(scene, camera, target, {
+    threshold: P.bloomThreshold,
+    knee: P.bloomKnee,
+    intensity: P.bloomIntensity,
+    radius: P.bloomRadius,
+    tint: bloomTintColor.setStyle(P.bloomTint, THREE.LinearSRGBColorSpace),
+    // 去背輸出寫的是 straight alpha，光暈的取樣與合成都要換一套（見 post.js）。
+    transparent: uniforms.uTransparentBackground.value === 1,
+    // 匯出是超採樣的，模糊鏈要以「最終成品的尺寸」為基準展開，否則同一組參數在
+    // 預覽與成品上的光暈大小會差一個超採樣倍率。
+    superSample,
+  });
+}
+
 function requestPausedRender() {
   // 暫停時 frame() 不跑，但循環秒數仍可能被改（拉時間軸、換模式、改文字），
   // 匯出對話框也常常是在暫停狀態下打開的，所以這條路也要廣播。
@@ -5814,7 +5875,7 @@ function requestPausedRender() {
         Math.max(1, canvas.clientHeight || document.documentElement.clientHeight),
       );
       uniforms.uMaxSteps.value = resolveMaxSteps();
-      renderer.render(scene, camera);
+      renderComposite();
       updateExportCameraPreview();
     }
   });
@@ -6586,8 +6647,7 @@ async function renderExportFrame(settings, time, target) {
   applyExportCamera(time, settings.renderWidth, settings.renderHeight, settings.fov, settings.scale, settings);
   const restoreDetail = applyExportDetailLOD(settings);
   try {
-    renderer.setRenderTarget(target);
-    renderer.render(scene, camera);
+    renderComposite(target, settings.renderWidth / Math.max(1, settings.width));
     const pixels = new Uint8Array(settings.renderWidth * settings.renderHeight * 4);
     renderer.readRenderTargetPixels(target, 0, 0, settings.renderWidth, settings.renderHeight, pixels);
     renderer.setRenderTarget(null);
@@ -6891,7 +6951,7 @@ function frame(now) {
   uniforms.uTime.value = simT;
   syncEdgeDropMotion(simT);
   uniforms.uMaxSteps.value = resolveMaxSteps();
-  renderer.render(scene, camera);
+  renderComposite();
   // 只在第一幀標記一次；之後 diagTiming.第一幀完成ms 已有值就不再量。
 
   updateExportCameraPreview();

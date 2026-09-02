@@ -410,6 +410,22 @@
 
   </details>
 
+  <!-- 後處理。這一段作用在「算完的整張畫面」上，跟材質那些沿著光路算的效果
+       （RAY 稜光、色散、焦散）是兩回事：那些是玻璃本身，這裡是相機與底片。
+       每個效果一節、開關掛在小節標題上；全部預設關閉，關閉時整條後處理鏈直接
+       跳過（見 bubble.js 的 renderComposite），畫面與加入這一段之前完全一致。 -->
+  <details class="group">
+    <summary><h3>後處理 Post</h3></summary>
+    <details class="subgroup" id="bloomGroup">
+      <summary><h4>光暈 Bloom</h4><span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="bloomEnabled"><span class="switchTrack" aria-hidden="true"></span></span></summary>
+      <div class="row" data-gate="bloomOn"><label>亮部門檻</label><input type="range" id="bloomThreshold" min="0" max="1" step="0.01" value="0.75"><span class="val" id="bloomThreshold_v"></span></div>
+      <div class="row" data-gate="bloomOn"><label>門檻柔度</label><input type="range" id="bloomKnee" min="0" max="1" step="0.01" value="0.5"><span class="val" id="bloomKnee_v"></span></div>
+      <div class="row" data-gate="bloomOn"><label>強度</label><input type="range" id="bloomIntensity" min="0" max="3" step="0.01" value="0.6"><span class="val" id="bloomIntensity_v"></span></div>
+      <div class="row" data-gate="bloomOn"><label>擴散範圍</label><input type="range" id="bloomRadius" min="0" max="1" step="0.01" value="0.7"><span class="val" id="bloomRadius_v"></span></div>
+      <div class="row" data-gate="bloomOn"><label>光暈色</label><input type="color" id="bloomTint" value="#ffffff"><span class="val"></span></div>
+    </details>
+  </details>
+
   <details class="group">
     <summary><h3>鏡頭 Camera</h3></summary>
     <div class="row"><label>鏡頭距離</label><input type="range" id="cameraDistance" min="2.8" max="10" step="0.05" value="5.5"><span class="val" id="cameraDistance_v"></span></div>
@@ -556,6 +572,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=absorb-2"></script>
+<script type="module" src="./bubble.js?v=post-bloom-1"></script>
 </body>
 </html>
