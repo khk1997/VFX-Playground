@@ -72,17 +72,31 @@ void main(){
 }
 `;
 
-// 升採：把下一層（更小、更糊）的結果模糊之後，跟本層的降採結果混合。
-// uRadius 就是混多少 —— 0 是幾乎只留本層（緊實的光暈），1 是幾乎只留低頻
-// （大範圍的暈開）。這是 Unity 那套 bloom 的 scatter，比「半徑幾像素」好調，
-// 也不會因為解析度改變而改變手感。
+// 升採：把下一層（更小、更糊）的結果模糊之後，「加」到本層的降採結果上。
+//
+// 這裡本來是 mix(here, lower, radius)，也就是兩者取代式地混合。那個寫法有個致命
+// 的問題：降採是平均，一小塊高光被攤到 64 倍面積之後每像素只剩幾百分之一，取代式
+// 混合等於「把緊實的光暈換成一片看不見的霧」—— 擴散範圍拉到 1 反而什麼都看不到，
+// 使用者只好把門檻壓到 0.03、強度拉到 3 硬換亮度，結果整顆球糊掉。
+//
+// 改成累加之後，每一個尺度都疊在一起（等於一組不同寬度的高斯相加，那正是 Blender
+// Fog Glow 用 FFT 卷積一個大核心在做的事）：uWeight 控制每往低頻走一層要加多少。
+//
+// 權重可以大於 1，而且預設就會 —— 滑桿的 0–1 對應到 0–2。理由是能量守恆：降採是
+// 平均，一小塊高光被攤到 4 倍面積之後每像素只剩四分之一，六層下來是千分之一，
+// 照原值累加等於什麼都看不到（實測過：擴散範圍從 0 拉到 1，畫面中線上的亮像素
+// 只從 549 變成 590，也就是使用者說的「看不出差別」）。乘 2 剛好抵掉一半的稀釋，
+// 讓寬的那幾層仍然有可見的振幅。
+//
+// 這不是物理上正確的做法，但這根滑桿要的本來就是美術控制：「光暈散多開」。代價是
+// 拉寬時整體也會變亮 —— 那符合直覺，Unity 的 scatter 同樣如此。
 const UP_FRAG = `
 precision highp float;
 varying vec2 vUv;
 uniform sampler2D uLower;
 uniform sampler2D uHere;
 uniform vec2 uHalfTexel;
-uniform float uRadius;
+uniform float uWeight;
 void main(){
   vec4 sum = texture2D(uLower, vUv + vec2(-uHalfTexel.x * 2.0, 0.0));
   sum += texture2D(uLower, vUv + vec2(-uHalfTexel.x, uHalfTexel.y)) * 2.0;
@@ -94,7 +108,7 @@ void main(){
   sum += texture2D(uLower, vUv + vec2(-uHalfTexel.x, -uHalfTexel.y)) * 2.0;
   vec3 lower = (sum / 12.0).rgb;
   vec3 here = texture2D(uHere, vUv).rgb;
-  gl_FragColor = vec4(mix(here, lower, clamp(uRadius, 0.0, 1.0)), 1.0);
+  gl_FragColor = vec4(here + lower * max(uWeight, 0.0), 1.0);
 }
 `;
 
@@ -213,7 +227,7 @@ export function createPostChain(renderer) {
     uLower: { value: null },
     uHere: { value: null },
     uHalfTexel: { value: new THREE.Vector2() },
-    uRadius: { value: 0.7 },
+    uWeight: { value: 0.7 },
   });
   const compositeMaterial = makeMaterial(COMPOSITE_FRAG, {
     uScene: { value: null },
@@ -338,7 +352,8 @@ export function createPostChain(renderer) {
       upMaterial.uniforms.uLower.value = lowerTexture;
       upMaterial.uniforms.uHere.value = levels[i].down.texture;
       upMaterial.uniforms.uHalfTexel.value.set(0.5 / lower.width, 0.5 / lower.height);
-      upMaterial.uniforms.uRadius.value = params.radius;
+      // 滑桿 0–1 → 權重 0–2，見 UP_FRAG 上方對稀釋的說明。
+      upMaterial.uniforms.uWeight.value = params.radius * 2.0;
       blit(upMaterial, levels[i].up);
       lower = levels[i];
       lowerTexture = levels[i].up.texture;
