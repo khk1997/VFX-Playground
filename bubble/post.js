@@ -33,80 +33,139 @@ void main(){
 }
 `;
 
-// 亮部取出。soft knee：門檻附近平滑過渡，不然高光邊緣會沿著等亮度線切出一圈
-// 硬邊，而且鏡頭一動那圈邊就會跳。
+// 亮部取出。這一步同時做「第一次降採」—— 從全解析度的畫面降到半解析度的亮部
+// 緩衝，而降採的方式決定了整個光暈乾不乾淨：
 //
-// uPremultiply 是給去背輸出用的：那條路徑寫出的是 straight alpha，真正「發出來
-// 的光」是 rgb × a，直接對 rgb 取門檻會讓半透明的地方虛胖。
+//   * 13 tap 的取樣圖樣（COD Advanced Warfare 那篇提出、EEVEE 也是這一套）：
+//     四個角落各一組 2×2、中央一組 2×2，權重 0.125×4 + 0.5。單純的雙線性一個
+//     tap（第一版的作法）會漏掉一半的像素，糊出來帶著取樣的結構感。
+//   * Karis 平均：每一組 2×2 以 1/(1+亮度) 加權。少了它，單一個過亮的像素會主導
+//     整條 mip 鏈，在動畫裡表現成一閃一閃的螢火蟲；這是 bloom 最典型的雜訊來源。
+//
+// soft knee：門檻附近平滑過渡，不然高光邊緣會沿著等亮度線切出一圈硬邊，而且
+// 鏡頭一動那圈邊就會跳。uClamp 是進 bloom 之前的上限（EEVEE 也有這一根）：
+// 沒有它，一顆極亮的像素就能把整片光暈拉爆，使用者只能回頭壓門檻。
 const THRESHOLD_FRAG = `
 precision highp float;
 varying vec2 vUv;
 uniform sampler2D uScene;
+uniform vec2 uTexel;
 uniform float uThreshold;
 uniform float uKnee;
+uniform float uClamp;
 uniform float uPremultiply;
-void main(){
-  vec4 s = texture2D(uScene, vUv);
+
+vec3 fetch(vec2 uv){
+  vec4 s = texture2D(uScene, uv);
   vec3 c = s.rgb * mix(1.0, s.a, uPremultiply);
-  float br = max(c.r, max(c.g, c.b));
+  return min(c, vec3(uClamp));
+}
+
+float karisWeight(vec3 c){
+  return 1.0 / (1.0 + dot(c, vec3(0.2126, 0.7152, 0.0722)));
+}
+
+vec3 karisAverage(vec3 a, vec3 b, vec3 c, vec3 d){
+  float wa = karisWeight(a);
+  float wb = karisWeight(b);
+  float wc = karisWeight(c);
+  float wd = karisWeight(d);
+  return (a * wa + b * wb + c * wc + d * wd) / (wa + wb + wc + wd);
+}
+
+void main(){
+  vec2 t = uTexel;
+  vec3 a = fetch(vUv + vec2(-2.0,  2.0) * t);
+  vec3 b = fetch(vUv + vec2( 0.0,  2.0) * t);
+  vec3 c = fetch(vUv + vec2( 2.0,  2.0) * t);
+  vec3 d = fetch(vUv + vec2(-2.0,  0.0) * t);
+  vec3 e = fetch(vUv);
+  vec3 f = fetch(vUv + vec2( 2.0,  0.0) * t);
+  vec3 g = fetch(vUv + vec2(-2.0, -2.0) * t);
+  vec3 h = fetch(vUv + vec2( 0.0, -2.0) * t);
+  vec3 i = fetch(vUv + vec2( 2.0, -2.0) * t);
+  vec3 j = fetch(vUv + vec2(-1.0,  1.0) * t);
+  vec3 k = fetch(vUv + vec2( 1.0,  1.0) * t);
+  vec3 l = fetch(vUv + vec2(-1.0, -1.0) * t);
+  vec3 m = fetch(vUv + vec2( 1.0, -1.0) * t);
+
+  vec3 sum = karisAverage(j, k, l, m) * 0.5;
+  sum += karisAverage(a, b, d, e) * 0.125;
+  sum += karisAverage(b, c, e, f) * 0.125;
+  sum += karisAverage(d, e, g, h) * 0.125;
+  sum += karisAverage(e, f, h, i) * 0.125;
+
+  float br = max(sum.r, max(sum.g, sum.b));
   float knee = uThreshold * uKnee + 1e-5;
   float soft = clamp(br - uThreshold + knee, 0.0, 2.0 * knee);
   soft = soft * soft / (4.0 * knee + 1e-5);
   float contrib = max(soft, br - uThreshold) / max(br, 1e-5);
-  gl_FragColor = vec4(c * contrib, 1.0);
+  gl_FragColor = vec4(sum * contrib, 1.0);
 }
 `;
 
+// 之後每一層的降採用同一套 13 tap，但不再做 Karis 平均 —— 螢火蟲在第一層就已經
+// 被壓掉，後面幾層再做只會白白讓光暈變暗（Karis 是加權平均，對高光有壓縮效果）。
 const DOWN_FRAG = `
 precision highp float;
 varying vec2 vUv;
 uniform sampler2D uTex;
-uniform vec2 uHalfTexel;
+uniform vec2 uTexel;
 void main(){
-  vec4 sum = texture2D(uTex, vUv) * 4.0;
-  sum += texture2D(uTex, vUv - uHalfTexel);
-  sum += texture2D(uTex, vUv + uHalfTexel);
-  sum += texture2D(uTex, vUv + vec2(uHalfTexel.x, -uHalfTexel.y));
-  sum += texture2D(uTex, vUv - vec2(uHalfTexel.x, -uHalfTexel.y));
-  gl_FragColor = sum / 8.0;
+  vec2 t = uTexel;
+  vec3 a = texture2D(uTex, vUv + vec2(-2.0,  2.0) * t).rgb;
+  vec3 b = texture2D(uTex, vUv + vec2( 0.0,  2.0) * t).rgb;
+  vec3 c = texture2D(uTex, vUv + vec2( 2.0,  2.0) * t).rgb;
+  vec3 d = texture2D(uTex, vUv + vec2(-2.0,  0.0) * t).rgb;
+  vec3 e = texture2D(uTex, vUv).rgb;
+  vec3 f = texture2D(uTex, vUv + vec2( 2.0,  0.0) * t).rgb;
+  vec3 g = texture2D(uTex, vUv + vec2(-2.0, -2.0) * t).rgb;
+  vec3 h = texture2D(uTex, vUv + vec2( 0.0, -2.0) * t).rgb;
+  vec3 i = texture2D(uTex, vUv + vec2( 2.0, -2.0) * t).rgb;
+  vec3 j = texture2D(uTex, vUv + vec2(-1.0,  1.0) * t).rgb;
+  vec3 k = texture2D(uTex, vUv + vec2( 1.0,  1.0) * t).rgb;
+  vec3 l = texture2D(uTex, vUv + vec2(-1.0, -1.0) * t).rgb;
+  vec3 m = texture2D(uTex, vUv + vec2( 1.0, -1.0) * t).rgb;
+  vec3 sum = (j + k + l + m) * 0.125;
+  sum += (a + b + d + e) * 0.03125;
+  sum += (b + c + e + f) * 0.03125;
+  sum += (d + e + g + h) * 0.03125;
+  sum += (e + f + h + i) * 0.03125;
+  gl_FragColor = vec4(sum, 1.0);
 }
 `;
 
-// 升採：把下一層（更小、更糊）的結果模糊之後，「加」到本層的降採結果上。
+// 升採：把下一層（更小、更糊）的結果用 3×3 帳篷濾波放大之後，「加」到本層上。
 //
-// 這裡本來是 mix(here, lower, radius)，也就是兩者取代式地混合。那個寫法有個致命
-// 的問題：降採是平均，一小塊高光被攤到 64 倍面積之後每像素只剩幾百分之一，取代式
-// 混合等於「把緊實的光暈換成一片看不見的霧」—— 擴散範圍拉到 1 反而什麼都看不到，
-// 使用者只好把門檻壓到 0.03、強度拉到 3 硬換亮度，結果整顆球糊掉。
+// 帳篷（1 2 1 / 2 4 2 / 1 2 1）而不是單純的雙線性：雙線性放大會留下軸向的方塊
+// 結構，一層一層疊上來會變成看得見的格狀花紋。這是 mip 鏈 bloom 的標準作法。
 //
-// 改成累加之後，每一個尺度都疊在一起（等於一組不同寬度的高斯相加，那正是 Blender
-// Fog Glow 用 FFT 卷積一個大核心在做的事）：uWeight 控制每往低頻走一層要加多少。
+// 為什麼是「加」而不是 mix(here, lower, radius)：降採是平均，一小塊高光被攤到
+// 4 倍面積之後每像素只剩四分之一，六層下來是千分之一。取代式混合等於「把緊實的
+// 光暈換成一片看不見的霧」—— 實測過，擴散範圍從 0 拉到 1，畫面中線上的亮像素
+// 只從 549 變成 590，也就是「看不出差別」。
 //
-// 權重可以大於 1，而且預設就會 —— 滑桿的 0–1 對應到 0–2。理由是能量守恆：降採是
-// 平均，一小塊高光被攤到 4 倍面積之後每像素只剩四分之一，六層下來是千分之一，
-// 照原值累加等於什麼都看不到（實測過：擴散範圍從 0 拉到 1，畫面中線上的亮像素
-// 只從 549 變成 590，也就是使用者說的「看不出差別」）。乘 2 剛好抵掉一半的稀釋，
-// 讓寬的那幾層仍然有可見的振幅。
-//
-// 這不是物理上正確的做法，但這根滑桿要的本來就是美術控制：「光暈散多開」。代價是
-// 拉寬時整體也會變亮 —— 那符合直覺，Unity 的 scatter 同樣如此。
+// uWeight 可以大於 1（滑桿 0–1 對應 0–2），乘 2 抵掉一半的稀釋，寬的那幾層才有
+// 可見的振幅。總亮度則由合成階段除掉，所以這根滑桿只改「散多開」。
 const UP_FRAG = `
 precision highp float;
 varying vec2 vUv;
 uniform sampler2D uLower;
 uniform sampler2D uHere;
-uniform vec2 uHalfTexel;
+uniform vec2 uTexel;
 uniform float uWeight;
 void main(){
-  vec4 sum = texture2D(uLower, vUv + vec2(-uHalfTexel.x * 2.0, 0.0));
-  sum += texture2D(uLower, vUv + vec2(-uHalfTexel.x, uHalfTexel.y)) * 2.0;
-  sum += texture2D(uLower, vUv + vec2(0.0, uHalfTexel.y * 2.0));
-  sum += texture2D(uLower, vUv + vec2(uHalfTexel.x, uHalfTexel.y)) * 2.0;
-  sum += texture2D(uLower, vUv + vec2(uHalfTexel.x * 2.0, 0.0));
-  sum += texture2D(uLower, vUv + vec2(uHalfTexel.x, -uHalfTexel.y)) * 2.0;
-  sum += texture2D(uLower, vUv + vec2(0.0, -uHalfTexel.y * 2.0));
-  sum += texture2D(uLower, vUv + vec2(-uHalfTexel.x, -uHalfTexel.y)) * 2.0;
-  vec3 lower = (sum / 12.0).rgb;
+  vec2 t = uTexel;
+  vec3 sum = texture2D(uLower, vUv + vec2(-1.0,  1.0) * t).rgb;
+  sum += texture2D(uLower, vUv + vec2( 0.0,  1.0) * t).rgb * 2.0;
+  sum += texture2D(uLower, vUv + vec2( 1.0,  1.0) * t).rgb;
+  sum += texture2D(uLower, vUv + vec2(-1.0,  0.0) * t).rgb * 2.0;
+  sum += texture2D(uLower, vUv).rgb * 4.0;
+  sum += texture2D(uLower, vUv + vec2( 1.0,  0.0) * t).rgb * 2.0;
+  sum += texture2D(uLower, vUv + vec2(-1.0, -1.0) * t).rgb;
+  sum += texture2D(uLower, vUv + vec2( 0.0, -1.0) * t).rgb * 2.0;
+  sum += texture2D(uLower, vUv + vec2( 1.0, -1.0) * t).rgb;
+  vec3 lower = sum / 16.0;
   vec3 here = texture2D(uHere, vUv).rgb;
   gl_FragColor = vec4(here + lower * max(uWeight, 0.0), 1.0);
 }
@@ -316,18 +375,20 @@ export function createPostChain(renderer) {
 
   const thresholdMaterial = makeMaterial(THRESHOLD_FRAG, {
     uScene: { value: null },
+    uTexel: { value: new THREE.Vector2() },
     uThreshold: { value: 0.75 },
     uKnee: { value: 0.5 },
+    uClamp: { value: 8 },
     uPremultiply: { value: 0 },
   });
   const downMaterial = makeMaterial(DOWN_FRAG, {
     uTex: { value: null },
-    uHalfTexel: { value: new THREE.Vector2() },
+    uTexel: { value: new THREE.Vector2() },
   });
   const upMaterial = makeMaterial(UP_FRAG, {
     uLower: { value: null },
     uHere: { value: null },
-    uHalfTexel: { value: new THREE.Vector2() },
+    uTexel: { value: new THREE.Vector2() },
     uWeight: { value: 0.7 },
   });
   const streakMaterial = makeMaterial(STREAK_FRAG, {
@@ -454,8 +515,11 @@ export function createPostChain(renderer) {
     // 哪些地方在發光），分兩份門檻只會讓兩個效果對不起來。
     if (wantsBloom || wantsStreaks) {
       thresholdMaterial.uniforms.uScene.value = sceneTarget.texture;
+      // 取樣間距用「來源」的 texel：13 tap 的圖樣是相對於被降採的那一張圖定義的。
+      thresholdMaterial.uniforms.uTexel.value.set(1 / width, 1 / height);
       thresholdMaterial.uniforms.uThreshold.value = params.threshold;
       thresholdMaterial.uniforms.uKnee.value = params.knee;
+      thresholdMaterial.uniforms.uClamp.value = params.clampMax;
       thresholdMaterial.uniforms.uPremultiply.value = params.transparent ? 1 : 0;
       blit(thresholdMaterial, levels[0].down);
     }
@@ -464,7 +528,7 @@ export function createPostChain(renderer) {
       for (let i = 1; i < levels.length; i++) {
         const source = levels[i - 1];
         downMaterial.uniforms.uTex.value = source.down.texture;
-        downMaterial.uniforms.uHalfTexel.value.set(0.5 / source.width, 0.5 / source.height);
+        downMaterial.uniforms.uTexel.value.set(1 / source.width, 1 / source.height);
         blit(downMaterial, levels[i].down);
       }
     }
@@ -487,7 +551,7 @@ export function createPostChain(renderer) {
     for (let i = last - 1; i >= 0; i--) {
       upMaterial.uniforms.uLower.value = lowerTexture;
       upMaterial.uniforms.uHere.value = levels[i].down.texture;
-      upMaterial.uniforms.uHalfTexel.value.set(0.5 / lower.width, 0.5 / lower.height);
+      upMaterial.uniforms.uTexel.value.set(1 / lower.width, 1 / lower.height);
       // 滑桿 0–1 → 權重 0–2，見 UP_FRAG 上方對稀釋的說明。
       upMaterial.uniforms.uWeight.value = params.radius * 2.0;
       blit(upMaterial, levels[i].up);
@@ -496,7 +560,12 @@ export function createPostChain(renderer) {
     }
 
     // 只有一層時升採迴圈一次都沒跑，光暈就是那層降採的結果。
-    composite(target, params, lowerTexture, glareTexture, params.intensity);
+    //
+    // 強度要除掉「擴散範圍帶進來的額外亮度」，兩根滑桿才各自只做一件事：擴散只改
+    // 散多開、強度只改多亮。除數不是權重總和（那是總能量，除下去核心會暗六十幾倍），
+    // 而是實測出來的峰值增益 —— 每往上疊一層，核心大約多拿到 0.55 倍的權重。
+    const spreadGain = 1 + params.radius * 2.0 * 0.55;
+    composite(target, params, lowerTexture, glareTexture, params.intensity / spreadGain);
   }
 
   function composite(target, params, bloomTexture, glareTexture, intensity) {

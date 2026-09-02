@@ -14,16 +14,16 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=post-streaks-1';
+} from './motions/registry.js?v=post-bloom-quality-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-76';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=post-streaks-1';
-import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=post-streaks-1';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=post-bloom-quality-1';
+import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=post-bloom-quality-1';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
-import createResearchMotion from './motions/research.js?v=post-streaks-1';
+import createResearchMotion from './motions/research.js?v=post-bloom-quality-1';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
@@ -374,6 +374,9 @@ const DEFAULTS = {              // 數值滑桿
   streakIntensity: 0.5,
   bloomThreshold: 1,
   bloomKnee: 0.5,
+  // 進 bloom 之前的上限（EEVEE 也有這一根）。沒有它，一顆極亮的像素就能把整片
+  // 光暈拉爆，使用者只能回頭壓門檻，結果是把正常畫面也倒進去糊。
+  bloomClamp: 8,
   bloomIntensity: 0.6,
   bloomRadius: 0.7,
   materialExposure: 1,
@@ -982,6 +985,7 @@ const fmt = {
   streakIntensity: v => '×' + v.toFixed(2),
   bloomThreshold: v => v.toFixed(2),
   bloomKnee: v => v.toFixed(2),
+  bloomClamp: v => v.toFixed(1),
   bloomIntensity: v => '×' + v.toFixed(2),
   bloomRadius: v => v.toFixed(2),
   researchBubbleCount: v => v.toFixed(0),
@@ -1199,8 +1203,8 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=post-streaks-1';
-import { createPostChain } from './post.js?v=post-streaks-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=post-bloom-quality-1';
+import { createPostChain } from './post.js?v=post-bloom-quality-1';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
@@ -5903,6 +5907,7 @@ function renderComposite(target = null, superSample = 1) {
     // 整條鏈的結果不參與。
     threshold: P.bloomThreshold,
     knee: P.bloomKnee,
+    clampMax: P.bloomClamp,
     intensity: P.bloomEnabled ? P.bloomIntensity : 0,
     radius: P.bloomRadius,
     exposure: P.postExposure,
