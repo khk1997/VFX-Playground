@@ -224,11 +224,11 @@ export const MOTIONS = {
         key: 'researchBubbles', label: '內部氣泡', type: 'toggle', value: true,
       },
       {
-        // 顆數。上限 16 是 shader 端迴圈的編譯期上界(RESEARCH_BUBBLE_MAX),
+        // 顆數。上限 40 是 shader 端迴圈的編譯期上界(RESEARCH_BUBBLE_MAX),
         // 兩邊必須一致 —— 這裡調高而那邊沒改的話,多出來的顆數不會出現。
         // 0 等同關閉,但開關仍然留著:那是「這個效果要不要」,顆數是「多少顆」,
         // 把調到一半的顆數記住、之後一鍵開回來,是兩種不同的操作。
-        key: 'researchBubbleCount', label: '氣泡數量', min: 0, max: 16, step: 1, value: 7,
+        key: 'researchBubbleCount', label: '氣泡數量', min: 0, max: 40, step: 1, value: 7,
         gate: 'researchBubblesOn',
       },
       {

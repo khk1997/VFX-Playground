@@ -1580,7 +1580,11 @@ float researchIconStage(
 // 顆數的編譯上限。實際畫幾顆由「氣泡數量」滑桿決定(uResearchBubbleCount),
 // 這個常數只是迴圈的靜態邊界 —— GLSL ES 1.0 的迴圈上界必須是常數,不能直接
 // 拿 uniform 當上界。
-#define RESEARCH_BUBBLE_MAX 16
+//
+// 執行期成本跟著滑桿走(迴圈到顆數就 break),不跟著這個上限走;上限影響的是
+// 編譯:編譯器會把這圈展開成 40 份,shader 變長、cold compile 變慢。40 是使用者
+// 要的上限,不是可以隨手再加大的數字 —— 真要再往上加,先量一次編譯時間。
+#define RESEARCH_BUBBLE_MAX 40
 
 // 每顆泡泡的四個亂數。用無理數倍數取小數(低差異序列)而不是 hash11 的 sin:
 // 這支函式每次距離場求值都要跑「目前顆數」次,而距離場一幀被呼叫上百萬次,
