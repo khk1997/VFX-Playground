@@ -128,6 +128,13 @@ export const MOTIONS = {
     radius: 0.71,
     loopDuration: 4.5,
     dolly: false,
+    // 這個模式指定的環境貼圖（bubble/assets/ 底下的檔名）。HDRI 平常是跟著
+    // 「材質類型」走的（通用玻璃／液態薄膜各一張），但私語的外觀是照這張棚燈
+    // 校出來的 —— 換一張，殼上那幾道反射的位置與冷暖就全變了。
+    //
+    // 只是預設：使用者自己匯入 HDRI 之後就以他的為準（見 loadMaterialEnvironment），
+    // 離開私語模式也會換回材質類型原本那張。
+    hdri: 'photo_studio3_london_hall_1k.hdr',
     overrides: {
       materialStyle: 'universal',
       cameraDistance: 4.8,
@@ -729,6 +736,7 @@ export const MOTION_DEFAULT_LOOP_DURATION = pick('loopDuration');
 export const MOTION_DEFAULT_DOLLY = pick('dolly');
 export const MOTION_SVG_DEMO = pick('svgDemo');
 export const MOTION_OVERRIDES = pick('overrides');
+export const MOTION_HDRI = pick('hdri');
 export const MOTION_KEYS = Object.keys(MOTIONS);
 export const MOTION_PARAMS = Object.fromEntries(entries.map(([key, motion]) => [key, motion.params || []]));
 

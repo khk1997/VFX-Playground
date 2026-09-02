@@ -12,18 +12,18 @@ import {
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
-  MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
+  MOTION_OVERRIDES, MOTION_HDRI, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=transparent-icon-rim-1';
+} from './motions/registry.js?v=whisper-hdri-2';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-76';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=transparent-icon-rim-1';
-import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=transparent-icon-rim-1';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=whisper-hdri-2';
+import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=whisper-hdri-2';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
-import createResearchMotion from './motions/research.js?v=transparent-icon-rim-1';
+import createResearchMotion from './motions/research.js?v=whisper-hdri-2';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
@@ -246,6 +246,18 @@ const GLASS_HDRI_URL = new URL('./assets/photo_studio2_london_hall_1k.hdr', impo
 const GLASS_HDRI_LABEL = 'photo_studio2_london_hall_1k.hdr';
 const MEMBRANE_HDRI_URL = new URL('./assets/christmas_photo_studio_04_1k.hdr', import.meta.url).href;
 const MEMBRANE_HDRI_LABEL = 'christmas_photo_studio_04_1k.hdr';
+// 動態模式自己指定的環境貼圖（registry.js 的 hdri 欄位）。HDRI 平常跟著材質
+// 類型走，但某些模式的外觀是照特定一張棚燈校出來的，換一張反射就全變了。
+function motionEnvironmentFor(motion) {
+  const name = MOTION_HDRI[motion];
+  if (!name) return null;
+  return {
+    url: new URL(`./assets/${name}`, import.meta.url).href,
+    label: name,
+    isHDR: /\.hdr$/i.test(name),
+    file: null,
+  };
+}
 const MAX_DROPS = 12;
 // 必須跟 shaders.js 的 MAX_MICRO 一致（那邊是 GLSL 的迴圈上界，改一邊就對不上）。
 // 48 是為了細長的造型（例如筆畫細、鋪得又寬的文字外框）：20 顆微滴攤在那種形狀上
@@ -1211,8 +1223,8 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=transparent-icon-rim-1';
-import { createPostChain } from './post.js?v=transparent-icon-rim-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=whisper-hdri-2';
+import { createPostChain } from './post.js?v=whisper-hdri-2';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
@@ -5092,6 +5104,12 @@ function bindControls() {
           }
         }
         previousDropT = null;
+        // 模式指定的 HDRI：進出私語這類自帶環境貼圖的模式時要換圖，回到沒有
+        // 指定的模式則換回材質類型原本那張。兩邊都沒有指定就不用動 —— 重載一
+        // 張 1MB 的 HDRI 還要重跑 PMREM，不是每次切模式都該付的成本。
+        if (inited && (MOTION_HDRI[previousMotion] || MOTION_HDRI[P.motion])) {
+          loadMaterialEnvironment(P.materialStyle);
+        }
       }
       if (uniforms && uniforms[uniform]) uniforms[uniform].value = map[el.value];
       updateUIState();
@@ -5601,9 +5619,19 @@ function loadEnvironment(url, label, isHDR, revokeURL = false) {
 }
 
 function loadMaterialEnvironment(style = P.materialStyle) {
-  const environment = materialEnvironments[style]
-    || MATERIAL_ENVIRONMENT_DEFAULTS[style]
-    || MATERIAL_ENVIRONMENT_DEFAULTS.universal;
+  // 優先序：使用者自己匯入的 > 這個動態模式指定的 > 材質類型的預設。
+  // 模式指定的排在使用者之後，是因為它只是預設 —— 匯入了自己的 HDRI 還被模式
+  // 蓋掉，那顆匯入按鈕在該模式下就等於壞的。
+  //
+  // 「使用者匯入的」要看 file，不能只看 materialEnvironments[style] 有沒有值：
+  // 那張表在 resetMaterialProfiles 就先填好了材質類型的預設，永遠是真的。
+  const stored = materialEnvironments[style];
+  const environment = (stored && stored.file)
+    ? stored
+    : (motionEnvironmentFor(P.motion)
+      || stored
+      || MATERIAL_ENVIRONMENT_DEFAULTS[style]
+      || MATERIAL_ENVIRONMENT_DEFAULTS.universal);
   if (environment.file) {
     const url = URL.createObjectURL(environment.file);
     loadEnvironment(url, environment.label, environment.isHDR, true);
