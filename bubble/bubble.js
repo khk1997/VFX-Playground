@@ -14,16 +14,16 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=whisper-bubbles-1';
+} from './motions/registry.js?v=whisper-ui-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-76';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=whisper-bubbles-1';
-import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=whisper-bubbles-1';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=whisper-ui-1';
+import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=whisper-ui-1';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
-import createResearchMotion from './motions/research.js?v=whisper-bubbles-1';
+import createResearchMotion from './motions/research.js?v=whisper-ui-1';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
@@ -1128,7 +1128,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=whisper-bubbles-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=whisper-ui-1';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
@@ -4748,6 +4748,42 @@ function switchMaterialProfile(previousStyle, nextStyle) {
   if (inited) loadMaterialEnvironment(nextStyle);
 }
 
+// 可折疊的小節（registry 的 type: 'subgroup'）。結構與 index.html 裡手寫的
+// 「造型動態 Shape Motion」逐字相同，樣式因此完全共用，不必為生成出來的這幾節
+// 另外寫 CSS。
+//
+// 帶 key 的 subgroup 會把那顆布林開關長在小節標題上：它走的是跟其他開關同一條
+// TOGGLES 綁定路徑（bindControls 找 #key 與它的下一個兄弟當滑軌），所以這裡只
+// 負責產生 DOM。summary 上要擋掉點擊冒泡，否則按開關會順手把小節收合起來。
+function buildMotionSubgroup(param, block) {
+  const details = document.createElement('details');
+  details.className = 'subgroup';
+  // 預設展開。收合狀態是使用者當下的閱讀偏好，不進參數組合檔。
+  details.open = param.open !== false;
+  if (param.gate) details.dataset.gate = param.gate;
+  const summary = document.createElement('summary');
+  const heading = document.createElement('h4');
+  heading.textContent = param.label;
+  summary.append(heading);
+  if (param.key) {
+    const holder = document.createElement('span');
+    holder.className = 'summaryToggle';
+    holder.addEventListener('click', event => event.stopPropagation());
+    const control = document.createElement('input');
+    control.type = 'checkbox';
+    control.id = param.key;
+    control.checked = Boolean(param.value);
+    const track = document.createElement('span');
+    track.className = 'switchTrack';
+    track.setAttribute('aria-hidden', 'true');
+    holder.append(control, track);
+    summary.append(holder);
+  }
+  details.append(summary);
+  block.append(details);
+  return details;
+}
+
 // 模式專屬控制項由 registry 的 metadata 建立。這讓模式檔、註冊資料與 UI 保持
 // 一一對應；刪除 registry 條目後不會留下失效控制項，也不必手動維護 HTML。
 function buildExtendedMotionControls() {
@@ -4761,7 +4797,14 @@ function buildExtendedMotionControls() {
     // capillaryTexture），面板得跟著用同一塊、用同一個 gate 顯示，不能各自
     // 宣告一份參數——那會讓兩顆 block 的滑桿 id 撞在一起。
     block.dataset.gate = motion === 'capillary' ? 'capillaryTextureUI' : motion;
+    // 參數往哪裡放。宣告一個 type: 'subgroup' 之後，其後的參數都掛進那個可折疊的
+    // 小節，直到下一個 subgroup 為止；沒宣告過就直接掛在模式區塊上（原本的行為）。
+    let container = block;
     for (const param of params) {
+      if (param.type === 'subgroup') {
+        container = buildMotionSubgroup(param, block);
+        continue;
+      }
       const row = document.createElement('div');
       row.className = 'row';
       row.id = `${param.key}Row`;
@@ -4813,7 +4856,7 @@ function buildExtendedMotionControls() {
       if (param.type !== 'select') value.id = `${param.key}_v`;
       if (track) row.append(label, control, track, value);
       else row.append(label, control, value);
-      block.append(row);
+      container.append(row);
       // 文字輸入底下掛一行狀態：幾句、烘出幾個字形、字體有沒有 fallback。
       // 字體 fallback 是靜默的（fillText 找不到就換一套字形），沒有這行的話
       // 使用者只會覺得「字看起來怪」而不知道原因。
@@ -4821,7 +4864,7 @@ function buildExtendedMotionControls() {
         const note = document.createElement('div');
         note.className = 'row noteRow';
         note.id = `${param.key}Info`;
-        block.append(note);
+        container.append(note);
       }
     }
     host.append(block);
@@ -4986,7 +5029,14 @@ function bindControls() {
     if (label) label.htmlFor = key;
     const track = el.nextElementSibling;
     if (!PREVIEW && track && !track._bound) {
-      track.addEventListener('click', () => {
+      track.addEventListener('click', event => {
+        // 開關長在 <summary> 上時（.summaryToggle，例如「造型動態」與私語那幾個
+        // 小節），按滑軌不該順手把整節收起來。原本只在 summary 上擋冒泡，但
+        // <details> 的展開是 summary 的「啟用行為」——stopPropagation 只擋監聽器，
+        // 擋不掉啟用行為，要 preventDefault 才行。滑軌自己沒有任何預設行為（真正
+        // 的 checkbox 是它旁邊那顆視覺隱藏的 input，狀態由下面那行手動翻），
+        // 所以無條件擋掉是安全的。
+        event.preventDefault();
         el.checked = !el.checked;
         el.dispatchEvent(new Event('change', { bubbles: true }));
       });

@@ -167,6 +167,13 @@ export const MOTIONS = {
     },
     params: [
       {
+        // 分節。往下到下一個 subgroup 為止的參數都收在這一節裡（見 bubble.js 的
+        // buildExtendedMotionControls）。私語的參數多到攤平之後讀不出從屬關係 ——
+        // 尤其「起伏大小／速度／密度」其實是程序紋理的振幅、速度與密度，跟紋理
+        // 選單分開放就會被誤讀成外殼另一組獨立的起伏。
+        type: 'subgroup', label: '外殼紋理 Shell Texture',
+      },
+      {
         // 0-6 跟毛細波的「程序紋理」是同一份詞彙與數學(見 shaders.js 的
         // researchProceduralTexture),只是餵進去的座標換成外殼自己的球面
         // 方向,而不是毛細波的行進方向場。7 是自創動態「駐波」(見
@@ -197,6 +204,21 @@ export const MOTIONS = {
         ],
       },
       {
+        key: 'researchShellAmount', label: '起伏大小',
+        min: 0, max: 0.08, step: 0.001, value: 0.04,
+        gate: 'researchTextureOn',
+      },
+      {
+        key: 'researchShellSpeed', label: '起伏速度',
+        min: 0, max: 4, step: 1, value: 1,
+        gate: 'researchTextureOn',
+      },
+      {
+        key: 'researchShellDensity', label: '起伏密度',
+        min: 0.4, max: 2.2, step: 0.05, value: 0.5,
+        gate: 'researchTextureOn',
+      },
+      {
         // 紋理方向。三根合起來是一個向量,shader 端正規化後由它長出一組正交座標
         // (沿軸／橫向／深度),程序紋理與駐波都改用那組座標,而不是寫死的
         // q.x／q.y/q.z —— 花紋因此可以在球面上轉到任何方向。作法與毛細波的
@@ -205,30 +227,39 @@ export const MOTIONS = {
         //
         // 預設 (1, 0, 0):代入那段構造剛好得到 along=q.x、across=q.y、depth=q.z,
         // 也就是加上這三根滑桿之前的行為,既有的參數組合檔看起來不會變。
-        key: 'researchTextureDirX', label: '紋理方向 X', min: -1, max: 1, step: 0.05, value: 1,
+        key: 'researchTextureDirX', label: '方向 X', min: -1, max: 1, step: 0.05, value: 1,
         gate: 'researchTextureOn',
       },
       {
-        key: 'researchTextureDirY', label: '紋理方向 Y', min: -1, max: 1, step: 0.05, value: 0,
+        key: 'researchTextureDirY', label: '方向 Y', min: -1, max: 1, step: 0.05, value: 0,
         gate: 'researchTextureOn',
       },
       {
-        key: 'researchTextureDirZ', label: '紋理方向 Z', min: -1, max: 1, step: 0.05, value: 0,
+        key: 'researchTextureDirZ', label: '方向 Z', min: -1, max: 1, step: 0.05, value: 0,
         gate: 'researchTextureOn',
       },
       {
-        // 內部氣泡。開關而不是「數量」滑桿:顆數、大小、落點都是照參考照片配好的
-        // 一組(見 shaders.js 的 researchBubbleMap),要調的是「有沒有」。
-        // 折射率刻意不另外開一根 —— 泡泡與 icon 是同一種玻璃,共用
-        // 「icon 折射率(相對外殼)」那根滑桿。
-        key: 'researchBubbles', label: '內部氣泡', type: 'toggle', value: true,
+        // 呼吸跟紋理無關（它動的是整顆殼的體積，不是表面花紋），所以自成一節，
+        // 而不是掛在紋理那一節的尾巴。
+        type: 'subgroup', label: '外殼動態 Shell Motion',
+      },
+      {
+        key: 'researchBreath', label: '呼吸幅度',
+        min: 0, max: 0.06, step: 0.001, value: 0.02,
+      },
+      {
+        // 帶開關的分節：key 一填，這個布林就長在小節標題上（沿用面板既有的
+        // .summaryToggle，跟「造型動態 Shape Motion」同一個樣式），而不是另外
+        // 佔一行。開關與收合是兩件事 —— 收起來只是不想看，關掉才是不要這個效果。
+        type: 'subgroup', label: '內部氣泡 Bubbles',
+        key: 'researchBubbles', value: true,
       },
       {
         // 顆數。上限 40 是 shader 端迴圈的編譯期上界(RESEARCH_BUBBLE_MAX),
         // 兩邊必須一致 —— 這裡調高而那邊沒改的話,多出來的顆數不會出現。
         // 0 等同關閉,但開關仍然留著:那是「這個效果要不要」,顆數是「多少顆」,
         // 把調到一半的顆數記住、之後一鍵開回來,是兩種不同的操作。
-        key: 'researchBubbleCount', label: '氣泡數量', min: 0, max: 40, step: 1, value: 7,
+        key: 'researchBubbleCount', label: '數量', min: 0, max: 40, step: 1, value: 7,
         gate: 'researchBubblesOn',
       },
       {
@@ -239,35 +270,24 @@ export const MOTIONS = {
         //
         // 下限 0.01 大約是外殼半徑的 1%,再小就會細過法線取樣間距而消失
         // (shader 端另有 RESEARCH_MIN_FEATURE 這條保險)。
-        key: 'researchBubbleMin', label: '氣泡最小', min: 0.01, max: 0.2, step: 0.005, value: 0.03,
+        key: 'researchBubbleMin', label: '大小下限', min: 0.01, max: 0.2, step: 0.005, value: 0.03,
         gate: 'researchBubblesOn',
       },
       {
         // 上限若被拉到比下限還小,shader 端會直接取兩者的最大值,不會反轉。
-        key: 'researchBubbleMax', label: '氣泡最大', min: 0.01, max: 0.2, step: 0.005, value: 0.12,
+        key: 'researchBubbleMax', label: '大小上限', min: 0.01, max: 0.2, step: 0.005, value: 0.12,
         gate: 'researchBubblesOn',
       },
       {
-        key: 'researchShellAmount', label: '外殼起伏大小',
-        min: 0, max: 0.08, step: 0.001, value: 0.04,
-      },
-      {
-        key: 'researchShellSpeed', label: '外殼起伏速度',
-        min: 0, max: 4, step: 1, value: 1,
-      },
-      {
-        key: 'researchShellDensity', label: '外殼起伏密度',
-        min: 0.4, max: 2.2, step: 0.05, value: 0.5,
-      },
-      {
-        key: 'researchBreath', label: '整體呼吸幅度',
-        min: 0, max: 0.06, step: 0.001, value: 0.02,
+        // 標題只寫「對話泡」，不寫「對話 icon」：小標在 CSS 裡是全大寫，
+        // 「icon Icons」會被顯示成「ICON ICONS」。
+        type: 'subgroup', label: '對話泡 Icons',
       },
       {
         // 這是內部 icon「相對於外殼玻璃」的折射率，不是絕對值，所以它會跟著
         // 材質那根 IOR 滑桿一起走。1 代表與外殼完全相同 —— 光學上分辨不出來，
         // icon 會直接消失，因此下限留在 1.02 而不是 1。
-        key: 'researchIconIOR', label: 'icon 折射率(相對外殼)',
+        key: 'researchIconIOR', label: '折射率(相對外殼)',
         min: 1.02, max: 2.2, step: 0.01, value: 1.2,
       },
       {
@@ -278,19 +298,12 @@ export const MOTIONS = {
         // 還要再乘約 0.8，而它必須維持在 researchIconNormal 的取樣間距
         // （h = 0.0018）的 8 倍以上，否則中央差分算出來的法線是噪音而不是梯度
         // ——那正是先前 icon 剛冒出來時滿是同心紋路的成因。臨界值約 0.15。
-        key: 'researchIconSizeA', label: 'icon A 大小(右)',
+        key: 'researchIconSizeA', label: 'A 大小(右)',
         min: 0.2, max: 1.6, step: 0.01, value: 1.14,
       },
       {
-        key: 'researchIconSizeB', label: 'icon B 大小(左)',
+        key: 'researchIconSizeB', label: 'B 大小(左)',
         min: 0.2, max: 1.6, step: 0.01, value: 1.12,
-      },
-      {
-        // 0 = 圓鈍，1 = 相當尖。不做到真正的針尖：尾端半徑同樣不能細過取樣間距，
-        // 所以對應的錐體末端半徑只從 0.055 收到 0.010（世界尺度約 0.008，仍是
-        // h 的 4.5 倍）。
-        key: 'researchIconTailTip', label: '尾巴尖度',
-        min: 0, max: 1, step: 0.01, value: 1,
       },
       {
         // 本體的寬高比。1.0 是正圓,越大越扁寬。
@@ -302,21 +315,28 @@ export const MOTIONS = {
         min: 1.0, max: 1.9, step: 0.01, value: 1.5,
       },
       {
+        // 0 = 圓鈍，1 = 相當尖。不做到真正的針尖：尾端半徑同樣不能細過取樣間距，
+        // 所以對應的錐體末端半徑只從 0.055 收到 0.010（世界尺度約 0.008，仍是
+        // h 的 4.5 倍）。
+        key: 'researchIconTailTip', label: '尾巴尖度',
+        min: 0, max: 1, step: 0.01, value: 1,
+      },
+      {
         // 兩顆對稱移動。開「間距 + 高度錯位」兩根，而不是每顆各給 X/Y 四根：
         // 面板已經很長，而實務上要調的就是「離多開」與「錯多少」。真的需要單獨
         // 挪某一顆再加。Z 軸不開——透過外殼折射幾乎看不出差別。
-        key: 'researchIconSpread', label: 'icon 間距',
+        key: 'researchIconSpread', label: '間距',
         min: 0.05, max: 0.45, step: 0.005, value: 0.31,
       },
       {
-        key: 'researchIconStagger', label: 'icon 高度錯位',
+        key: 'researchIconStagger', label: '高度錯位',
         min: -0.3, max: 0.3, step: 0.005, value: -0.14,
       },
       {
         // 前後(z)錯位。我先前判斷「透過外殼折射幾乎看不出差別」而沒有開這一根,
         // 那個判斷太武斷:外殼本身就是一片厚透鏡,z 一動,放大率、前方玻璃的
         // 體積吸收、以及兩顆互相的遮擋順序都會跟著變,是讀得出來的。
-        key: 'researchIconDepth', label: 'icon 前後錯位',
+        key: 'researchIconDepth', label: '前後錯位',
         min: -0.3, max: 0.3, step: 0.005, value: 0.2,
       },
     ],
@@ -680,13 +700,18 @@ export const MOTION_PARAMS = Object.fromEntries(entries.map(([key, motion]) => [
 // 明確是「數值滑桿」那一組，它的通用綁定迴圈對每個 key 一律 parseFloat——字串混
 // 進去會變成 NaN。改走一張獨立的表，跟 SELECTS／TOGGLES／COLORS 各有各的表是
 // 同一個作法。
-// 布林參數（type: 'toggle'）同理：它走的是 bubble.js 的 TOGGLES 那條路
-// （checkbox + applyToggle），不是滑桿那條 parseFloat 的路。
+// 布林參數（type: 'toggle'，以及帶 key 的 'subgroup'）同理：它走的是 bubble.js
+// 的 TOGGLES 那條路（checkbox + applyToggle），不是滑桿那條 parseFloat 的路。
+//
+// 'subgroup' 是純排版的分節標記，本身沒有值；只有它帶 key 時（開關長在小節標題
+// 上的那種）才算一個布林參數。兩種情況都不能進 MOTION_PARAM_DEFAULTS。
 const isTextParam = param => param.type === 'text';
-const isToggleParam = param => param.type === 'toggle';
+const isToggleParam = param => param.type === 'toggle'
+  || (param.type === 'subgroup' && Boolean(param.key));
+const isLayoutParam = param => param.type === 'subgroup' && !param.key;
 export const MOTION_PARAM_DEFAULTS = Object.fromEntries(
   entries.flatMap(([, motion]) => (motion.params || [])
-    .filter(param => !isTextParam(param) && !isToggleParam(param))
+    .filter(param => !isTextParam(param) && !isToggleParam(param) && !isLayoutParam(param))
     .map(param => [param.key, param.value])),
 );
 export const MOTION_TOGGLE_DEFAULTS = Object.fromEntries(
