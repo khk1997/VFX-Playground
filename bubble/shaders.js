@@ -331,6 +331,17 @@ uniform float uTransmission;
 // （HDRI 經 PMREM 之後本來就可能遠大於 1）乘上反射強度與材質曝光，真正的高光
 // 量級一直都在，只是被最後那行 clamp 丟掉了。
 uniform float uHdrOutput;
+// 後處理要不要一份「物件遮罩」。1 時 alpha 改寫成「這個像素是不是物體」：命中
+// 幾何是 1、純背景是 0，顏色完全不動。
+//
+// 這是給後處理鏈用的：亮部取樣如果把背景也算進去，白底就會整片被當成光源餵進
+// bloom 與條紋，糊回來之後整個畫面爆掉、物體消失；對比與亮度同理，那是調色，
+// 應該只作用在主體上，不該連背景一起推。
+//
+// 只在「後處理有在跑」而且「不是去背輸出」時開啟：去背那條路的 alpha 有它自己的
+// 意義（straight alpha 的覆蓋率），不能被遮罩蓋掉；而後處理旁路時 alpha 必須維持
+// 原本的 1.0，否則不透明的匯出 PNG 會變成透明背景。
+uniform float uCoverageAlpha;
 
 // 高光增益。只推「已經接近上限」的那一段，中間調幾乎不動 —— 所以它幾乎不改變
 // 畫面本身的樣子，改變的是餵給後處理的高光有多少量級可以溢出。
@@ -342,6 +353,12 @@ uniform float uHdrOutput;
 // 只在 HDR 輸出時生效：直接畫到 8-bit canvas 時被推上去的部分反正會被夾掉，
 // 開了也看不出差別，不如明確地不做。
 uniform float uHighlightGain;
+
+// 純背景像素。後處理要遮罩時 alpha 寫 0，其餘情況維持背景本來的 alpha
+// （去背輸出是 0、不透明是 1）。
+vec4 backgroundPixel(vec4 bg){
+  return vec4(bg.rgb, uCoverageAlpha > 0.5 ? 0.0 : bg.a);
+}
 
 vec3 clampOutput(vec3 c){
   if (uHdrOutput > 0.5) {
@@ -2916,10 +2933,12 @@ void main(){
   float qb = dot(oc, rd);
   float qc = dot(oc, oc) - uBounds.w * uBounds.w;
   float qh = qb * qb - qc;
-  if (qh < 0.0){ gl_FragColor = bg; return; }
+  // 三個「這條射線沒碰到任何東西」的提早返回都要寫成背景遮罩（alpha 0），
+  // 少一個就會有一整塊背景被後處理當成物體 —— 包圍球外那一大片正是走這裡。
+  if (qh < 0.0){ gl_FragColor = backgroundPixel(bg); return; }
   qh = sqrt(qh);
   float tEnd = -qb + qh;
-  if (tEnd < 0.0){ gl_FragColor = bg; return; }
+  if (tEnd < 0.0){ gl_FragColor = backgroundPixel(bg); return; }
 
   float t = max(0.0, -qb - qh);
   bool hit = false;
@@ -2932,7 +2951,7 @@ void main(){
     if (t > tEnd) break;
   }
 
-  if (!hit){ gl_FragColor = bg; return; }
+  if (!hit){ gl_FragColor = backgroundPixel(bg); return; }
 
   vec3 p = ro + rd * t;
   vec3 N = calcNormal(p);
@@ -3968,7 +3987,7 @@ void main(){
       finalColor = clamp(finalColor / max(outputAlpha, 0.001), 0.0, 1.0);
     }
   }
-  gl_FragColor = vec4(finalColor, outputAlpha);
+  gl_FragColor = vec4(finalColor, uCoverageAlpha > 0.5 ? 1.0 : outputAlpha);
 }
 `;
 

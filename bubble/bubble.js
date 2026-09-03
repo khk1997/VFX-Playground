@@ -14,16 +14,16 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_HDRI, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=post-grade-1';
+} from './motions/registry.js?v=post-mask-3';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-76';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=post-grade-1';
-import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=post-grade-1';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=post-mask-3';
+import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=post-mask-3';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
-import createResearchMotion from './motions/research.js?v=post-grade-1';
+import createResearchMotion from './motions/research.js?v=post-mask-3';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
@@ -1227,8 +1227,8 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=post-grade-1';
-import { createPostChain } from './post.js?v=post-grade-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=post-mask-3';
+import { createPostChain } from './post.js?v=post-mask-3';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
@@ -4471,6 +4471,7 @@ function initGL() {
     uReflect:    { value: P.reflect },
     uTransmission: { value: P.transmission },
     uHdrOutput: { value: 0 },
+    uCoverageAlpha: { value: 0 },
     uHighlightGain: { value: 1 },
     uAbsorb: { value: P.absorb },
     uAbsorbColor: { value: new THREE.Color().setStyle(P.absorbColor, THREE.LinearSRGBColorSpace) },
@@ -5920,6 +5921,16 @@ const bloomTintColor = new THREE.Color();
 // target 為 null 代表直接輸出到 canvas。
 // 後處理是否真的要跑。曝光與色調映射即使沒開 bloom 也是有效的效果，所以旁路的
 // 條件是「三者都在中性值」，不是只看 bloom。
+// 背景的亮度水平，取最強通道（跟亮部取樣的 br 同一個基準）。
+function backdropLevel(transparent) {
+  if (transparent || P.bgMode !== 'color') return 0;
+  const hex = P.bgColor.replace('#', '');
+  const r = parseInt(hex.slice(0, 2), 16) / 255;
+  const g = parseInt(hex.slice(2, 4), 16) / 255;
+  const b = parseInt(hex.slice(4, 6), 16) / 255;
+  return Math.max(r, g, b);
+}
+
 function postActive() {
   return P.bloomEnabled || P.streaksEnabled
     || P.postExposure !== 1 || P.postToneMap !== 'none' || P.highlightGain !== 1
@@ -5934,6 +5945,9 @@ function renderComposite(target = null, superSample = 1) {
   // 超出範圍的顏色。
   uniforms.uHdrOutput.value = (postActive() && !transparent) ? 1 : 0;
   uniforms.uHighlightGain.value = P.highlightGain;
+  // 後處理需要一份物件遮罩（寫在 alpha，見 shaders.js 的 uCoverageAlpha）：亮部
+  // 取樣與調色都只該作用在主體上。旁路時維持 0，alpha 就還是原本的 1.0。
+  uniforms.uCoverageAlpha.value = (postActive() && !transparent) ? 1 : 0;
   if (!postActive()) {
     // 效果全關：完全走原本那條路（不配置 render target、不多任何一個 pass），
     // 畫面逐位元等於加入後處理之前。
@@ -5949,6 +5963,10 @@ function renderComposite(target = null, superSample = 1) {
     threshold: P.bloomThreshold,
     knee: P.bloomKnee,
     clampMax: P.bloomClamp,
+    // 門檻是「比背景亮多少」。純色背景知道確切亮度就直接給；HDRI 背景每個
+    // 方向都不一樣，沒有單一代表值，給 0 維持原本的絕對門檻。
+    // 去背輸出的背景是全透明，同樣是 0。
+    backdrop: backdropLevel(transparent),
     intensity: P.bloomEnabled ? P.bloomIntensity : 0,
     radius: P.bloomRadius,
     exposure: P.postExposure,

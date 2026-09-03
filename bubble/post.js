@@ -53,11 +53,24 @@ uniform vec2 uTexel;
 uniform float uThreshold;
 uniform float uKnee;
 uniform float uClamp;
-uniform float uPremultiply;
+// 背景亮度。門檻是「比背景亮多少」，不是絕對值 —— 光暈的物理意義是「超出周遭
+// 環境的那部分能量散進鏡頭」，而不是「絕對值大於 1 的像素」。
+//
+// 黑底時它是 0，門檻與行為完全不變。白底時它是 1，門檻自動抬到 1 + 1：這才擋得住
+// 「整顆球因為透出白背景而被當成光源」—— 那正是換白底之後物體整個爆掉消失的原因
+// （球本身透過去就已經接近 1，配上為暗底校的門檻 1.0，整顆球都算高光）。
+uniform float uBackdrop;
+// alpha 在這裡一律代表「這個像素有多少是物體」：不透明算繪時它是主 shader 寫進來
+// 的物件遮罩（uCoverageAlpha），去背輸出時它是 straight alpha 的覆蓋率。兩種情況
+// 都要乘上去 —— 背景不是光源。
+//
+// 少了這一步，白底會被整片當成高光餵進 bloom 與條紋，糊回來之後蓋掉整個畫面，
+// 症狀就是「換成白背景之後物體消失」。
+uniform float uMaskByAlpha;
 
 vec3 fetch(vec2 uv){
   vec4 s = texture2D(uScene, uv);
-  vec3 c = s.rgb * mix(1.0, s.a, uPremultiply);
+  vec3 c = s.rgb * mix(1.0, s.a, uMaskByAlpha);
   return min(c, vec3(uClamp));
 }
 
@@ -96,10 +109,11 @@ void main(){
   sum += karisAverage(e, f, h, i) * 0.125;
 
   float br = max(sum.r, max(sum.g, sum.b));
-  float knee = uThreshold * uKnee + 1e-5;
-  float soft = clamp(br - uThreshold + knee, 0.0, 2.0 * knee);
+  float threshold = uThreshold + uBackdrop;
+  float knee = threshold * uKnee + 1e-5;
+  float soft = clamp(br - threshold + knee, 0.0, 2.0 * knee);
   soft = soft * soft / (4.0 * knee + 1e-5);
-  float contrib = max(soft, br - uThreshold) / max(br, 1e-5);
+  float contrib = max(soft, br - threshold) / max(br, 1e-5);
   gl_FragColor = vec4(sum * contrib, 1.0);
 }
 `;
@@ -375,9 +389,16 @@ void main(){
   //
   // 對比以 0.5 為樞紐：中間調不動，亮的更亮、暗的更暗。亮度是加法偏移，
   // 對整條曲線平移 —— 這是「亮度／對比」這組配對的標準定義。
-  if (uContrast != 1.0) color = (color - 0.5) * uContrast + 0.5;
-  color += uBrightness;
-  color = max(color, vec3(0.0));
+  //
+  // 只作用在主體上：base.a 是物件遮罩（見主 shader 的 uCoverageAlpha），背景是 0。
+  // 調色調的是「這顆水滴」，不是整張畫布 —— 背景本來就由背景色決定，被對比拉走
+  // 只會讓人以為背景色設錯了。
+  if (uContrast != 1.0 || uBrightness != 0.0) {
+    vec3 graded = color;
+    if (uContrast != 1.0) graded = (graded - 0.5) * uContrast + 0.5;
+    graded = max(graded + uBrightness, vec3(0.0));
+    color = mix(color, graded, clamp(base.a, 0.0, 1.0));
+  }
 
   // 顆粒最後才加，而且加在色調映射之後：它是底片／感光元件上的東西，不是場景裡的
   // 光。暗部給多一點、亮部給少一點，跟真實的訊噪比一致。
@@ -388,7 +409,9 @@ void main(){
   }
 
   if (uTransparent < 0.5) {
-    gl_FragColor = vec4(color, base.a);
+    // base.a 這時候是物件遮罩，不是真的 alpha —— 不透明輸出一律寫 1，否則
+    // 「背景用場景色」的匯出 PNG 會變成去背的。
+    gl_FragColor = vec4(color, 1.0);
     return;
   }
   float alpha = clamp(base.a + max(bloom.r, max(bloom.g, bloom.b)), 0.0, 1.0);
@@ -462,7 +485,8 @@ export function createPostChain(renderer) {
     uThreshold: { value: 0.75 },
     uKnee: { value: 0.5 },
     uClamp: { value: 8 },
-    uPremultiply: { value: 0 },
+    uBackdrop: { value: 0 },
+    uMaskByAlpha: { value: 0 },
   });
   const downMaterial = makeMaterial(DOWN_FRAG, {
     uTex: { value: null },
@@ -603,7 +627,9 @@ export function createPostChain(renderer) {
       thresholdMaterial.uniforms.uThreshold.value = params.threshold;
       thresholdMaterial.uniforms.uKnee.value = params.knee;
       thresholdMaterial.uniforms.uClamp.value = params.clampMax;
-      thresholdMaterial.uniforms.uPremultiply.value = params.transparent ? 1 : 0;
+      thresholdMaterial.uniforms.uBackdrop.value = params.backdrop;
+      // 去背輸出的 alpha 是覆蓋率、不透明算繪的 alpha 是物件遮罩 —— 兩種都要乘。
+      thresholdMaterial.uniforms.uMaskByAlpha.value = 1;
       blit(thresholdMaterial, levels[0].down);
     }
 
