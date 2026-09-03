@@ -14,7 +14,7 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_HDRI, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=installing-defaults-1';
+} from './motions/registry.js?v=installing-defaults-2';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
@@ -850,7 +850,8 @@ const MOTION_SCOPED_KEYS = [
   // 這些值只會在切進私語的那一刻套用一次，之後被使用者調過、切到別的模式
   // 再切回來就再也拿不回研究預設，而是沿用使用者上次調到的全域值。
   'absorb', 'postExposure', 'postContrast', 'postBrightness', 'postGrain', 'postGrainScale',
-  'bloomEnabled', 'streaksEnabled', 'streakCount', 'streakLength', 'streakIntensity',
+  'bloomEnabled', 'streaksEnabled', 'streakCount', 'streakAngle', 'streakLength',
+  'streakChroma', 'streakIntensity',
 ];
 function motionDefaultsFor(key) {
   const base = key in DEFAULTS ? DEFAULTS[key]
