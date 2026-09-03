@@ -15,7 +15,7 @@ import {
   MOTION_OVERRIDES, MOTION_LIGHT_OVERRIDES,
   MOTION_HDRI, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=light-backdrop-1';
+} from './motions/registry.js?v=light-backdrop-16';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
@@ -271,6 +271,9 @@ const MAX_NEGATIVE_DROPS = 4;
 
 /* ===== 參數 ===== */
 const DEFAULTS = {              // 數值滑桿
+  // 淺底的顯色強度（見 shaders.js 的 liftedCover）。0 = 跟深底同一條公式，水滴
+  // 在白底上會被數學抵銷掉幾乎看不見；越高越不透明。只在底色情境為淺底時有效。
+  lightShow: 0.4,
   ...MOTION_PARAM_DEFAULTS,
   thickness: 250,
   thickVar: 400,
@@ -4606,6 +4609,7 @@ function initGL() {
     uMaterialStyle: { value: SELECTS.materialStyle.map[P.materialStyle] },
     uTransparentBackground: { value: 0 },
     uLightBackdrop: { value: SELECTS.backdrop.map[P.backdrop] },
+    uLightShow:  { value: P.lightShow },
     uBgColor:    { value: new THREE.Color().setStyle(P.bgColor, THREE.LinearSRGBColorSpace) },
     uMembraneBaseColor: { value: new THREE.Color(P.membraneBaseColor) },
     uMembraneVeilColor: { value: new THREE.Color(P.membraneVeilColor) },
@@ -5612,6 +5616,12 @@ function updateUIState() {
     document.getElementById(key).disabled = !membraneMaterial;
     document.getElementById(key + 'Row').style.display = membraneMaterial ? '' : 'none';
   }
+  // 淺底顯色只在淺底情境下有作用（見 shaders.js 的 liftedCover），深底時停用而
+  // 不是隱藏 —— 隱藏會讓使用者以為這根滑桿不見了，停用才說得出「現在用不到」。
+  const lightBackdrop = P.backdrop === 'light';
+  const lightShowEl = document.getElementById('lightShow');
+  setDisabled(lightShowEl, !lightBackdrop);
+  lightShowEl.closest('.row').style.opacity = lightBackdrop ? 1 : 0.4;
   document.body.style.background = colorBackground ? P.bgColor : '#000';
   // 輪廓液滴的模式閘門（形狀場 + SVG 擠出）走 data-gate；這裡只剩它自己的主
   // 開關。主開關關閉時只停掉會移動的液滴，「邊緣水滴」因為同時決定擠出邊緣的

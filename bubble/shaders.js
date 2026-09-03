@@ -329,14 +329,20 @@ uniform float uMembraneOverWhite;
 uniform vec3  uBgColor;
 // 底色情境（見 bubble.js 的 SELECT_DEFAULTS.backdrop）。0 = 深底，1 = 淺底。
 //
-// 通用玻璃在顯色階段把背景視為黑場（下面 bgLum 那一行），亮底那條合成路徑
-// 因此從來沒有為它跑過。深底時這是對的：折射進來的光完整保留在 refractedBg
-// 裡，背景的貢獻交給最後的 over 合成。淺底時就不對了 —— 厚度資訊只剩「把
-// 白色乘暗」一種表現方式，結果就是中央一片灰。
+// 這個材質在深底上的顯色方式是「自身能量」：水滴自己發出的光疊在黑場上，最後
+// 由 over 合成把背景讓進來。那套在白背景上會失效，而且失效的方式是數學上的必然
+// 而不是強度不足 —— over 合成是 final = own + bg·(1 - cover)，cover 取自身能量
+// 的峰值，背景為 1.0 時整式恆等於 1.0。自身能量被精確地抵銷掉。
 //
-// 這顆 uniform 解除那道封鎖，讓 brightComposite 與 whiteBackdrop 的白底校正
-// （冷色透射、HDRI 去米黃、彩度隨背景收放）對通用玻璃生效。
+// 淺底因此走另一條合成：同一份自身能量，改成「對背景的選擇性吸收」。留下來的
+// 顏色仍然是這個材質自己的顏色，所以換到白底看起來還是同一個材質，不是另外配
+// 一組美術模型（那是液態薄膜走的路，見 uMembraneOverWhite）。
+//
+// 三個作用點：liftedCover（抬高覆蓋率打破抵銷）、低彩度自身能量的去暖色偏、
+// 以及 researchIconFilter（內部 icon 改走乘法濾色）。深底時全部是恆等運算。
 uniform float uLightBackdrop;
+// 淺底的顯色強度（見 liftedCover）。只在 uLightBackdrop 為 1 時有作用。
+uniform float uLightShow;
 uniform float uEnvRefraction;
 uniform float uReflect;
 uniform float uTransmission;
@@ -2988,7 +2994,7 @@ void main(){
   // 的彩度要隨背景變亮而收回來（見 beamEnergy 的 brightWash），而 bgLum 歸零之後
   // 就問不出「背景到底有多亮」了。
   float trueBgLum = bgLum;
-  if (universalGlass) bgLum = mix(0.0, bgLum, uLightBackdrop);
+  if (universalGlass) bgLum = 0.0;
   float brightBg = smoothstep(0.45, 0.90, bgLum);
   // 灰底維持原本美術模型；只有純色畫布接近白色時才做保色補償。
   //
@@ -3032,6 +3038,22 @@ void main(){
   vec3 researchInsideDir = rd;
   float researchIconFres = 0.0;
   float researchIconBend = 0.0;
+  // 淺底時 icon 的界面反射改走「對透射光乘法濾色」這條路，係數存在這裡，套用點
+  // 在下面通用玻璃的 over 合成（見 universalTransmitted）。vec3(1.0) = 不濾。
+  //
+  // 為什麼淺底不能沿用深底那條 screen：screen 加進去的是水滴的自身能量，而
+  // over 合成是 final = own + bg·(1 - covered)，covered 又是取自身能量的峰值。
+  // 背景為白（1.0）時代入就是 final = V + 1·(1 - V) = 1 —— 不管 V 多大，結果
+  // 恆等於純白。也就是說任何自身能量項在白底上數學上必然隱形，不是強度不夠。
+  // 能在白底上留下痕跡的只有「把透過來的光乘暗」。
+  vec3 researchIconFilter = vec3(1.0);
+  // icon 表面的正對程度（1 = 正視，0 = 掠射）。淺底的濾色遮罩要用它自己算一條
+  // 比 Schlick 寬的曲線，見下方 iconBodyMask。
+  float researchIconFacing = 1.0;
+  // 光在 icon 內部走過的長度。深底時它只是併進總光程（見 pathLength），淺底另外
+  // 需要它單獨算一份「這顆 icon 自己的吸收」—— 全域的體積吸收是整顆水滴一起
+  // 染色，沒辦法只讓 icon 顯色而外殼維持接近白。
+  float researchIconPath = 0.0;
 #endif
   bool needsEnvironmentTransmission =
     uBgMode == 0 && uHasEnv == 1
@@ -3137,6 +3159,8 @@ void main(){
           if (dot(shellOut, shellOut) < 0.0001) shellOut = iconOut;
           vec3 iconTransmitted = backgroundSample(normalize(shellOut), roughBlur).rgb;
           float iconFacing = clamp(dot(-researchInsideDir, researchIconN), 0.0, 1.0);
+          researchIconFacing = iconFacing;
+          researchIconPath = iconPath;
           float iconF0 = pow((relIOR - 1.0) / (relIOR + 1.0), 2.0);
           float iconFres = iconF0 + (1.0 - iconF0) * pow(1.0 - iconFacing, 5.0);
           vec3 iconReflection = sampleEnvironmentBackdrop(
@@ -3920,6 +3944,16 @@ void main(){
     vec3 iconSpec = sampleEnvironmentBackdrop(
       reflect(researchInsideDir, researchIconN), roughBlur * 0.35
     );
+    // 淺底只借用棚燈的明暗結構，不把米黃色的牆面染進 icon —— 跟上面
+    // envRefraction 那段的 cleanBrightRefraction 同一個處理，冷色再偏一點，
+    // 這個材質本來就是冷色系的（吸收色預設 #68b2e7），中性灰會讓 icon 在白底
+    // 上讀起來像水泥而不是玻璃。
+    float iconSpecLum = dot(iconSpec, vec3(0.2126, 0.7152, 0.0722));
+    vec3 iconCoolSpec = clamp(
+      vec3(iconSpecLum) * vec3(0.92, 0.965, 1.03),
+      0.0,
+      1.0
+    );
     // screen 合成：亮處不會爆掉，暗處等於直接加上去。
     //
     // 位置很關鍵：必須在下面那段通用玻璃的 over 合成「之前」。這一圈亮邊是水滴
@@ -3928,7 +3962,41 @@ void main(){
     // （見結尾的 uTransparentBackground 分支）是拿 universalOwnEnergy 反解的，
     // 會整個略過這一圈亮邊 —— 症狀就是「viewer 看得到氣泡邊界，去背 PNG 疊回
     // 黑底卻淡掉了」，而且 alpha 也沒把它算進覆蓋率。
-    finalColor = 1.0 - (1.0 - finalColor) * (1.0 - clamp(iconSpec * iconRim, 0.0, 1.0));
+    // 深底：原本那條 screen，一個係數都沒動。
+    vec3 iconScreened = 1.0
+      - (1.0 - finalColor) * (1.0 - clamp(iconSpec * iconRim, 0.0, 1.0));
+    finalColor = mix(finalColor, iconScreened, 1.0 - uLightBackdrop);
+    // 淺底：同一個 Fresnel 項，換成對透射光的選擇性吸收。界面上反射掉的那部分
+    // 本來就是「沒有繼續穿過來的光」，所以在亮背景上它的正確表現是把白色壓暗，
+    // 而不是再加一層亮。iconCoolSpec 接近 1 的地方（棚燈的高光）濾色係數也接近
+    // 1，於是那一小塊維持純白 —— 周圍都被壓暗之後，它自己就讀成高光點。
+    // 淺底的遮罩不能直接沿用 iconRim。那是 Schlick 項，而 icon 相對外殼的折射率
+    // 只有 1.2 上下，F0 ≈ 0.008 —— 只有極掠射抬得起來，在亮底上結果只是一條細
+    // 描邊，讀不出「一顆鏡片」。這裡用同一個正對量但放寬指數，讓 icon 的本體也
+    // 拿到一部分濾色，輪廓才有東西可以依附。
+    //
+    // 仍然保留 uFresnel 當總量，滑桿的語意不變。
+    float iconBodyMask = pow(1.0 - researchIconFacing, 2.0);
+    float iconLightMask = clamp(
+      max(iconRim, iconBodyMask * 0.55) * (0.35 + uFresnel) * 0.42,
+      0.0,
+      1.0
+    );
+    researchIconFilter = mix(
+      vec3(1.0),
+      iconCoolSpec,
+      iconLightMask * uLightBackdrop
+    );
+    // icon 自己的厚度染色。係數偏冷（藍通道幾乎不吸收），所以厚的地方往淡藍
+    // 走而不是往灰走 —— 往灰走就是「髒」，那正是要避免的。
+    //
+    // 這一項跟上面的界面濾色是兩件不同的事：界面濾色集中在掠射的輪廓，厚度
+    // 染色填的是鏡片的本體，兩者相乘才讀得出「一顆有體積的內含物」而不是一圈
+    // 描邊。
+    vec3 iconDepthTint = exp(
+      -vec3(0.55, 0.30, 0.08) * researchIconPath * uLightBackdrop * 1.6
+    );
+    researchIconFilter *= iconDepthTint;
   }
 #endif
   // 通用玻璃的 over 合成。finalColor 此刻是「黑場上的水滴自身能量」，也就是
@@ -3942,6 +4010,27 @@ void main(){
   // 的版本：加上透射光後夾到 [0,1] 是給不透明畫面用的，亮部很容易在那裡就
   // 先被截頂，再拿截頂後的值去反減、反除只會把能量憑空削掉，去背結果就會
   // 比畫面上看到的暗、也比較不飽和。
+  // 淺底：把「低彩度」的自身能量去掉暖色偏。
+  //
+  // 棚燈 HDRI 是米黃色的，那點暖色在深底上完全看不出來（周圍全黑，眼睛沒有
+  // 白參考），一旦被抬到白背景上就變成一層灰褐色的濁 —— 這就是原本「黑黑
+  // 髒髒」裡的「髒」，跟體積吸收造成的「黑」是兩件不同的事。
+  //
+  // 只處理低彩度的部分：藍色焦散、色散彩虹、薄膜彩邊這些有彩度的項目是這個
+  // 材質的識別特徵，一律原封不動保留，換到白底也要看得出是同一個材質。
+  if (universalGlass && uLightBackdrop > 0.0) {
+    float ownLum = dot(finalColor, vec3(0.2126, 0.7152, 0.0722));
+    float ownChroma = max(finalColor.r, max(finalColor.g, finalColor.b))
+      - min(finalColor.r, min(finalColor.g, finalColor.b));
+    // 留一點冷偏而不是純灰：這個材質本來就是冷色系的液態玻璃（吸收色預設
+    // #68b2e7），純灰會讓它在白底上讀起來像水泥。
+    vec3 ownClean = vec3(ownLum) * vec3(0.94, 0.975, 1.03);
+    finalColor = mix(
+      finalColor,
+      ownClean,
+      (1.0 - smoothstep(0.04, 0.22, ownChroma)) * uLightBackdrop
+    );
+  }
   vec3 universalOwnEnergy = finalColor;
   if (universalGlass) {
     universalTransmitted = refractedBg * material.transmission * volumeAbsorption
@@ -3956,7 +4045,41 @@ void main(){
       0.0,
       1.0
     );
-    finalColor = clampOutput(finalColor + universalTransmitted * (1.0 - universalCovered));
+#ifdef FEATURE_RESEARCH
+    // icon 的選擇性吸收。它是一層透射率，跟上面那一串乘在一起才是正確的濾片
+    // 串接。深底時 researchIconFilter 恆為 vec3(1)，是恆等運算。
+    universalTransmitted *= researchIconFilter;
+#endif
+    // 淺底把覆蓋率抬高。這是整個白底問題的核心一行，說明如下。
+    //
+    // over 合成是 final = own + bg·(1 - cover)，而 cover 取的是自身能量的峰值。
+    // 背景為白（1.0）時代進去就是：
+    //
+    //     final = own + 1·(1 - peak(own))
+    //
+    // 對灰階的自身能量，這恆等於 1.0 —— 不管 own 多大都一樣。也就是說「覆蓋率
+    // 等於能量峰值」這個設定，在白背景上會精確地把自身能量抵銷掉。深底時它是
+    // 對的（bg 為 0，final = own，能量完整保留），白底時它是災難。
+    //
+    // 抬高 cover 就打破這個抵銷：讓開的背景比自身能量還多，差額就是這個材質在
+    // 白底上留下的痕跡，而留下來的顏色仍然是 own 自己的顏色 —— 也就是黑底那套
+    // 材質的色相，不是另外配一組。這正是「同一個材質換到白底」該有的做法。
+    //
+    // pow 的指數小於 1，作用是把「暗但有色相」的大片區域抬起來。這個材質在黑底
+    // 上絕大部分面積都是暗的（深藍玻璃），線性的 cover 會讓那些區域在白底上幾乎
+    // 完全消失，只剩幾道高光 —— 症狀就是「輪廓跟顏色都看不清楚」。
+    // uLightShow 是唯一的美術旋鈕（面板上的「淺底顯色」）。0 = 完全不抬，行為
+    // 與深底的公式逐字相同，水滴在白底上會像原本那樣被抵銷掉；1 = 抬到最強，
+    // 材質幾乎不透明。指數與增益一起走同一根，因為它們表達的是同一件事：
+    // 「這個材質在白底上要留下多少痕跡」。
+    float liftedCover = clamp(
+      pow(universalCovered, mix(1.0, 0.45, uLightShow))
+        * mix(1.0, 1.28, uLightShow),
+      0.0,
+      1.0
+    );
+    float cover = mix(universalCovered, liftedCover, uLightBackdrop);
+    finalColor = clampOutput(finalColor + universalTransmitted * (1.0 - cover));
   }
 
   // 稜光光芒的減法那一半，套在「已經合成完背景」的顏色上。
