@@ -15,7 +15,7 @@ import {
   MOTION_OVERRIDES, MOTION_LIGHT_OVERRIDES,
   MOTION_HDRI, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=light-backdrop-23';
+} from './motions/registry.js?v=light-backdrop-27';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
@@ -274,6 +274,12 @@ const DEFAULTS = {              // 數值滑桿
   // 淺底的顯色強度（見 shaders.js 的 liftedCover）。0 = 跟深底同一條公式，水滴
   // 在白底上會被數學抵銷掉幾乎看不見；越高越不透明。只在底色情境為淺底時有效。
   lightShow: 0,
+  // 淺底 icon 的獨立顯色（見 shaders.js 的 researchIconFilter）。只在底色情境為
+  // 淺底時作用，深底一律不讀 —— 調這幾根動不到黑底的任何外觀。
+  //
+  // 濃度是輪廓那圈色的強度；邊緣集中越高，藍色就越貼著輪廓、中央留得越透明。
+  lightIconTint: 0.8,
+  lightIconEdge: 4.6,
   ...MOTION_PARAM_DEFAULTS,
   thickness: 250,
   thickVar: 400,
@@ -733,6 +739,9 @@ const COLOR_DEFAULTS  = {
   // absorbCoefficient）。這個值配上濃度 ×1，算出來就是這兩個控制項出現以前
   // 寫死的吸收係數，所以預設外觀不變。
   absorbColor: '#68b2e7',
+  // 淺底 icon 的顏色。只取色相 —— shader 會把它的亮度歸一化，所以選飽和一點的
+  // 顏色只會更明確，不會變成暗環（見 shaders.js 的 iconTintColor）。
+  lightIconColor: '#5b8fe0',
   // 液態薄膜原本各自寫死一個偏藍紫色常數的 5 處，現在各自開一個選色器直接
   // 取代常數，選色器選什麼顏色，畫面上那一處就是那個顏色。預設值都是原本
   // 那個常數本身，維持改動前的外觀。
@@ -993,6 +1002,7 @@ const SELECTS = {
 const COLORS = {
   bgColor: 'uBgColor',
   absorbColor: 'uAbsorbColor',
+  lightIconColor: 'uLightIconColor',
   // 後處理的顏色不對應 uniform（它們是 post.js 每幀讀的），uniform 名稱留空，
   // 由下面兩處的特例分支處理。
   bloomTint: '',
@@ -1337,7 +1347,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=whisper-icon-phase-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=light-icon-1';
 import { createPostChain } from './post.js?v=post-mask-3';
 
 // cold compile 的時間量測（?diagTiming=1）。
@@ -4610,6 +4620,9 @@ function initGL() {
     uTransparentBackground: { value: 0 },
     uLightBackdrop: { value: SELECTS.backdrop.map[P.backdrop] },
     uLightShow:  { value: P.lightShow },
+    uLightIconColor: { value: new THREE.Color().setStyle(P.lightIconColor, THREE.LinearSRGBColorSpace) },
+    uLightIconTint: { value: P.lightIconTint },
+    uLightIconEdge: { value: P.lightIconEdge },
     uBgColor:    { value: new THREE.Color().setStyle(P.bgColor, THREE.LinearSRGBColorSpace) },
     uMembraneBaseColor: { value: new THREE.Color(P.membraneBaseColor) },
     uMembraneVeilColor: { value: new THREE.Color(P.membraneVeilColor) },
@@ -4962,7 +4975,9 @@ function syncPanelToUniforms() {
     // 吸收色不是「一道光的顏色」而是「每個通道剩下多少」的比例，所以要的是選色
     // 器上那三個原始數值，不能讓 three 的色彩管理把它當 sRGB 轉成線性（那會把
     // 比例整個扭掉）。同 uBgColor 的作法。
-    else if (key === 'absorbColor') uniforms[COLORS[key]].value.setStyle(P[key], THREE.LinearSRGBColorSpace);
+    else if (key === 'absorbColor' || key === 'lightIconColor') {
+      uniforms[COLORS[key]].value.setStyle(P[key], THREE.LinearSRGBColorSpace);
+    }
     else uniforms[COLORS[key]].value.set(P[key]);
   }
   document.body.style.background = (P.bgMode === 'hdri') ? '#000' : P.bgColor;
@@ -5343,7 +5358,9 @@ function bindControls() {
       if (!uName) { /* 後處理的顏色由 renderComposite 每幀直接讀 P */ }
       else if (key === 'bgColor') setBgColorUniform(el.value);
       // 見上面 applyAllUniforms 裡同一個特例的說明。
-      else if (key === 'absorbColor') { if (uniforms) uniforms[uName].value.setStyle(el.value, THREE.LinearSRGBColorSpace); }
+      else if (key === 'absorbColor' || key === 'lightIconColor') {
+        if (uniforms) uniforms[uName].value.setStyle(el.value, THREE.LinearSRGBColorSpace);
+      }
       else if (uniforms) uniforms[uName].value.set(el.value);
       if (key === 'bgColor') {
         document.body.style.background = (P.bgMode === 'hdri') ? '#000' : el.value;
@@ -5619,9 +5636,11 @@ function updateUIState() {
   // 淺底顯色只在淺底情境下有作用（見 shaders.js 的 liftedCover），深底時停用而
   // 不是隱藏 —— 隱藏會讓使用者以為這根滑桿不見了，停用才說得出「現在用不到」。
   const lightBackdrop = P.backdrop === 'light';
-  const lightShowEl = document.getElementById('lightShow');
-  setDisabled(lightShowEl, !lightBackdrop);
-  lightShowEl.closest('.row').style.opacity = lightBackdrop ? 1 : 0.4;
+  for (const key of ['lightShow', 'lightIconColor', 'lightIconTint', 'lightIconEdge']) {
+    const el = document.getElementById(key);
+    setDisabled(el, !lightBackdrop);
+    el.closest('.row').style.opacity = lightBackdrop ? 1 : 0.4;
+  }
   document.body.style.background = colorBackground ? P.bgColor : '#000';
   // 輪廓液滴的模式閘門（形狀場 + SVG 擠出）走 data-gate；這裡只剩它自己的主
   // 開關。主開關關閉時只停掉會移動的液滴，「邊緣水滴」因為同時決定擠出邊緣的

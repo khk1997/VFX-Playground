@@ -343,6 +343,14 @@ uniform vec3  uBgColor;
 uniform float uLightBackdrop;
 // 淺底的顯色強度（見 liftedCover）。只在 uLightBackdrop 為 1 時有作用。
 uniform float uLightShow;
+// 淺底時內部 icon 的獨立顯色（見 researchIconFilter）。刻意跟體積吸收脫鉤：
+// 這三根只在淺底作用，深底一律不讀，所以調它們動不到黑底的任何外觀。
+//
+// uLightIconColor 只取色相，亮度會被歸一化（見套用處）—— 選色器選的是「偏哪個
+// 顏色」而不是「多暗」，這也是黑邊不會回來的保證。
+uniform vec3  uLightIconColor;
+uniform float uLightIconTint;
+uniform float uLightIconEdge;
 uniform float uEnvRefraction;
 uniform float uReflect;
 uniform float uTransmission;
@@ -3976,57 +3984,38 @@ void main(){
     // 上一版是把界面反射與厚度直接當吸收乘上去，兩者都在掠射處最強，結果是
     // icon 周圍一圈黑邊 —— 跟參考完全相反，那裡是用藍與白的漸層勾形狀的。
     //
-    // 所以這裡的濾色刻意做成亮度接近 1、只有色相偏移：最深的地方紅通道也只
-    // 掉約兩成，藍通道甚至微幅提高。icon 因此是「比外殼藍一點」而不是「比外殼
-    // 暗一截」，而冷色本身就是這個材質的吸收色系（預設 #68b2e7），換到白底仍
-    // 看得出是同一種材質的內含物。
+    // 所以這裡的濾色刻意做成亮度接近 1、只有色相偏移：icon 是「比外殼偏色」而
+    // 不是「比外殼暗一截」。
+    // 淺底 icon 的獨立顯色。三根專屬控制（顏色／濃度／邊緣集中），跟體積吸收
+    // 完全脫鉤 —— 上一版是從 uAbsorbColor 推的，結果 icon 的顏色與濃淡會跟著
+    // 體積吸收一起被拉走，沒辦法單獨造型。
     //
-    // 密度由兩項相加：掠射的界面項（勾邊）與厚度項（填鏡片本體）。兩者都是
-    // 「多少比例的光被界面或體積動到」，不含亮度衰減。
-    // 本體遮罩只能用厚度，不能用正對程度。實測 researchIconFacing 在 icon 的
-    // 可見範圍內幾乎恆為 1（這兩顆 icon 是朝著鏡頭的），pow(1 - facing, 2) 因此
-    // 恆為 0 —— 拿它當本體遮罩是無效的。光在 icon 內走過的長度才真的分得出
-    // 「中央厚、邊緣薄」。
-    // 0.10 的底值：命中 icon 就先給一點色偏。厚度薄的那一顆（融合的某些時點
-    // 只切到很淺的一層）光靠厚度項會幾乎沒有顏色，輪廓就斷掉了。
+    // 分佈刻意做成「輪廓帶」：光程短代表接近剪影邊緣，光程長代表中央，所以
+    // exp(-path·k) 在邊緣最強、往中央衰減。這正是要的「藍色包圍輪廓、中間留
+    // 透明」；上一版用的是 1 - exp(-path)，那是中央最濃，剛好相反。
+    //
+    // 中央不會完全歸零（exp 只是衰減），所以裡面仍留一層很淡的漸層色。
+    float iconEdge = exp(-researchIconPath * max(uLightIconEdge, 0.01));
     float iconDensity = clamp(
-      0.10
-        + iconRim * (0.35 + uFresnel) * 0.42
-        + (1.0 - exp(-researchIconPath * 3.2)) * 0.95,
+      iconEdge * uLightIconTint
+        + iconRim * (0.35 + uFresnel) * 0.18,
       0.0,
       1.0
     );
-    // 棚燈打到的高光維持透明。周圍都偏了藍之後，這一小塊留在白色就自己讀成
-    // 高光點，不必再加光 —— 白底上本來就沒有比白更亮的空間。
+    // 棚燈打到的高光維持透明。周圍偏了色之後，這一小塊留白就自己讀成高光點，
+    // 不必再加光 —— 白底上本來就沒有比白更亮的空間。
     //
-    // 門檻不能用 clamp(iconSpecLum, 0, 1)。HDRI 是高動態範圍的，棚燈的亮度在
-    // 相當大的立體角裡都超過 1，clamp 之後幾乎整片都是 1，等於把密度無條件砍
-    // 成三分之一 —— 症狀就是「色偏調得再深都看不出來」。smoothstep 從 1.6 才
-    // 開始起作用，真正的高光才會被留白。
+    // 門檻不能用 clamp(iconSpecLum, 0, 1)：HDRI 是高動態範圍的，棚燈亮度在相當
+    // 大的立體角裡都超過 1，clamp 之後幾乎整片是 1，等於把密度無條件砍掉大半。
     float iconHighlight = smoothstep(1.6, 5.0, iconSpecLum);
     iconDensity *= 1.0 - iconHighlight * 0.75;
-    // 色相從材質自己的吸收色推出來，不是寫死一個藍。
+    // 顏色只取色相：把選到的顏色除掉自己的亮度，歸一化到 1。
     //
-    // 走的是跟體積吸收完全同一條比爾–朗伯（同一個 uAbsorbColor、同樣除以參考
-    // 厚度 20），只是把光程換成 icon 自己那一段。所以它會跟著「吸收色」滑桿走，
-    // 而且跟外殼身上的顏色同源 —— 這是「同一個材質」而不是「疊一層藍」的差別。
-    // 吸收色調成琥珀色，icon 就會變琥珀色，跟外殼一起變。
-    vec3 iconAbsorbCoefficient = -log(clamp(uAbsorbColor, 0.002, 0.999)) / 20.0;
-    // 40 是「icon 這段光程要當成多厚」的尺度。icon 只有零點幾個單位厚，照原尺度
-    // 算出來紅通道只差約 7%，色相分不開；這個係數把它放大到跟外殼明顯不同的一階。
-    // 語意上就是「icon 是比外殼稠很多的同一種玻璃」—— 它本來就有自己的折射率
-    // 滑桿（researchIconIOR 預設 1.2 倍），濃度跟著不同是一致的。
-    vec3 iconBeer = exp(
-      -iconAbsorbCoefficient * researchIconPath * max(uAbsorb, 0.0) * 40.0
-    );
-    // 只取它的「顏色」，不取它的「暗」。
-    //
-    // 純比爾–朗伯會把厚處與掠射一起壓黑，那正是上一版黑邊的來源。除掉亮度之後
-    // 只剩下色相的偏移：紅通道低於 1、藍通道高於 1，於是 icon 靠顏色跟外殼分開，
-    // 而不是靠一條暗線。這一步是刻意的美術取捨，不是物理 —— 白背景上沒有比白更
-    // 亮的空間，要讓內含物讀得出來，只能在色相上做。
-    float iconBeerLum = dot(iconBeer, vec3(0.2126, 0.7152, 0.0722));
-    vec3 iconTintColor = clamp(iconBeer / max(iconBeerLum, 0.001), 0.0, 2.0);
+    // 這一步是「不會再出現黑邊」的保證。直接乘一個飽和藍（線性亮度遠低於 1）
+    // 等於乘一個暗值，最濃的地方就會變成一圈暗環 —— 那正是前幾版的問題。歸一化
+    // 之後不管選什麼顏色，最濃處都只是換色而不是變暗。
+    float iconPickLum = dot(uLightIconColor, vec3(0.2126, 0.7152, 0.0722));
+    vec3 iconTintColor = uLightIconColor / max(iconPickLum, 0.001);
     researchIconFilter = mix(
       vec3(1.0),
       iconTintColor,
