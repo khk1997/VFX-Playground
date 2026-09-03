@@ -14,7 +14,7 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_HDRI, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=whisper-icon-phase-1';
+} from './motions/registry.js?v=installing-defaults-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
@@ -708,6 +708,11 @@ const TOGGLE_DEFAULTS = {
   // 這幾顆手寫的開關走同一條路。
   ...MOTION_TOGGLE_DEFAULTS,
 };
+// shader 的光譜座標由紫端（0）走向紅端（1）。七個色標固定等距，
+// 讓每種彩虹顏色都能單獨編輯，同時保持色帶之間連續混色。
+const SPECTRAL_CAUSTIC_DEFAULTS = [
+  '#52e6fc', '#40b3f9', '#3aa3e3', '#3fabf9', '#4dd8fb', '#3ba6f9', '#52e6fc',
+];
 const COLOR_DEFAULTS  = {
   bgColor: '#000000',
   // 光暈的顏色。白 = 不染色。
@@ -724,6 +729,9 @@ const COLOR_DEFAULTS  = {
   membraneReflectionColor: '#94b8e6',
   membraneCardColor: '#94c7ff',
   membraneShadeColor: '#85b8e6',
+  ...Object.fromEntries(SPECTRAL_CAUSTIC_DEFAULTS.map(
+    (color, index) => [`spectralCausticCol${index}`, color],
+  )),
 };
 const P = { ...DEFAULTS, ...MOTION_TEXT_DEFAULTS, ...SELECT_DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS };
 const extendedMotions = createExtendedMotionRuntime(P);
@@ -808,6 +816,10 @@ const MOTION_SCOPED_KEYS = [
   'rayBeamAzimuth', 'rayBeamElevation', 'rayBeamRefract', 'rayBeamNoiseMask',
   'rayDispersionEnabled', 'rayBeamPattern',
   'spectralCausticEnabled',
+  'spectralCausticIntensity', 'spectralCausticFocus', 'spectralCausticBlend',
+  'spectralCausticDensity', 'spectralCausticWarp', 'spectralCausticNoiseScale',
+  'spectralCausticAzimuth', 'spectralCausticElevation',
+  ...SPECTRAL_CAUSTIC_DEFAULTS.map((_, index) => `spectralCausticCol${index}`),
   // 藝術色散的開關，跟上面的光譜焦散開關同一個身分。
   'dispersionEnabled',
   'cameraDistance', 'cameraRotationX', 'cameraRotationY',
@@ -824,6 +836,7 @@ const MOTION_SCOPED_KEYS = [
   // switchMaterialProfile 還原該類型記住的整組材質值，而模式記憶是照這個陣列
   // 的順序逐一寫回的，排在後面模式的 override 才蓋得過材質類型的 profile。
   'transmission', 'reflect', 'materialExposure', 'roughness', 'fresnel', 'ior',
+  'hdriBlur', 'dispersion', 'artPatternSpeed',
   // 水滴形態這兩條同樣沒列進來，所以 research overrides 裡的 viscosity 0.82 /
   // surfaceTension 0.92 從來沒被寫回控制項，面板一直是全域的 0.78 / 0.82。
   'viscosity', 'surfaceTension',
@@ -836,13 +849,14 @@ const MOTION_SCOPED_KEYS = [
   // 指定了一組後處理手感（見 registry.js 的 overrides），沒有按模式記憶的話
   // 這些值只會在切進私語的那一刻套用一次，之後被使用者調過、切到別的模式
   // 再切回來就再也拿不回研究預設，而是沿用使用者上次調到的全域值。
-  'absorb', 'postGrain', 'postGrainScale',
+  'absorb', 'postExposure', 'postContrast', 'postBrightness', 'postGrain', 'postGrainScale',
   'bloomEnabled', 'streaksEnabled', 'streakCount', 'streakLength', 'streakIntensity',
 ];
 function motionDefaultsFor(key) {
   const base = key in DEFAULTS ? DEFAULTS[key]
     : key in TOGGLE_DEFAULTS ? TOGGLE_DEFAULTS[key]
-      : SELECT_DEFAULTS[key];
+      : key in COLOR_DEFAULTS ? COLOR_DEFAULTS[key]
+        : SELECT_DEFAULTS[key];
   return Object.fromEntries(MOTION_KEYS.map(m => [m, MOTION_OVERRIDES[m]?.[key] ?? base]));
 }
 function buildMotionMemory() {
@@ -912,11 +926,6 @@ const COLORS = {
   membraneCardColor: 'uMembraneCardColor',
   membraneShadeColor: 'uMembraneShadeColor',
 };
-// shader 的光譜座標由紫端（0）走向紅端（1）。七個色標固定等距，
-// 讓每種彩虹顏色都能單獨編輯，同時保持色帶之間連續混色。
-const SPECTRAL_CAUSTIC_DEFAULTS = [
-  '#52e6fc', '#40b3f9', '#3aa3e3', '#3fabf9', '#4dd8fb', '#3ba6f9', '#52e6fc',
-];
 // 值為 uniform 名稱（直接寫 0/1），或一個套用函式 —— 輪廓液滴的開關不是
 // 布林 uniform，而是把 uEdgeDropCount 歸零，這樣關閉液滴時仍保留邊緣圓角
 // （圓角半徑由獨立的 uShapeEdgeBevel 控制，見 svgShapeDistance 的 smin 半徑）。
@@ -5281,9 +5290,12 @@ function bindControls() {
 
 function bindSpectralCausticColors() {
   for (let i = 0; i < SPECTRAL_CAUSTIC_DEFAULTS.length; i++) {
-    const el = document.getElementById('spectralCausticCol' + i);
+    const key = 'spectralCausticCol' + i;
+    const el = document.getElementById(key);
+    el.value = P[key];
     if (!PREVIEW && !el._bound) {
       el.addEventListener('input', () => {
+        P[key] = el.value;
         buildSpectralCausticLUT();
         requestPausedRender();
       });
@@ -5294,8 +5306,9 @@ function bindSpectralCausticColors() {
 }
 
 function resetSpectralCausticColors() {
-  SPECTRAL_CAUSTIC_DEFAULTS.forEach((color, i) => {
-    document.getElementById('spectralCausticCol' + i).value = color;
+  SPECTRAL_CAUSTIC_DEFAULTS.forEach((_, i) => {
+    const key = 'spectralCausticCol' + i;
+    document.getElementById(key).value = P[key];
   });
   buildSpectralCausticLUT();
 }

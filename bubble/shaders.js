@@ -1105,7 +1105,7 @@ const float RESEARCH_SIDE_SOFT = 0.06;
 // 接點上被 fract 切斷 —— 隆起會在 phase 0 那一幀憑空跳出一塊。
 #define RESEARCH_ANTICIPATE 0.06
 #define RESEARCH_BIRTH_A 0.0
-// B 的出生時刻改由 uResearchIconBirthStagger 控制；預設仍是 0.14。
+// B 的出生時刻由 uResearchIconBirthStagger 控制。
 // 每顆的壽命,以及淡出的起點。壽命必須跟淡出的終點一致,scale 才會剛好在生命
 // 結束那一刻歸零。最晚出生的 B 在 0.14 + 0.84 = 0.98 收完,留 0.02 給 loop 接點。
 // 每顆 icon 的生命週期現在正好填滿一整個循環,兩顆錯開可調的出生間隔。

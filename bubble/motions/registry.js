@@ -120,7 +120,7 @@ export const MOTIONS = {
     dolly: false,
   },
   research: {
-    label: '私語 Whisper',
+    label: '安裝中 Installing',
     uniform: 9,
     usesShapeField: false,
     gate: 'research',
@@ -128,7 +128,7 @@ export const MOTIONS = {
     // 使用者要調的是下面那組有語意的尺寸與融合參數，而不是任意增減顆數。
     count: 2,
     radius: 0.71,
-    loopDuration: 4.5,
+    loopDuration: 8,
     dolly: false,
     // 這個模式指定的環境貼圖（bubble/assets/ 底下的檔名）。HDRI 平常是跟著
     // 「材質類型」走的（通用玻璃／液態薄膜各一張），但私語的外觀是照這張棚燈
@@ -139,8 +139,10 @@ export const MOTIONS = {
     hdri: 'photo_studio3_london_hall_1k.hdr',
     overrides: {
       materialStyle: 'universal',
-      cameraDistance: 4.8,
-      spin: 0,
+      cameraDistance: 3.85,
+      cameraRotationX: 7.8,
+      cameraRotationY: 28.5,
+      spin: 0.08,
       wobble: 0.05,
       // 外殼起伏定格。這個模式的主角是內部那兩顆 icon，外殼再自己流動會搶掉
       // 注意力；wobble 保留（起伏的「形狀」還在），只把時間項關掉。
@@ -150,11 +152,12 @@ export const MOTIONS = {
       // 以下整組材質與 RAY 色散是這個模式的指定外觀，逐項寫死而不是只列出
       // 與全域 DEFAULTS 不同的幾個 —— 全域預設之後若被調動，這裡不該跟著漂。
       transmission: 1,
-      reflect: 1.6,
+      reflect: 1.22,
       materialExposure: 1,
-      roughness: 0.16,
-      fresnel: 0.45,
-      ior: 1.16,
+      roughness: 0.14,
+      fresnel: 0.8,
+      ior: 1.15,
+      hdriBlur: 0.22,
       rayDispersionEnabled: true,
       rayBeamPattern: 'grid',
       rayBeamIntensity: 17.55,
@@ -167,24 +170,43 @@ export const MOTIONS = {
       rayBeamAzimuth: -54,
       rayBeamElevation: 0,
       rayBeamRefract: 1,
-      rayBeamFresnelMask: 0.57,
+      rayBeamFresnelMask: 0.28,
       rayBeamNoiseMask: 1,
       rayBeamNoiseScale: 0.7,
-      spectralCausticEnabled: false,
+      spectralCausticEnabled: true,
+      spectralCausticCol2: '#3c41e2',
+      spectralCausticCol5: '#3979f9',
+      spectralCausticCol6: '#4ebafd',
+      spectralCausticIntensity: 6,
+      spectralCausticFocus: 0.26,
+      spectralCausticBlend: 1,
+      spectralCausticDensity: 0.52,
+      spectralCausticWarp: 0.26,
+      spectralCausticNoiseScale: 0.5,
+      spectralCausticAzimuth: -29,
+      spectralCausticElevation: -31,
       dispersionEnabled: true,
-      dispersionSeparation: 0.24,
+      dispersion: 0.03,
+      dispersionSeparation: 1.5,
+      artPatternSpeed: 0,
       // 使用者實測後定案的後處理整組（2026-09-02 存檔匯入）：體積吸收拉濃，
       // 顆粒放大顆粒感、縮小粒徑，開 Bloom 與條紋光芒各自給一組收斂過的手感。
       // 其餘後處理欄位（門檻、強度、擴散範圍…）沒有列在這裡，維持全域預設 ——
       // 使用者只調了這幾根，其餘沒有理由跟著漂。
-      absorb: 5.3,
+      absorb: 5.05,
+      postExposure: 1.13,
+      postContrast: 1.33,
+      postBrightness: -0.02,
       postGrain: 0.033,
       postGrainScale: 0.6,
-      bloomEnabled: true,
+      bloomEnabled: false,
       streaksEnabled: true,
       streakCount: 2,
       streakLength: 0.37,
-      streakIntensity: 0.55,
+      streakIntensity: 0.4,
+      capillaryHeight: 0.09,
+      capillaryRings: 3,
+      capillarySpeed: 2,
     },
     params: [
       {
@@ -225,18 +247,18 @@ export const MOTIONS = {
       },
       {
         key: 'researchCompanionSize', label: '外殼大小',
-        min: 0.12, max: 1.1, step: 0.01, value: 0.48,
+        min: 0.12, max: 1.1, step: 0.01, value: 0.54,
       },
       {
         // 0 = 中心停在主殼表面（只露半顆）；1 = 兩殼接近相切。預設保留明顯的
         // 液橋與雙葉輪廓，對應參考影片「要融合、但還沒完全融合」的首尾姿勢。
         key: 'researchCompanionExposure', label: '外露程度',
-        min: 0, max: 1.25, step: 0.01, value: 0.72,
+        min: 0, max: 1.25, step: 0.01, value: 0,
       },
       {
         // 最高點時伴生殼中心往主殼裡走多深；1 代表兩顆中心重合。
         key: 'researchCompanionDepth', label: '融合深度',
-        min: 0, max: 1, step: 0.01, value: 0.72,
+        min: 0, max: 1, step: 0.01, value: 1,
       },
       {
         // 改變中段曲線的平頂寬度，不改首尾姿勢或循環接縫。
@@ -244,7 +266,7 @@ export const MOTIONS = {
         min: 0, max: 1, step: 0.01, value: 0.42,
       },
       {
-        key: 'researchCompanionPath', label: '軌跡類型', type: 'select', value: 0,
+        key: 'researchCompanionPath', label: '軌跡類型', type: 'select', value: 1,
         options: [
           { value: 0, label: '雙側環繞 Orbit' },
           { value: 1, label: '同側弧線 Arc' },
@@ -253,23 +275,23 @@ export const MOTIONS = {
       },
       {
         key: 'researchCompanionPathAngle', label: '出發方向',
-        min: -180, max: 180, step: 1, value: 36,
+        min: -180, max: 180, step: 1, value: 18,
       },
       {
         // 正負值會交換靠近／回程所走的側邊；以主殼半徑為尺度，不會在融合點前
         // 因兩殼距離縮小而突然夾緊。
         key: 'researchCompanionOrbit', label: '側向弧線',
-        min: -110, max: 110, step: 1, value: 34,
+        min: -110, max: 110, step: 1, value: 0,
       },
       {
         key: 'researchCompanionDepthOrbit', label: '前後弧線',
-        min: -110, max: 110, step: 1, value: 22,
+        min: -110, max: 110, step: 1, value: 32,
       },
       {
         // 只縮放私語模式的 smooth-min 半徑；跟通用「黏度」分開，避免為了調頸部
         // 手感連材質的其他液態行為一起改掉。
         key: 'researchCompanionFusion', label: '融合柔度',
-        min: 0.05, max: 1, step: 0.01, value: 0.34,
+        min: 0.05, max: 1, step: 0.01, value: 0.24,
       },
       {
         // 分節。往下到下一個 subgroup 為止的參數都收在這一節裡（見 bubble.js 的
@@ -291,7 +313,7 @@ export const MOTIONS = {
         // 「無」用 6 而不是插在 0——理由跟毛細波那份保留註解一樣:0–5 的編號
         // 用意是「跟毛細波的 capillaryTexture 值一一對應」，方便理解，不是
         // 因為有舊檔案相容性負擔（這是全新參數）。
-        key: 'researchShellTexture', label: '程序紋理', type: 'select', value: 0,
+        key: 'researchShellTexture', label: '程序紋理', type: 'select', value: 1,
         options: [
           { value: 6, label: '無' },
           { value: 0, label: 'Wave' },
@@ -310,17 +332,17 @@ export const MOTIONS = {
       },
       {
         key: 'researchShellAmount', label: '起伏大小',
-        min: 0, max: 0.08, step: 0.001, value: 0.04,
+        min: 0, max: 0.08, step: 0.001, value: 0.044,
         gate: 'researchTextureOn',
       },
       {
         key: 'researchShellSpeed', label: '起伏速度',
-        min: 0, max: 4, step: 1, value: 1,
+        min: 0, max: 4, step: 1, value: 2,
         gate: 'researchTextureOn',
       },
       {
         key: 'researchShellDensity', label: '起伏密度',
-        min: 0.4, max: 2.2, step: 0.05, value: 0.5,
+        min: 0.4, max: 2.2, step: 0.05, value: 1.25,
         gate: 'researchTextureOn',
       },
       {
@@ -386,9 +408,9 @@ export const MOTIONS = {
         min: -0.45, max: 0.45, step: 0.01, value: 0,
       },
       {
-        // A 固定先出現，這根只控制 B 落後多少個循環比例；預設保留原本的 0.14。
+        // A 固定先出現，這根只控制 B 落後多少個循環比例。
         key: 'researchIconBirthStagger', label: 'A/B 出現錯開',
-        min: 0, max: 0.4, step: 0.01, value: 0.14,
+        min: 0, max: 0.4, step: 0.01, value: 0.13,
       },
       {
         // 這是內部 icon「相對於外殼玻璃」的折射率，不是絕對值，所以它會跟著
