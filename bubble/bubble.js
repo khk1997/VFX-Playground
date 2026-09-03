@@ -15,7 +15,7 @@ import {
   MOTION_OVERRIDES, MOTION_LIGHT_OVERRIDES,
   MOTION_HDRI, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=light-backdrop-16';
+} from './motions/registry.js?v=light-backdrop-21';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
@@ -273,7 +273,7 @@ const MAX_NEGATIVE_DROPS = 4;
 const DEFAULTS = {              // 數值滑桿
   // 淺底的顯色強度（見 shaders.js 的 liftedCover）。0 = 跟深底同一條公式，水滴
   // 在白底上會被數學抵銷掉幾乎看不見；越高越不透明。只在底色情境為淺底時有效。
-  lightShow: 0.4,
+  lightShow: 0,
   ...MOTION_PARAM_DEFAULTS,
   thickness: 250,
   thickVar: 400,
