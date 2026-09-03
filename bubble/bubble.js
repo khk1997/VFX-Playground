@@ -319,6 +319,10 @@ const DEFAULTS = {              // 數值滑桿
   spectralCausticSoftness: 1,
   spectralCausticWarp: 0.57,
   spectralCausticSeparation: 0,
+  // 把七色查找表沿環形方向模糊融合：0 = 保留色標間的硬邊界，1 = 色彩與
+  // 邊界都糊成一片,近似對色標序列做一次很重的高斯模糊。純粹在 LUT 的
+  // 建表階段做（見 buildSpectralCausticLUT）,不影響 shader 端的取樣邏輯。
+  spectralCausticBlend: 0,
   spectralCausticBounce: 0.19,
   spectralCausticFlow: 0,
   spectralCausticFresnelMask: 1,
@@ -1049,6 +1053,7 @@ const fmt = {
   spectralCausticSoftness: v => Math.round(v * 100) + '%',
   spectralCausticWarp: v => Math.round(v * 100) + '%',
   spectralCausticSeparation: v => 'x' + v.toFixed(2),
+  spectralCausticBlend: v => v === 0 ? '不融合' : Math.round(v * 100) + '%',
   spectralCausticBounce: v => Math.round(v * 100) + '%',
   spectralCausticFlow: v => 'x' + v.toFixed(2),
   spectralCausticFresnelMask: v => Math.round(v * 100) + '%',
@@ -4295,16 +4300,44 @@ function buildSpectralCausticLUT() {
   if (!spectralCausticTex) return;
   const colors = readSpectralCausticColors();
   const data = spectralCausticTex.image.data;
+  // 先算出未模糊的線性內插版本，模糊融合滑桿要用它做環形卷積的來源。
+  const raw = new Array(RAMP_W);
   for (let x = 0; x < RAMP_W; x++) {
     const position = (x / (RAMP_W - 1)) * (colors.length - 1);
     const left = Math.min(colors.length - 1, Math.floor(position));
     const right = Math.min(colors.length - 1, left + 1);
     const mixAmount = position - left;
-    for (let channel = 0; channel < 3; channel++) {
-      data[x * 4 + channel] = Math.round(
-        colors[left][channel] + (colors[right][channel] - colors[left][channel]) * mixAmount
-      );
+    raw[x] = [0, 1, 2].map(channel =>
+      colors[left][channel] + (colors[right][channel] - colors[left][channel]) * mixAmount
+    );
+  }
+
+  // 模糊融合：把七色查找表當成環形帶（首尾兩色本來就設計成同一色，見
+  // SPECTRAL_CAUSTIC_DEFAULTS），對它做環繞式的重複箱形模糊,三次箱形模糊
+  // 疊起來近似高斯模糊。滑桿為 0 時半徑是 0，raw 陣列原樣輸出，不動既有畫面。
+  const blend = Math.min(1, Math.max(0, P.spectralCausticBlend || 0));
+  const radius = Math.round(blend * RAMP_W * 0.5);
+  let blurred = raw;
+  if (radius > 0) {
+    for (let pass = 0; pass < 3; pass++) {
+      const next = new Array(RAMP_W);
+      for (let x = 0; x < RAMP_W; x++) {
+        let r = 0, g = 0, b = 0;
+        for (let k = -radius; k <= radius; k++) {
+          const src = blurred[((x + k) % RAMP_W + RAMP_W) % RAMP_W];
+          r += src[0]; g += src[1]; b += src[2];
+        }
+        const n = radius * 2 + 1;
+        next[x] = [r / n, g / n, b / n];
+      }
+      blurred = next;
     }
+  }
+
+  for (let x = 0; x < RAMP_W; x++) {
+    data[x * 4 + 0] = Math.round(blurred[x][0]);
+    data[x * 4 + 1] = Math.round(blurred[x][1]);
+    data[x * 4 + 2] = Math.round(blurred[x][2]);
     data[x * 4 + 3] = 255;
   }
   spectralCausticTex.needsUpdate = true;
@@ -5035,6 +5068,7 @@ function bindControls() {
       // 會改變哪些控制項該顯示，staticShape 還會改變要編譯哪一支 shader。
       // 走 SELECTS 的字串型 select 在 change 時會自動呼叫 updateUIState() 與
       // syncShaderVariant()，但這兩個走的是這裡的數值型通用迴圈，得自己補。
+      if (key === 'spectralCausticBlend') buildSpectralCausticLUT();
       if (key === 'capillaryTexture') applyGates();
       // 同理：私語的程序紋理選「無」時，紋理方向那三根滑桿要一起收起來。
       if (key === 'researchShellTexture') applyGates();
