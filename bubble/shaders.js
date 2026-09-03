@@ -297,6 +297,10 @@ uniform float uSpectralCausticNoiseScale;
 uniform float uSpectralCausticAzimuth;
 uniform float uSpectralCausticElevation;
 uniform float uSpectralCausticHdri;
+// 0 = 對話泡 icon 不受焦散影響（icon 所在像素維持原樣），1 = 焦散改用 icon
+// 自己的表面與法線（跟 FEATURE_DISPERSION 換座標系是同一套處理），讓聚光帶
+// 貼著 icon 的曲率走。見 FEATURE_SPECTRAL_CAUSTICS 區塊。
+uniform float uSpectralCausticIconAffect;
 uniform sampler2D uSpectralCausticRamp;
 uniform float uArtThickness;
 uniform float uArtThickVar;
@@ -3673,7 +3677,29 @@ void main(){
 #ifdef FEATURE_SPECTRAL_CAUSTICS   // 單獨隔離：光譜焦散 spectral caustics
   float spectralCausticStrength =
     uSpectralCausticEnabled * uSpectralCausticIntensity;
-  if (spectralCausticStrength > 0.001) {
+  bool spectralCausticSkipIcon = false;
+  vec3 causticP = p;
+  vec3 causticN = N;
+  vec3 causticViewDir = rd;
+  float causticEdgeFactor = material.edgeFactor;
+#ifdef FEATURE_RESEARCH
+  if (researchIconHit) {
+    if (uSpectralCausticIconAffect > 0.5) {
+      // 焦散圖案改用 icon 自己的表面、法線與視線方向，讓聚光帶跟著 icon 的
+      // 曲率走，而不是外殼——跟 FEATURE_DISPERSION 換座標系（見上方
+      // artisticDispersionOPD 那段）是同一套處理。
+      causticP = researchIconPoint;
+      causticN = researchIconN;
+      causticViewDir = researchInsideDir;
+      causticEdgeFactor = researchIconFres;
+    } else {
+      // 使用者選擇讓焦散完全不影響對話泡 icon：略過整段運算，icon 所在
+      // 像素維持原本顏色。
+      spectralCausticSkipIcon = true;
+    }
+  }
+#endif
+  if (spectralCausticStrength > 0.001 && !spectralCausticSkipIcon) {
     float lightAzimuth = radians(uSpectralCausticAzimuth);
     float lightElevation = radians(uSpectralCausticElevation);
     vec3 virtualLightDir = normalize(vec3(
@@ -3691,13 +3717,13 @@ void main(){
 
     // 用一次入射折射與一次虛擬內反射建立聚焦方向。這不是路徑追蹤，
     // 但光斑會隨法線、視角與光源方向移動，而不是貼死在模型表面。
-    vec3 internalLight = refract(-virtualLightDir, N, 1.0 / uIOR);
+    vec3 internalLight = refract(-virtualLightDir, causticN, 1.0 / uIOR);
     if (dot(internalLight, internalLight) < 0.0001) {
       internalLight = -virtualLightDir;
     }
-    vec3 internalBounce = normalize(reflect(internalLight, -N));
+    vec3 internalBounce = normalize(reflect(internalLight, -causticN));
     float focusAlignment = clamp(
-      dot(internalBounce, normalize(-rd)) * 0.5 + 0.5,
+      dot(internalBounce, normalize(-causticViewDir)) * 0.5 + 0.5,
       0.0,
       1.0
     );
@@ -3713,10 +3739,10 @@ void main(){
     vec2 flowOffset = vec2(cos(loopPhase), sin(loopPhase))
       * uSpectralCausticFlow * 1.4;
     float bandScale = mix(1.5, 8.5, uSpectralCausticDensity);
-    float fieldU = (dot(p, causticTangent) + flowOffset.x) * bandScale;
-    float fieldV = (dot(p, causticBitangent) + flowOffset.y) * bandScale;
+    float fieldU = (dot(causticP, causticTangent) + flowOffset.x) * bandScale;
+    float fieldV = (dot(causticP, causticBitangent) + flowOffset.y) * bandScale;
     float warpedBand = fieldU
-      + sin(fieldV * 1.7 + dot(N, virtualLightDir) * 4.0)
+      + sin(fieldV * 1.7 + dot(causticN, virtualLightDir) * 4.0)
         * 0.82 * uSpectralCausticWarp
       + sin((fieldU - fieldV) * 0.73)
         * 0.36 * uSpectralCausticWarp;
@@ -3748,7 +3774,7 @@ void main(){
     // roughFocus ≤ 1，所以這個補償恆 ≤ 1：一樣是只會變暗、不會變亮。
     bandFocus *= sqrt(roughFocus);
     float incidenceFold = pow(
-      clamp(1.0 - abs(dot(N, virtualLightDir)), 0.0, 1.0),
+      clamp(1.0 - abs(dot(causticN, virtualLightDir)), 0.0, 1.0),
       0.72
     );
     // 把每一條亮帶本身展開成完整光譜，而不是讓不同亮帶各自只有
@@ -3756,7 +3782,7 @@ void main(){
     float signedBand = fract(warpedBand * 0.5 + 0.5) - 0.5;
     float rainbowCoordinate = clamp(
       0.5 + signedBand * mix(1.8, 10.0, uSpectralCausticSeparation)
-        + dot(N, causticTangent) * 0.06,
+        + dot(causticN, causticTangent) * 0.06,
       0.0,
       1.0
     );
@@ -3767,7 +3793,7 @@ void main(){
     // 可獨立混合的 Fresnel 與循環 Noise 遮罩。0 完全不限制焦散；
     // Fresnel=1 時彩光集中於掠射角，Noise=1 時連續光帶拆成局部光斑。
     float fresnelMask = pow(
-      clamp(material.edgeFactor, 0.0, 1.0),
+      clamp(causticEdgeFactor, 0.0, 1.0),
       1.8
     );
     fresnelMask = mix(1.0, fresnelMask, uSpectralCausticFresnelMask);
@@ -3779,7 +3805,7 @@ void main(){
     );
     vec3 causticNoiseFlow = loopNoiseOffset(uSpectralCausticFlow);
     float causticNoise = fbmFast(
-      p * uSpectralCausticNoiseScale + causticNoiseFlow
+      causticP * uSpectralCausticNoiseScale + causticNoiseFlow
     );
     float noiseMask = smoothstep(0.32, 0.68, 0.5 + causticNoise * 0.72);
     noiseMask = mix(1.0, noiseMask, uSpectralCausticNoiseMask);

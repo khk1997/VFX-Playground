@@ -686,6 +686,10 @@ const TOGGLE_DEFAULTS = {
   dispersionEnabled: true,
   rayDispersionEnabled: true,
   spectralCausticEnabled: true,
+  // 焦散是否影響對話泡 icon：關閉時 icon 所在像素完全跳過焦散運算，維持
+  // 原本顏色；開啟時焦散改用 icon 自己的表面與法線（見 shaders.js 的
+  // uSpectralCausticIconAffect）。
+  spectralCausticIconAffect: true,
   // 前後拉伸（見下方 dolly 計算）。跟 count/radius/loopDuration 一樣按模式
   // 各自記憶，這裡只是進入畫面時的初始值。
   dollyEnabled: MOTION_DEFAULT_DOLLY[SELECT_DEFAULTS.motion],
@@ -921,6 +925,7 @@ const TOGGLES = {
   dispersionEnabled: 'uDispersionEnabled',
   rayDispersionEnabled: 'uRayDispersionEnabled',
   spectralCausticEnabled: 'uSpectralCausticEnabled',
+  spectralCausticIconAffect: 'uSpectralCausticIconAffect',
   edgeDropsEnabled: () => applyEdgeDropDistribution(),
   // 沒有對應 uniform：dolly 是 CPU 端算好直接寫進 uCameraDistance 的純量，
   // render loop 每幀直接讀 P.dollyEnabled，這裡不用同步任何東西。
@@ -4474,6 +4479,7 @@ function initGL() {
     uSpectralCausticAzimuth: { value: P.spectralCausticAzimuth },
     uSpectralCausticElevation: { value: P.spectralCausticElevation },
     uSpectralCausticHdri: { value: P.spectralCausticHdri },
+    uSpectralCausticIconAffect: { value: P.spectralCausticIconAffect ? 1 : 0 },
     uSpectralCausticRamp: { value: makeSpectralCausticTexture() },
     uArtThickness: { value: P.artThickness },
     uArtThickVar: { value: P.artThickVar },
