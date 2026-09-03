@@ -14,7 +14,7 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_HDRI, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=whisper-shell-2';
+} from './motions/registry.js?v=whisper-icon-phase-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
@@ -1032,6 +1032,10 @@ const fmt = {
   researchCompanionOrbit: v => v.toFixed(0) + '°',
   researchCompanionDepthOrbit: v => v.toFixed(0) + '°',
   researchCompanionFusion: v => Math.round(v * 100) + '%',
+  researchIconPhaseOffset: v => Math.abs(v) < 0.005
+    ? '同步'
+    : `${v < 0 ? '提前' : '延後'} ${(Math.abs(v) * P.loopDuration).toFixed(2)}s`,
+  researchIconBirthStagger: v => (v * P.loopDuration).toFixed(2) + 's',
   capillaryCrestSoftness: v => Math.round(v * 100) + '%',
   capillaryWarp: v => Math.round(v * 100) + '%',
   patternSpeed: v => 'x' + v.toFixed(2),
@@ -1235,7 +1239,10 @@ function refreshShatterTimelineReadouts() {
 // 就得重畫，否則會停在用舊循環長度算出來的數字。切換動態模式時循環秒數會跟著
 // 換（每個模式各自記憶），所以這不是罕見情況——morphHold 一開始就漏了列進來，
 // 結果切到形狀變形時定格時間顯示的是用上一個模式的循環秒數算的值。
-const LOOP_SCALED_KEYS = ['gatherDuration', 'shapeHold', 'morphHold', 'rayBeamSpeed'];
+const LOOP_SCALED_KEYS = [
+  'gatherDuration', 'shapeHold', 'morphHold', 'rayBeamSpeed',
+  'researchIconPhaseOffset', 'researchIconBirthStagger',
+];
 function refreshLoopScaledReadouts() {
   for (const key of LOOP_SCALED_KEYS) {
     const valEl = document.getElementById(key + '_v');
@@ -1245,7 +1252,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=post-mask-3';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=whisper-icon-phase-1';
 import { createPostChain } from './post.js?v=post-mask-3';
 
 // cold compile 的時間量測（?diagTiming=1）。
@@ -4433,6 +4440,8 @@ function initGL() {
     uResearchIconSpread: { value: P.researchIconSpread },
     uResearchIconStagger: { value: P.researchIconStagger },
     uResearchIconDepth: { value: P.researchIconDepth },
+    uResearchIconPhaseOffset: { value: P.researchIconPhaseOffset },
+    uResearchIconBirthStagger: { value: P.researchIconBirthStagger },
     // 打字模式。字形圖集在切進這個模式時才烘（見 scheduleGlyphRebuild），在那之前
     // 綁一張 1x1 的空貼圖——取樣器一定要綁著東西，某些驅動會直接拒絕未綁定的
     // sampler，即使 runtime 永遠不會走到那個分支。

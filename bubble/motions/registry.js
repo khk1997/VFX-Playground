@@ -380,6 +380,17 @@ export const MOTIONS = {
         type: 'subgroup', label: '對話泡 Icons',
       },
       {
+        // 相對整個循環移動 icon 的生命週期，不改外殼融合曲線。正值延後、負值
+        // 提前；使用相位比例可讓循環秒數改變時仍維持相同的編舞位置。
+        key: 'researchIconPhaseOffset', label: 'Icons 出現時機',
+        min: -0.45, max: 0.45, step: 0.01, value: 0,
+      },
+      {
+        // A 固定先出現，這根只控制 B 落後多少個循環比例；預設保留原本的 0.14。
+        key: 'researchIconBirthStagger', label: 'A/B 出現錯開',
+        min: 0, max: 0.4, step: 0.01, value: 0.14,
+      },
+      {
         // 這是內部 icon「相對於外殼玻璃」的折射率，不是絕對值，所以它會跟著
         // 材質那根 IOR 滑桿一起走。1 代表與外殼完全相同 —— 光學上分辨不出來，
         // icon 會直接消失，因此下限留在 1.02 而不是 1。

@@ -133,6 +133,9 @@ uniform float uResearchIconAspect;
 uniform float uResearchIconSpread;
 uniform float uResearchIconStagger;
 uniform float uResearchIconDepth;
+// 相對循環的整體位移（正值延後）與 B 相對 A 的出生錯開。
+uniform float uResearchIconPhaseOffset;
+uniform float uResearchIconBirthStagger;
 
 // icon 相對於外殼玻璃的折射率。內外是同一種液態玻璃,材質流程完全共用,只有這個
 // 比值不同 —— 大於 1 表示內部這一坨比外殼更「稠」,光路彎得更多,所以看得出形狀。
@@ -1102,12 +1105,10 @@ const float RESEARCH_SIDE_SOFT = 0.06;
 // 接點上被 fract 切斷 —— 隆起會在 phase 0 那一幀憑空跳出一塊。
 #define RESEARCH_ANTICIPATE 0.06
 #define RESEARCH_BIRTH_A 0.0
-// B 只比 A 晚 0.06(約 0.27 秒),兩顆一前一後像一次對答,而不是各演各的。
-// 舊值 0.22 差太多:B 還沒長出來 A 就快演完了,「兩顆並存」只佔循環的三成。
-#define RESEARCH_BIRTH_B 0.14
+// B 的出生時刻改由 uResearchIconBirthStagger 控制；預設仍是 0.14。
 // 每顆的壽命,以及淡出的起點。壽命必須跟淡出的終點一致,scale 才會剛好在生命
 // 結束那一刻歸零。最晚出生的 B 在 0.14 + 0.84 = 0.98 收完,留 0.02 給 loop 接點。
-// 每顆 icon 的生命週期現在正好填滿一整個循環,兩顆錯開 RESEARCH_BIRTH_B。
+// 每顆 icon 的生命週期現在正好填滿一整個循環,兩顆錯開可調的出生間隔。
 //
 // 這是為了「重複播的背景」改的。舊版是兩顆一起生、一起死,中間留下約一成的
 // 空景 —— 而外殼的環境起伏被設成靜止,那段時間畫面上真的什麼都不動,看起來
@@ -1387,8 +1388,9 @@ float researchShellOffset(vec3 p){
   float side = smoothstep(-0.15, 0.9, lateralMask + lower * 0.55);
   // 誕生事件不乘 uResearchShellAmount。那根滑桿控制的是「環境起伏」的振幅,
   // 拉到 0 的語意是外殼平滑,不該連帶把因果關係一起關掉。
-  float events = researchShellEvent(q, 1.0, fract(phase01 - RESEARCH_BIRTH_A))
-    + researchShellEvent(q, -1.0, fract(phase01 - RESEARCH_BIRTH_B));
+  float iconPhase = fract(phase01 - uResearchIconPhaseOffset);
+  float events = researchShellEvent(q, 1.0, fract(iconPhase - RESEARCH_BIRTH_A))
+    + researchShellEvent(q, -1.0, fract(iconPhase - uResearchIconBirthStagger));
   return pattern * side * uResearchShellAmount + events;
 }
 
@@ -1683,7 +1685,7 @@ float researchBubbleMap(vec3 p, float phase){
     float radius = mix(rMin, rMax, rnd.w * rnd.w) * shellR;
     // 出生時刻落在兩顆 icon 的出生之間,各自再錯開一點 —— 全部同時彈出來會
     // 讀成一次事件,錯開才像液體裡陸續冒出來的氣泡。
-    float birth = mix(RESEARCH_BIRTH_A, RESEARCH_BIRTH_B, rnd.z) + rnd.x * 0.05;
+    float birth = mix(RESEARCH_BIRTH_A, uResearchIconBirthStagger, rnd.z) + rnd.x * 0.05;
     float t = fract(phase - birth);
     // 生成就是縮放:長進來、整圈停留、末段收乾。收乾的時刻正好接回自己的下一次
     // 出生,所以循環的接縫上沒有任何跳變(跟 icon 的生命週期同一套作法)。
@@ -1713,10 +1715,12 @@ float researchBubbleMap(vec3 p, float phase){
 }
 
 float researchIconMap(vec3 p){
-  float phase = fract(uTime / max(uLoopDuration, 0.001));
+  // 整體位移只作用在 icon、誕生漣漪與伴隨泡泡，不綁定第二外殼的融合時刻。
+  // fract 讓正負位移都保持無縫循環；正值代表視覺事件延後。
+  float phase = fract(uTime / max(uLoopDuration, 0.001) - uResearchIconPhaseOffset);
   // A 在右、小顆,腳往右下;B 在左、大顆,腳往左下 —— 兩隻腳方向相反。
   // anchor 落在外殼內壁偏下的位置,與腳同一側,芽才會從腳的方向長出來。
-  // 兩顆錯開 0.06;最晚的 B 在 0.14 + 0.84 = 0.98 收完,loop 接得回去。
+  // 兩顆的時間差由面板控制；預設 B 在 0.14 才開始自己的生命週期。
   // 落點由「間距」與「高度錯位」對稱決定。z 保留原本的小幅前後差，讓兩顆不完全
   // 共平面——那點深度差在折射下看得出來，但不值得再開一根滑桿。
   float spread = uResearchIconSpread;
@@ -1736,7 +1740,7 @@ float researchIconMap(vec3 p){
     max(uResearchIconSizeA, 0.2), 1.0, 0.10, 0.46, 0.0
   );
   float b = researchIconStage(
-    p, phase, fract(phase - RESEARCH_BIRTH_B),
+    p, phase, fract(phase - uResearchIconBirthStagger),
     researchAnchor(-1.0), vec3(-spread, -stagger, -depth),
     max(uResearchIconSizeB, 0.2), -1.0, -0.16, 0.54, 0.02
   );
