@@ -14,7 +14,7 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_HDRI, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=post-mask-3';
+} from './motions/registry.js?v=whisper-shell-2';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
@@ -23,7 +23,7 @@ import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=post-ma
 import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=post-mask-3';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
-import createResearchMotion from './motions/research.js?v=post-mask-3';
+import createResearchMotion from './motions/research.js?v=whisper-shell-2';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
@@ -1024,6 +1024,14 @@ const fmt = {
   researchBubbleCount: v => v.toFixed(0),
   researchBubbleMin: v => v.toFixed(3),
   researchBubbleMax: v => v.toFixed(3),
+  researchCompanionSize: v => 'x' + v.toFixed(2),
+  researchCompanionExposure: v => Math.round(v * 100) + '%',
+  researchCompanionDepth: v => Math.round(v * 100) + '%',
+  researchCompanionHold: v => Math.round(v * 100) + '%',
+  researchCompanionPathAngle: v => v.toFixed(0) + '°',
+  researchCompanionOrbit: v => v.toFixed(0) + '°',
+  researchCompanionDepthOrbit: v => v.toFixed(0) + '°',
+  researchCompanionFusion: v => Math.round(v * 100) + '%',
   capillaryCrestSoftness: v => Math.round(v * 100) + '%',
   capillaryWarp: v => Math.round(v * 100) + '%',
   patternSpeed: v => 'x' + v.toFixed(2),
@@ -2611,7 +2619,7 @@ const {
   shapeRigidMotion: researchShapeRigidMotion,
   dropPosition: researchDropPosition,
   shellEnvelope: researchShellEnvelope,
-} = createResearchMotion(P);
+} = createResearchMotion(P, { dropSeeds });
 const {
   typeState: typewriterState,
   segmentSeconds: typewriterSegmentSeconds,
@@ -2957,7 +2965,11 @@ function updateDropUniforms(t) {
   // 毛細波是純形狀場模式。即使舊參數檔還保存著 count > 0，也不允許主滴重新出現。
   const count = P.motion === 'capillary'
     ? 0
-    : Math.max(0, Math.min(MAX_DROPS, Math.round(P.count)));
+    // 私語的第二外殼是模式本體，不是通用的可增減水滴。這層是舊 preset 的保險：
+    // 即使檔案裡還存著改版前的 count=1，渲染端仍固定產生主殼與伴生殼兩顆。
+    : P.motion === 'research'
+      ? 2
+      : Math.max(0, Math.min(MAX_DROPS, Math.round(P.count)));
   const layoutCount = Math.max(1, count);
   const tau = Math.PI * 2;
   const phase = fract(t / Math.max(0.001, P.loopDuration));
@@ -3335,7 +3347,7 @@ function updateDropUniforms(t) {
   // 非電影模式仍可依實際接觸做黏性融合；電影模式已在上方守恆轉移體積。
   // 融化排除在外：每一滴都是各自落下的獨立水滴，靠得近時互相脹大半徑會黏成
   // 一條斷不開的水柱，正好是這個模式最不該有的樣子。
-  if (!isFormationMotion(P.motion) && P.motion !== 'split' && !melting
+  if (!isFormationMotion(P.motion) && P.motion !== 'split' && P.motion !== 'research' && !melting
     && count >= 2 && fusionAmount > 0) {
     const da = dropData[pairA], db = dropData[pairB];
     const axisX = db.x - da.x, axisY = db.y - da.y, axisZ = db.z - da.z;
@@ -3378,6 +3390,8 @@ function updateDropUniforms(t) {
   // 水滴是貼在表面的點綴，融成一坨就沒有點綴可言。
   const mergeScale = P.motion === 'weave'
     ? Math.max(0.02, P.weaveCling)
+    : P.motion === 'research'
+      ? Math.max(0.02, P.researchCompanionFusion)
     : extended
       ? 0.34
     : jelly
@@ -5059,7 +5073,10 @@ function bindControls() {
     const uName = uniformNameFor(key);
     const update = () => {
       const previousValue = P[key];
-      P[key] = parseFloat(el.value);
+      P[key] = key === 'count' && P.motion === 'research' ? 2 : parseFloat(el.value);
+      // 舊 preset 載入 count=1 時不只渲染要修正，DOM 也要同步，下一次匯出才不會
+      // 又把舊值寫回檔案。私語模式的 count 列本來就是隱藏的，不會限制正常操作。
+      if (key === 'count' && P.motion === 'research') el.value = '2';
       if (key === 'cameraRotationX') rot.x = P[key] * Math.PI / 180;
       if (key === 'cameraRotationY') rot.y = P[key] * Math.PI / 180;
       if (MOTION_MEMORY_KEYS.includes(key)) {

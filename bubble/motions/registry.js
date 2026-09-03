@@ -124,7 +124,9 @@ export const MOTIONS = {
     uniform: 9,
     usesShapeField: false,
     gate: 'research',
-    count: 1,
+    // 主殼之外再放一顆會靠近／吞入的伴生外殼。count 控制列在私語模式仍隱藏，
+    // 使用者要調的是下面那組有語意的尺寸與融合參數，而不是任意增減顆數。
+    count: 2,
     radius: 0.71,
     loopDuration: 4.5,
     dolly: false,
@@ -217,6 +219,57 @@ export const MOTIONS = {
       },
       {
         type: 'borrow', key: 'wobbleSpeed', label: '雜訊動畫',
+      },
+      {
+        type: 'subgroup', label: '第二外殼 Companion Shell',
+      },
+      {
+        key: 'researchCompanionSize', label: '外殼大小',
+        min: 0.12, max: 1.1, step: 0.01, value: 0.48,
+      },
+      {
+        // 0 = 中心停在主殼表面（只露半顆）；1 = 兩殼接近相切。預設保留明顯的
+        // 液橋與雙葉輪廓，對應參考影片「要融合、但還沒完全融合」的首尾姿勢。
+        key: 'researchCompanionExposure', label: '外露程度',
+        min: 0, max: 1.25, step: 0.01, value: 0.72,
+      },
+      {
+        // 最高點時伴生殼中心往主殼裡走多深；1 代表兩顆中心重合。
+        key: 'researchCompanionDepth', label: '融合深度',
+        min: 0, max: 1, step: 0.01, value: 0.72,
+      },
+      {
+        // 改變中段曲線的平頂寬度，不改首尾姿勢或循環接縫。
+        key: 'researchCompanionHold', label: '融合停留',
+        min: 0, max: 1, step: 0.01, value: 0.42,
+      },
+      {
+        key: 'researchCompanionPath', label: '軌跡類型', type: 'select', value: 0,
+        options: [
+          { value: 0, label: '雙側環繞 Orbit' },
+          { value: 1, label: '同側弧線 Arc' },
+          { value: 2, label: '雙瓣 8 字 Figure 8' },
+        ],
+      },
+      {
+        key: 'researchCompanionPathAngle', label: '出發方向',
+        min: -180, max: 180, step: 1, value: 36,
+      },
+      {
+        // 正負值會交換靠近／回程所走的側邊；以主殼半徑為尺度，不會在融合點前
+        // 因兩殼距離縮小而突然夾緊。
+        key: 'researchCompanionOrbit', label: '側向弧線',
+        min: -110, max: 110, step: 1, value: 34,
+      },
+      {
+        key: 'researchCompanionDepthOrbit', label: '前後弧線',
+        min: -110, max: 110, step: 1, value: 22,
+      },
+      {
+        // 只縮放私語模式的 smooth-min 半徑；跟通用「黏度」分開，避免為了調頸部
+        // 手感連材質的其他液態行為一起改掉。
+        key: 'researchCompanionFusion', label: '融合柔度',
+        min: 0.05, max: 1, step: 0.01, value: 0.34,
       },
       {
         // 分節。往下到下一個 subgroup 為止的參數都收在這一節裡（見 bubble.js 的
