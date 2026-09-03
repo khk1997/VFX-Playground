@@ -4005,11 +4005,31 @@ void main(){
     // 開始起作用，真正的高光才會被留白。
     float iconHighlight = smoothstep(1.6, 5.0, iconSpecLum);
     iconDensity *= 1.0 - iconHighlight * 0.75;
-    // 目標色刻意壓紅、保綠、微抬藍。亮度算下來仍在 0.8 附近，所以最濃的地方
-    // 是「明確的藍」而不是「暗」—— 這正是要跟黑邊區分開的地方。
+    // 色相從材質自己的吸收色推出來，不是寫死一個藍。
+    //
+    // 走的是跟體積吸收完全同一條比爾–朗伯（同一個 uAbsorbColor、同樣除以參考
+    // 厚度 20），只是把光程換成 icon 自己那一段。所以它會跟著「吸收色」滑桿走，
+    // 而且跟外殼身上的顏色同源 —— 這是「同一個材質」而不是「疊一層藍」的差別。
+    // 吸收色調成琥珀色，icon 就會變琥珀色，跟外殼一起變。
+    vec3 iconAbsorbCoefficient = -log(clamp(uAbsorbColor, 0.002, 0.999)) / 20.0;
+    // 40 是「icon 這段光程要當成多厚」的尺度。icon 只有零點幾個單位厚，照原尺度
+    // 算出來紅通道只差約 7%，色相分不開；這個係數把它放大到跟外殼明顯不同的一階。
+    // 語意上就是「icon 是比外殼稠很多的同一種玻璃」—— 它本來就有自己的折射率
+    // 滑桿（researchIconIOR 預設 1.2 倍），濃度跟著不同是一致的。
+    vec3 iconBeer = exp(
+      -iconAbsorbCoefficient * researchIconPath * max(uAbsorb, 0.0) * 40.0
+    );
+    // 只取它的「顏色」，不取它的「暗」。
+    //
+    // 純比爾–朗伯會把厚處與掠射一起壓黑，那正是上一版黑邊的來源。除掉亮度之後
+    // 只剩下色相的偏移：紅通道低於 1、藍通道高於 1，於是 icon 靠顏色跟外殼分開，
+    // 而不是靠一條暗線。這一步是刻意的美術取捨，不是物理 —— 白背景上沒有比白更
+    // 亮的空間，要讓內含物讀得出來，只能在色相上做。
+    float iconBeerLum = dot(iconBeer, vec3(0.2126, 0.7152, 0.0722));
+    vec3 iconTintColor = clamp(iconBeer / max(iconBeerLum, 0.001), 0.0, 2.0);
     researchIconFilter = mix(
       vec3(1.0),
-      vec3(0.45, 0.72, 1.12),
+      iconTintColor,
       iconDensity * uLightBackdrop
     );
   }
