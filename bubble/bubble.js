@@ -14,16 +14,16 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES, MOTION_HDRI, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=whisper-hdri-2';
+} from './motions/registry.js?v=post-grade-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-76';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=whisper-hdri-2';
-import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=whisper-hdri-2';
+import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=post-grade-1';
+import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=post-grade-1';
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
-import createResearchMotion from './motions/research.js?v=whisper-hdri-2';
+import createResearchMotion from './motions/research.js?v=post-grade-1';
 import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
@@ -372,7 +372,10 @@ const DEFAULTS = {              // 數值滑桿
   highlightGain: 1,
   // 鏡頭與底片。三者都是 0 = 沒有這個效果，所以不另外開開關。
   postAberration: 0,
-  postVignette: 0,
+  // 對比與亮度是色調映射之後的調色（見 post.js 的合成 pass），跟「曝光」不同：
+  // 曝光是場景端的乘法、會改變 bloom 門檻選到哪些地方，這兩根只動最後的畫面。
+  postContrast: 1,
+  postBrightness: 0,
   postGrain: 0,
   postGrainScale: 1.5,
   // 條紋光芒（Blender Glare 的 Streaks）。
@@ -995,7 +998,8 @@ const fmt = {
   postExposure: v => '×' + v.toFixed(2),
   highlightGain: v => '×' + v.toFixed(1),
   postAberration: v => (v <= 0 ? '關閉' : v.toFixed(2)),
-  postVignette: v => (v <= 0 ? '關閉' : v.toFixed(2)),
+  postContrast: v => '×' + v.toFixed(2),
+  postBrightness: v => (v === 0 ? '0' : (v > 0 ? '+' : '') + v.toFixed(2)),
   postGrain: v => (v <= 0 ? '關閉' : v.toFixed(3)),
   postGrainScale: v => v.toFixed(1) + 'px',
   streakCount: v => v.toFixed(0),
@@ -1223,8 +1227,8 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=whisper-hdri-2';
-import { createPostChain } from './post.js?v=whisper-hdri-2';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=post-grade-1';
+import { createPostChain } from './post.js?v=post-grade-1';
 
 // cold compile 的時間量測（?diagTiming=1）。
 //
@@ -5919,7 +5923,8 @@ const bloomTintColor = new THREE.Color();
 function postActive() {
   return P.bloomEnabled || P.streaksEnabled
     || P.postExposure !== 1 || P.postToneMap !== 'none' || P.highlightGain !== 1
-    || P.postAberration > 0 || P.postVignette > 0 || P.postGrain > 0;
+    || P.postAberration > 0 || P.postGrain > 0
+    || P.postContrast !== 1 || P.postBrightness !== 0;
 }
 
 function renderComposite(target = null, superSample = 1) {
@@ -5955,7 +5960,8 @@ function renderComposite(target = null, superSample = 1) {
     streakChroma: P.streakChroma,
     streakIntensity: P.streakIntensity,
     aberration: P.postAberration,
-    vignette: P.postVignette,
+    contrast: P.postContrast,
+    brightness: P.postBrightness,
     grain: P.postGrain,
     grainScale: P.postGrainScale,
     // 顆粒的亂數種子。步數取「循環秒數 × 24」：顆粒因此以每秒 24 次更新（底片的

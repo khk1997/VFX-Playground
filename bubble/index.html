@@ -435,7 +435,8 @@
       <option value="reinhard">Reinhard</option>
     </select><span class="val"></span></div>
     <div class="row"><label>鏡頭色差</label><input type="range" id="postAberration" min="0" max="1" step="0.01" value="0"><span class="val" id="postAberration_v"></span></div>
-    <div class="row"><label>暗角</label><input type="range" id="postVignette" min="0" max="1" step="0.01" value="0"><span class="val" id="postVignette_v"></span></div>
+    <div class="row"><label>對比度</label><input type="range" id="postContrast" min="0" max="2" step="0.01" value="1"><span class="val" id="postContrast_v"></span></div>
+    <div class="row"><label>亮度</label><input type="range" id="postBrightness" min="-0.5" max="0.5" step="0.01" value="0"><span class="val" id="postBrightness_v"></span></div>
     <div class="row"><label>顆粒</label><input type="range" id="postGrain" min="0" max="0.15" step="0.001" value="0"><span class="val" id="postGrain_v"></span></div>
     <div class="row"><label>顆粒大小</label><input type="range" id="postGrainScale" min="0.5" max="4" step="0.1" value="1.5"><span class="val" id="postGrainScale_v"></span></div>
     <details class="subgroup" id="bloomGroup">
@@ -605,6 +606,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=whisper-hdri-2"></script>
+<script type="module" src="./bubble.js?v=post-grade-1"></script>
 </body>
 </html>

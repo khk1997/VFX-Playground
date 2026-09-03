@@ -234,11 +234,11 @@ uniform float uTransparent;
 uniform float uExposure;
 uniform int uToneMap;
 uniform float uAberration;
-uniform float uVignette;
+uniform float uContrast;
+uniform float uBrightness;
 uniform float uGrain;
 uniform float uGrainScale;
 uniform float uGrainSeed;
-uniform float uAspect;
 
 // 對照 Blender 的色調映射選單（Color Management → View Transform）。除了 AgX、
 // Filmic、ACES 都是 LUT／完整色彩空間轉換，這裡放的是業界公認的即時擬合 ——
@@ -363,16 +363,21 @@ void main(){
     texture2D(uGlare, uvB).b
   );
 
-  // 暗角在曝光與色調映射之前：它是鏡頭少收了光，不是事後把畫面壓暗。
-  // 用畫面對角線正規化，比例才不隨長寬比改變。
-  float vignette = 1.0;
-  if (uVignette > 0.0) {
-    float r = length(centered * vec2(uAspect, 1.0)) * 1.4142;
-    vignette = mix(1.0, 1.0 - smoothstep(0.35, 1.05, r), uVignette);
-  }
-
-  vec3 lit = (base.rgb * (uTransparent < 0.5 ? 1.0 : base.a) + bloom) * vignette * uExposure;
+  vec3 lit = (base.rgb * (uTransparent < 0.5 ? 1.0 : base.a) + bloom) * uExposure;
   vec3 color = applyToneMap(lit);
+
+  // 對比與亮度是「調色」，所以放在色調映射之後：那時候的值才是實際要顯示的
+  // 畫面，拉對比拉到的是眼睛看到的反差。放在之前的話會先被色調映射的滾降吃掉
+  // 一大半，滑桿推起來會覺得沒力。
+  //
+  // 這兩根跟上面的「曝光」是不同的東西，不是重複：曝光是場景端的乘法（進 bloom
+  // 門檻之前就生效，會改變哪些地方在發光），這兩根純粹是最後的畫面調整。
+  //
+  // 對比以 0.5 為樞紐：中間調不動，亮的更亮、暗的更暗。亮度是加法偏移，
+  // 對整條曲線平移 —— 這是「亮度／對比」這組配對的標準定義。
+  if (uContrast != 1.0) color = (color - 0.5) * uContrast + 0.5;
+  color += uBrightness;
+  color = max(color, vec3(0.0));
 
   // 顆粒最後才加，而且加在色調映射之後：它是底片／感光元件上的東西，不是場景裡的
   // 光。暗部給多一點、亮部給少一點，跟真實的訊噪比一致。
@@ -489,11 +494,11 @@ export function createPostChain(renderer) {
     uExposure: { value: 1 },
     uToneMap: { value: 0 },
     uAberration: { value: 0 },
-    uVignette: { value: 0 },
+    uContrast: { value: 1 },
+    uBrightness: { value: 0 },
     uGrain: { value: 0 },
     uGrainScale: { value: 1 },
     uGrainSeed: { value: 0 },
-    uAspect: { value: 1 },
   });
 
   // bloom 關著（強度 0）時整條模糊鏈都不跑，合成 pass 仍需要一張圖可以取樣。
@@ -656,14 +661,14 @@ export function createPostChain(renderer) {
     compositeMaterial.uniforms.uExposure.value = params.exposure;
     compositeMaterial.uniforms.uToneMap.value = params.toneMap;
     compositeMaterial.uniforms.uAberration.value = params.aberration;
-    compositeMaterial.uniforms.uVignette.value = params.vignette;
+    compositeMaterial.uniforms.uContrast.value = params.contrast;
+    compositeMaterial.uniforms.uBrightness.value = params.brightness;
     compositeMaterial.uniforms.uGrain.value = params.grain;
     // 顆粒以「最終成品的像素」為單位：匯出是超採樣的，不除回去的話成品的顆粒會
     // 細到看不見。
     compositeMaterial.uniforms.uGrainScale.value = params.grainScale
       * Math.max(1, params.superSample || 1);
     compositeMaterial.uniforms.uGrainSeed.value = params.grainSeed;
-    compositeMaterial.uniforms.uAspect.value = width / Math.max(1, height);
     blit(compositeMaterial, target || null);
     renderer.setRenderTarget(null);
   }
