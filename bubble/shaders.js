@@ -339,11 +339,12 @@ uniform vec3  uBgColor;
 // 一組美術模型（那是液態薄膜走的路，見 uMembraneOverWhite）。
 //
 // 三個作用點：liftedCover（抬高覆蓋率打破抵銷）、低彩度自身能量的去暖色偏、
-// 以及 researchIconFilter（內部 icon 改走乘法濾色）。深底時全部是恆等運算。
+// 以及 researchIconColor／researchIconMask（內部 icon 的獨立顯色）。深底時全部
+// 是恆等運算。
 uniform float uLightBackdrop;
 // 淺底的顯色強度（見 liftedCover）。只在 uLightBackdrop 為 1 時有作用。
 uniform float uLightShow;
-// 淺底時內部 icon 的獨立顯色（見 researchIconFilter）。刻意跟體積吸收脫鉤：
+// 淺底時內部 icon 的獨立顯色（見 researchIconColor）。刻意跟體積吸收脫鉤：
 // 這三根只在淺底作用，深底一律不讀，所以調它們動不到黑底的任何外觀。
 //
 // uLightIconColor 只取色相，亮度會被歸一化（見套用處）—— 選色器選的是「偏哪個
@@ -3046,15 +3047,19 @@ void main(){
   vec3 researchInsideDir = rd;
   float researchIconFres = 0.0;
   float researchIconBend = 0.0;
-  // 淺底時 icon 的界面反射改走「對透射光乘法濾色」這條路，係數存在這裡，套用點
-  // 在下面通用玻璃的 over 合成（見 universalTransmitted）。vec3(1.0) = 不濾。
+  // 淺底時 icon 的顯色結果：要染成什麼顏色（researchIconColor）、以及這個像素被
+  // 染了多少（researchIconMask）。套用點在下面通用玻璃的 over 合成之後。
   //
   // 為什麼淺底不能沿用深底那條 screen：screen 加進去的是水滴的自身能量，而
   // over 合成是 final = own + bg·(1 - covered)，covered 又是取自身能量的峰值。
   // 背景為白（1.0）時代入就是 final = V + 1·(1 - V) = 1 —— 不管 V 多大，結果
   // 恆等於純白。也就是說任何自身能量項在白底上數學上必然隱形，不是強度不夠。
-  // 能在白底上留下痕跡的只有「把透過來的光乘暗」。
-  vec3 researchIconFilter = vec3(1.0);
+  //
+  // 為什麼是「指定顏色 + 遮罩」而不是「乘一層濾色」：乘法的結果會跟著底下那層
+  // 的濃淡跑，而底下那層受淺底顯色（uLightShow）影響 —— 於是調淺底顯色就會把
+  // icon 的顏色一起帶走，選色器選的顏色跟畫面上看到的對不起來。用 mix 直接指定
+  // 之後，遮罩為 1 的地方就精確等於選到的顏色，跟其他任何滑桿都無關。
+  vec3 researchIconColor = vec3(1.0);
   // icon 表面的正對程度（1 = 正視，0 = 掠射）。淺底的濾色遮罩要用它自己算一條
   // 比 Schlick 寬的曲線，見下方 iconBodyMask。
   float researchIconFacing = 1.0;
@@ -3062,6 +3067,9 @@ void main(){
   // 需要它單獨算一份「這顆 icon 自己的吸收」—— 全域的體積吸收是整顆水滴一起
   // 染色，沒辦法只讓 icon 顯色而外殼維持接近白。
   float researchIconPath = 0.0;
+  // icon 在這個像素上「被染色了多少」。淺底顯色（uLightShow）要靠它把自己從
+  // icon 身上收回來 —— 見下方 showWeight。
+  float researchIconMask = 0.0;
 #endif
   bool needsEnvironmentTransmission =
     uBgMode == 0 && uHasEnv == 1
@@ -4009,6 +4017,7 @@ void main(){
     // 大的立體角裡都超過 1，clamp 之後幾乎整片是 1，等於把密度無條件砍掉大半。
     float iconHighlight = smoothstep(1.6, 5.0, iconSpecLum);
     iconDensity *= 1.0 - iconHighlight * 0.75;
+    researchIconMask = iconDensity * uLightBackdrop;
     // 顏色只取色相：把選到的顏色除掉自己的亮度，歸一化到 1。
     //
     // 這一步是「不會再出現黑邊」的保證。直接乘一個飽和藍（線性亮度遠低於 1）
@@ -4016,11 +4025,7 @@ void main(){
     // 之後不管選什麼顏色，最濃處都只是換色而不是變暗。
     float iconPickLum = dot(uLightIconColor, vec3(0.2126, 0.7152, 0.0722));
     vec3 iconTintColor = uLightIconColor / max(iconPickLum, 0.001);
-    researchIconFilter = mix(
-      vec3(1.0),
-      iconTintColor,
-      iconDensity * uLightBackdrop
-    );
+    researchIconColor = iconTintColor;
   }
 #endif
   // 通用玻璃的 over 合成。finalColor 此刻是「黑場上的水滴自身能量」，也就是
@@ -4091,24 +4096,39 @@ void main(){
     // 與深底的公式逐字相同，水滴在白底上會像原本那樣被抵銷掉；1 = 抬到最強，
     // 材質幾乎不透明。指數與增益一起走同一根，因為它們表達的是同一件事：
     // 「這個材質在白底上要留下多少痕跡」。
+    float showWeight = uLightShow;
+#ifdef FEATURE_RESEARCH
+    // 淺底顯色不能作用在 icon 上。
+    //
+    // 它抬的是「這個材質在白底上要留下多少痕跡」，講的是外殼那件事。作用到 icon
+    // 身上的話，icon 的顏色會先被它乘一層濃淡、再乘上選到的色相 —— 等於在選色器
+    // 前面疊了一層濾鏡，調出來的顏色跟畫面上看到的對不起來。
+    //
+    // 用 icon 的染色量把抬升收回來：icon 越濃的地方 uLightShow 越不介入，最濃處
+    // 完全不介入。那裡的底色因此就是「白背景穿過玻璃」（在白底上約等於 1.0），
+    // 乘上歸一化過的色相之後，畫面上就是選色器選的那個顏色本身。
+    // 用 smoothstep 而不是直接乘 (1 - mask)：遮罩的峰值只到 0.7 上下，直接乘的話
+    // 抬升仍有三成打在 icon 上，實測 icon 的像素在淺底顯色 0→1 之間平均還會變動
+    // 85/255。改成只要有可觀的 icon 密度就整個收掉。
+    showWeight *= 1.0 - smoothstep(0.02, 0.30, researchIconMask);
+#endif
     float liftedCover = clamp(
-      pow(universalCovered, mix(1.0, 0.45, uLightShow))
-        * mix(1.0, 1.28, uLightShow),
+      pow(universalCovered, mix(1.0, 0.45, showWeight))
+        * mix(1.0, 1.28, showWeight),
       0.0,
       1.0
     );
     float cover = mix(universalCovered, liftedCover, uLightBackdrop);
     finalColor = clampOutput(finalColor + universalTransmitted * (1.0 - cover));
 #ifdef FEATURE_RESEARCH
-    // icon 的冷色偏套在「已經合成完背景」的顏色上，不是只套在透射項上。
+    // icon 的顯色。遮罩為 1 的地方就精確等於選到的顏色，不受前面任何濃淡影響
+    // —— 這是「調淺底顯色不會動到 icon 顏色」的保證（見上方宣告處的說明）。
     //
-    // 原本套在 universalTransmitted 上完全看不出效果，原因是 icon 那一塊的
-    // universalCovered 很高，(1 - cover) 把透射項壓得很小，濾色因此幾乎沒有
-    // 東西可以作用。淺底這條路上整個像素的語意就是「透過水滴看到的背景」，
-    // 所以濾色套在合成結果上才對得起它的物理意義。
-    //
-    // 深底時 researchIconFilter 恆為 vec3(1)，這一行是精確的恆等運算。
-    finalColor = clampOutput(finalColor * researchIconFilter);
+    // 遮罩在輪廓最高、往中央衰減（見 iconEdge），所以 mix 出來就是「漸層色包圍
+    // 輪廓、中間讓外殼透出來」。深底時遮罩恆為 0，這一行是精確的恆等運算。
+    finalColor = clampOutput(
+      mix(finalColor, researchIconColor, clamp(researchIconMask, 0.0, 1.0))
+    );
 #endif
   }
 
