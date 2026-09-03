@@ -210,6 +210,21 @@ export const MOTIONS = {
       capillaryRings: 3,
       capillarySpeed: 2,
     },
+    // 淺底情境的差異值。上面那組 overrides 是深底（黑）的定案外觀，這一組
+    // 只列「換到淺底之後必須不一樣」的那幾根，其餘全部沿用上面那份 ——
+    // 形狀、動態、鏡頭、外殼、icon 時序跟底色無關，沒有理由各存一份。
+    //
+    // 為什麼是這三根：白底下水滴的形狀不能再靠「加亮」讀出來（背景已經是 1.0，
+    // 加法沒有空間），只能靠壓暗與色相。體積吸收在深底是無作用項（折射進來的
+    // 背景是黑的，乘什麼都是黑），所以那邊給到 5.05 不痛不癢；淺底時它變成
+    // 身體唯一的填充光在被衰減，5.05 會把中央壓成灰。反射與邊緣光則相反，
+    // 要往上加才追得回輪廓 —— 棚燈 HDRI 的平均亮度低於白紙，同一道在深底
+    // 讀成高光的反射，在淺底是暗斑。
+    lightOverrides: {
+      absorb: 2.6,
+      reflect: 1.7,
+      fresnel: 2.4,
+    },
     params: [
       {
         // 外殼本身：大小、呼吸，以及那層雜訊起伏。這一節的四根滑桿有三根來自
@@ -824,6 +839,9 @@ export const MOTION_DEFAULT_LOOP_DURATION = pick('loopDuration');
 export const MOTION_DEFAULT_DOLLY = pick('dolly');
 export const MOTION_SVG_DEMO = pick('svgDemo');
 export const MOTION_OVERRIDES = pick('overrides');
+// 淺底情境的差異值。只有真的需要跟深底分開的模式會列（目前只有安裝中），
+// 其餘模式是 undefined，代表兩個底色情境共用同一組數值。
+export const MOTION_LIGHT_OVERRIDES = pick('lightOverrides');
 export const MOTION_HDRI = pick('hdri');
 export const MOTION_KEYS = Object.keys(MOTIONS);
 export const MOTION_PARAMS = Object.fromEntries(entries.map(([key, motion]) => [key, motion.params || []]));

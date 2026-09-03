@@ -12,9 +12,10 @@ import {
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
-  MOTION_OVERRIDES, MOTION_HDRI, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
+  MOTION_OVERRIDES, MOTION_LIGHT_OVERRIDES,
+  MOTION_HDRI, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=installing-defaults-2';
+} from './motions/registry.js?v=light-backdrop-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
@@ -654,6 +655,14 @@ const isFormationMotion = motion => motion === 'formation';
 const SELECT_DEFAULTS = {
   postToneMap: 'none',
   bgMode: 'color',
+  // 底色情境。深底＝原本的外觀，一行都沒變；淺底會解除 shader 裡「通用玻璃把
+  // 顯色階段的背景視為黑場」那道封鎖（見 shaders.js 的 uLightBackdrop），並換上
+  // 該模式 lightOverrides 記的那組數值。
+  //
+  // 刻意做成明確的切換，而不是自動從背景亮度推導：去背輸出時根本沒有背景可以
+  // 推導，反乘要對著哪個底色算只能由這裡告訴它；順帶也避免「調個背景色，外觀
+  // 被偷換」這種說不出原因的意外。
+  backdrop: 'dark',
   materialStyle: 'universal',
   colorMode: 'spectral',
   motion: 'static',
@@ -853,12 +862,70 @@ const MOTION_SCOPED_KEYS = [
   'bloomEnabled', 'streaksEnabled', 'streakCount', 'streakAngle', 'streakLength',
   'streakChroma', 'streakIntensity',
 ];
+// 底色情境會影響到的那幾根。深底與淺底各記一份，其餘的參數兩個情境共用。
+//
+// 名單為什麼只有這些：形狀、動態、鏡頭、外殼、icon 時序跟底色完全無關，分開
+// 存只會逼使用者把同一個東西調兩次。真正跟底色綁在一起的是「靠加亮顯色」的
+// 那一批 —— 深底上背景是 0，加法有無限空間；淺底上背景已經是 1.0，同一個
+// 加法會直接截頂消失，所以強度必須另外一組。體積吸收是鏡像的情況：深底無
+// 作用，淺底是主要的髒源。
+const BACKDROP_SCOPED_KEYS = new Set([
+  'absorb',
+  'reflect', 'materialExposure', 'fresnel',
+  'postExposure', 'postContrast', 'postBrightness', 'postGrain',
+  'streakIntensity', 'rayBeamIntensity', 'spectralCausticIntensity',
+]);
+// 就是 SELECTS.backdrop.map 的那兩個鍵。不從 SELECTS 讀是因為那張表在這一行
+// 之後才宣告，讀它會撞上 const 的 TDZ。
+const BACKDROP_KEYS = ['dark', 'light'];
+// 記憶格的位址。跟底色無關的參數照舊只按模式記一格；BACKDROP_SCOPED_KEYS 裡
+// 的則按「模式＋底色情境」記，兩個情境互不覆蓋。
+//
+// 只有這一個函式知道位址長什麼樣，所有讀寫都走它 —— 之前的坑就是同一個 key
+// 有兩處各自索引，改了一處另一處悄悄用舊格。
+function memorySlot(key, motion = P.motion, backdrop = P.backdrop) {
+  return BACKDROP_SCOPED_KEYS.has(key) ? `${motion}|${backdrop}` : motion;
+}
+// 把一批被記憶的參數從「舊的格子」搬到「新的格子」：先把控制項現在的值存回舊
+// 格，再把新格記得的值寫回控制項並觸發它自己的 input/change。
+//
+// 觸發事件而不是直接改 P，是為了讓 uniform、顯示文字、applyEdgeDropDistribution
+// 之類的副作用照常各跑一次，不必在這裡重複一份。切模式與切底色情境走的是同一支
+// —— 兩者的差別只有「哪些 key」與「格子的哪一維在變」。
+function applyMemorySlots(keys, fromMotion, toMotion, fromBackdrop, toBackdrop) {
+  for (const key of keys) {
+    motionMemory[key][memorySlot(key, fromMotion, fromBackdrop)] = P[key];
+    const el = document.getElementById(key);
+    if (!el) continue;
+    const next = motionMemory[key][memorySlot(key, toMotion, toBackdrop)];
+    if (el.type === 'checkbox') {
+      el.checked = next;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    } else {
+      el.value = next;
+      el.dispatchEvent(new Event(
+        el.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true },
+      ));
+    }
+  }
+}
 function motionDefaultsFor(key) {
   const base = key in DEFAULTS ? DEFAULTS[key]
     : key in TOGGLE_DEFAULTS ? TOGGLE_DEFAULTS[key]
       : key in COLOR_DEFAULTS ? COLOR_DEFAULTS[key]
         : SELECT_DEFAULTS[key];
-  return Object.fromEntries(MOTION_KEYS.map(m => [m, MOTION_OVERRIDES[m]?.[key] ?? base]));
+  const darkValue = m => MOTION_OVERRIDES[m]?.[key] ?? base;
+  if (!BACKDROP_SCOPED_KEYS.has(key)) {
+    return Object.fromEntries(MOTION_KEYS.map(m => [m, darkValue(m)]));
+  }
+  // 淺底的預設是「深底那份再套上 lightOverrides 有列到的」。沒列到就等於兩個
+  // 情境同值，這樣新增一個底色相關的 key 時不必回頭補每個模式的淺底表。
+  return Object.fromEntries(MOTION_KEYS.flatMap(m => BACKDROP_KEYS.map(b => [
+    `${m}|${b}`,
+    b === 'light'
+      ? (MOTION_LIGHT_OVERRIDES[m]?.[key] ?? darkValue(m))
+      : darkValue(m),
+  ])));
 }
 function buildMotionMemory() {
   return {
@@ -871,11 +938,15 @@ function buildMotionMemory() {
 }
 let motionMemory = buildMotionMemory();
 const MOTION_MEMORY_KEYS = Object.keys(motionMemory);
+// 切換底色情境時要搬的那一批。由交集導出而不是另外手寫一份名單：BACKDROP_SCOPED_KEYS
+// 裡若有哪個 key 忘了加進 MOTION_SCOPED_KEYS，它在 motionMemory 裡根本沒有格子，
+// 手寫名單會在這裡炸掉，交集則是安全地略過它。
+const BACKDROP_MEMORY_KEYS = MOTION_MEMORY_KEYS.filter(k => BACKDROP_SCOPED_KEYS.has(k));
 // 初始模式（SELECT_DEFAULTS.motion）不會經過 select 的 change 事件，
 // 切模式時「套用該模式記憶值」那段回寫邏輯不會跑。以前預設模式是分裂、
 // 沒有 overrides，這個落差看不出來；現在預設模式換成靜態、帶了整組材質
 // overrides，得在這裡把起始 P 值先補成該模式記得的值，跟切換模式時的行為一致。
-for (const key of MOTION_MEMORY_KEYS) P[key] = motionMemory[key][P.motion];
+for (const key of MOTION_MEMORY_KEYS) P[key] = motionMemory[key][memorySlot(key)];
 
 // 自訂漸層色標（最多 6，可調位置）— reset 用
 const STOP_MAX = 6;
@@ -888,6 +959,7 @@ const RAMP_DEFAULT = {
 // select 字串 → int uniform
 const SELECTS = {
   bgMode:    { uniform: 'uBgMode',    map: { color: 0, hdri: 1 } },
+  backdrop:  { uniform: 'uLightBackdrop', map: { dark: 0, light: 1 } },
   materialStyle: { uniform: 'uMaterialStyle', map: { membrane: 1, universal: 2 } },
   colorMode: { uniform: 'uColorMode', map: { spectral: 0, ramp: 1 } },
   rayBeamPattern: {
@@ -4533,9 +4605,7 @@ function initGL() {
     uBgMode:     { value: SELECTS.bgMode.map[P.bgMode] },
     uMaterialStyle: { value: SELECTS.materialStyle.map[P.materialStyle] },
     uTransparentBackground: { value: 0 },
-    // 【探針・暫時】見 shaders.js 的 uProbeLightBg。從 console 用
-    // window.__probeLightBg(0..1) 即時切換，評估完連同 shader 那兩處一起移除。
-    uProbeLightBg: { value: 0 },
+    uLightBackdrop: { value: SELECTS.backdrop.map[P.backdrop] },
     uBgColor:    { value: new THREE.Color().setStyle(P.bgColor, THREE.LinearSRGBColorSpace) },
     uMembraneBaseColor: { value: new THREE.Color(P.membraneBaseColor) },
     uMembraneVeilColor: { value: new THREE.Color(P.membraneVeilColor) },
@@ -4663,11 +4733,6 @@ function initGL() {
   if (!PREVIEW) bindPointer();
   syncPanelToUniforms();
   loadMaterialEnvironment(P.materialStyle);
-  // 【探針・暫時】見 shaders.js 的 uProbeLightBg。
-  window.__probeLightBg = v => {
-    uniforms.uProbeLightBg.value = v;
-    return uniforms.uProbeLightBg.value;
-  };
   if (DIAG.any && !DIAG_TIMING) requestAnimationFrame(() => window.__bubbleDiagReport());
 }
 
@@ -5107,7 +5172,7 @@ function bindControls() {
       if (key === 'cameraRotationX') rot.x = P[key] * Math.PI / 180;
       if (key === 'cameraRotationY') rot.y = P[key] * Math.PI / 180;
       if (MOTION_MEMORY_KEYS.includes(key)) {
-        motionMemory[key][P.motion] = key === 'count' ? Math.round(P[key]) : P[key];
+        motionMemory[key][memorySlot(key)] = key === 'count' ? Math.round(P[key]) : P[key];
       }
       if (key === 'shapeLiquidPosition') applyEdgeDropDistribution(P[key]);
       if (key === 'shapeAScale') scheduleShapeAScaleRebuild();
@@ -5171,6 +5236,12 @@ function bindControls() {
       if (key === 'materialStyle' && previousValue !== P[key]) {
         switchMaterialProfile(previousValue, P[key]);
       }
+      if (key === 'backdrop' && previousValue !== P[key]) {
+        // 只搬跟底色有關的那幾根，其餘的兩個情境共用同一格，碰都不該碰。
+        applyMemorySlots(
+          BACKDROP_MEMORY_KEYS, P.motion, P.motion, previousValue, P[key],
+        );
+      }
       if (key === 'motion' && previousMotion !== P.motion) {
         // 毛細波只允許形狀場本體。舊的自動保存／參數檔可能還記著早期版本的
         // count=12；除了渲染端強制歸零，這裡也把模式記憶清成 0，避免隱藏欄位
@@ -5179,19 +5250,7 @@ function bindControls() {
         // 每個按模式記憶的參數：先把舊模式剛才的值存回去，再把新模式記得的值
         // 寫回控制項並觸發它自己的 input/change，讓 uniform、顯示文字、
         // applyEdgeDropDistribution 之類的副作用照常跑一次，不必在這裡重複。
-        for (const memKey of MOTION_MEMORY_KEYS) {
-          motionMemory[memKey][previousMotion] = P[memKey];
-          const memEl = document.getElementById(memKey);
-          if (memEl.type === 'checkbox') {
-            memEl.checked = motionMemory[memKey][P.motion];
-            memEl.dispatchEvent(new Event('change', { bubbles: true }));
-          } else {
-            memEl.value = motionMemory[memKey][P.motion];
-            memEl.dispatchEvent(new Event(
-              memEl.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true },
-            ));
-          }
-        }
+        applyMemorySlots(MOTION_MEMORY_KEYS, previousMotion, P.motion, P.backdrop, P.backdrop);
         previousDropT = null;
         // 模式指定的 HDRI：進出私語這類自帶環境貼圖的模式時要換圖，回到沒有
         // 指定的模式則換回材質類型原本那張。兩邊都沒有指定就不用動 —— 重載一
@@ -5228,7 +5287,7 @@ function bindControls() {
     const label = el.closest('.toggleRow')?.querySelector('label');
     const update = () => {
       P[key] = el.checked;
-      if (MOTION_MEMORY_KEYS.includes(key)) motionMemory[key][P.motion] = P[key];
+      if (MOTION_MEMORY_KEYS.includes(key)) motionMemory[key][memorySlot(key)] = P[key];
       if (valEl) valEl.textContent = P[key] ? '開啟' : '關閉';
       applyToggle(key);
       updateUIState();
@@ -5603,7 +5662,7 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   //
   // 平常這件事是由模式切換的處理去做的，但這裡刻意不換模式，那條路徑不會觸發，
   // 所以得自己補。
-  for (const key of MOTION_MEMORY_KEYS) P[key] = motionMemory[key][motion];
+  for (const key of MOTION_MEMORY_KEYS) P[key] = motionMemory[key][memorySlot(key, motion)];
   resetSpectralCausticColors();
   resetRamp();
   bindControls();
@@ -7197,7 +7256,8 @@ if (!PREVIEW && window.PresetIO) {
     // 模式類控件必須先套用：切換動態模式會連帶覆寫水滴數量，
     // 配色數量會決定色標列的顯示，順序顛倒會讓後套的值被蓋掉。
     applyFirst: [
-      'motion', 'bgMode', 'bgColor', 'materialStyle', 'colorMode', 'shapeSource', 'shapeQuality',
+      'motion', 'bgMode', 'bgColor', 'backdrop',
+      'materialStyle', 'colorMode', 'shapeSource', 'shapeQuality',
       'rayBeamPattern',
       'filmEnabled', 'dispersionEnabled', 'rayDispersionEnabled',
       'spectralCausticEnabled', 'rampCount',

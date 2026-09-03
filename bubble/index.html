@@ -486,6 +486,8 @@
     <summary><h3>背景與 HDRI Background</h3></summary>
     <div class="row"><label>背景模式</label><select id="bgMode"><option value="color">純色</option><option value="hdri">HDRI</option></select><span class="val"></span></div>
     <div class="row"><label>背景顏色</label><input type="color" id="bgColor" value="#000000"><span class="val"></span></div>
+    <div class="row"><label>底色情境</label><select id="backdrop"><option value="dark">深底 Dark</option><option value="light">淺底 Light</option></select><span class="val"></span></div>
+    <div class="note">切換水滴的顯色模型，並換上該動態模式為這個底色存的那組數值。深底是原本的外觀。淺底解除「把背景視為黑場」的顯色封鎖，水滴在亮背景上才不會變灰。兩個情境各記一份體積吸收、反射、邊緣光與後處理強度，互不覆蓋；形狀、動態、鏡頭這些跟底色無關的參數共用同一份。這個切換不會自己改背景顏色，請自行搭配。</div>
     <div class="row"><label>HDRI 水平</label><input type="range" id="hdriYaw" min="-180" max="180" step="1" value="0"><span class="val" id="hdriYaw_v"></span></div>
     <div class="row"><label>HDRI 垂直</label><input type="range" id="hdriPitch" min="-90" max="90" step="1" value="0"><span class="val" id="hdriPitch_v"></span></div>
     <div class="row"><label>HDRI 模糊</label><input type="range" id="hdriBlur" min="0" max="1" step="0.01" value="0.11"><span class="val" id="hdriBlur_v"></span></div>
@@ -608,6 +610,6 @@
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=installing-defaults-2"></script>
+<script type="module" src="./bubble.js?v=light-backdrop-1"></script>
 </body>
 </html>

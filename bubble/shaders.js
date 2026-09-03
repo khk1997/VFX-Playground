@@ -327,10 +327,16 @@ uniform int   uTransparentBackground;
 //（見 mainImage 末段）
 uniform float uMembraneOverWhite;
 uniform vec3  uBgColor;
-// 【探針・暫時】通用玻璃的亮底顯色封鎖開關。0 = 現況（bgLum 歸零，亮底路徑
-// 完全不跑）；1 = 解除封鎖，讓 brightComposite／whiteBackdrop 對通用玻璃生效。
-// 這是為了先看一眼那條從未為通用玻璃跑過的路現在長什麼樣，評估完就會移除。
-uniform float uProbeLightBg;
+// 底色情境（見 bubble.js 的 SELECT_DEFAULTS.backdrop）。0 = 深底，1 = 淺底。
+//
+// 通用玻璃在顯色階段把背景視為黑場（下面 bgLum 那一行），亮底那條合成路徑
+// 因此從來沒有為它跑過。深底時這是對的：折射進來的光完整保留在 refractedBg
+// 裡，背景的貢獻交給最後的 over 合成。淺底時就不對了 —— 厚度資訊只剩「把
+// 白色乘暗」一種表現方式，結果就是中央一片灰。
+//
+// 這顆 uniform 解除那道封鎖，讓 brightComposite 與 whiteBackdrop 的白底校正
+// （冷色透射、HDRI 去米黃、彩度隨背景收放）對通用玻璃生效。
+uniform float uLightBackdrop;
 uniform float uEnvRefraction;
 uniform float uReflect;
 uniform float uTransmission;
@@ -2982,7 +2988,7 @@ void main(){
   // 的彩度要隨背景變亮而收回來（見 beamEnergy 的 brightWash），而 bgLum 歸零之後
   // 就問不出「背景到底有多亮」了。
   float trueBgLum = bgLum;
-  if (universalGlass) bgLum = mix(0.0, bgLum, uProbeLightBg);
+  if (universalGlass) bgLum = mix(0.0, bgLum, uLightBackdrop);
   float brightBg = smoothstep(0.45, 0.90, bgLum);
   // 灰底維持原本美術模型；只有純色畫布接近白色時才做保色補償。
   //
