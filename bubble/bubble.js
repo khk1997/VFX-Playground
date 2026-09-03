@@ -4533,6 +4533,9 @@ function initGL() {
     uBgMode:     { value: SELECTS.bgMode.map[P.bgMode] },
     uMaterialStyle: { value: SELECTS.materialStyle.map[P.materialStyle] },
     uTransparentBackground: { value: 0 },
+    // 【探針・暫時】見 shaders.js 的 uProbeLightBg。從 console 用
+    // window.__probeLightBg(0..1) 即時切換，評估完連同 shader 那兩處一起移除。
+    uProbeLightBg: { value: 0 },
     uBgColor:    { value: new THREE.Color().setStyle(P.bgColor, THREE.LinearSRGBColorSpace) },
     uMembraneBaseColor: { value: new THREE.Color(P.membraneBaseColor) },
     uMembraneVeilColor: { value: new THREE.Color(P.membraneVeilColor) },
@@ -4660,6 +4663,11 @@ function initGL() {
   if (!PREVIEW) bindPointer();
   syncPanelToUniforms();
   loadMaterialEnvironment(P.materialStyle);
+  // 【探針・暫時】見 shaders.js 的 uProbeLightBg。
+  window.__probeLightBg = v => {
+    uniforms.uProbeLightBg.value = v;
+    return uniforms.uProbeLightBg.value;
+  };
   if (DIAG.any && !DIAG_TIMING) requestAnimationFrame(() => window.__bubbleDiagReport());
 }
 

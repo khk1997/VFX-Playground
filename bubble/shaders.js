@@ -327,6 +327,10 @@ uniform int   uTransparentBackground;
 //（見 mainImage 末段）
 uniform float uMembraneOverWhite;
 uniform vec3  uBgColor;
+// 【探針・暫時】通用玻璃的亮底顯色封鎖開關。0 = 現況（bgLum 歸零，亮底路徑
+// 完全不跑）；1 = 解除封鎖，讓 brightComposite／whiteBackdrop 對通用玻璃生效。
+// 這是為了先看一眼那條從未為通用玻璃跑過的路現在長什麼樣，評估完就會移除。
+uniform float uProbeLightBg;
 uniform float uEnvRefraction;
 uniform float uReflect;
 uniform float uTransmission;
@@ -2978,7 +2982,7 @@ void main(){
   // 的彩度要隨背景變亮而收回來（見 beamEnergy 的 brightWash），而 bgLum 歸零之後
   // 就問不出「背景到底有多亮」了。
   float trueBgLum = bgLum;
-  if (universalGlass) bgLum = 0.0;
+  if (universalGlass) bgLum = mix(0.0, bgLum, uProbeLightBg);
   float brightBg = smoothstep(0.45, 0.90, bgLum);
   // 灰底維持原本美術模型；只有純色畫布接近白色時才做保色補償。
   //
