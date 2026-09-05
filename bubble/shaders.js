@@ -351,8 +351,7 @@ uniform float uLightShow;
 // 淺底時內部 icon 的獨立顯色（見 researchIconColor）。刻意跟體積吸收脫鉤：
 // 這三根只在淺底作用，深底一律不讀，所以調它們動不到黑底的任何外觀。
 //
-// uLightIconColor 只取色相，亮度會被歸一化（見套用處）—— 選色器選的是「偏哪個
-// 顏色」而不是「多暗」，這也是黑邊不會回來的保證。
+// 顏色控制淡體積色；明暗反射卡獨立保留，避免可讀性依賴選色。
 uniform vec3  uLightIconColor;
 uniform float uLightIconTint;
 uniform float uLightIconEdge;
@@ -3160,21 +3159,9 @@ void main(){
   vec3 researchInsideDir = rd;
   float researchIconFres = 0.0;
   float researchIconBend = 0.0;
-  // 淺底時 icon 的顯色結果：要染成什麼顏色（researchIconColor）、以及這個像素被
-  // 染了多少（researchIconMask）。套用點在下面通用玻璃的 over 合成之後。
-  //
-  // 為什麼淺底不能沿用深底那條 screen：screen 加進去的是水滴的自身能量，而
-  // over 合成是 final = own + bg·(1 - covered)，covered 又是取自身能量的峰值。
-  // 背景為白（1.0）時代入就是 final = V + 1·(1 - V) = 1 —— 不管 V 多大，結果
-  // 恆等於純白。也就是說任何自身能量項在白底上數學上必然隱形，不是強度不夠。
-  //
-  // 為什麼是「指定顏色 + 遮罩」而不是「乘一層濾色」：乘法的結果會跟著底下那層
-  // 的濃淡跑，而底下那層受淺底顯色（uLightShow）影響 —— 於是調淺底顯色就會把
-  // icon 的顏色一起帶走，選色器選的顏色跟畫面上看到的對不起來。用 mix 直接指定
-  // 之後，遮罩為 1 的地方就精確等於選到的顏色，跟其他任何滑桿都無關。
+  // 淺底局部玻璃的反射／厚度色，在外殼合成後套用以保持辨識度。
   vec3 researchIconColor = vec3(1.0);
-  // icon 表面的正對程度（1 = 正視，0 = 掠射）。淺底的濾色遮罩要用它自己算一條
-  // 比 Schlick 寬的曲線，見下方 iconBodyMask。
+  // icon 表面的正對程度（1 = 正視，0 = 掠射），用來柔化真正剪影邊界。
   float researchIconFacing = 1.0;
   // 光在 icon 內部走過的長度。深底時它只是併進總光程（見 pathLength），淺底另外
   // 需要它單獨算一份「這顆 icon 自己的吸收」—— 全域的體積吸收是整顆水滴一起
@@ -3297,17 +3284,9 @@ void main(){
           );
           iconFres = clamp(iconFres, 0.0, 1.0);
           researchIconFres = iconFres;
-          // 淺底時界面反射不能直接用棚燈取樣。掠射處 iconFres 接近 1，下面那個
-          // mix 會把 refractedBg 整個換成棚燈的值，而棚燈的平均亮度遠低於白紙
-          // —— 結果就是 icon 邊緣一圈很深的黑邊。
-          //
-          // 改成「背景亮度、但帶冷色偏」：輪廓因此是靠顏色跟外殼分開，不是靠一
-          // 條暗線，跟參考的做法一致（藍色與白色的漸層勾出形狀）。冷色的來源是
-          // 這個材質本來的吸收色系，所以看起來仍是同一個材質的內含物。
-          //
-          // 深底時 uLightBackdrop 為 0，這一行是精確的恆等運算：那裡的暗邊正是
-          // 「暗心亮邊」的成因，一個係數都不能動。
-          vec3 iconReflectionLight = iconTransmitted * vec3(0.86, 0.93, 1.03);
+          // 淺底的明暗由後面的局部反射卡塑形。此處只保留透射，避免
+          // Fresnel 在整圈剪影同時拉暗；深底仍用原本的環境反射。
+          vec3 iconReflectionLight = iconTransmitted;
           iconReflection = mix(iconReflection, iconReflectionLight, uLightBackdrop);
           refractedBg = mix(iconTransmitted, iconReflection, iconFres);
           // icon 內部那一段光程併進總光程,體積吸收因此自然變厚一點。
@@ -4100,45 +4079,36 @@ void main(){
     vec3 iconScreened = 1.0
       - (1.0 - finalColor) * (1.0 - clamp(iconSpec * iconRim, 0.0, 1.0));
     finalColor = mix(finalColor, iconScreened, 1.0 - uLightBackdrop);
-    // 淺底：icon 用「偏冷色」勾輪廓，不用「壓暗」。
-    //
-    // 上一版是把界面反射與厚度直接當吸收乘上去，兩者都在掠射處最強，結果是
-    // icon 周圍一圈黑邊 —— 跟參考完全相反，那裡是用藍與白的漸層勾形狀的。
-    //
-    // 所以這裡的濾色刻意做成亮度接近 1、只有色相偏移：icon 是「比外殼偏色」而
-    // 不是「比外殼暗一截」。
-    // 淺底 icon 的獨立顯色。三根專屬控制（顏色／濃度／邊緣集中），跟體積吸收
-    // 完全脫鉤 —— 上一版是從 uAbsorbColor 推的，結果 icon 的顏色與濃淡會跟著
-    // 體積吸收一起被拉走，沒辦法單獨造型。
-    //
-    // 分佈刻意做成「輪廓帶」：光程短代表接近剪影邊緣，光程長代表中央，所以
-    // exp(-path·k) 在邊緣最強、往中央衰減。這正是要的「藍色包圍輪廓、中間留
-    // 透明」；上一版用的是 1 - exp(-path)，那是中央最濃，剛好相反。
-    //
-    // 中央不會完全歸零（exp 只是衰減），所以裡面仍留一層很淡的漸層色。
-    float iconEdge = exp(-researchIconPath * max(uLightIconEdge, 0.01));
-    float iconDensity = clamp(
-      iconEdge * uLightIconTint
-        + iconRim * (0.35 + uFresnel) * 0.18,
-      0.0,
-      1.0
-    );
-    // 棚燈打到的高光維持透明。周圍偏了色之後，這一小塊留白就自己讀成高光點，
-    // 不必再加光 —— 白底上本來就沒有比白更亮的空間。
-    //
-    // 門檻不能用 clamp(iconSpecLum, 0, 1)：HDRI 是高動態範圍的，棚燈亮度在相當
-    // 大的立體角裡都超過 1，clamp 之後幾乎整片是 1，等於把密度無條件砍掉大半。
-    float iconHighlight = smoothstep(1.6, 5.0, iconSpecLum);
-    iconDensity *= 1.0 - iconHighlight * 0.75;
-    researchIconMask = iconDensity * uLightBackdrop;
-    // 顏色只取色相：把選到的顏色除掉自己的亮度，歸一化到 1。
-    //
-    // 這一步是「不會再出現黑邊」的保證。直接乘一個飽和藍（線性亮度遠低於 1）
-    // 等於乘一個暗值，最濃的地方就會變成一圈暗環 —— 那正是前幾版的問題。歸一化
-    // 之後不管選什麼顏色，最濃處都只是換色而不是變暗。
-    float iconPickLum = dot(uLightIconColor, vec3(0.2126, 0.7152, 0.0722));
-    vec3 iconTintColor = uLightIconColor / max(iconPickLum, 0.001);
-    researchIconColor = iconTintColor;
+    // 淺底：寬暗卡、窄白卡與厚度色共同塑形，明暗跟隨真正的反射方向。
+    // 不用 Fresnel 把整圈塗黑；正面仍保留淡色與透射，掠射處才局部加深。
+    if (uLightBackdrop > 0.0) {
+      vec3 iconReflectDir = reflect(researchInsideDir, researchIconN);
+      float iconDarkCard = pow(max(dot(iconReflectDir,
+        normalize(vec3(0.72, -0.38, 0.58))), 0.0), mix(3.8, 1.8, uRoughness));
+      // 寬卡的柔和包覆：只靠鏡面峰值在旋轉時會縮成小點，補上同側低頻暗面。
+      iconDarkCard = max(iconDarkCard, smoothstep(-0.35, 0.85,
+        dot(researchIconN, normalize(vec3(0.82, -0.48, 0.12)))) * 0.78);
+      float iconWhiteCard = pow(max(dot(iconReflectDir,
+        normalize(vec3(-0.48, 0.66, 0.58))), 0.0), mix(24.0, 7.0, uRoughness));
+      float iconHighlight = max(iconWhiteCard, smoothstep(1.6, 5.0, iconSpecLum) * 0.65);
+      float iconThickness = 1.0 - exp(-max(researchIconPath, 0.0) * 4.5);
+      float iconEdge = exp(-researchIconPath * max(uLightIconEdge, 0.01));
+      // 真正剪影處收柔，避免 ray hit / miss 形成一條硬描邊。
+      float iconBoundary = smoothstep(0.0, 0.12, researchIconFacing);
+      float iconDensity = (0.42 + iconThickness * 0.35 + iconEdge * 0.10)
+        * clamp(uLightIconTint, 0.0, 1.0);
+      vec3 iconBodyColor = mix(vec3(0.96, 0.98, 1.0),
+        clamp(uLightIconColor, 0.0, 1.0),
+        (0.16 + iconThickness * 0.26) * clamp(uLightIconTint, 0.0, 1.0));
+      float iconCardStrength = iconDarkCard * (0.58 + iconEdge * 0.22)
+        * clamp(uReflect * uMaterialExposure, 0.0, 2.0) * 0.5;
+      researchIconColor = mix(iconBodyColor, vec3(0.10, 0.19, 0.32), iconCardStrength);
+      researchIconColor = mix(researchIconColor, vec3(1.0), iconHighlight * 0.88);
+      // 反射不依賴色彩濃度；把濃度歸零仍是能讀出曲面的無色玻璃。
+      researchIconMask = clamp((iconDensity + iconDarkCard * 0.28
+        + iconHighlight * 0.24) * iconBoundary, 0.0, 0.86) * uLightBackdrop;
+    }
+
   }
 #endif
   // 通用玻璃的 over 合成。finalColor 此刻是「黑場上的水滴自身能量」，也就是
@@ -4211,18 +4181,7 @@ void main(){
     // 「這個材質在白底上要留下多少痕跡」。
     float showWeight = uLightShow;
 #ifdef FEATURE_RESEARCH
-    // 淺底顯色不能作用在 icon 上。
-    //
-    // 它抬的是「這個材質在白底上要留下多少痕跡」，講的是外殼那件事。作用到 icon
-    // 身上的話，icon 的顏色會先被它乘一層濃淡、再乘上選到的色相 —— 等於在選色器
-    // 前面疊了一層濾鏡，調出來的顏色跟畫面上看到的對不起來。
-    //
-    // 用 icon 的染色量把抬升收回來：icon 越濃的地方 uLightShow 越不介入，最濃處
-    // 完全不介入。那裡的底色因此就是「白背景穿過玻璃」（在白底上約等於 1.0），
-    // 乘上歸一化過的色相之後，畫面上就是選色器選的那個顏色本身。
-    // 用 smoothstep 而不是直接乘 (1 - mask)：遮罩的峰值只到 0.7 上下，直接乘的話
-    // 抬升仍有三成打在 icon 上，實測 icon 的像素在淺底顯色 0→1 之間平均還會變動
-    // 85/255。改成只要有可觀的 icon 密度就整個收掉。
+    // icon 已有自己的明暗塑形，外殼顯色在此收回以免重複壓暗。
     showWeight *= 1.0 - smoothstep(0.02, 0.30, researchIconMask);
 #endif
     float liftedCover = clamp(
@@ -4234,11 +4193,7 @@ void main(){
     float cover = mix(universalCovered, liftedCover, uLightBackdrop);
     finalColor = clampOutput(finalColor + universalTransmitted * (1.0 - cover));
 #ifdef FEATURE_RESEARCH
-    // icon 的顯色。遮罩為 1 的地方就精確等於選到的顏色，不受前面任何濃淡影響
-    // —— 這是「調淺底顯色不會動到 icon 顏色」的保證（見上方宣告處的說明）。
-    //
-    // 遮罩在輪廓最高、往中央衰減（見 iconEdge），所以 mix 出來就是「漸層色包圍
-    // 輪廓、中間讓外殼透出來」。深底時遮罩恆為 0，這一行是精確的恆等運算。
+    // 局部反射卡保留明暗面；深底 mask 為零，沿用原本合成。
     finalColor = clampOutput(
       mix(finalColor, researchIconColor, clamp(researchIconMask, 0.0, 1.0))
     );
@@ -4281,6 +4236,15 @@ void main(){
       outputAlpha = clamp(universalCovered, 0.02, 1.0);
       // 自身能量也要吃同一份光譜吸收，否則去背輸出會比畫面上看到的少一層彩帶。
       finalColor = clamp(universalOwnEnergy * beamAbsorb / outputAlpha, 0.0, 1.0);
+#ifdef FEATURE_RESEARCH
+      if (researchIconMask > 0.0) {
+        float iconAlpha = clamp(researchIconMask, 0.0, 1.0);
+        float combinedAlpha = iconAlpha + outputAlpha * (1.0 - iconAlpha);
+        finalColor = clamp((finalColor * outputAlpha * (1.0 - iconAlpha)
+          + researchIconColor * beamAbsorb * iconAlpha) / combinedAlpha, 0.0, 1.0);
+        outputAlpha = combinedAlpha;
+      }
+#endif
     } else if (uMembraneOverWhite > 0.5) {
       // 液態薄膜的去背輸出。膜身「就是背景」（見 transparentMembrane 那行），
       // 而且亮底顯色路徑是由背景亮度開的閘 —— 把背景抽成黑色等於連材質模型

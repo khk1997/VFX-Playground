@@ -280,7 +280,7 @@ const DEFAULTS = {              // 數值滑桿
   // 淺底 icon 的獨立顯色（見 shaders.js 的 researchIconFilter）。只在底色情境為
   // 淺底時作用，深底一律不讀 —— 調這幾根動不到黑底的任何外觀。
   //
-  // 濃度是輪廓那圈色的強度；邊緣集中越高，藍色就越貼著輪廓、中央留得越透明。
+  // 濃度控制體積顯色，明暗反射卡獨立保留；邊緣集中微調輪廓帶寬度。
   lightIconTint: 0.8,
   lightIconEdge: 4.6,
   ...MOTION_PARAM_DEFAULTS,
@@ -742,8 +742,7 @@ const COLOR_DEFAULTS  = {
   // absorbCoefficient）。這個值配上濃度 ×1，算出來就是這兩個控制項出現以前
   // 寫死的吸收係數，所以預設外觀不變。
   absorbColor: '#68b2e7',
-  // 淺底 icon 的顏色。只取色相 —— shader 會把它的亮度歸一化，所以選飽和一點的
-  // 顏色只會更明確，不會變成暗環（見 shaders.js 的 iconTintColor）。
+  // 淺底 icon 的體積色，與清透底色混合；明暗反射由材質獨立塑形。
   lightIconColor: '#5b8fe0',
   // 液態薄膜原本各自寫死一個偏藍紫色常數的 5 處，現在各自開一個選色器直接
   // 取代常數，選色器選什麼顏色，畫面上那一處就是那個顏色。預設值都是原本
@@ -1350,7 +1349,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=light-icon-4';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=light-crystal-1';
 import { createPostChain } from './post.js?v=post-mask-3';
 
 // cold compile 的時間量測（?diagTiming=1）。
@@ -5958,13 +5957,12 @@ function updateUIState() {
     document.getElementById(key).disabled = !membraneMaterial;
     document.getElementById(key + 'Row').style.display = membraneMaterial ? '' : 'none';
   }
-  // 淺底顯色只在淺底情境下有作用（見 shaders.js 的 liftedCover），深底時停用而
-  // 不是隱藏 —— 隱藏會讓使用者以為這根滑桿不見了，停用才說得出「現在用不到」。
-  const lightBackdrop = P.backdrop === 'light';
+  const lightBackdrop = P.backdrop === 'light' && P.materialStyle === 'universal';
+  const lightIcons = lightBackdrop && P.motion === 'research';
+  document.getElementById('lightShowRow').style.display = lightBackdrop ? '' : 'none';
+  document.getElementById('lightIconDetails').style.display = lightIcons ? '' : 'none';
   for (const key of ['lightShow', 'lightIconColor', 'lightIconTint', 'lightIconEdge']) {
-    const el = document.getElementById(key);
-    setDisabled(el, !lightBackdrop);
-    el.closest('.row').style.opacity = lightBackdrop ? 1 : 0.4;
+    setDisabled(document.getElementById(key), key === 'lightShow' ? !lightBackdrop : !lightIcons);
   }
   document.body.style.background = colorBackground ? P.bgColor : '#000';
   // 輪廓液滴的模式閘門（形狀場 + SVG 擠出）走 data-gate；這裡只剩它自己的主
