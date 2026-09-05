@@ -1941,7 +1941,13 @@ function syncShaderVariantNow() {
 //     在那裡會退回同步路徑 —— 預熱會把主執行緒一支一支地扣住，那比不預熱糟得多。
 // 所以兩個條件都要成立才做：擴充在（＝真的非阻塞），而且首編實測真的慢。這樣同一份
 // 程式碼在三種環境下都會做對的事，不必判斷平台，也不會在未來的新後端上猜錯。
-const PREWARM_MOTIONS = ['formation', 'melt', 'morph', 'weave', 'shatter', 'jelly', 'capillary'];
+// research 與 typewriter／split 是各自獨立的 FEATURE_* 旗標，不像 formation／melt
+// 等造型模式那樣共用同一組 shapeField 組合鍵 —— 沒有任何一支既有目標會「順便」
+// 編到它們，所以要自己各佔一個名額，否則使用者切過去時永遠是冷編。
+const PREWARM_MOTIONS = [
+  'formation', 'melt', 'morph', 'weave', 'shatter', 'jelly', 'capillary',
+  'research', 'typewriter', 'split',
+];
 // 首編超過這個時間才值得預熱。個位數秒的環境多編幾支只是浪費。
 const PREWARM_MIN_COMPILE_MS = 4000;
 const prewarmStats = {
