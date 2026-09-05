@@ -138,6 +138,11 @@
   .summaryToggle input:checked + .switchTrack::after { transform: translateX(16px); background: #b9c9ff; }
   .summaryToggle input:focus-visible + .switchTrack { outline: 2px solid #9fb8ff; outline-offset: 2px; }
   .group .note { font-size: 10px; color: #5f6f95; margin: 2px 0 6px; line-height: 1.4; }
+  /* 背景在忙但使用者沒有在等（預熱）：維持一般說明字的亮度，只是交代一下。 */
+  .group .note.busy { color: #6f80a8; }
+  /* 使用者正在等的那一支（畫面上看不到造型就是因為它）：亮一階並加個底線提示，
+     這是唯一需要被注意到的狀態。 */
+  .group .note.waiting { color: #a8bcff; }
   .effectBlock {
     --effect-accent: #7895d7;
     position: relative;
