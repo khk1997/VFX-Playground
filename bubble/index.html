@@ -494,10 +494,13 @@
     <div class="row" id="lightShowRow"><label for="lightShow">淺底顯色</label><input type="range" id="lightShow" min="0" max="1" step="0.01" value="0"><span class="val" id="lightShow_v"></span></div>
     <div class="note">深／淺底各自保留材質設定；背景顏色請搭配選擇。淺底以柔和明暗反射呈現玻璃厚度。</div>
     <details class="subgroup" id="lightIconDetails">
-      <summary><h4>Icon 進階微調</h4></summary>
-      <div class="note">安裝中模式的淺底玻璃已自帶明暗與高光，以下只用來微調配色。</div>
+      <summary><h4>Icon 自訂配色</h4></summary>
+      <div class="note">本體色控制透明染色，邊緣色沿曲面呈現。想要清透玻璃，可降低本體濃度並保留彩邊。</div>
+      <button type="button" id="clearIconPreset">套用清透藍玻璃</button>
       <div class="row" id="lightIconColorRow"><label for="lightIconColor">體積色</label><input type="color" id="lightIconColor" value="#5b8fe0"><span class="val"></span></div>
       <div class="row" id="lightIconTintRow"><label for="lightIconTint">顯色濃度</label><input type="range" id="lightIconTint" min="0" max="1" step="0.01" value="0.8"><span class="val" id="lightIconTint_v"></span></div>
+      <div class="row"><label for="lightIconRimColor">邊緣色</label><input type="color" id="lightIconRimColor" value="#238eca"><span class="val"></span></div>
+      <div class="row"><label for="lightIconRimStrength">彩邊強度</label><input type="range" id="lightIconRimStrength" min="0" max="1" step="0.01" value="0.75"><span class="val" id="lightIconRimStrength_v"></span></div>
       <div class="row" id="lightIconEdgeRow"><label for="lightIconEdge">邊緣集中</label><input type="range" id="lightIconEdge" min="0.2" max="12" step="0.1" value="4.6"><span class="val" id="lightIconEdge_v"></span></div>
     </details>
     <div class="row"><label>HDRI 水平</label><input type="range" id="hdriYaw" min="-180" max="180" step="1" value="0"><span class="val" id="hdriYaw_v"></span></div>

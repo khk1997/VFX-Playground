@@ -283,6 +283,7 @@ const DEFAULTS = {              // 數值滑桿
   // 濃度控制體積顯色，明暗反射卡獨立保留；邊緣集中微調輪廓帶寬度。
   lightIconTint: 0.8,
   lightIconEdge: 4.6,
+  lightIconRimStrength: 0.75,
   ...MOTION_PARAM_DEFAULTS,
   thickness: 250,
   thickVar: 400,
@@ -744,6 +745,7 @@ const COLOR_DEFAULTS  = {
   absorbColor: '#68b2e7',
   // 淺底 icon 的體積色，與清透底色混合；明暗反射由材質獨立塑形。
   lightIconColor: '#5b8fe0',
+  lightIconRimColor: '#238eca',
   // 液態薄膜原本各自寫死一個偏藍紫色常數的 5 處，現在各自開一個選色器直接
   // 取代常數，選色器選什麼顏色，畫面上那一處就是那個顏色。預設值都是原本
   // 那個常數本身，維持改動前的外觀。
@@ -1005,6 +1007,7 @@ const COLORS = {
   bgColor: 'uBgColor',
   absorbColor: 'uAbsorbColor',
   lightIconColor: 'uLightIconColor',
+  lightIconRimColor: 'uLightIconRimColor',
   // 後處理的顏色不對應 uniform（它們是 post.js 每幀讀的），uniform 名稱留空，
   // 由下面兩處的特例分支處理。
   bloomTint: '',
@@ -4947,6 +4950,8 @@ function initGL() {
     uLightIconColor: { value: new THREE.Color().setStyle(P.lightIconColor, THREE.LinearSRGBColorSpace) },
     uLightIconTint: { value: P.lightIconTint },
     uLightIconEdge: { value: P.lightIconEdge },
+    uLightIconRimColor: { value: new THREE.Color().setStyle(P.lightIconRimColor, THREE.LinearSRGBColorSpace) },
+    uLightIconRimStrength: { value: P.lightIconRimStrength },
     uBgColor:    { value: new THREE.Color().setStyle(P.bgColor, THREE.LinearSRGBColorSpace) },
     uMembraneBaseColor: { value: new THREE.Color(P.membraneBaseColor) },
     uMembraneVeilColor: { value: new THREE.Color(P.membraneVeilColor) },
@@ -5299,7 +5304,7 @@ function syncPanelToUniforms() {
     // 吸收色不是「一道光的顏色」而是「每個通道剩下多少」的比例，所以要的是選色
     // 器上那三個原始數值，不能讓 three 的色彩管理把它當 sRGB 轉成線性（那會把
     // 比例整個扭掉）。同 uBgColor 的作法。
-    else if (key === 'absorbColor' || key === 'lightIconColor') {
+    else if (key === 'absorbColor' || key === 'lightIconColor' || key === 'lightIconRimColor') {
       uniforms[COLORS[key]].value.setStyle(P[key], THREE.LinearSRGBColorSpace);
     }
     else uniforms[COLORS[key]].value.set(P[key]);
@@ -5682,7 +5687,7 @@ function bindControls() {
       if (!uName) { /* 後處理的顏色由 renderComposite 每幀直接讀 P */ }
       else if (key === 'bgColor') setBgColorUniform(el.value);
       // 見上面 applyAllUniforms 裡同一個特例的說明。
-      else if (key === 'absorbColor' || key === 'lightIconColor') {
+      else if (key === 'absorbColor' || key === 'lightIconColor' || key === 'lightIconRimColor') {
         if (uniforms) uniforms[uName].value.setStyle(el.value, THREE.LinearSRGBColorSpace);
       }
       else if (uniforms) uniforms[uName].value.set(el.value);
@@ -5695,6 +5700,19 @@ function bindControls() {
     el.value = P[key];
     if (!PREVIEW && !el._bound) { el.addEventListener('input', update); el._bound = true; }
     update();
+  }
+  const clearIconPreset = document.getElementById('clearIconPreset');
+  if (!PREVIEW && !clearIconPreset._bound) {
+    clearIconPreset.addEventListener('click', () => {
+      for (const [key, value] of Object.entries({ lightIconColor: '#eaf7ff',
+        lightIconTint: 0.35, lightIconRimColor: '#238eca',
+        lightIconRimStrength: 0.75, lightIconEdge: 4.6 })) {
+        const input = document.getElementById(key);
+        input.value = value;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    });
+    clearIconPreset._bound = true;
   }
   bindSpectralCausticColors();
   bindRamp();
@@ -5961,7 +5979,7 @@ function updateUIState() {
   const lightIcons = lightBackdrop && P.motion === 'research';
   document.getElementById('lightShowRow').style.display = lightBackdrop ? '' : 'none';
   document.getElementById('lightIconDetails').style.display = lightIcons ? '' : 'none';
-  for (const key of ['lightShow', 'lightIconColor', 'lightIconTint', 'lightIconEdge']) {
+  for (const key of ['lightShow', 'lightIconColor', 'lightIconTint', 'lightIconEdge', 'lightIconRimColor', 'lightIconRimStrength']) {
     setDisabled(document.getElementById(key), key === 'lightShow' ? !lightBackdrop : !lightIcons);
   }
   document.body.style.background = colorBackground ? P.bgColor : '#000';

@@ -355,6 +355,8 @@ uniform float uLightShow;
 uniform vec3  uLightIconColor;
 uniform float uLightIconTint;
 uniform float uLightIconEdge;
+uniform vec3 uLightIconRimColor;
+uniform float uLightIconRimStrength;
 uniform float uEnvRefraction;
 uniform float uReflect;
 uniform float uTransmission;
@@ -4097,15 +4099,36 @@ void main(){
       float iconBoundary = smoothstep(0.0, 0.12, researchIconFacing);
       float iconDensity = (0.42 + iconThickness * 0.35 + iconEdge * 0.10)
         * clamp(uLightIconTint, 0.0, 1.0);
-      vec3 iconBodyColor = mix(vec3(0.96, 0.98, 1.0),
-        clamp(uLightIconColor, 0.0, 1.0),
-        (0.16 + iconThickness * 0.26) * clamp(uLightIconTint, 0.0, 1.0));
+      // 選擇性透射：厚處累積色彩，薄處透亮。不要先與白色大幅混合，
+      // 否則最後的背景合成會再稀釋一次，把 icon 洗成乳白色。
+      float iconOpticalDepth = (0.32 + iconThickness * 1.65)
+        * clamp(uLightIconTint, 0.0, 1.0);
+      vec3 iconBodyColor = pow(clamp(uLightIconColor, 0.035, 1.0),
+        vec3(iconOpticalDepth));
+      // 彩色只在曲面轉折聚集；本體色與邊緣色分開，才能保留清透中央。
+      // 取真正的 icon 法線，動畫旋轉時色帶跟著曲面移動。
+      float iconColorRim = pow(1.0 - researchIconFacing,
+        max(0.4, uLightIconEdge * 0.35));
+      iconColorRim *= clamp(uLightIconRimStrength, 0.0, 1.0);
+      // 白棚玻璃的色彩不只是一條描邊：下側寬反射面帶色，上側留柔白窗光。
+      // 使用同一顆自訂邊緣色，色帶仍跟著 icon 法線旋轉，沒有貼死的平面漸層。
+      float iconColorCard = iconDarkCard * clamp(uLightIconRimStrength, 0.0, 1.0);
+      float iconColorWeight = clamp(iconColorRim + iconColorCard * 1.25, 0.0, 0.94);
+      iconBodyColor *= mix(vec3(1.0),
+        clamp(uLightIconRimColor, 0.035, 1.0), iconColorWeight);
       float iconCardStrength = iconDarkCard * (0.58 + iconEdge * 0.22)
         * clamp(uReflect * uMaterialExposure, 0.0, 2.0) * 0.5;
-      researchIconColor = mix(iconBodyColor, vec3(0.10, 0.19, 0.32), iconCardStrength);
+      // 暗卡只調節亮度，保留所選色相；避免固定藍灰色把彩色玻璃染濁。
+      researchIconColor = iconBodyColor * (1.0 - iconCardStrength * 0.28);
+      float iconSoftbox = pow(max(dot(iconReflectDir,
+        normalize(vec3(-0.48, 0.66, 0.58))), 0.0), mix(4.0, 2.0, uRoughness));
+      researchIconColor = mix(researchIconColor, vec3(0.97, 0.99, 1.0), iconSoftbox * 0.62);
       researchIconColor = mix(researchIconColor, vec3(1.0), iconHighlight * 0.88);
       // 反射不依賴色彩濃度；把濃度歸零仍是能讀出曲面的無色玻璃。
-      researchIconMask = clamp((iconDensity + iconDarkCard * 0.28
+      // 柔白反射也要有覆蓋率，否則低染色濃度會把外殼紋理再次透進亮面，
+      // 讓 icon 像一片起皺的薄膜。仍保留至少 14% 的下層透射。
+      float iconSurfaceCoverage = 0.52 + iconThickness * 0.18;
+      researchIconMask = clamp((max(max(iconDensity, iconSurfaceCoverage), iconColorWeight * 0.92) + iconDarkCard * 0.28
         + iconHighlight * 0.24) * iconBoundary, 0.0, 0.86) * uLightBackdrop;
     }
 

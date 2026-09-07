@@ -360,9 +360,16 @@ void main(){
   vec2 uvR = 0.5 + centered * (1.0 + uAberration * 0.01);
   vec2 uvB = 0.5 + centered * (1.0 - uAberration * 0.01);
 
-  vec4 base = texture2D(uScene, vUv);
-  base.r = texture2D(uScene, uvR).r;
-  base.b = texture2D(uScene, uvB).b;
+  vec4 original = texture2D(uScene, vUv);
+  vec4 base = original;
+  vec4 redSample = texture2D(uScene, uvR);
+  vec4 blueSample = texture2D(uScene, uvB);
+  // 不透明畫面的 alpha 是物件遮罩。色差不可把 HDRI 背景搬進物件，
+  // 也不可移動背景本身；去背沿用原本的取樣方式。
+  base.r = mix(base.r, redSample.r,
+    uTransparent < 0.5 ? original.a * redSample.a : 1.0);
+  base.b = mix(base.b, blueSample.b,
+    uTransparent < 0.5 ? original.a * blueSample.a : 1.0);
 
   // 光暈與眩光都是「加上去的光」，所以先加在一起再一起走曝光與色調映射 ——
   // 分開套會讓同一道光在不同效果之間有不同的滾降。色差同樣要吃到它們，不然
@@ -405,10 +412,18 @@ void main(){
   if (uGrain > 0.0) {
     float luma = dot(color, vec3(0.299, 0.587, 0.114));
     float n = grainNoise(floor(gl_FragCoord.xy / max(uGrainScale, 0.25)), uGrainSeed) - 0.5;
-    color += n * uGrain * mix(1.0, 0.35, luma) * (uTransparent < 0.5 ? 1.0 : base.a);
+    color += n * uGrain * mix(1.0, 0.35, luma) * base.a;
   }
 
   if (uTransparent < 0.5) {
+    // 背景不參與曝光、色調映射或調色。只把物件發出的光暈疊回原背景，
+    // 保留輪廓外的光芒；不能直接裁掉遮罩外像素，否則 bloom 會被截斷。
+    vec3 background = original.rgb;
+    if (max(bloom.r, max(bloom.g, bloom.b)) > 0.0) {
+      background += max(applyToneMap(bloom * uExposure)
+        - applyToneMap(vec3(0.0)), vec3(0.0));
+    }
+    color = mix(background, color, clamp(original.a, 0.0, 1.0));
     // base.a 這時候是物件遮罩，不是真的 alpha —— 不透明輸出一律寫 1，否則
     // 「背景用場景色」的匯出 PNG 會變成去背的。
     gl_FragColor = vec4(color, 1.0);
