@@ -320,8 +320,6 @@
 
     <details class="subgroup" id="dispersionGroup">
       <summary><h4>色散 Dispersion</h4><span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="dispersionMaster"><span class="switchTrack" aria-hidden="true"></span></span></summary>
-      <div class="row" id="lightDispersionModeRow"><label for="lightDispersionMode">白底色散做法</label><select id="lightDispersionMode"><option value="absorb" selected>互補扣除（預設）</option><option value="legacy">舊版：混入飽和色</option></select><span class="val"></span></div>
-      <div class="note" id="lightDispersionModeNote">只在純色白底時作用，深底一律不讀、定案外觀不變。互補扣除＝白光被扣掉光譜的補色（紅／青、綠／洋紅成對出現），且顯色只留在 Fresnel、折射真正彎曲處與背面掠射；舊版是把飽和色平塗上去、連平坦白區也吃到 18%，那是「色塊貼在玻璃上」的來源，留著只為了對照。</div>
       <div class="effectBlock effectBlock--physical" id="rayDispersionGroup">
         <div class="effectTitle"><span>RAY</span> 模擬色散<span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="rayDispersionEnabled" checked><span class="switchTrack" aria-hidden="true"></span></span></div>
         <div class="row"><label>打燈圖樣</label><select id="rayBeamPattern"><option value="grid" selected>晶格光針</option><option value="starburst">放射星芒</option><option value="ring">同心光環</option><option value="softbox">條狀棚燈</option><option value="window">窗光格柵</option></select><span class="val"></span></div>

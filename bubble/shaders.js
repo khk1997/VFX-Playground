@@ -345,14 +345,6 @@ uniform vec3  uBgColor;
 // 三個作用點：白底專屬 brightComposite、低彩度自身能量的去暖色偏，以及
 // researchIconColor／researchIconMask（內部 icon 的獨立顯色）。深底時全部不讀。
 uniform float uLightBackdrop;
-// 白底的色散顯色做法。1（預設）＝互補扣除：從白光扣掉光譜的補色，並用
-// pow(locality, 2.2) 把顯色收在 Fresnel／折射彎曲處／背面掠射。0＝舊版的
-// 「混入飽和色」，locality 帶 0.18 下限，平坦白區照樣被塗色，那就是「色塊
-// 貼在玻璃上」的來源；留著只為了隨時能對照舊觀感。
-//
-// 閘門是 whiteBackdrop（真實背景亮度）而不是 backdrop 選單，所以深底畫布上
-// 這根一律不作用，黑底的定案外觀不受影響。
-uniform int uLightDispersionMode;
 // 淺底的體積強化。只在 uLightBackdrop 為 1 時壓低背光與掠射面。
 uniform float uLightShow;
 // 完整的淺底外觀。這組值只進入 bright/light 分支，深底路徑不讀取。
@@ -3270,7 +3262,8 @@ void main(){
         // 不是實作問題：所有方向看過去都一樣亮的背景，折射影像本身就沒有錯位
         // 可言。真實產品照的彩虹來自棚燈與反光板的不均勻，不是那張白紙。
         //
-        // 所以白底的色散顯色一律走「互補扣除」那條（見 uLightDispersionMode）。
+        // 所以白底的色散顯色一律走互補扣除（RAY／ART／LIGHT 三條線都是，各自
+        // 見 beamAbsorbAmount／absorbAmount／causticAbsorbAmount）。
 
 #ifdef FEATURE_RESEARCH
         // 內部物件與外殼是同一種液態玻璃,只有折射率不同,所以它不該自己疊一層
@@ -3795,7 +3788,10 @@ void main(){
     // 很小 —— 在黑底上小點靠明暗對比就很搶眼，在白底上一樣大的小點卻不顯眼，這是
     // 白底看起來還是比較弱的真正原因。sqrt 把中低能量一起抬起來，彩帶因此鋪得開，
     // 而峰值處又不會過飽和（跟 ART 藝術色散用的是同一招）。
-    // 位置遮罩提前到這裡宣告：下面的 beamAbsorb（A／B 兩案）也要用它。
+    // 位置遮罩：白底的顯色只發生在物理上說得通的地方 —— 邊緣、折射真正彎曲
+    // 處、背面 rim。指數 2.2 是刻意的「沒有下限」：舊版這裡是
+    // mix(0.18, 1.0, beamLocality)，下限 0.18 的語意是「即使完全不在邊界也還是
+    // 塗 18%」，大片平坦白區因此被染色，那就是「色塊貼在玻璃上」的來源。
     float beamLocality = clamp(
       material.edgeFactor * 0.76
         + localPrism * 0.62
@@ -3804,53 +3800,32 @@ void main(){
       0.0,
       1.0
     );
+    // 這一層是套在整張 finalColor 上的濾色（見下方 beamAbsorb 的使用處），
+    // 原本無視位置，而 beamPeak 的圖樣覆蓋面積很大，所以它是白底色塊感最主要
+    // 的來源。同樣接上 locality 閘門。
+    //
+    // 純黑底時 brightWash 為 0 → depth 為 0 → mix 回傳 vec3(1)，是精確的恆等
+    // 運算，黑底的定案外觀不受影響。
     float beamAbsorbDepth = clamp(
       sqrt(max(beamPeak, 0.0)) * 0.85, 0.0, 0.72
     ) * brightWash;
-    if (uLightDispersionMode == 1 && whiteBackdrop > 0.01) {
-      // B 案：這一層原本無視位置，把整片光帶圖樣所在的區域都濾成彩色，而
-      // beamPeak 的圖樣覆蓋面積很大 —— 這是白底色塊感最主要的來源。加上同一個
-      // locality 閘門後，濾色只發生在折射真的彎曲的地方。
-      // A 模式（2）也走這裡：光帶不在折射影像裡，真色差對它沒有貢獻。
-      beamAbsorb = mix(vec3(1.0), beamHue, beamAbsorbDepth * pow(beamLocality, 2.2));
-    } else {
-      beamAbsorb = mix(vec3(1.0), beamHue, beamAbsorbDepth);
-    }
-
-    vec3 beamTransmission = mix(vec3(0.76, 0.90, 1.0), beamHue, 0.62);
-    float beamBrightSupport = max(whiteBackdrop, membraneMode * brightBg);
-    float beamTransmissionAmount = beamBrightSupport * clamp(
-      sqrt(max(beamPeak, 0.0))
-        * 0.42
-        * mix(0.18, 1.0, beamLocality)
-        * mix(1.0, 1.36, membraneMode),
-      0.0,
-      0.30
+    beamAbsorb = mix(
+      vec3(1.0), beamHue, beamAbsorbDepth * pow(beamLocality, 2.2)
     );
-    // mode >= 1 都走這條：A 案只提供「折射影像的色差」，而光帶是獨立疊加的
-    // 發光圖樣、根本不在折射影像裡，A 對它沒有任何貢獻。上一版在 A 模式把
-    // beamAbsorb 歸零，等於關掉白底上唯一有效的那一半（加光已被 brightWash
-    // 淡到 12%），模擬色散就幾乎消失了。所以 A 模式 = B + 真色差。
-    if (uLightDispersionMode == 1 && whiteBackdrop > 0.01) {
-      // ===== B 案（RAY 模擬色散）=====
-      // 這一條是白底色塊感最重的來源，因為它疊了兩層平塗：上面的 beamAbsorb
-      // 把整片光帶降彩度，這裡的 beamTransmission 又混一個飽和色進去，而且
-      // locality 有 0.18 的下限 —— 也就是完全不在邊界的平坦白區照樣被塗 18%。
-      //
-      // B 案的兩件事：改成從白光扣掉光譜的補色（互補關係讓它讀成分光而不是
-      // 顏料），以及把 locality 下限拿掉、提高指數，顯色只留在 Fresnel／折射
-      // 真正彎曲處／背面掠射。
-      float beamAbsorbLocality = pow(beamLocality, 2.2);
-      float beamAbsorbAmount = beamBrightSupport * clamp(
-        sqrt(max(beamPeak, 0.0)) * 0.78 * beamAbsorbLocality,
-        0.0,
-        0.46
-      );
-      vec3 beamComplement = vec3(1.0) - beamHue;
-      finalColor = beamScreen * (vec3(1.0) - beamComplement * beamAbsorbAmount);
-    } else {
-      finalColor = mix(beamScreen, beamTransmission, beamTransmissionAmount);
-    }
+
+    // 白底的顯色：從白光扣掉光譜的補色。互補關係讓紅／青、綠／洋紅成對出現，
+    // 讀起來是分光；舊版是把一個飽和色平塗混進去，沒有互補關係，讀起來是顏料。
+    //
+    // beamBrightSupport 在深底為 0（membraneMode 恆為 0，材質已統一為通用玻璃），
+    // 所以 amount 為 0、乘數為 vec3(1)，深底同樣是精確的恆等運算。
+    float beamBrightSupport = max(whiteBackdrop, membraneMode * brightBg);
+    float beamAbsorbAmount = beamBrightSupport * clamp(
+      sqrt(max(beamPeak, 0.0)) * 0.78 * pow(beamLocality, 2.2),
+      0.0,
+      0.46
+    );
+    vec3 beamComplement = vec3(1.0) - beamHue;
+    finalColor = beamScreen * (vec3(1.0) - beamComplement * beamAbsorbAmount);
   }
 #endif // FEATURE_PRISM_SATURATION：稜光彩度後處理 beam chroma post-processing
   // 通用玻璃的亮底補償仍由原開關管理；液態薄膜本身就是透射模型，不依賴該開關。
@@ -3907,15 +3882,18 @@ void main(){
     // screen 合成使焦散維持透明發光感，而不是實體顏料。
     vec3 prismScreen = 1.0
       - (1.0 - finalColor) * (1.0 - prismLight);
-    // 白色已沒有 screen 的加色空間；亮底改成彩色透射（選擇性吸收），
-    // 強度仍由 prismAmount 單調控制，0 時與舊合成完全一致。
-    vec3 prismTransmission = mix(
-      vec3(0.76, 0.90, 1.0),
-      prismSpectrum,
-      0.62
-    );
-    // 平方根是感知式響應：低強度仍能在白底看見，高強度則逐漸壓縮，
-    // 保持 0 → 無效果且全程單調，不會讓 50% 直接變成不透明彩色貼圖。
+    // 白色已沒有 screen 的加色空間，所以亮底走「互補扣除」：真實色散是把白光
+    // 分開，某個方向多了紅就必然少了青，所以從白光裡扣掉光譜的補色，紅／青、
+    // 綠／洋紅會自動成對出現。舊版是把一個飽和色平塗混進去，沒有互補關係，
+    // 讀起來是顏料而不是光。
+    //
+    // 位置遮罩的指數 2.2 同樣是刻意「沒有下限」：舊版是
+    // mix(0.18, 1.0, whitePrismLocality)，那個 0.18 下限讓完全不在邊界的平坦
+    // 白區照樣被塗色 —— 「色塊貼在玻璃上」就是這麼來的。
+    //
+    // sqrt 是感知式響應：低強度在白底仍看得見，高強度逐漸壓縮，保持 0 → 無效果
+    // 且全程單調。brightColorSupport 在深底為 0（membraneMode 恆為 0，材質已
+    // 統一為通用玻璃），amount 為 0、乘數為 vec3(1)，深底是精確的恆等運算。
     float whitePrismLocality = clamp(
       material.edgeFactor * 0.76
         + localPrism * 0.62
@@ -3924,41 +3902,15 @@ void main(){
       0.0,
       1.0
     );
-    float prismTransmissionAmount = brightColorSupport * clamp(
+    float absorbAmount = brightColorSupport * clamp(
       sqrt(max(prismAmount, 0.0))
-        * (0.42 + 0.08 * uDispersionSeparation)
-        * mix(0.18, 1.0, whitePrismLocality)
-        * mix(1.0, 1.36, membraneMode),
+        * (0.62 + 0.18 * uDispersionSeparation)
+        * pow(whitePrismLocality, 2.2),
       0.0,
-      0.30
+      0.42
     );
-    if (uLightDispersionMode == 1 && whiteBackdrop > 0.01) {
-      // ===== B 案：互補扣除 + 收掉平坦區 =====
-      // 真實色散是把白光「分開」：某個方向多了紅，就必然少了青。原本的 fallback
-      // 只是把一個飽和色平塗混進去，沒有互補關係，讀起來就是顏料而不是光。這裡
-      // 改成從白光裡扣掉光譜的補色，紅／青、綠／洋紅會自動成對出現。
-      //
-      // 另一半的問題在 mix(0.18, 1.0, whitePrismLocality)：下限 0.18 的語意是
-      // 「即使完全不在邊界，也還是塗 18% 的色」，那正是大片平坦白區被染色、
-      // 看起來像色塊貼在玻璃上的來源。B 案把下限拿掉並提高指數，顯色只留在
-      // Fresnel／曲率／背面掠射真的強的位置。
-      float absorbLocality = pow(whitePrismLocality, 2.2);
-      float absorbAmount = brightColorSupport * clamp(
-        sqrt(max(prismAmount, 0.0))
-          * (0.62 + 0.18 * uDispersionSeparation)
-          * absorbLocality,
-        0.0,
-        0.42
-      );
-      vec3 prismAbsorb = vec3(1.0) - prismSpectrum;
-      finalColor = prismScreen * (vec3(1.0) - prismAbsorb * absorbAmount);
-    } else {
-      finalColor = mix(
-        prismScreen,
-        prismTransmission,
-        prismTransmissionAmount
-      );
-    }
+    vec3 prismAbsorb = vec3(1.0) - prismSpectrum;
+    finalColor = prismScreen * (vec3(1.0) - prismAbsorb * absorbAmount);
   }
 #endif // FEATURE_DISPERSION：色散／光譜 dispersion / spectral
 
@@ -4133,41 +4085,27 @@ void main(){
       causticLight.r,
       max(causticLight.g, causticLight.b)
     );
-    vec3 causticTransmission = mix(
-      vec3(0.76, 0.91, 1.0),
-      causticSpectrum,
-      0.68
+    // 白底的顯色跟 RAY／ART 同一套：互補扣除加上位置遮罩。
+    //
+    // 這一條原本是三者裡色塊感最重的，因為舊版連 locality 都沒有 —— 混色權重
+    // 只看光帶強度 causticPeak，上限還開到 0.62，所以白底上整條光帶都會被塗成
+    // 飽和色。這裡補上位置遮罩：焦散的顯色集中在掠射（causticEdgeFactor）與
+    // 入射角折疊（incidenceFold）真的強的地方。
+    //
+    // brightColorSupport 在深底為 0，amount 為 0、乘數為 vec3(1)，深底是精確的
+    // 恆等運算。
+    float causticLocality = pow(
+      clamp(causticEdgeFactor * 0.85 + incidenceFold * 0.55, 0.0, 1.0),
+      2.0
     );
-    float causticTransmissionAmount = brightColorSupport
-      * clamp(
-        causticPeak * mix(0.52, 0.78, membraneMode)
-          + membraneMode * membraneFold * causticPeak * 0.18,
-        0.0,
-        0.62
-      );
-    if (uLightDispersionMode == 1 && whiteBackdrop > 0.01) {
-      // B 案同樣的兩件事：互補扣除，加上收掉平坦區的顯色。焦散這一條原本連
-      // locality 都沒有（causticTransmissionAmount 只看光帶強度 causticPeak），
-      // 所以白底上整條光帶都會被塗成飽和色 —— 色塊感最重的就是它。
-      float causticLocality = pow(
-        clamp(causticEdgeFactor * 0.85 + incidenceFold * 0.55, 0.0, 1.0),
-        2.0
-      );
-      float causticAbsorbAmount = brightColorSupport * clamp(
-        causticPeak * 0.85 * causticLocality,
-        0.0,
-        0.5
-      );
-      vec3 causticAbsorb = vec3(1.0) - causticSpectrum;
-      finalColor = causticScreen
-        * (vec3(1.0) - causticAbsorb * causticAbsorbAmount);
-    } else {
-      finalColor = mix(
-        causticScreen,
-        causticTransmission,
-        causticTransmissionAmount
-      );
-    }
+    float causticAbsorbAmount = brightColorSupport * clamp(
+      causticPeak * 0.85 * causticLocality,
+      0.0,
+      0.5
+    );
+    vec3 causticAbsorb = vec3(1.0) - causticSpectrum;
+    finalColor = causticScreen
+      * (vec3(1.0) - causticAbsorb * causticAbsorbAmount);
   }
 #endif // FEATURE_SPECTRAL_CAUSTICS：光譜焦散 spectral caustics
 

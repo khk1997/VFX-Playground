@@ -674,8 +674,6 @@ const SELECT_DEFAULTS = {
   bgMode: 'color',
   // 淺底版本尚未定案，目前固定走既有深底材質路徑。
   backdrop: 'dark',
-  // 預設就走互補扣除：舊版那條在白底上會把平坦區也塗成色塊。
-  lightDispersionMode: 'absorb',
   materialStyle: 'universal',
   colorMode: 'spectral',
   motion: 'static',
@@ -978,19 +976,6 @@ const SELECTS = {
   bgMode:    { uniform: 'uBgMode',    map: { color: 0, hdri: 1 } },
   // 這份淺底參數是在既有通用玻璃路徑上調成，因此兩種底色都使用同一 shader 路徑。
   backdrop:  { uniform: 'uLightBackdrop', map: { dark: 0, light: 0 } },
-  // 白底色散的顯色做法。閘門是真實背景亮度（whiteBackdrop），不是 backdrop 選單
-  // —— 深底畫布上這根一律不作用，黑底的定案外觀不受任何影響。
-  //
-  // absorb（預設）＝互補扣除：白光扣掉光譜補色，顯色收在 Fresnel／折射彎曲處。
-  // legacy＝舊版的混入飽和色，平坦白區也會被塗色（色塊感的來源），留著對照用。
-  //
-  // 曾經還有第三個選項 split（RGB 各自以不同折射率取樣 HDRI 的真色散），實測在
-  // 均勻白底上肉眼分辨不出差異、又要多兩次環境取樣，已移除；原因記在 shaders.js
-  // 的 backgroundSample 呼叫處。
-  lightDispersionMode: {
-    uniform: 'uLightDispersionMode',
-    map: { legacy: 0, absorb: 1 },
-  },
   materialStyle: { uniform: 'uMaterialStyle', map: { universal: 2 } },
   colorMode: { uniform: 'uColorMode', map: { spectral: 0, ramp: 1 } },
   rayBeamPattern: {
@@ -4961,7 +4946,6 @@ function initGL() {
     uMaterialStyle: { value: SELECTS.materialStyle.map[P.materialStyle] },
     uTransparentBackground: { value: 0 },
     uLightBackdrop: { value: SELECTS.backdrop.map[P.backdrop] },
-    uLightDispersionMode: { value: SELECTS.lightDispersionMode.map[P.lightDispersionMode] },
     uLightShow:  { value: P.lightShow },
     uLightClarity: { value: P.lightClarity },
     uLightDepth: { value: P.lightDepth },
@@ -5971,17 +5955,6 @@ function updateUIState() {
   const bgc = document.getElementById('bgColor');
   bgc.disabled = !colorBackground;
   bgc.closest('.row').style.opacity = colorBackground ? 1 : 0.4;
-  // 白底色散做法的閘門，跟 shader 的 whiteBackdrop 同一個判準（純色畫布且亮度
-  // 接近白）。非白底時整根不作用，標示成停用避免以為它有效。
-  const canvasLuma = (() => {
-    const hex = P.bgColor.replace('#', '');
-    const [r, g, b] = [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  })();
-  const whiteCanvas = colorBackground && canvasLuma > 0.82;
-  const lightDispersionRow = document.getElementById('lightDispersionModeRow');
-  setDisabled(document.getElementById('lightDispersionMode'), !whiteCanvas);
-  lightDispersionRow.style.opacity = whiteCanvas ? 1 : 0.4;
   // 已移除液態薄膜材質；相容節點固定隱藏，舊參數檔也會被 materialStyle 收斂為 universal。
   document.getElementById('membraneDepth').disabled = true;
   document.getElementById('membraneDepthRow').style.display = 'none';
