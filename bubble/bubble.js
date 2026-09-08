@@ -876,6 +876,7 @@ const BACKDROP_SCOPED_KEYS = new Set([
   'capillaryHeight', 'capillaryRings', 'capillarySpeed',
   'viscosity', 'surfaceTension',
   'reflect', 'absorb', 'absorbColor',
+  'transmission',
   'roughness', 'fresnel', 'ior',
   'rayBeamIntensity', 'rayBeamSeparation', 'rayBeamChroma',
   'rayBeamZoom', 'rayBeamRings',
@@ -892,6 +893,7 @@ const BACKDROP_SCOPED_KEYS = new Set([
   'dispersion', 'artPatternSpeed',
   'postExposure', 'postBrightness',
   'postContrast', 'postGrain', 'postGrainScale',
+  'bloomEnabled', 'streaksEnabled',
   'streakCount', 'streakLength', 'streakIntensity',
   'cameraDistance', 'cameraRotationY', 'cameraRotationX',
   'spin', 'hdriYaw', 'hdriPitch', 'hdriBlur',
@@ -965,6 +967,16 @@ function buildMotionMemory() {
   };
 }
 let motionMemory = buildMotionMemory();
+// 淺底使用高調棚拍玻璃的起始值；使用者後續
+// 手動調整的值仍會記在淺底自己的記憶格，不會影響深底。
+for (const motion of MOTION_KEYS) {
+  if (motionMemory.transmission) motionMemory.transmission[`${motion}|light`] = 0.97;
+  if (motionMemory.absorb) motionMemory.absorb[`${motion}|light`] = 1.6;
+  if (motionMemory.envRefraction) motionMemory.envRefraction[`${motion}|light`] = 0.04;
+  if (motionMemory.fresnel) motionMemory.fresnel[`${motion}|light`] = 0.15;
+  if (motionMemory.bloomEnabled) motionMemory.bloomEnabled[`${motion}|light`] = false;
+  if (motionMemory.streaksEnabled) motionMemory.streaksEnabled[`${motion}|light`] = false;
+}
 const MOTION_MEMORY_KEYS = Object.keys(motionMemory);
 // 把目前這一格的值鏡射到另一個底色情境的同一格。
 //
@@ -6059,11 +6071,21 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   // 重設不換動態模式：按重設是想把「現在這個模式」的參數歸零，不是想被丟回
   // 分裂模式再自己切回來。
   const motion = P.motion;
+  const backdrop = P.backdrop;
   Object.assign(P, DEFAULTS, MOTION_TEXT_DEFAULTS, SELECT_DEFAULTS, TOGGLE_DEFAULTS, COLOR_DEFAULTS);
   P.motion = motion;
+  P.backdrop = backdrop;
   resetMaterialProfiles();
   if (mobileRenderQuery.matches && !PREVIEW) P.cameraDistance = MOBILE_CAMERA_DISTANCE_DEFAULT;
   motionMemory = buildMotionMemory();
+  for (const mode of MOTION_KEYS) {
+    if (motionMemory.transmission) motionMemory.transmission[`${mode}|light`] = 0.97;
+    if (motionMemory.absorb) motionMemory.absorb[`${mode}|light`] = 1.6;
+    if (motionMemory.envRefraction) motionMemory.envRefraction[`${mode}|light`] = 0.04;
+    if (motionMemory.fresnel) motionMemory.fresnel[`${mode}|light`] = 0.15;
+    if (motionMemory.bloomEnabled) motionMemory.bloomEnabled[`${mode}|light`] = false;
+    if (motionMemory.streaksEnabled) motionMemory.streaksEnabled[`${mode}|light`] = false;
+  }
   // 每個模式各自記憶的那幾項（顆數／滴徑／循環秒數／前後拉伸／擠出外觀）要套用
   // 「這個模式」的預設，不能停在共用預設上。共用預設是給分裂模式用的數字——
   // 例如循環 12 秒、顆數 2，留在形狀變形上就完全不對。
