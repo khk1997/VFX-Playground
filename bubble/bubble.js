@@ -12,7 +12,7 @@ import {
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
-  MOTION_OVERRIDES, MOTION_LIGHT_OVERRIDES,
+  MOTION_OVERRIDES,
   MOTION_HDRI, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
 } from './motions/registry.js?v=light-backdrop-30';
@@ -248,8 +248,6 @@ const canvas = document.getElementById('stage');
 const mobileRenderQuery = window.matchMedia('(max-width: 760px)');
 const GLASS_HDRI_URL = new URL('./assets/photo_studio2_london_hall_1k.hdr', import.meta.url).href;
 const GLASS_HDRI_LABEL = 'photo_studio2_london_hall_1k.hdr';
-const MEMBRANE_HDRI_URL = new URL('./assets/christmas_photo_studio_04_1k.hdr', import.meta.url).href;
-const MEMBRANE_HDRI_LABEL = 'christmas_photo_studio_04_1k.hdr';
 // 動態模式自己指定的環境貼圖（registry.js 的 hdri 欄位）。HDRI 平常跟著材質
 // 類型走，但某些模式的外觀是照特定一張棚燈校出來的，換一張反射就全變了。
 function motionEnvironmentFor(motion) {
@@ -274,16 +272,22 @@ const MAX_NEGATIVE_DROPS = 4;
 
 /* ===== 參數 ===== */
 const DEFAULTS = {              // 數值滑桿
-  // 淺底的顯色強度（見 shaders.js 的 liftedCover）。0 = 跟深底同一條公式，水滴
-  // 在白底上會被數學抵銷掉幾乎看不見；越高越不透明。只在底色情境為淺底時有效。
-  lightShow: 0,
+  // 淺底的體積強化：只壓低背光面與掠射面，正面透射保持乾淨。
+  lightShow: 0.25,
+  // 白底專屬的完整外觀控制。shader 只在 uLightBackdrop > 0 時讀取，Dark
+  // 分支的公式與定案參數完全不受影響。
+  lightClarity: 0.65,
+  lightDepth: 0.30,
+  lightCardStrength: 0.75,
+  lightChroma: 0.58,
   // 淺底 icon 的獨立顯色（見 shaders.js 的 researchIconFilter）。只在底色情境為
   // 淺底時作用，深底一律不讀 —— 調這幾根動不到黑底的任何外觀。
   //
   // 濃度控制體積顯色，明暗反射卡獨立保留；邊緣集中微調輪廓帶寬度。
-  lightIconTint: 0.8,
-  lightIconEdge: 4.6,
-  lightIconRimStrength: 0.75,
+  lightIconClarity: 0.58,
+  lightIconTint: 0.42,
+  lightIconEdge: 5.2,
+  lightIconRimStrength: 0.62,
   ...MOTION_PARAM_DEFAULTS,
   thickness: 250,
   thickVar: 400,
@@ -668,14 +672,10 @@ const isFormationMotion = motion => motion === 'formation';
 const SELECT_DEFAULTS = {
   postToneMap: 'none',
   bgMode: 'color',
-  // 底色情境。深底＝原本的外觀，一行都沒變；淺底會解除 shader 裡「通用玻璃把
-  // 顯色階段的背景視為黑場」那道封鎖（見 shaders.js 的 uLightBackdrop），並換上
-  // 該模式 lightOverrides 記的那組數值。
-  //
-  // 刻意做成明確的切換，而不是自動從背景亮度推導：去背輸出時根本沒有背景可以
-  // 推導，反乘要對著哪個底色算只能由這裡告訴它；順帶也避免「調個背景色，外觀
-  // 被偷換」這種說不出原因的意外。
+  // 淺底版本尚未定案，目前固定走既有深底材質路徑。
   backdrop: 'dark',
+  // 預設就走互補扣除：舊版那條在白底上會把平坦區也塗成色塊。
+  lightDispersionMode: 'absorb',
   materialStyle: 'universal',
   colorMode: 'spectral',
   motion: 'static',
@@ -744,8 +744,8 @@ const COLOR_DEFAULTS  = {
   // 寫死的吸收係數，所以預設外觀不變。
   absorbColor: '#68b2e7',
   // 淺底 icon 的體積色，與清透底色混合；明暗反射由材質獨立塑形。
-  lightIconColor: '#5b8fe0',
-  lightIconRimColor: '#238eca',
+  lightIconColor: '#d9f3ff',
+  lightIconRimColor: '#3aa9df',
   // 液態薄膜原本各自寫死一個偏藍紫色常數的 5 處，現在各自開一個選色器直接
   // 取代常數，選色器選什麼顏色，畫面上那一處就是那個顏色。預設值都是原本
   // 那個常數本身，維持改動前的外觀。
@@ -761,12 +761,10 @@ const COLOR_DEFAULTS  = {
 const P = { ...DEFAULTS, ...MOTION_TEXT_DEFAULTS, ...SELECT_DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS };
 const extendedMotions = createExtendedMotionRuntime(P);
 
-// 材質切換不是同一組滑桿換 shader 分支：通用玻璃與液態薄膜各自保留一份
-// HDRI／材質狀態。離開時記住使用者微調，回來時恢復；第一次進入薄膜則使用
-// 白底參考圖的校準值。鏡頭、動畫與配色不在這裡，切材質時不應改變構圖或動作。
+// 材質目前統一為通用玻璃。保留單一 profile，供 HDRI 匯入與重設共用。
 const MATERIAL_PROFILE_KEYS = [
   'hdriYaw', 'hdriPitch', 'hdriBlur', 'envRefraction',
-  'membraneDepth', 'reflect', 'transmission', 'materialExposure',
+  'reflect', 'transmission', 'materialExposure',
   'roughness', 'fresnel', 'ior',
   // 薄膜式藝術色散：白底薄膜的顯色幾乎全靠它，跟通用玻璃要的分佈差很多
   // （通用玻璃靠折射堆疊出顏色，薄膜是整片透光、顏色要自己長出來），
@@ -780,42 +778,17 @@ const pickMaterialProfile = source => Object.fromEntries(
 );
 const MATERIAL_PROFILE_DEFAULTS = {
   universal: pickMaterialProfile(P),
-  membrane: {
-    hdriYaw: -45,
-    hdriPitch: 20,
-    hdriBlur: 0.18,
-    envRefraction: 0.21,
-    membraneDepth: 0.65,
-    reflect: 1.6,
-    transmission: 1,
-    materialExposure: 1,
-    roughness: 0.17,
-    fresnel: 1.05,
-    ior: 1.6,
-    dispersion: 0.05,
-    dispersionSeparation: 1.5,
-    artThickness: 295,
-    artThickVar: 130,
-    artNoiseScale: 0.5,
-    artPatternSpeed: 0.01,
-    artGravity: 0.52,
-    causticScale: 1,
-    causticSharpness: 0.65,
-  },
 };
 const MATERIAL_ENVIRONMENT_DEFAULTS = {
-  membrane: { url: MEMBRANE_HDRI_URL, label: MEMBRANE_HDRI_LABEL, isHDR: true, file: null },
   universal: { url: GLASS_HDRI_URL, label: GLASS_HDRI_LABEL, isHDR: true, file: null },
 };
 let materialProfiles = {};
 let materialEnvironments = {};
 function resetMaterialProfiles() {
   materialProfiles = {
-    membrane: { ...MATERIAL_PROFILE_DEFAULTS.membrane },
     universal: { ...MATERIAL_PROFILE_DEFAULTS.universal },
   };
   materialEnvironments = {
-    membrane: { ...MATERIAL_ENVIRONMENT_DEFAULTS.membrane },
     universal: { ...MATERIAL_ENVIRONMENT_DEFAULTS.universal },
   };
 }
@@ -841,7 +814,8 @@ const MOTION_SCOPED_KEYS = [
   'rayBeamAzimuth', 'rayBeamElevation', 'rayBeamRefract', 'rayBeamNoiseMask',
   'rayDispersionEnabled', 'rayBeamPattern',
   'spectralCausticEnabled',
-  'spectralCausticIntensity', 'spectralCausticFocus', 'spectralCausticBlend',
+  'spectralCausticIntensity', 'spectralCausticFocus', 'spectralCausticSeparation',
+  'spectralCausticBlend', 'spectralCausticWidth',
   'spectralCausticDensity', 'spectralCausticWarp', 'spectralCausticNoiseScale',
   'spectralCausticAzimuth', 'spectralCausticElevation',
   ...SPECTRAL_CAUSTIC_DEFAULTS.map((_, index) => `spectralCausticCol${index}`),
@@ -856,12 +830,15 @@ const MOTION_SCOPED_KEYS = [
   // 起伏的時間項。私語模式要把外殼定格（wobbleSpeed 0），而 wobble 本身保留，
   // 所以兩條都得按模式記憶，只列 wobble 會讓外殼照樣流動。
   'wobbleSpeed',
+  // 白底預設需要切換純色背景；兩個底色各自記憶，不影響深底設定。
+  'bgMode', 'bgColor',
   'materialStyle',
   // 材質那一組。必須排在 materialStyle 後面：切換材質類型會由
   // switchMaterialProfile 還原該類型記住的整組材質值，而模式記憶是照這個陣列
   // 的順序逐一寫回的，排在後面模式的 override 才蓋得過材質類型的 profile。
   'transmission', 'reflect', 'materialExposure', 'roughness', 'fresnel', 'ior',
-  'hdriBlur', 'dispersion', 'artPatternSpeed',
+  'hdriYaw', 'hdriPitch', 'hdriBlur', 'envRefraction',
+  'dispersion', 'artPatternSpeed', 'absorbColor', 'researchIconIOR',
   // 水滴形態這兩條同樣沒列進來，所以 research overrides 裡的 viscosity 0.82 /
   // surfaceTension 0.92 從來沒被寫回控制項，面板一直是全域的 0.78 / 0.82。
   'viscosity', 'surfaceTension',
@@ -878,19 +855,38 @@ const MOTION_SCOPED_KEYS = [
   'bloomEnabled', 'streaksEnabled', 'streakCount', 'streakAngle', 'streakLength',
   'streakChroma', 'streakIntensity',
 ];
-// 底色情境會影響到的那幾根。深底與淺底各記一份，其餘的參數兩個情境共用。
-//
-// 名單為什麼只有這些：形狀、動態、鏡頭、外殼、icon 時序跟底色完全無關，分開
-// 存只會逼使用者把同一個東西調兩次。真正跟底色綁在一起的是「靠加亮顯色」的
-// 那一批 —— 深底上背景是 0，加法有無限空間；淺底上背景已經是 1.0，同一個
-// 加法會直接截頂消失，所以強度必須另外一組。體積吸收是鏡像的情況：深底無
-// 作用，淺底是主要的髒源。
-const BACKDROP_SCOPED_KEYS = new Set([
-  'absorb',
-  'reflect', 'materialExposure', 'fresnel',
-  'postExposure', 'postContrast', 'postBrightness', 'postGrain',
-  'streakIntensity', 'rayBeamIntensity', 'spectralCausticIntensity',
-]);
+// 使用者在白色背景、通用玻璃深底 shader 路徑上定案的參數（2026-09-08）。
+// 不包含 motion：切到淺底時保留目前動態，只把外觀、構圖及該動態能使用的數值
+// 換成這組。所有模式共用同一份初始值，之後仍各自記憶手動微調。
+const LIGHT_BACKDROP_PRESET = {
+  bgMode: 'color', bgColor: '#ffffff', materialStyle: 'universal',
+  loopDuration: 8, radius: 0.71, count: 2,
+  wobble: 0.05, wobbleSpeed: 0, researchIconIOR: 1.14,
+  capillaryHeight: 0.09, capillaryRings: 3, capillarySpeed: 2,
+  viscosity: 0.82, surfaceTension: 0.92,
+  reflect: 1.22, absorb: 2.2, absorbColor: '#73849c',
+  roughness: 0.14, fresnel: 0, ior: 1.15,
+  rayBeamIntensity: 32, rayBeamSeparation: 0.045, rayBeamChroma: 1.6,
+  rayBeamZoom: 18.5, rayBeamRings: 3.5,
+  rayBeamAzimuth: 58, rayBeamElevation: -41, rayBeamRefract: 0.31,
+  rayBeamFresnelMask: 0.53, rayBeamNoiseScale: 0.8,
+  spectralCausticEnabled: true,
+  spectralCausticCol2: '#3c41e2', spectralCausticCol4: '#4bb8fb',
+  spectralCausticCol5: '#3979f9', spectralCausticCol6: '#4ebafd',
+  spectralCausticIntensity: 6, spectralCausticFocus: 0.32,
+  spectralCausticSeparation: 0.34, spectralCausticBlend: 1,
+  spectralCausticWidth: 0.6, spectralCausticDensity: 0.08,
+  spectralCausticWarp: 0.26, spectralCausticNoiseScale: 0.5,
+  spectralCausticAzimuth: -29, spectralCausticElevation: -31,
+  dispersion: 0.03, artPatternSpeed: 0,
+  postExposure: 1.0, postBrightness: 0,
+  postContrast: 1.33, postGrain: 0.033, postGrainScale: 0.6,
+  streakCount: 2, streakLength: 0.11, streakIntensity: 0.3,
+  cameraDistance: 4.75, cameraRotationY: 7.9, cameraRotationX: 4.2,
+  spin: 0.08, hdriYaw: 44, hdriPitch: 10, hdriBlur: 0.22,
+  envRefraction: 0.25,
+};
+const BACKDROP_SCOPED_KEYS = new Set(Object.keys(LIGHT_BACKDROP_PRESET));
 // 就是 SELECTS.backdrop.map 的那兩個鍵。不從 SELECTS 讀是因為那張表在這一行
 // 之後才宣告，讀它會撞上 const 的 TDZ。
 const BACKDROP_KEYS = ['dark', 'light'];
@@ -926,29 +922,34 @@ function applyMemorySlots(keys, fromMotion, toMotion, fromBackdrop, toBackdrop) 
   }
 }
 function motionDefaultsFor(key) {
+  const intrinsicByMode = {
+    count: MOTION_DEFAULT_COUNTS,
+    radius: MOTION_DEFAULT_RADIUS,
+    loopDuration: MOTION_DEFAULT_LOOP_DURATION,
+    dollyEnabled: MOTION_DEFAULT_DOLLY,
+  };
   const base = key in DEFAULTS ? DEFAULTS[key]
     : key in TOGGLE_DEFAULTS ? TOGGLE_DEFAULTS[key]
       : key in COLOR_DEFAULTS ? COLOR_DEFAULTS[key]
         : SELECT_DEFAULTS[key];
-  const darkValue = m => MOTION_OVERRIDES[m]?.[key] ?? base;
+  const darkValue = m => MOTION_OVERRIDES[m]?.[key]
+    ?? intrinsicByMode[key]?.[m]
+    ?? base;
   if (!BACKDROP_SCOPED_KEYS.has(key)) {
     return Object.fromEntries(MOTION_KEYS.map(m => [m, darkValue(m)]));
   }
-  // 淺底的預設是「深底那份再套上 lightOverrides 有列到的」。沒列到就等於兩個
-  // 情境同值，這樣新增一個底色相關的 key 時不必回頭補每個模式的淺底表。
+  // 淺底所有模式共用使用者定案值，深底仍使用各模式原本的預設。
   return Object.fromEntries(MOTION_KEYS.flatMap(m => BACKDROP_KEYS.map(b => [
     `${m}|${b}`,
-    b === 'light'
-      ? (MOTION_LIGHT_OVERRIDES[m]?.[key] ?? darkValue(m))
-      : darkValue(m),
+    b === 'light' ? (LIGHT_BACKDROP_PRESET[key] ?? darkValue(m)) : darkValue(m),
   ])));
 }
 function buildMotionMemory() {
   return {
-    count: { ...MOTION_DEFAULT_COUNTS },
-    radius: { ...MOTION_DEFAULT_RADIUS },
-    loopDuration: { ...MOTION_DEFAULT_LOOP_DURATION },
-    dollyEnabled: { ...MOTION_DEFAULT_DOLLY },
+    count: motionDefaultsFor('count'),
+    radius: motionDefaultsFor('radius'),
+    loopDuration: motionDefaultsFor('loopDuration'),
+    dollyEnabled: motionDefaultsFor('dollyEnabled'),
     ...Object.fromEntries(MOTION_SCOPED_KEYS.map(k => [k, motionDefaultsFor(k)])),
   };
 }
@@ -975,8 +976,22 @@ const RAMP_DEFAULT = {
 // select 字串 → int uniform
 const SELECTS = {
   bgMode:    { uniform: 'uBgMode',    map: { color: 0, hdri: 1 } },
-  backdrop:  { uniform: 'uLightBackdrop', map: { dark: 0, light: 1 } },
-  materialStyle: { uniform: 'uMaterialStyle', map: { membrane: 1, universal: 2 } },
+  // 這份淺底參數是在既有通用玻璃路徑上調成，因此兩種底色都使用同一 shader 路徑。
+  backdrop:  { uniform: 'uLightBackdrop', map: { dark: 0, light: 0 } },
+  // 白底色散的顯色做法。閘門是真實背景亮度（whiteBackdrop），不是 backdrop 選單
+  // —— 深底畫布上這根一律不作用，黑底的定案外觀不受任何影響。
+  //
+  // absorb（預設）＝互補扣除：白光扣掉光譜補色，顯色收在 Fresnel／折射彎曲處。
+  // legacy＝舊版的混入飽和色，平坦白區也會被塗色（色塊感的來源），留著對照用。
+  //
+  // 曾經還有第三個選項 split（RGB 各自以不同折射率取樣 HDRI 的真色散），實測在
+  // 均勻白底上肉眼分辨不出差異、又要多兩次環境取樣，已移除；原因記在 shaders.js
+  // 的 backgroundSample 呼叫處。
+  lightDispersionMode: {
+    uniform: 'uLightDispersionMode',
+    map: { legacy: 0, absorb: 1 },
+  },
+  materialStyle: { uniform: 'uMaterialStyle', map: { universal: 2 } },
   colorMode: { uniform: 'uColorMode', map: { spectral: 0, ramp: 1 } },
   rayBeamPattern: {
     uniform: 'uRayBeamPattern',
@@ -4946,8 +4961,14 @@ function initGL() {
     uMaterialStyle: { value: SELECTS.materialStyle.map[P.materialStyle] },
     uTransparentBackground: { value: 0 },
     uLightBackdrop: { value: SELECTS.backdrop.map[P.backdrop] },
+    uLightDispersionMode: { value: SELECTS.lightDispersionMode.map[P.lightDispersionMode] },
     uLightShow:  { value: P.lightShow },
+    uLightClarity: { value: P.lightClarity },
+    uLightDepth: { value: P.lightDepth },
+    uLightCardStrength: { value: P.lightCardStrength },
+    uLightChroma: { value: P.lightChroma },
     uLightIconColor: { value: new THREE.Color().setStyle(P.lightIconColor, THREE.LinearSRGBColorSpace) },
+    uLightIconClarity: { value: P.lightIconClarity },
     uLightIconTint: { value: P.lightIconTint },
     uLightIconEdge: { value: P.lightIconEdge },
     uLightIconRimColor: { value: new THREE.Color().setStyle(P.lightIconRimColor, THREE.LinearSRGBColorSpace) },
@@ -5704,9 +5725,9 @@ function bindControls() {
   const clearIconPreset = document.getElementById('clearIconPreset');
   if (!PREVIEW && !clearIconPreset._bound) {
     clearIconPreset.addEventListener('click', () => {
-      for (const [key, value] of Object.entries({ lightIconColor: '#eaf7ff',
-        lightIconTint: 0.35, lightIconRimColor: '#238eca',
-        lightIconRimStrength: 0.75, lightIconEdge: 4.6 })) {
+      for (const [key, value] of Object.entries({ lightIconColor: '#d9f3ff',
+        lightIconClarity: 0.58, lightIconTint: 0.42, lightIconRimColor: '#3aa9df',
+        lightIconRimStrength: 0.62, lightIconEdge: 5.2 })) {
         const input = document.getElementById(key);
         input.value = value;
         input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -5948,39 +5969,35 @@ function updateUIState() {
   });
   const colorBackground = P.bgMode === 'color';
   const bgc = document.getElementById('bgColor');
-  const materialStyle = document.getElementById('materialStyle');
-  const membraneOption = materialStyle.querySelector('option[value="membrane"]');
   bgc.disabled = !colorBackground;
   bgc.closest('.row').style.opacity = colorBackground ? 1 : 0.4;
-  // 液態薄膜的合成是專為純白畫布設計（見 shaders.js 對應段落的白底假設）。
-  // 背景一旦離開 #fff，立即收斂回通用玻璃，避免下拉顯示一個實際不成立、
-  // shader 又無法合理解讀的組合。之前拿掉這個限制想讓薄膜通用背景，但薄膜
-  // 的顯色路徑（亮底 transmission、白卡/藍卡反射、去背用的白底反乘）都是
-  // 針對白底寫死的美術模型，不是簡單的背景取樣，所以重新鎖回純白。
-  const pureWhiteBackground = colorBackground
-    && P.bgColor.toLowerCase() === '#ffffff';
-  membraneOption.disabled = !pureWhiteBackground;
-  if (!pureWhiteBackground && P.materialStyle === 'membrane') {
-    const previousStyle = P.materialStyle;
-    P.materialStyle = 'universal';
-    materialStyle.value = 'universal';
-    switchMaterialProfile(previousStyle, 'universal');
-    if (uniforms) uniforms.uMaterialStyle.value = SELECTS.materialStyle.map.universal;
-  }
-  const membraneMaterial = P.materialStyle === 'membrane';
-  const membraneDepth = document.getElementById('membraneDepth');
-  membraneDepth.disabled = !membraneMaterial;
-  document.getElementById('membraneDepthRow').style.display = membraneMaterial ? '' : 'none';
+  // 白底色散做法的閘門，跟 shader 的 whiteBackdrop 同一個判準（純色畫布且亮度
+  // 接近白）。非白底時整根不作用，標示成停用避免以為它有效。
+  const canvasLuma = (() => {
+    const hex = P.bgColor.replace('#', '');
+    const [r, g, b] = [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  })();
+  const whiteCanvas = colorBackground && canvasLuma > 0.82;
+  const lightDispersionRow = document.getElementById('lightDispersionModeRow');
+  setDisabled(document.getElementById('lightDispersionMode'), !whiteCanvas);
+  lightDispersionRow.style.opacity = whiteCanvas ? 1 : 0.4;
+  // 已移除液態薄膜材質；相容節點固定隱藏，舊參數檔也會被 materialStyle 收斂為 universal。
+  document.getElementById('membraneDepth').disabled = true;
+  document.getElementById('membraneDepthRow').style.display = 'none';
   for (const key of ['membraneBaseColor', 'membraneVeilColor', 'membraneReflectionColor', 'membraneCardColor', 'membraneShadeColor']) {
-    document.getElementById(key).disabled = !membraneMaterial;
-    document.getElementById(key + 'Row').style.display = membraneMaterial ? '' : 'none';
+    document.getElementById(key).disabled = true;
+    document.getElementById(key + 'Row').style.display = 'none';
   }
-  const lightBackdrop = P.backdrop === 'light' && P.materialStyle === 'universal';
-  const lightIcons = lightBackdrop && P.motion === 'research';
-  document.getElementById('lightShowRow').style.display = lightBackdrop ? '' : 'none';
-  document.getElementById('lightIconDetails').style.display = lightIcons ? '' : 'none';
-  for (const key of ['lightShow', 'lightIconColor', 'lightIconTint', 'lightIconEdge', 'lightIconRimColor', 'lightIconRimStrength']) {
-    setDisabled(document.getElementById(key), key === 'lightShow' ? !lightBackdrop : !lightIcons);
+  const lightBackdrop = false;
+  const lightIcons = false;
+  document.getElementById('lightShowRow').style.display = 'none';
+  document.getElementById('lightLookDetails').style.display = 'none';
+  document.getElementById('lightIconDetails').style.display = 'none';
+  for (const key of ['lightShow', 'lightClarity', 'lightDepth', 'lightCardStrength', 'lightChroma',
+    'lightIconClarity', 'lightIconColor', 'lightIconTint', 'lightIconEdge', 'lightIconRimColor', 'lightIconRimStrength']) {
+    const shellControl = ['lightShow', 'lightClarity', 'lightDepth', 'lightCardStrength', 'lightChroma'].includes(key);
+    setDisabled(document.getElementById(key), shellControl ? !lightBackdrop : !lightIcons);
   }
   document.body.style.background = colorBackground ? P.bgColor : '#000';
   // 輪廓液滴的模式閘門（形狀場 + SVG 擠出）走 data-gate；這裡只剩它自己的主
@@ -7727,11 +7744,15 @@ if (!PREVIEW && window.PresetIO) {
     // 模式類控件必須先套用：切換動態模式會連帶覆寫水滴數量，
     // 配色數量會決定色標列的顯示，順序顛倒會讓後套的值被蓋掉。
     applyFirst: [
-      'motion', 'bgMode', 'bgColor', 'backdrop',
+      'motion', 'backdrop', 'bgMode', 'bgColor',
       'materialStyle', 'colorMode', 'shapeSource', 'shapeQuality',
       'rayBeamPattern',
       'filmEnabled', 'dispersionEnabled', 'rayDispersionEnabled',
       'spectralCausticEnabled', 'rampCount',
+    ],
+    exclude: [
+      'materialStyle', 'membraneDepth', 'membraneBaseColor', 'membraneVeilColor',
+      'membraneReflectionColor', 'membraneCardColor', 'membraneShadeColor',
     ],
     assetNote: 'HDRI 與 SVG / GLB 素材無法存進參數檔，請自行載入',
     saveOn: ['#resetBtn'],

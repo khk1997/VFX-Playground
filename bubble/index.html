@@ -301,13 +301,14 @@
 
   <details class="group" open>
     <summary><h3>材質 Material</h3></summary>
-    <div class="row"><label>材質類型</label><select id="materialStyle"><option value="universal" selected>通用玻璃</option><option value="membrane">液態薄膜（白底）</option><option value="glass" hidden>厚玻璃（已移除，改用通用玻璃）</option></select><span class="val"></span></div>
-    <div class="row" id="membraneDepthRow"><label>膜體立體感</label><input type="range" id="membraneDepth" min="0" max="1" step="0.01" value="0.65"><span class="val" id="membraneDepth_v"></span></div>
-    <div class="row" id="membraneBaseColorRow"><label>薄膜底色</label><input type="color" id="membraneBaseColor" value="#7a9ec7"><span class="val"></span></div>
-    <div class="row" id="membraneVeilColorRow"><label>薄膜面紗色調</label><input type="color" id="membraneVeilColor" value="#b8e6ff"><span class="val"></span></div>
-    <div class="row" id="membraneReflectionColorRow"><label>棚燈反射色</label><input type="color" id="membraneReflectionColor" value="#94b8e6"><span class="val"></span></div>
-    <div class="row" id="membraneCardColorRow"><label>藍卡反射色</label><input type="color" id="membraneCardColor" value="#94c7ff"><span class="val"></span></div>
-    <div class="row" id="membraneShadeColorRow"><label>立體暗部色</label><input type="color" id="membraneShadeColor" value="#85b8e6"><span class="val"></span></div>
+    <!-- 材質目前統一為通用玻璃；隱藏節點僅供舊參數檔與現有 uniform 相容。 -->
+    <div class="row" hidden style="display:none"><select id="materialStyle"><option value="universal" selected>通用玻璃</option></select><span class="val"></span></div>
+    <div class="row" id="membraneDepthRow" hidden style="display:none"><input type="range" id="membraneDepth" min="0" max="1" step="0.01" value="0.65"><span class="val" id="membraneDepth_v"></span></div>
+    <div class="row" id="membraneBaseColorRow" hidden style="display:none"><input type="color" id="membraneBaseColor" value="#7a9ec7"><span class="val"></span></div>
+    <div class="row" id="membraneVeilColorRow" hidden style="display:none"><input type="color" id="membraneVeilColor" value="#b8e6ff"><span class="val"></span></div>
+    <div class="row" id="membraneReflectionColorRow" hidden style="display:none"><input type="color" id="membraneReflectionColor" value="#94b8e6"><span class="val"></span></div>
+    <div class="row" id="membraneCardColorRow" hidden style="display:none"><input type="color" id="membraneCardColor" value="#94c7ff"><span class="val"></span></div>
+    <div class="row" id="membraneShadeColorRow" hidden style="display:none"><input type="color" id="membraneShadeColor" value="#85b8e6"><span class="val"></span></div>
     <div class="row"><label>反射強度</label><input type="range" id="reflect" min="0" max="2" step="0.02" value="1.6"><span class="val" id="reflect_v"></span></div>
     <div class="row"><label>透射率</label><input type="range" id="transmission" min="0" max="1" step="0.01" value="0.96"><span class="val" id="transmission_v"></span></div>
     <div class="row"><label>體積吸收</label><input type="range" id="absorb" min="0" max="10" step="0.05" value="1"><span class="val" id="absorb_v"></span></div>
@@ -319,6 +320,8 @@
 
     <details class="subgroup" id="dispersionGroup">
       <summary><h4>色散 Dispersion</h4><span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="dispersionMaster"><span class="switchTrack" aria-hidden="true"></span></span></summary>
+      <div class="row" id="lightDispersionModeRow"><label for="lightDispersionMode">白底色散做法</label><select id="lightDispersionMode"><option value="absorb" selected>互補扣除（預設）</option><option value="legacy">舊版：混入飽和色</option></select><span class="val"></span></div>
+      <div class="note" id="lightDispersionModeNote">只在純色白底時作用，深底一律不讀、定案外觀不變。互補扣除＝白光被扣掉光譜的補色（紅／青、綠／洋紅成對出現），且顯色只留在 Fresnel、折射真正彎曲處與背面掠射；舊版是把飽和色平塗上去、連平坦白區也吃到 18%，那是「色塊貼在玻璃上」的來源，留著只為了對照。</div>
       <div class="effectBlock effectBlock--physical" id="rayDispersionGroup">
         <div class="effectTitle"><span>RAY</span> 模擬色散<span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="rayDispersionEnabled" checked><span class="switchTrack" aria-hidden="true"></span></span></div>
         <div class="row"><label>打燈圖樣</label><select id="rayBeamPattern"><option value="grid" selected>晶格光針</option><option value="starburst">放射星芒</option><option value="ring">同心光環</option><option value="softbox">條狀棚燈</option><option value="window">窗光格柵</option></select><span class="val"></span></div>
@@ -490,15 +493,24 @@
     <summary><h3>背景與 HDRI Background</h3></summary>
     <div class="row"><label for="bgMode">背景模式</label><select id="bgMode"><option value="color">純色</option><option value="hdri">HDRI</option></select><span class="val"></span></div>
     <div class="row"><label for="bgColor">背景顏色</label><input type="color" id="bgColor" value="#000000"><span class="val"></span></div>
-    <div class="row"><label for="backdrop">材質底色適配</label><select id="backdrop"><option value="dark">深底 Dark</option><option value="light">淺底 Light</option></select><span class="val"></span></div>
-    <div class="row" id="lightShowRow"><label for="lightShow">淺底顯色</label><input type="range" id="lightShow" min="0" max="1" step="0.01" value="0"><span class="val" id="lightShow_v"></span></div>
-    <div class="note">深／淺底各自保留材質設定；背景顏色請搭配選擇。淺底以柔和明暗反射呈現玻璃厚度。</div>
-    <details class="subgroup" id="lightIconDetails">
+    <div class="row"><label for="backdrop">材質底色</label><select id="backdrop"><option value="dark">深底 Dark</option><option value="light">淺底 Light</option></select><span class="val"></span></div>
+    <div class="note">淺底使用目前定案的白底參數；深／淺底會各自記住後續調整。</div>
+    <div class="row" id="lightShowRow" hidden><label for="lightShow">體積強化</label><input type="range" id="lightShow" min="0" max="1" step="0.01" value="0.25"><span class="val" id="lightShow_v"></span></div>
+    <details class="subgroup" id="lightLookDetails" hidden>
+      <summary><h4>淺底外觀 Light Look</h4></summary>
+      <div class="note">以液態薄膜的清透合成為基底，保留通用玻璃的厚度、折射與局部彩邊。</div>
+      <div class="row"><label for="lightClarity">清透度</label><input type="range" id="lightClarity" min="0" max="1" step="0.01" value="0.65"><span class="val" id="lightClarity_v"></span></div>
+      <div class="row"><label for="lightDepth">厚度顯色</label><input type="range" id="lightDepth" min="0" max="1" step="0.01" value="0.30"><span class="val" id="lightDepth_v"></span></div>
+      <div class="row"><label for="lightCardStrength">攝影棚反射</label><input type="range" id="lightCardStrength" min="0" max="1" step="0.01" value="0.75"><span class="val" id="lightCardStrength_v"></span></div>
+      <div class="row"><label for="lightChroma">局部虹彩</label><input type="range" id="lightChroma" min="0" max="1" step="0.01" value="0.58"><span class="val" id="lightChroma_v"></span></div>
+    </details>
+    <details class="subgroup" id="lightIconDetails" hidden>
       <summary><h4>Icon 自訂配色</h4></summary>
       <div class="note">本體色控制透明染色，邊緣色沿曲面呈現。想要清透玻璃，可降低本體濃度並保留彩邊。</div>
       <button type="button" id="clearIconPreset">套用清透藍玻璃</button>
+      <div class="row"><label for="lightIconClarity">Icon 清透度</label><input type="range" id="lightIconClarity" min="0" max="1" step="0.01" value="0.58"><span class="val" id="lightIconClarity_v"></span></div>
       <div class="row" id="lightIconColorRow"><label for="lightIconColor">體積色</label><input type="color" id="lightIconColor" value="#5b8fe0"><span class="val"></span></div>
-      <div class="row" id="lightIconTintRow"><label for="lightIconTint">顯色濃度</label><input type="range" id="lightIconTint" min="0" max="1" step="0.01" value="0.8"><span class="val" id="lightIconTint_v"></span></div>
+      <div class="row" id="lightIconTintRow"><label for="lightIconTint">顯色濃度</label><input type="range" id="lightIconTint" min="0" max="1" step="0.01" value="0.42"><span class="val" id="lightIconTint_v"></span></div>
       <div class="row"><label for="lightIconRimColor">邊緣色</label><input type="color" id="lightIconRimColor" value="#238eca"><span class="val"></span></div>
       <div class="row"><label for="lightIconRimStrength">彩邊強度</label><input type="range" id="lightIconRimStrength" min="0" max="1" step="0.01" value="0.75"><span class="val" id="lightIconRimStrength_v"></span></div>
       <div class="row" id="lightIconEdgeRow"><label for="lightIconEdge">邊緣集中</label><input type="range" id="lightIconEdge" min="0.2" max="12" step="0.1" value="4.6"><span class="val" id="lightIconEdge_v"></span></div>

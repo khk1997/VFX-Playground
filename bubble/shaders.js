@@ -342,17 +342,30 @@ uniform vec3  uBgColor;
 // 顏色仍然是這個材質自己的顏色，所以換到白底看起來還是同一個材質，不是另外配
 // 一組美術模型（那是液態薄膜走的路，見 uMembraneOverWhite）。
 //
-// 三個作用點：liftedCover（抬高覆蓋率打破抵銷）、低彩度自身能量的去暖色偏、
-// 以及 researchIconColor／researchIconMask（內部 icon 的獨立顯色）。深底時全部
-// 是恆等運算。
+// 三個作用點：白底專屬 brightComposite、低彩度自身能量的去暖色偏，以及
+// researchIconColor／researchIconMask（內部 icon 的獨立顯色）。深底時全部不讀。
 uniform float uLightBackdrop;
-// 淺底的顯色強度（見 liftedCover）。只在 uLightBackdrop 為 1 時有作用。
+// 白底的色散顯色做法。1（預設）＝互補扣除：從白光扣掉光譜的補色，並用
+// pow(locality, 2.2) 把顯色收在 Fresnel／折射彎曲處／背面掠射。0＝舊版的
+// 「混入飽和色」，locality 帶 0.18 下限，平坦白區照樣被塗色，那就是「色塊
+// 貼在玻璃上」的來源；留著只為了隨時能對照舊觀感。
+//
+// 閘門是 whiteBackdrop（真實背景亮度）而不是 backdrop 選單，所以深底畫布上
+// 這根一律不作用，黑底的定案外觀不受影響。
+uniform int uLightDispersionMode;
+// 淺底的體積強化。只在 uLightBackdrop 為 1 時壓低背光與掠射面。
 uniform float uLightShow;
+// 完整的淺底外觀。這組值只進入 bright/light 分支，深底路徑不讀取。
+uniform float uLightClarity;
+uniform float uLightDepth;
+uniform float uLightCardStrength;
+uniform float uLightChroma;
 // 淺底時內部 icon 的獨立顯色（見 researchIconColor）。刻意跟體積吸收脫鉤：
 // 這三根只在淺底作用，深底一律不讀，所以調它們動不到黑底的任何外觀。
 //
 // 顏色控制淡體積色；明暗反射卡獨立保留，避免可讀性依賴選色。
 uniform vec3  uLightIconColor;
+uniform float uLightIconClarity;
 uniform float uLightIconTint;
 uniform float uLightIconEdge;
 uniform vec3 uLightIconRimColor;
@@ -3118,7 +3131,13 @@ void main(){
   // 就問不出「背景到底有多亮」了。
   float trueBgLum = bgLum;
   if (universalGlass) bgLum = 0.0;
-  float brightBg = smoothstep(0.45, 0.90, bgLum);
+  // 通用玻璃的 bgLum 會刻意歸零，因為暗底自身能量要在黑場生成；但使用者明確
+  // 選擇淺底時，最終材質仍必須切到 brightComposite。舊寫法只看歸零後的 bgLum，
+  // 使整條 Light Look 永遠不可達，畫面實際仍是黑底 HDRI 反射再疊白背景。
+  float brightBg = max(
+    smoothstep(0.45, 0.90, bgLum),
+    universalGlass ? clamp(uLightBackdrop, 0.0, 1.0) : 0.0
+  );
   // 灰底維持原本美術模型；只有純色畫布接近白色時才做保色補償。
   //
   // 這裡原本還乘一個「亮底保色」開關，已移除：它在唯一預設材質（通用玻璃）下
@@ -3131,7 +3150,7 @@ void main(){
   // 通用玻璃把它關掉、再切到液態薄膜，那個 false 會跟著生效並悄悄改掉薄膜的
   // 外觀，而此時滑桿是灰的、使用者無從得知。
   float whiteBackdrop = (1.0 - float(uBgMode))
-    * smoothstep(0.82, 0.97, bgLum);
+    * smoothstep(0.82, 0.97, trueBgLum);
   vec3 darkComposite = mix(universalGlass ? vec3(0.0) : bg.rgb,
     material.darkColor, material.darkAlpha);
 
@@ -3240,6 +3259,18 @@ void main(){
         // A：折射進來的背景依粗糙度預濾波。這是「霧面玻璃」最主要的視覺來源——
         // 畫面九成以上的內容走這條路徑，接上這裡滑桿才真的有感。
         refractedBg = backgroundSample(exitDir, roughBlur).rgb;
+        // 註：這裡試過「RGB 通道各自以不同折射率取樣」的真色散（chromatic
+        // aberration），結論是不划算，已經移除。留個記錄避免重踩：
+        //
+        // 一、做在這一行沒有意義。純色畫布下 backgroundSample 完全不看方向
+        // （直接回傳 uBgColor），三個通道取到同一個常數，相減恆為零。
+        //
+        // 二、改成對 HDRI 取樣（白底時唯一帶方向資訊的來源）雖然會動，但要多
+        // 付兩次環境取樣，而效果在均勻白底上肉眼分辨不出來 —— 這是物理限制而
+        // 不是實作問題：所有方向看過去都一樣亮的背景，折射影像本身就沒有錯位
+        // 可言。真實產品照的彩虹來自棚燈與反光板的不均勻，不是那張白紙。
+        //
+        // 所以白底的色散顯色一律走「互補扣除」那條（見 uLightDispersionMode）。
 
 #ifdef FEATURE_RESEARCH
         // 內部物件與外殼是同一種液態玻璃,只有折射率不同,所以它不該自己疊一層
@@ -3440,8 +3471,19 @@ void main(){
     vec3(0.94, 0.97, 1.0),
     material.edgeFactor
   );
+  // 借用液態薄膜的乾淨白底模型：中央先以近乎無色的背景透射為主，厚度吸收
+  // 只保留使用者指定的比例；輪廓仍由 Fresnel、折射與後面的反射卡塑形。
+  vec3 lightVolumeAbsorption = mix(
+    vec3(1.0), volumeAbsorption, clamp(uLightDepth, 0.0, 1.0)
+  );
   vec3 brightBase = refractedBg * material.transmission * coolTransmission
-    * volumeAbsorption * (1.0 - backFres * 0.72);
+    * lightVolumeAbsorption * (1.0 - backFres * 0.42);
+  vec3 cleanLightTransmission = refractedBg * coolTransmission
+    * (1.0 - backFres * 0.24);
+  float lightClarityMask = clamp(uLightClarity, 0.0, 1.0)
+    * (1.0 - material.edgeFactor * 0.78)
+    * (1.0 - backRim * 0.46);
+  brightBase = mix(brightBase, cleanLightTransmission, lightClarityMask);
   // 參考白棚拍攝的透明液體：厚處保留極淡冷色，而不是讓白背景與
   // 暖色 HDRI 相乘成灰米色。僅由亮底保色開關控制，不借用其他滑桿。
   float brightBodyDepth = whiteBackdrop * clamp(
@@ -3454,27 +3496,62 @@ void main(){
   brightBase = mix(
     brightBase,
     brightBase * vec3(0.82, 0.93, 1.0),
-    brightBodyDepth
+    brightBodyDepth * clamp(uLightDepth, 0.0, 1.0)
   );
   vec3 surfaceLight = clamp(
     material.baseSurface + material.filmSurface * 0.08 + vec3(backFres * 0.10),
     0.0,
     1.0
   );
-  vec3 brightSurface = surfaceLight * max(vec3(0.0), vec3(1.0) - brightBase) * 0.82;
+  vec3 brightSurface = surfaceLight * max(vec3(0.0), vec3(1.0) - brightBase)
+    * mix(0.12, 0.82, clamp(uLightCardStrength, 0.0, 1.0));
   float chromaLocal = mix(
     0.50,
     1.0,
     smoothstep(0.04, 0.22, material.filmAmount)
   );
   vec3 brightChroma = material.filmChroma * material.filmAmount
-    * brightBg * 2.8 * chromaLocal * sqrt(max(uMaterialExposure, 0.0));
-  brightChroma += material.reflectionChroma * brightBg * 0.75;
-  brightChroma += backFilmChroma * brightBg * (0.08 + backRim * 0.65);
+    * brightBg * 2.8 * chromaLocal * sqrt(max(uMaterialExposure, 0.0))
+    * clamp(uLightChroma, 0.0, 1.0);
+  brightChroma += material.reflectionChroma * brightBg * 0.75
+    * clamp(uLightChroma, 0.0, 1.0);
+  brightChroma += backFilmChroma * brightBg * (0.08 + backRim * 0.65)
+    * clamp(uLightChroma, 0.0, 1.0);
   vec3 brightComposite = clamp(
     brightBase + brightSurface + brightChroma,
     0.0,
     1.0
+  );
+  // 白底仍需要少量暗反射才能讀出曲面，但不能把低亮度 HDRI 直接鋪滿整顆。
+  // 沿用液態薄膜的做法：由反射方向生成一張寬而柔的冷藍卡，只在側下方與
+  // 掠射區域局部壓低亮度；中央大面積透射保持乾淨。
+  vec3 lightStudioReflectDir = reflect(rd, N);
+  float lightCoolCard = pow(max(dot(
+    lightStudioReflectDir, normalize(vec3(0.70, -0.30, 0.64))
+  ), 0.0), mix(4.2, 1.7, uRoughness));
+  lightCoolCard = max(
+    lightCoolCard,
+    smoothstep(-0.22, 0.84, dot(N, normalize(vec3(0.78, -0.42, 0.18)))) * 0.52
+  );
+  float lightCoolCardWeight = lightCoolCard
+    * clamp(uLightCardStrength, 0.0, 1.0)
+    * (0.07 + material.edgeFactor * 0.13 + backRim * 0.06);
+  // 鏡面卡只會形成小片高光，不能單獨描述大體積；再以真正的曲面法線建立
+  // 一個寬廣的棚燈明暗面。上左方受光、右下方轉成冷藍，沒有噪聲或 HDRI
+  // 低頻紋理，因此有立體感但不會重新變髒。
+  float lightFormFacing = clamp(
+    dot(N, normalize(vec3(-0.46, 0.58, 0.68))) * 0.5 + 0.5,
+    0.0,
+    1.0
+  );
+  float lightFormShade = pow(1.0 - lightFormFacing, 1.35);
+  lightCoolCardWeight += lightFormShade
+    * clamp(uLightCardStrength, 0.0, 1.0)
+    * (0.20 + material.edgeFactor * 0.16);
+  brightComposite = mix(
+    brightComposite,
+    brightComposite * vec3(0.44, 0.72, 0.94),
+    clamp(lightCoolCardWeight, 0.0, 0.36)
   );
   // 暗色純色背景也保留 HDRI 內部結構，但只在水滴中央以低權重 screen 合成；
   // 邊緣仍交給原有黑膜、Fresnel 與薄膜彩色輪廓，避免整顆變成明亮環境貼圖。
@@ -3718,13 +3795,7 @@ void main(){
     // 很小 —— 在黑底上小點靠明暗對比就很搶眼，在白底上一樣大的小點卻不顯眼，這是
     // 白底看起來還是比較弱的真正原因。sqrt 把中低能量一起抬起來，彩帶因此鋪得開，
     // 而峰值處又不會過飽和（跟 ART 藝術色散用的是同一招）。
-    beamAbsorb = mix(
-      vec3(1.0),
-      beamHue,
-      clamp(sqrt(max(beamPeak, 0.0)) * 0.85, 0.0, 0.72) * brightWash
-    );
-
-    vec3 beamTransmission = mix(vec3(0.76, 0.90, 1.0), beamHue, 0.62);
+    // 位置遮罩提前到這裡宣告：下面的 beamAbsorb（A／B 兩案）也要用它。
     float beamLocality = clamp(
       material.edgeFactor * 0.76
         + localPrism * 0.62
@@ -3733,6 +3804,20 @@ void main(){
       0.0,
       1.0
     );
+    float beamAbsorbDepth = clamp(
+      sqrt(max(beamPeak, 0.0)) * 0.85, 0.0, 0.72
+    ) * brightWash;
+    if (uLightDispersionMode == 1 && whiteBackdrop > 0.01) {
+      // B 案：這一層原本無視位置，把整片光帶圖樣所在的區域都濾成彩色，而
+      // beamPeak 的圖樣覆蓋面積很大 —— 這是白底色塊感最主要的來源。加上同一個
+      // locality 閘門後，濾色只發生在折射真的彎曲的地方。
+      // A 模式（2）也走這裡：光帶不在折射影像裡，真色差對它沒有貢獻。
+      beamAbsorb = mix(vec3(1.0), beamHue, beamAbsorbDepth * pow(beamLocality, 2.2));
+    } else {
+      beamAbsorb = mix(vec3(1.0), beamHue, beamAbsorbDepth);
+    }
+
+    vec3 beamTransmission = mix(vec3(0.76, 0.90, 1.0), beamHue, 0.62);
     float beamBrightSupport = max(whiteBackdrop, membraneMode * brightBg);
     float beamTransmissionAmount = beamBrightSupport * clamp(
       sqrt(max(beamPeak, 0.0))
@@ -3742,7 +3827,30 @@ void main(){
       0.0,
       0.30
     );
-    finalColor = mix(beamScreen, beamTransmission, beamTransmissionAmount);
+    // mode >= 1 都走這條：A 案只提供「折射影像的色差」，而光帶是獨立疊加的
+    // 發光圖樣、根本不在折射影像裡，A 對它沒有任何貢獻。上一版在 A 模式把
+    // beamAbsorb 歸零，等於關掉白底上唯一有效的那一半（加光已被 brightWash
+    // 淡到 12%），模擬色散就幾乎消失了。所以 A 模式 = B + 真色差。
+    if (uLightDispersionMode == 1 && whiteBackdrop > 0.01) {
+      // ===== B 案（RAY 模擬色散）=====
+      // 這一條是白底色塊感最重的來源，因為它疊了兩層平塗：上面的 beamAbsorb
+      // 把整片光帶降彩度，這裡的 beamTransmission 又混一個飽和色進去，而且
+      // locality 有 0.18 的下限 —— 也就是完全不在邊界的平坦白區照樣被塗 18%。
+      //
+      // B 案的兩件事：改成從白光扣掉光譜的補色（互補關係讓它讀成分光而不是
+      // 顏料），以及把 locality 下限拿掉、提高指數，顯色只留在 Fresnel／折射
+      // 真正彎曲處／背面掠射。
+      float beamAbsorbLocality = pow(beamLocality, 2.2);
+      float beamAbsorbAmount = beamBrightSupport * clamp(
+        sqrt(max(beamPeak, 0.0)) * 0.78 * beamAbsorbLocality,
+        0.0,
+        0.46
+      );
+      vec3 beamComplement = vec3(1.0) - beamHue;
+      finalColor = beamScreen * (vec3(1.0) - beamComplement * beamAbsorbAmount);
+    } else {
+      finalColor = mix(beamScreen, beamTransmission, beamTransmissionAmount);
+    }
   }
 #endif // FEATURE_PRISM_SATURATION：稜光彩度後處理 beam chroma post-processing
   // 通用玻璃的亮底補償仍由原開關管理；液態薄膜本身就是透射模型，不依賴該開關。
@@ -3824,11 +3932,33 @@ void main(){
       0.0,
       0.30
     );
-    finalColor = mix(
-      prismScreen,
-      prismTransmission,
-      prismTransmissionAmount
-    );
+    if (uLightDispersionMode == 1 && whiteBackdrop > 0.01) {
+      // ===== B 案：互補扣除 + 收掉平坦區 =====
+      // 真實色散是把白光「分開」：某個方向多了紅，就必然少了青。原本的 fallback
+      // 只是把一個飽和色平塗混進去，沒有互補關係，讀起來就是顏料而不是光。這裡
+      // 改成從白光裡扣掉光譜的補色，紅／青、綠／洋紅會自動成對出現。
+      //
+      // 另一半的問題在 mix(0.18, 1.0, whitePrismLocality)：下限 0.18 的語意是
+      // 「即使完全不在邊界，也還是塗 18% 的色」，那正是大片平坦白區被染色、
+      // 看起來像色塊貼在玻璃上的來源。B 案把下限拿掉並提高指數，顯色只留在
+      // Fresnel／曲率／背面掠射真的強的位置。
+      float absorbLocality = pow(whitePrismLocality, 2.2);
+      float absorbAmount = brightColorSupport * clamp(
+        sqrt(max(prismAmount, 0.0))
+          * (0.62 + 0.18 * uDispersionSeparation)
+          * absorbLocality,
+        0.0,
+        0.42
+      );
+      vec3 prismAbsorb = vec3(1.0) - prismSpectrum;
+      finalColor = prismScreen * (vec3(1.0) - prismAbsorb * absorbAmount);
+    } else {
+      finalColor = mix(
+        prismScreen,
+        prismTransmission,
+        prismTransmissionAmount
+      );
+    }
   }
 #endif // FEATURE_DISPERSION：色散／光譜 dispersion / spectral
 
@@ -4015,11 +4145,29 @@ void main(){
         0.0,
         0.62
       );
-    finalColor = mix(
-      causticScreen,
-      causticTransmission,
-      causticTransmissionAmount
-    );
+    if (uLightDispersionMode == 1 && whiteBackdrop > 0.01) {
+      // B 案同樣的兩件事：互補扣除，加上收掉平坦區的顯色。焦散這一條原本連
+      // locality 都沒有（causticTransmissionAmount 只看光帶強度 causticPeak），
+      // 所以白底上整條光帶都會被塗成飽和色 —— 色塊感最重的就是它。
+      float causticLocality = pow(
+        clamp(causticEdgeFactor * 0.85 + incidenceFold * 0.55, 0.0, 1.0),
+        2.0
+      );
+      float causticAbsorbAmount = brightColorSupport * clamp(
+        causticPeak * 0.85 * causticLocality,
+        0.0,
+        0.5
+      );
+      vec3 causticAbsorb = vec3(1.0) - causticSpectrum;
+      finalColor = causticScreen
+        * (vec3(1.0) - causticAbsorb * causticAbsorbAmount);
+    } else {
+      finalColor = mix(
+        causticScreen,
+        causticTransmission,
+        causticTransmissionAmount
+      );
+    }
   }
 #endif // FEATURE_SPECTRAL_CAUSTICS：光譜焦散 spectral caustics
 
@@ -4101,8 +4249,9 @@ void main(){
         * clamp(uLightIconTint, 0.0, 1.0);
       // 選擇性透射：厚處累積色彩，薄處透亮。不要先與白色大幅混合，
       // 否則最後的背景合成會再稀釋一次，把 icon 洗成乳白色。
-      float iconOpticalDepth = (0.32 + iconThickness * 1.65)
-        * clamp(uLightIconTint, 0.0, 1.0);
+      float iconClarity = clamp(uLightIconClarity, 0.0, 1.0);
+      float iconOpticalDepth = (0.24 + iconThickness * 1.20)
+        * clamp(uLightIconTint, 0.0, 1.0) * mix(1.0, 0.34, iconClarity);
       vec3 iconBodyColor = pow(clamp(uLightIconColor, 0.035, 1.0),
         vec3(iconOpticalDepth));
       // 彩色只在曲面轉折聚集；本體色與邊緣色分開，才能保留清透中央。
@@ -4117,19 +4266,61 @@ void main(){
       iconBodyColor *= mix(vec3(1.0),
         clamp(uLightIconRimColor, 0.035, 1.0), iconColorWeight);
       float iconCardStrength = iconDarkCard * (0.58 + iconEdge * 0.22)
-        * clamp(uReflect * uMaterialExposure, 0.0, 2.0) * 0.5;
-      // 暗卡只調節亮度，保留所選色相；避免固定藍灰色把彩色玻璃染濁。
-      researchIconColor = iconBodyColor * (1.0 - iconCardStrength * 0.28);
+        * clamp(uReflect * uMaterialExposure, 0.0, 2.0) * 0.5
+        * mix(1.0, 0.62, iconClarity);
+      // icon 需要比外殼更清楚的內部界面。暗卡保持局部並染成乾淨冷藍，不使用
+      // HDRI 原本的灰褐低頻反射；如此中央仍透，側面卻有接近黑底版的曲面層次。
+      float iconCoolCardWeight = clamp(
+        iconCardStrength * (0.52 + uLightCardStrength * 0.54), 0.0, 0.58
+      );
+      researchIconColor = mix(
+        iconBodyColor,
+        iconBodyColor * vec3(0.22, 0.52, 0.84),
+        iconCoolCardWeight
+      );
+      // 厚度與掠射面再形成一層柔和藍色暗面。它不依賴 HDRI 的平均亮度，因此在
+      // 白紙上仍持續存在；白卡高光會在下一段覆回去，保留玻璃的亮暗反射層次。
+      float iconSculptShade = clamp(
+        iconDarkCard * 0.38
+          + iconThickness * 0.14
+          + iconColorRim * 0.16,
+        0.0,
+        0.46
+      ) * mix(0.72, 1.0, clamp(uLightCardStrength, 0.0, 1.0));
+      float iconFormFacing = clamp(
+        dot(researchIconN, normalize(vec3(-0.46, 0.58, 0.68))) * 0.5 + 0.5,
+        0.0,
+        1.0
+      );
+      iconSculptShade = clamp(
+        iconSculptShade
+          + pow(1.0 - iconFormFacing, 1.25)
+            * (0.18 + uLightCardStrength * 0.22),
+        0.0,
+        0.58
+      );
+      researchIconColor = mix(
+        researchIconColor,
+        researchIconColor * vec3(0.34, 0.68, 0.98),
+        iconSculptShade
+      );
       float iconSoftbox = pow(max(dot(iconReflectDir,
         normalize(vec3(-0.48, 0.66, 0.58))), 0.0), mix(4.0, 2.0, uRoughness));
       researchIconColor = mix(researchIconColor, vec3(0.97, 0.99, 1.0), iconSoftbox * 0.62);
       researchIconColor = mix(researchIconColor, vec3(1.0), iconHighlight * 0.88);
+      float iconClearCenter = (1.0 - iconEdge) * (1.0 - iconColorWeight);
+      researchIconColor = mix(
+        researchIconColor,
+        vec3(0.975, 0.993, 1.0),
+        iconClarity * iconClearCenter * 0.82
+      );
       // 反射不依賴色彩濃度；把濃度歸零仍是能讀出曲面的無色玻璃。
       // 柔白反射也要有覆蓋率，否則低染色濃度會把外殼紋理再次透進亮面，
       // 讓 icon 像一片起皺的薄膜。仍保留至少 14% 的下層透射。
-      float iconSurfaceCoverage = 0.52 + iconThickness * 0.18;
-      researchIconMask = clamp((max(max(iconDensity, iconSurfaceCoverage), iconColorWeight * 0.92) + iconDarkCard * 0.28
-        + iconHighlight * 0.24) * iconBoundary, 0.0, 0.86) * uLightBackdrop;
+      float iconSurfaceCoverage = mix(0.50, 0.22, iconClarity)
+        + iconThickness * mix(0.18, 0.08, iconClarity);
+      researchIconMask = clamp((max(max(iconDensity, iconSurfaceCoverage), iconColorWeight * 0.92) + iconDarkCard * 0.42
+        + iconHighlight * 0.24) * iconBoundary, 0.0, mix(0.86, 0.72, iconClarity)) * uLightBackdrop;
     }
 
   }
@@ -4202,19 +4393,33 @@ void main(){
     // 與深底的公式逐字相同，水滴在白底上會像原本那樣被抵銷掉；1 = 抬到最強，
     // 材質幾乎不透明。指數與增益一起走同一根，因為它們表達的是同一件事：
     // 「這個材質在白底上要留下多少痕跡」。
-    float showWeight = uLightShow;
+    if (uLightBackdrop > 0.5) {
+      // brightComposite 已經包含白底透射、厚度、反射卡與彩邊，是一張完成的白底
+      // 合成。若再套一次暗底用的 own + bg·(1-cover)，白色透射會被重複加回來，
+      // 前面建立的所有明暗都被洗成接近純白，正是畫面看起來 2D 的主因。
+      float lightVolumeMask = clamp(
+        material.edgeFactor * 0.34
+          + backRim * 0.18
+          + pow(1.0 - lightFormFacing, 1.2) * 0.64,
+        0.0,
+        1.0
+      );
 #ifdef FEATURE_RESEARCH
-    // icon 已有自己的明暗塑形，外殼顯色在此收回以免重複壓暗。
-    showWeight *= 1.0 - smoothstep(0.02, 0.30, researchIconMask);
+      // icon 有自己的材質明暗，避免外殼的體積強化再次壓過它們。
+      lightVolumeMask *= 1.0 - smoothstep(0.04, 0.42, researchIconMask);
 #endif
-    float liftedCover = clamp(
-      pow(universalCovered, mix(1.0, 0.45, showWeight))
-        * mix(1.0, 1.28, showWeight),
-      0.0,
-      1.0
-    );
-    float cover = mix(universalCovered, liftedCover, uLightBackdrop);
-    finalColor = clampOutput(finalColor + universalTransmitted * (1.0 - cover));
+      finalColor = mix(
+        finalColor,
+        finalColor * vec3(0.68, 0.84, 0.98),
+        clamp(uLightShow, 0.0, 1.0) * lightVolumeMask
+      );
+      finalColor = clampOutput(finalColor);
+    } else {
+      // 深底維持原本的自身能量 over 路徑，公式與定案輸出不變。
+      finalColor = clampOutput(
+        finalColor + universalTransmitted * (1.0 - universalCovered)
+      );
+    }
 #ifdef FEATURE_RESEARCH
     // 局部反射卡保留明暗面；深底 mask 為零，沿用原本合成。
     finalColor = clampOutput(
