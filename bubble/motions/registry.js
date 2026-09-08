@@ -189,14 +189,15 @@ export const MOTIONS = {
       dispersion: 0.03,
       dispersionSeparation: 1.5,
       artPatternSpeed: 0,
-      // 使用者實測後定案的後處理整組（2026-09-02 存檔匯入）：體積吸收拉濃，
-      // 顆粒放大顆粒感、縮小粒徑，開 Bloom 與條紋光芒各自給一組收斂過的手感。
+      // 使用者實測後定案的後處理整組（2026-09-02 存檔匯入；曝光／亮度已於
+      // 2026-09-08 改回全域預設 1.0 / 0）：體積吸收拉濃，顆粒放大顆粒感、
+      // 縮小粒徑，開 Bloom 與條紋光芒各自給一組收斂過的手感。
       // 其餘後處理欄位（門檻、強度、擴散範圍…）沒有列在這裡，維持全域預設 ——
       // 使用者只調了這幾根，其餘沒有理由跟著漂。
       absorb: 5.05,
-      postExposure: 1.13,
+      postExposure: 1.0,
       postContrast: 1.33,
-      postBrightness: -0.02,
+      postBrightness: 0,
       postGrain: 0.033,
       postGrainScale: 0.6,
       bloomEnabled: false,
