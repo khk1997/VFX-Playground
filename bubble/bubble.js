@@ -853,38 +853,45 @@ const MOTION_SCOPED_KEYS = [
   'bloomEnabled', 'streaksEnabled', 'streakCount', 'streakAngle', 'streakLength',
   'streakChroma', 'streakIntensity',
 ];
-// 使用者在白色背景、通用玻璃深底 shader 路徑上定案的參數（2026-09-08）。
-// 不包含 motion：切到淺底時保留目前動態，只把外觀、構圖及該動態能使用的數值
-// 換成這組。所有模式共用同一份初始值，之後仍各自記憶手動微調。
-const LIGHT_BACKDROP_PRESET = {
-  bgMode: 'color', bgColor: '#ffffff', materialStyle: 'universal',
-  loopDuration: 8, radius: 0.71, count: 2,
-  wobble: 0.05, wobbleSpeed: 0, researchIconIOR: 1.14,
-  capillaryHeight: 0.09, capillaryRings: 3, capillarySpeed: 2,
-  viscosity: 0.82, surfaceTension: 0.92,
-  reflect: 1.22, absorb: 2.2, absorbColor: '#73849c',
-  roughness: 0.14, fresnel: 0, ior: 1.15,
-  rayBeamIntensity: 32, rayBeamSeparation: 0.045, rayBeamChroma: 1.6,
-  rayBeamZoom: 18.5, rayBeamRings: 3.5,
-  rayBeamAzimuth: 58, rayBeamElevation: -41, rayBeamRefract: 0.31,
-  rayBeamFresnelMask: 0.53, rayBeamNoiseScale: 0.8,
-  spectralCausticEnabled: true,
-  spectralCausticCol2: '#3c41e2', spectralCausticCol4: '#4bb8fb',
-  spectralCausticCol5: '#3979f9', spectralCausticCol6: '#4ebafd',
-  spectralCausticIntensity: 6, spectralCausticFocus: 0.32,
-  spectralCausticSeparation: 0.34, spectralCausticBlend: 1,
-  spectralCausticWidth: 0.6, spectralCausticDensity: 0.08,
-  spectralCausticWarp: 0.26, spectralCausticNoiseScale: 0.5,
-  spectralCausticAzimuth: -29, spectralCausticElevation: -31,
-  dispersion: 0.03, artPatternSpeed: 0,
-  postExposure: 1.0, postBrightness: 0,
-  postContrast: 1.33, postGrain: 0.033, postGrainScale: 0.6,
-  streakCount: 2, streakLength: 0.11, streakIntensity: 0.3,
-  cameraDistance: 4.75, cameraRotationY: 7.9, cameraRotationX: 4.2,
-  spin: 0.08, hdriYaw: 44, hdriPitch: 10, hdriBlur: 0.22,
-  envRefraction: 0.25,
-};
-const BACKDROP_SCOPED_KEYS = new Set(Object.keys(LIGHT_BACKDROP_PRESET));
+// 會按「模式＋底色情境」各記一格的參數。
+//
+// 這裡原本掛著一份白底定案數值（LIGHT_BACKDROP_PRESET），切到淺底時整組寫進
+// 控制項。那組值已經整批捨棄：它是在「深底 shader 路徑 + 白背景」上調出來的，
+// 而那條路徑的美術模型是「在黑場上加光」，白底上加光會被最終 over 合成精確
+// 抵銷（見 shaders.js 的 universalCovered 那段），所以再怎麼調都到不了深底的
+// 質感。淺底的做法要重新來，起點回到「跟深底一模一樣」。
+//
+// 名單本身保留：兩個底色仍各自記一格，所以在淺底上調參數不會污染已經定案的
+// 深底外觀。淺底每一格的初始值現在都等於同一個模式的深底值（見
+// motionDefaultsFor）。
+const BACKDROP_SCOPED_KEYS = new Set([
+  'bgMode', 'bgColor', 'materialStyle',
+  'loopDuration', 'radius', 'count',
+  'wobble', 'wobbleSpeed', 'researchIconIOR',
+  'capillaryHeight', 'capillaryRings', 'capillarySpeed',
+  'viscosity', 'surfaceTension',
+  'reflect', 'absorb', 'absorbColor',
+  'roughness', 'fresnel', 'ior',
+  'rayBeamIntensity', 'rayBeamSeparation', 'rayBeamChroma',
+  'rayBeamZoom', 'rayBeamRings',
+  'rayBeamAzimuth', 'rayBeamElevation', 'rayBeamRefract',
+  'rayBeamFresnelMask', 'rayBeamNoiseScale',
+  'spectralCausticEnabled',
+  'spectralCausticCol2', 'spectralCausticCol4',
+  'spectralCausticCol5', 'spectralCausticCol6',
+  'spectralCausticIntensity', 'spectralCausticFocus',
+  'spectralCausticSeparation', 'spectralCausticBlend',
+  'spectralCausticWidth', 'spectralCausticDensity',
+  'spectralCausticWarp', 'spectralCausticNoiseScale',
+  'spectralCausticAzimuth', 'spectralCausticElevation',
+  'dispersion', 'artPatternSpeed',
+  'postExposure', 'postBrightness',
+  'postContrast', 'postGrain', 'postGrainScale',
+  'streakCount', 'streakLength', 'streakIntensity',
+  'cameraDistance', 'cameraRotationY', 'cameraRotationX',
+  'spin', 'hdriYaw', 'hdriPitch', 'hdriBlur',
+  'envRefraction',
+]);
 // 就是 SELECTS.backdrop.map 的那兩個鍵。不從 SELECTS 讀是因為那張表在這一行
 // 之後才宣告，讀它會撞上 const 的 TDZ。
 const BACKDROP_KEYS = ['dark', 'light'];
@@ -936,10 +943,11 @@ function motionDefaultsFor(key) {
   if (!BACKDROP_SCOPED_KEYS.has(key)) {
     return Object.fromEntries(MOTION_KEYS.map(m => [m, darkValue(m)]));
   }
-  // 淺底所有模式共用使用者定案值，深底仍使用各模式原本的預設。
+  // 兩個底色各記一格，但初始值相同：淺底的起點就是該模式的深底值。淺底之後的
+  // 手動微調會存在自己那一格，不會動到深底（見 BACKDROP_SCOPED_KEYS 的說明）。
   return Object.fromEntries(MOTION_KEYS.flatMap(m => BACKDROP_KEYS.map(b => [
     `${m}|${b}`,
-    b === 'light' ? (LIGHT_BACKDROP_PRESET[key] ?? darkValue(m)) : darkValue(m),
+    darkValue(m),
   ])));
 }
 function buildMotionMemory() {
@@ -953,6 +961,19 @@ function buildMotionMemory() {
 }
 let motionMemory = buildMotionMemory();
 const MOTION_MEMORY_KEYS = Object.keys(motionMemory);
+// 把目前這一格的值鏡射到另一個底色情境的同一格。
+//
+// 為什麼需要：載入參數檔（或自動保存的還原）只會寫進「當時所在底色」那一格，
+// 另一格還留著內建預設。於是切換底色時，那些 key 會突然跳回預設值，看起來像
+// 「淺底又跟深底不一樣了」。淺底目前沒有獨立的定案數值（見 BACKDROP_SCOPED_KEYS
+// 的說明），所以載入後兩格應該相同，之後使用者在淺底調什麼才是真正的差異。
+function mirrorBackdropMemory() {
+  const other = P.backdrop === 'dark' ? 'light' : 'dark';
+  for (const key of BACKDROP_MEMORY_KEYS) {
+    motionMemory[key][memorySlot(key, P.motion, P.backdrop)] = P[key];
+    motionMemory[key][memorySlot(key, P.motion, other)] = P[key];
+  }
+}
 // 切換底色情境時要搬的那一批。由交集導出而不是另外手寫一份名單：BACKDROP_SCOPED_KEYS
 // 裡若有哪個 key 忘了加進 MOTION_SCOPED_KEYS，它在 motionMemory 裡根本沒有格子，
 // 手寫名單會在這裡炸掉，交集則是安全地略過它。
@@ -7733,6 +7754,9 @@ if (!PREVIEW && window.PresetIO) {
       updateRampRows();
       buildRampLUT();
       buildSpectralCausticLUT();
+      // 參數檔只寫得到當時所在底色那一格，另一格會留著內建預設，切過去就會
+      // 看到參數莫名跳動。淺底目前沒有獨立定案值，所以載入後兩格對齊。
+      mirrorBackdropMemory();
       updateUIState();
     },
   }).restore();

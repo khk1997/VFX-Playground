@@ -210,9 +210,6 @@ export const MOTIONS = {
       capillaryRings: 3,
       capillarySpeed: 2,
     },
-    // 淺底第一次進入時沿用深底的完整參數，讓使用者從同一個起點手動調整。
-    // 後續兩種底色仍各自記憶調整結果，切換時不會互相覆蓋。
-    lightOverrides: {},
     params: [
       {
         // 外殼本身：大小、呼吸，以及那層雜訊起伏。這一節的四根滑桿有三根來自
@@ -827,9 +824,6 @@ export const MOTION_DEFAULT_LOOP_DURATION = pick('loopDuration');
 export const MOTION_DEFAULT_DOLLY = pick('dolly');
 export const MOTION_SVG_DEMO = pick('svgDemo');
 export const MOTION_OVERRIDES = pick('overrides');
-// 淺底情境的差異值。只有真的需要跟深底分開的模式會列（目前只有安裝中），
-// 其餘模式是 undefined，代表兩個底色情境共用同一組數值。
-export const MOTION_LIGHT_OVERRIDES = pick('lightOverrides');
 export const MOTION_HDRI = pick('hdri');
 export const MOTION_KEYS = Object.keys(MOTIONS);
 export const MOTION_PARAMS = Object.fromEntries(entries.map(([key, motion]) => [key, motion.params || []]));
