@@ -331,6 +331,16 @@ uniform int   uTransparentBackground;
 //（見 mainImage 末段）
 uniform float uMembraneOverWhite;
 uniform vec3  uBgColor;
+// 淺底專屬的漸層背景（棚拍常見的無縫背景紙）：由頂到底柔和過渡，取代淺底時
+// 原本的純色 uBgColor。用畫面垂直方向（見 backgroundSample 裡的 d.y）驅動，
+// 不吃 uBgMode/uBgColor —— 選了淺底就直接是這個漸層，不需要另外切換。
+uniform vec3  uLightBgGradientTop;
+uniform vec3  uLightBgGradientBottom;
+// 只驅動這個漸層背景，刻意不用 uLightBackdrop（那顆目前釘死在兩個值都是 0，
+// 因為它還接著一大批尚未定案的淺底外觀邏輯 —— icon 顯色、brightComposite 等。
+// 這裡要的只是「選了淺底就顯示漸層背景」這一件事，所以另開一個乾淨的開關，
+// 不去牽動那些休眠中的路徑）。
+uniform float uLightBgGradientEnabled;
 // 底色情境（見 bubble.js 的 SELECT_DEFAULTS.backdrop）。0 = 深底，1 = 淺底。
 //
 // 這個材質在深底上的顯色方式是「自身能量」：水滴自己發出的光疊在黑場上，最後
@@ -609,6 +619,15 @@ vec3 sampleEnvironmentBackdrop(vec3 d, float extraBlur){
 vec4 backgroundSample(vec3 rd, float extraBlur){
   if (uBgMode == 1 && uHasEnv == 1){
     return vec4(sampleEnvironmentBackdrop(rd, extraBlur), 1.0);
+  }
+  if (uLightBgGradientEnabled > 0.5) {
+    // 棚拍無縫背景紙：頂到底柔和過渡，S 曲線讓中段變化最快、頭尾趨緩收斂，
+    // 讀起來才是「紙自然垂墜」的漸層，不是機械的線性內插。跟 proceduralEnv
+    // 同一個慣例，用歸一化方向的 d.y 當「畫面垂直位置」，折射、反射取樣同一支
+    // 函式時漸層會自然跟著彎折，穿過玻璃看仍是同一塊背景紙。
+    float t = smoothstep(-0.55, 0.55, rd.y);
+    vec3 gradient = mix(uLightBgGradientBottom, uLightBgGradientTop, t);
+    return vec4(gradient, uTransparentBackground == 1 ? 0.0 : 1.0);
   }
   return vec4(uBgColor, uTransparentBackground == 1 ? 0.0 : 1.0);
 }

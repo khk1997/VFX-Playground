@@ -744,6 +744,11 @@ const COLOR_DEFAULTS  = {
   // 淺底 icon 的體積色，與清透底色混合；明暗反射由材質獨立塑形。
   lightIconColor: '#d9f3ff',
   lightIconRimColor: '#3aa9df',
+  // 淺底專屬的棚拍無縫背景紙漸層（見 shaders.js 的 backgroundSample）。只在
+  // uLightBackdrop 為 1 時取代 bgColor，不受 bgMode/bgColor 影響，選淺底就是
+  // 這個漸層。頂到底：近白 → 冷調柔灰，是常見的攝影棚無縫背景紙配色。
+  lightBgGradientTop: '#ffffff',
+  lightBgGradientBottom: '#c9ccd1',
   // 液態薄膜原本各自寫死一個偏藍紫色常數的 5 處，現在各自開一個選色器直接
   // 取代常數，選色器選什麼顏色，畫面上那一處就是那個顏色。預設值都是原本
   // 那個常數本身，維持改動前的外觀。
@@ -1029,6 +1034,8 @@ const COLORS = {
   absorbColor: 'uAbsorbColor',
   lightIconColor: 'uLightIconColor',
   lightIconRimColor: 'uLightIconRimColor',
+  lightBgGradientTop: 'uLightBgGradientTop',
+  lightBgGradientBottom: 'uLightBgGradientBottom',
   // 後處理的顏色不對應 uniform（它們是 post.js 每幀讀的），uniform 名稱留空，
   // 由下面兩處的特例分支處理。
   bloomTint: '',
@@ -4744,6 +4751,15 @@ function setBgColorUniform(hex) {
   uniforms.uBgColor.value.setStyle(hex, THREE.LinearSRGBColorSpace);
 }
 
+// canvas 是 position:absolute; inset:0，正常情況下完全蓋住 body，這個背景色
+// 只在畫面還沒畫出第一幀（或極端縮放留出的縫）時看得到。淺底時同步成跟 shader
+// 一樣的漸層，避免那個瞬間跟畫出來的漸層不一致。
+function pageBackgroundCss(fallback) {
+  return P.backdrop === 'light'
+    ? `linear-gradient(to bottom, ${P.lightBgGradientTop}, ${P.lightBgGradientBottom})`
+    : fallback;
+}
+
 function makeRampTexture() {
   rampTex = new THREE.DataTexture(new Uint8Array(RAMP_W * 4), RAMP_W, 1, THREE.RGBAFormat);
   rampTex.colorSpace = THREE.SRGBColorSpace;
@@ -4967,6 +4983,9 @@ function initGL() {
     uMaterialStyle: { value: SELECTS.materialStyle.map[P.materialStyle] },
     uTransparentBackground: { value: 0 },
     uLightBackdrop: { value: SELECTS.backdrop.map[P.backdrop] },
+    // 直接讀 P.backdrop 字串，不透過 SELECTS.backdrop.map（那張表兩個值目前都
+    // 映射成 0，見 uLightBackdrop 旁的說明）。
+    uLightBgGradientEnabled: { value: P.backdrop === 'light' ? 1 : 0 },
     uLightShow:  { value: P.lightShow },
     uLightClarity: { value: P.lightClarity },
     uLightDepth: { value: P.lightDepth },
@@ -4979,6 +4998,8 @@ function initGL() {
     uLightIconRimColor: { value: new THREE.Color().setStyle(P.lightIconRimColor, THREE.LinearSRGBColorSpace) },
     uLightIconRimStrength: { value: P.lightIconRimStrength },
     uBgColor:    { value: new THREE.Color().setStyle(P.bgColor, THREE.LinearSRGBColorSpace) },
+    uLightBgGradientTop: { value: new THREE.Color().setStyle(P.lightBgGradientTop, THREE.LinearSRGBColorSpace) },
+    uLightBgGradientBottom: { value: new THREE.Color().setStyle(P.lightBgGradientBottom, THREE.LinearSRGBColorSpace) },
     uMembraneBaseColor: { value: new THREE.Color(P.membraneBaseColor) },
     uMembraneVeilColor: { value: new THREE.Color(P.membraneVeilColor) },
     uMembraneReflectionColor: { value: new THREE.Color(P.membraneReflectionColor) },
@@ -5323,6 +5344,7 @@ function syncPanelToUniforms() {
     const u = uniforms[SELECTS[key].uniform];
     if (u) u.value = SELECTS[key].map[P[key]];
   }
+  uniforms.uLightBgGradientEnabled.value = P.backdrop === 'light' ? 1 : 0;
   for (const key of Object.keys(TOGGLES)) applyToggle(key);
   for (const key of Object.keys(COLORS)) {
     if (!COLORS[key]) continue;
@@ -5330,12 +5352,13 @@ function syncPanelToUniforms() {
     // 吸收色不是「一道光的顏色」而是「每個通道剩下多少」的比例，所以要的是選色
     // 器上那三個原始數值，不能讓 three 的色彩管理把它當 sRGB 轉成線性（那會把
     // 比例整個扭掉）。同 uBgColor 的作法。
-    else if (key === 'absorbColor' || key === 'lightIconColor' || key === 'lightIconRimColor') {
+    else if (key === 'absorbColor' || key === 'lightIconColor' || key === 'lightIconRimColor'
+      || key === 'lightBgGradientTop' || key === 'lightBgGradientBottom') {
       uniforms[COLORS[key]].value.setStyle(P[key], THREE.LinearSRGBColorSpace);
     }
     else uniforms[COLORS[key]].value.set(P[key]);
   }
-  document.body.style.background = (P.bgMode === 'hdri') ? '#000' : P.bgColor;
+  document.body.style.background = (P.bgMode === 'hdri') ? '#000' : pageBackgroundCss(P.bgColor);
 }
 
 // 把「匯集時間／完成停留」換算回具體秒數並列出散開段，讓使用者一次看到循環
@@ -5634,6 +5657,9 @@ function bindControls() {
         }
       }
       if (uniforms && uniforms[uniform]) uniforms[uniform].value = map[el.value];
+      if (key === 'backdrop' && uniforms) {
+        uniforms.uLightBgGradientEnabled.value = P.backdrop === 'light' ? 1 : 0;
+      }
       updateUIState();
       if (key === 'shapeQuality' && previousValue !== P[key]) {
         scheduleGLBRebuild();
@@ -5713,12 +5739,13 @@ function bindControls() {
       if (!uName) { /* 後處理的顏色由 renderComposite 每幀直接讀 P */ }
       else if (key === 'bgColor') setBgColorUniform(el.value);
       // 見上面 applyAllUniforms 裡同一個特例的說明。
-      else if (key === 'absorbColor' || key === 'lightIconColor' || key === 'lightIconRimColor') {
+      else if (key === 'absorbColor' || key === 'lightIconColor' || key === 'lightIconRimColor'
+      || key === 'lightBgGradientTop' || key === 'lightBgGradientBottom') {
         if (uniforms) uniforms[uName].value.setStyle(el.value, THREE.LinearSRGBColorSpace);
       }
       else if (uniforms) uniforms[uName].value.set(el.value);
       if (key === 'bgColor') {
-        document.body.style.background = (P.bgMode === 'hdri') ? '#000' : el.value;
+        document.body.style.background = (P.bgMode === 'hdri') ? '#000' : pageBackgroundCss(el.value);
         updateUIState();
       }
       requestPausedRender();
@@ -5993,7 +6020,7 @@ function updateUIState() {
     const shellControl = ['lightShow', 'lightClarity', 'lightDepth', 'lightCardStrength', 'lightChroma'].includes(key);
     setDisabled(document.getElementById(key), shellControl ? !lightBackdrop : !lightIcons);
   }
-  document.body.style.background = colorBackground ? P.bgColor : '#000';
+  document.body.style.background = colorBackground ? pageBackgroundCss(P.bgColor) : '#000';
   // 輪廓液滴的模式閘門（形狀場 + SVG 擠出）走 data-gate；這裡只剩它自己的主
   // 開關。主開關關閉時只停掉會移動的液滴，「邊緣水滴」因為同時決定擠出邊緣的
   // 圓角，標了 .keepEnabled 而保持可用 —— 這樣才做得出「圓角擠出但沒有液滴」。
