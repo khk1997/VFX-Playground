@@ -885,6 +885,9 @@ const BACKDROP_SCOPED_KEYS = new Set([
   'rayBeamZoom', 'rayBeamRings',
   'rayBeamAzimuth', 'rayBeamElevation', 'rayBeamRefract',
   'rayBeamFresnelMask', 'rayBeamNoiseScale',
+  // 淺底預設關閉 RAY 模擬色散；列入底色記憶後，切回深底仍會恢復深底的開啟
+  // 狀態，使用者在任一底色手動切換也只會改到該底色自己的記憶格。
+  'rayDispersionEnabled',
   'spectralCausticEnabled',
   'spectralCausticCol2', 'spectralCausticCol4',
   'spectralCausticCol5', 'spectralCausticCol6',
@@ -979,6 +982,7 @@ for (const motion of MOTION_KEYS) {
   if (motionMemory.absorb) motionMemory.absorb[`${motion}|light`] = 1.35;
   if (motionMemory.envRefraction) motionMemory.envRefraction[`${motion}|light`] = 0.025;
   if (motionMemory.fresnel) motionMemory.fresnel[`${motion}|light`] = 0.12;
+  if (motionMemory.rayDispersionEnabled) motionMemory.rayDispersionEnabled[`${motion}|light`] = false;
   if (motionMemory.bloomEnabled) motionMemory.bloomEnabled[`${motion}|light`] = false;
   if (motionMemory.streaksEnabled) motionMemory.streaksEnabled[`${motion}|light`] = false;
 }
@@ -6095,6 +6099,7 @@ document.getElementById('resetBtn').addEventListener('click', () => {
     if (motionMemory.absorb) motionMemory.absorb[`${mode}|light`] = 1.35;
     if (motionMemory.envRefraction) motionMemory.envRefraction[`${mode}|light`] = 0.025;
     if (motionMemory.fresnel) motionMemory.fresnel[`${mode}|light`] = 0.12;
+    if (motionMemory.rayDispersionEnabled) motionMemory.rayDispersionEnabled[`${mode}|light`] = false;
     if (motionMemory.bloomEnabled) motionMemory.bloomEnabled[`${mode}|light`] = false;
     if (motionMemory.streaksEnabled) motionMemory.streaksEnabled[`${mode}|light`] = false;
   }

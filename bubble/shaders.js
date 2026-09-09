@@ -3468,12 +3468,20 @@ void main(){
       envRefraction,
       vec3(0.2126, 0.7152, 0.0722)
     );
-    vec3 cleanBrightRefraction = vec3(envRefractionLum)
-      * vec3(0.975, 0.995, 1.035);
+    // 淺底只保留 HDRI 的亮度結構。暗部用 sqrt 曲線柔和抬起，中間調與高光
+    // 逐步退回原亮度，避免硬 clamp 造成乳白塑膠感。
+    float envShadowWeight = 1.0 - smoothstep(0.18, 0.86, envRefractionLum);
+    float liftedEnvLum = mix(
+      envRefractionLum,
+      sqrt(max(envRefractionLum, 0.0)),
+      envShadowWeight * 0.58
+    );
+    vec3 cleanBrightRefraction = vec3(liftedEnvLum)
+      * vec3(0.985, 1.0, 1.025);
     envRefraction = mix(
       envRefraction,
       cleanBrightRefraction,
-      whiteBackdrop * 0.94
+      whiteBackdrop
     );
     refractedBg = mix(refractedBg, envRefraction, uEnvRefraction);
   }
@@ -3516,8 +3524,15 @@ void main(){
     0.0,
     1.0
   );
+  // 表面反射在淺底轉成中性冷白，並只保留 HDRI 最亮的棚燈區域；一般牆面與
+  // 暖灰中間調不再大面積鋪進玻璃。使用已算好的 surfaceLight，不增加環境取樣。
+  float surfaceLightLum = dot(surfaceLight, vec3(0.2126, 0.7152, 0.0722));
+  float studioHighlight = smoothstep(0.42, 0.88, surfaceLightLum);
+  vec3 neutralSurfaceLight = vec3(surfaceLightLum) * vec3(0.985, 1.0, 1.02);
+  surfaceLight = mix(surfaceLight, neutralSurfaceLight, whiteBackdrop * 0.96);
   vec3 brightSurface = surfaceLight * max(vec3(0.0), vec3(1.0) - brightBase)
-    * mix(0.12, 0.82, clamp(uLightCardStrength, 0.0, 1.0));
+    * mix(0.12, 0.82, clamp(uLightCardStrength, 0.0, 1.0))
+    * mix(1.0, 0.16 + studioHighlight * 0.84, whiteBackdrop);
   // 淺底的彩色不平均鋪滿輪廓：一般曲面只留淡藍青色，完整光譜集中在折射
   // 彎曲最強的折角、融合處與局部掠射面。全部重用既有遮罩，不增加射線取樣。
   float prismColorFocus = smoothstep(0.18, 0.72, localPrism);
@@ -3533,7 +3548,8 @@ void main(){
   vec3 brightChroma = material.filmChroma * material.filmAmount
     * brightBg * 2.45 * chromaLocal * sqrt(max(uMaterialExposure, 0.0))
     * clamp(uLightChroma, 0.0, 1.0);
-  brightChroma += material.reflectionChroma * brightBg * 0.62 * rainbowFocus
+  brightChroma += material.reflectionChroma * brightBg
+    * mix(0.62, 0.08, whiteBackdrop) * rainbowFocus
     * clamp(uLightChroma, 0.0, 1.0);
   brightChroma += backFilmChroma * brightBg
     * (backRim * 0.54 + material.filmAmount * 0.10) * rainbowFocus
