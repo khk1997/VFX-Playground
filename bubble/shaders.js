@@ -3486,15 +3486,15 @@ void main(){
   // 借用液態薄膜的乾淨白底模型：中央先以近乎無色的背景透射為主，厚度吸收
   // 只保留使用者指定的比例；輪廓仍由 Fresnel、折射與後面的反射卡塑形。
   vec3 lightVolumeAbsorption = mix(
-    vec3(1.0), volumeAbsorption, clamp(uLightDepth, 0.0, 1.0)
+    vec3(1.0), volumeAbsorption, clamp(uLightDepth * 0.72, 0.0, 1.0)
   );
   vec3 brightBase = refractedBg * material.transmission * coolTransmission
-    * lightVolumeAbsorption * (1.0 - backFres * 0.42);
+    * lightVolumeAbsorption * (1.0 - backFres * 0.12);
   vec3 cleanLightTransmission = refractedBg * coolTransmission
-    * (1.0 - backFres * 0.24);
+    * (1.0 - backFres * 0.06);
   float lightClarityMask = clamp(uLightClarity, 0.0, 1.0)
-    * (1.0 - material.edgeFactor * 0.78)
-    * (1.0 - backRim * 0.46);
+    * (1.0 - material.edgeFactor * material.edgeFactor * material.edgeFactor * 0.48)
+    * (1.0 - backRim * 0.10);
   brightBase = mix(brightBase, cleanLightTransmission, lightClarityMask);
   // 參考白棚拍攝的透明液體：厚處保留極淡冷色，而不是讓白背景與
   // 暖色 HDRI 相乘成灰米色。僅由亮底保色開關控制，不借用其他滑桿。
@@ -3547,7 +3547,8 @@ void main(){
   );
   float lightCoolCardWeight = lightCoolCard
     * clamp(uLightCardStrength, 0.0, 1.0)
-    * (0.07 + material.edgeFactor * 0.13 + backRim * 0.06);
+    * (material.edgeFactor * material.edgeFactor * material.edgeFactor * 0.045
+      + backRim * 0.012);
   // 鏡面卡只會形成小片高光，不能單獨描述大體積；再以真正的曲面法線建立
   // 一個寬廣的棚燈明暗面。上左方受光、右下方轉成冷藍，沒有噪聲或 HDRI
   // 低頻紋理，因此有立體感但不會重新變髒。
@@ -3559,11 +3560,11 @@ void main(){
   float lightFormShade = pow(1.0 - lightFormFacing, 1.35);
   lightCoolCardWeight += lightFormShade
     * clamp(uLightCardStrength, 0.0, 1.0)
-    * (0.20 + material.edgeFactor * 0.16);
+    * material.edgeFactor * material.edgeFactor * material.edgeFactor * 0.035;
   brightComposite = mix(
     brightComposite,
-    brightComposite * vec3(0.44, 0.72, 0.94),
-    clamp(lightCoolCardWeight, 0.0, 0.36)
+    brightComposite * vec3(0.72, 0.86, 1.0),
+    clamp(lightCoolCardWeight, 0.0, 0.08)
   );
   // 暗色純色背景也保留 HDRI 內部結構，但只在水滴中央以低權重 screen 合成；
   // 邊緣仍交給原有黑膜、Fresnel 與薄膜彩色輪廓，避免整顆變成明亮環境貼圖。

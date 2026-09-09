@@ -971,9 +971,9 @@ let motionMemory = buildMotionMemory();
 // 手動調整的值仍會記在淺底自己的記憶格，不會影響深底。
 for (const motion of MOTION_KEYS) {
   if (motionMemory.transmission) motionMemory.transmission[`${motion}|light`] = 0.97;
-  if (motionMemory.absorb) motionMemory.absorb[`${motion}|light`] = 1.6;
-  if (motionMemory.envRefraction) motionMemory.envRefraction[`${motion}|light`] = 0.04;
-  if (motionMemory.fresnel) motionMemory.fresnel[`${motion}|light`] = 0.15;
+  if (motionMemory.absorb) motionMemory.absorb[`${motion}|light`] = 1.35;
+  if (motionMemory.envRefraction) motionMemory.envRefraction[`${motion}|light`] = 0.025;
+  if (motionMemory.fresnel) motionMemory.fresnel[`${motion}|light`] = 0.12;
   if (motionMemory.bloomEnabled) motionMemory.bloomEnabled[`${motion}|light`] = false;
   if (motionMemory.streaksEnabled) motionMemory.streaksEnabled[`${motion}|light`] = false;
 }
@@ -6080,9 +6080,9 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   motionMemory = buildMotionMemory();
   for (const mode of MOTION_KEYS) {
     if (motionMemory.transmission) motionMemory.transmission[`${mode}|light`] = 0.97;
-    if (motionMemory.absorb) motionMemory.absorb[`${mode}|light`] = 1.6;
-    if (motionMemory.envRefraction) motionMemory.envRefraction[`${mode}|light`] = 0.04;
-    if (motionMemory.fresnel) motionMemory.fresnel[`${mode}|light`] = 0.15;
+    if (motionMemory.absorb) motionMemory.absorb[`${mode}|light`] = 1.35;
+    if (motionMemory.envRefraction) motionMemory.envRefraction[`${mode}|light`] = 0.025;
+    if (motionMemory.fresnel) motionMemory.fresnel[`${mode}|light`] = 0.12;
     if (motionMemory.bloomEnabled) motionMemory.bloomEnabled[`${mode}|light`] = false;
     if (motionMemory.streaksEnabled) motionMemory.streaksEnabled[`${mode}|light`] = false;
   }
