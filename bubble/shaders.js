@@ -289,6 +289,7 @@ uniform float uRayBeamNoiseMask;
 uniform float uRayBeamNoiseScale;
 uniform float uSpectralCausticEnabled;
 uniform float uSpectralCausticIntensity;
+uniform int uSpectralCausticMapping;
 uniform float uSpectralCausticFocus;
 uniform float uSpectralCausticWidth;
 uniform float uSpectralCausticLightSize;
@@ -2927,7 +2928,7 @@ vec3 visibleSpectrum(float t){
   return clamp(vec3(red, green, blue), 0.0, 1.0);
 }
 
-vec3 separateSpectrum(vec3 spectrum){
+vec3 separateSpectrum(vec3 spectrum, float separationControl){
   float lum = dot(spectrum, vec3(0.2126, 0.7152, 0.0722));
   // 粗糙度會把色散「洗掉」，而不只是「弄柔」——這是霧面玻璃不會打出彩虹的原因。
   //
@@ -2942,7 +2943,7 @@ vec3 separateSpectrum(vec3 spectrum){
   // 但刻意保留 35% 不收（係數 0.65 而不是 1.0）：扇形最外緣永遠只有最外側的
   // 波長到得了，所以即使很粗糙也還是「霧玻璃透出的彩色暈光」，不是純灰。
   // 收到 0 會過頭，看起來像色散被關掉，而不是被散射。
-  float separation = uDispersionSeparation * (1.0 - transmissionSpread() * 0.65);
+  float separation = separationControl * (1.0 - transmissionSpread() * 0.65);
   vec3 separated = mix(
     vec3(lum),
     spectrum,
@@ -3907,7 +3908,8 @@ void main(){
       artOpd / dispersionPeriod
     );
     vec3 prismSpectrum = separateSpectrum(
-      visibleSpectrum(spectrumCoordinate)
+      visibleSpectrum(spectrumCoordinate),
+      uDispersionSeparation
     );
     // 銳利度收束每個 OPD 週期的邊界，但週期內仍完整走過一次彩虹。
     float cycleEnvelope = sin(spectrumCoordinate * PI);
@@ -4032,6 +4034,19 @@ void main(){
     float loopPhase = fract(uTime / max(uLoopDuration, 0.001)) * 2.0 * PI;
     vec2 flowOffset = vec2(cos(loopPhase), sin(loopPhase))
       * uSpectralCausticFlow * 1.4;
+    // Object Coordinate → Mapping → 3D Noise。這一份 Noise 後面也直接供遮罩使用，
+    // 三種 mapping 都只付一次 fbmFast，不重複生成另一張噪聲場。
+    float sizeFactor = clamp(uSpectralCausticWidth / 2.5, 0.0, 1.0);
+    float objectNoiseScale = mix(0.55, 2.4, uSpectralCausticDensity);
+    vec3 causticNoiseFlow = loopNoiseOffset(uSpectralCausticFlow);
+    float causticNoise = fbmFast(
+      causticP * uSpectralCausticNoiseScale * objectNoiseScale + causticNoiseFlow
+    );
+    float causticNoise01 = clamp(0.5 + causticNoise * 0.72, 0.0, 1.0);
+    float noiseRidge = clamp(1.0 - abs(causticNoise01 * 2.0 - 1.0), 0.0, 1.0);
+    float noiseBandWidth = mix(0.18, 0.78, sizeFactor);
+    float noiseBand = smoothstep(1.0 - noiseBandWidth, 1.0, noiseRidge);
+    float noiseSignedBand = causticNoise01 - 0.5;
     float bandScale = mix(1.5, 8.5, uSpectralCausticDensity);
     float fieldU = (dot(causticP, causticTangent) + flowOffset.x) * bandScale;
     float fieldV = (dot(causticP, causticBitangent) + flowOffset.y) * bandScale;
@@ -4048,7 +4063,16 @@ void main(){
       bandWave,
       bounceWave * uSpectralCausticBounce * 0.78
     );
-    float sizeFactor = clamp(uSpectralCausticWidth / 2.5, 0.0, 1.0);
+    float signedBand = fract(warpedBand * 0.5 + 0.5) - 0.5;
+    if (uSpectralCausticMapping == 1) {
+      // 純物件噪聲：Noise 同時決定亮帶強度與 LUT 橫向色彩座標。
+      bandWave = noiseBand;
+      signedBand = noiseSignedBand;
+    } else if (uSpectralCausticMapping == 2) {
+      // 混合：保留 Wave 的受光方向，以 3D Noise 打散規律條紋與色彩位置。
+      bandWave = clamp(bandWave * (0.45 + noiseBand * 0.75), 0.0, 1.0);
+      signedBand = mix(signedBand, noiseSignedBand, 0.48);
+    }
     // B：粗糙度把焦散的亮帶攤開。bandWave 落在 0..1，pow 的指數調低會讓亮帶
     // 變寬——但同時整體變亮（底數 < 1，指數越小值越大）。所以這個乘數不能單獨
     // 用，必須配下面那個補償。
@@ -4073,7 +4097,6 @@ void main(){
     );
     // 把每一條亮帶本身展開成完整光譜，而不是讓不同亮帶各自只有
     // 一種顏色。signedBand 是目前像素相對聚光帶中心的橫向位置。
-    float signedBand = fract(warpedBand * 0.5 + 0.5) - 0.5;
     float rainbowCoordinate = clamp(
       0.5 + signedBand * mix(1.8, 10.0, uSpectralCausticSeparation)
         + dot(causticN, causticTangent) * 0.06,
@@ -4081,7 +4104,8 @@ void main(){
       1.0
     );
     vec3 causticSpectrum = separateSpectrum(
-      texture2D(uSpectralCausticRamp, vec2(rainbowCoordinate, 0.5)).rgb
+      texture2D(uSpectralCausticRamp, vec2(rainbowCoordinate, 0.5)).rgb,
+      uSpectralCausticSeparation
     );
 
     // 可獨立混合的 Fresnel 與循環 Noise 遮罩。0 完全不限制焦散；
@@ -4097,11 +4121,7 @@ void main(){
       fresnelMask,
       membraneMode * membraneFold * uSpectralCausticFresnelMask * 0.86
     );
-    vec3 causticNoiseFlow = loopNoiseOffset(uSpectralCausticFlow);
-    float causticNoise = fbmFast(
-      causticP * uSpectralCausticNoiseScale + causticNoiseFlow
-    );
-    float noiseMask = smoothstep(0.32, 0.68, 0.5 + causticNoise * 0.72);
+    float noiseMask = smoothstep(0.32, 0.68, causticNoise01);
     noiseMask = mix(1.0, noiseMask, uSpectralCausticNoiseMask);
 
     float hdriDrive = 1.0;

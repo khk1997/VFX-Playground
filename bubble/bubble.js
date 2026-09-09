@@ -679,6 +679,8 @@ const SELECT_DEFAULTS = {
   motion: 'static',
   shapeSource: 'svg',
   shapeQuality: 'balanced',
+  // 虛擬光譜焦散的空間 mapping。wave 保留既有 preset 外觀。
+  spectralCausticMapping: 'wave',
   // 抗鋸齒程度：全螢幕 raymarch shader 沒有多邊形邊緣可以靠 MSAA 磨平（見 initGL
   // 建立 renderer 時關閉 antialias 的說明），畫面唯一能消鋸齒的手段是把渲染解析度
   // 拉高過顯示解析度、再讓瀏覽器縮小回去——也就是超取樣。這個滑桿控制的正是超取樣
@@ -821,6 +823,7 @@ const MOTION_SCOPED_KEYS = [
   'spectralCausticBlend', 'spectralCausticWidth',
   'spectralCausticDensity', 'spectralCausticWarp', 'spectralCausticNoiseScale',
   'spectralCausticAzimuth', 'spectralCausticElevation',
+  'spectralCausticMapping',
   ...SPECTRAL_CAUSTIC_DEFAULTS.map((_, index) => `spectralCausticCol${index}`),
   // 藝術色散的開關，跟上面的光譜焦散開關同一個身分。
   'dispersionEnabled',
@@ -970,6 +973,8 @@ let motionMemory = buildMotionMemory();
 // 淺底使用高調棚拍玻璃的起始值；使用者後續
 // 手動調整的值仍會記在淺底自己的記憶格，不會影響深底。
 for (const motion of MOTION_KEYS) {
+  if (motionMemory.spectralCausticFocus) motionMemory.spectralCausticFocus[`${motion}|dark`] = 1.0;
+  if (motionMemory.spectralCausticSeparation) motionMemory.spectralCausticSeparation[`${motion}|dark`] = 1.0;
   if (motionMemory.transmission) motionMemory.transmission[`${motion}|light`] = 0.97;
   if (motionMemory.absorb) motionMemory.absorb[`${motion}|light`] = 1.35;
   if (motionMemory.envRefraction) motionMemory.envRefraction[`${motion}|light`] = 0.025;
@@ -1019,6 +1024,10 @@ const SELECTS = {
   rayBeamPattern: {
     uniform: 'uRayBeamPattern',
     map: { grid: 0, starburst: 1, ring: 2, softbox: 3, window: 4 },
+  },
+  spectralCausticMapping: {
+    uniform: 'uSpectralCausticMapping',
+    map: { wave: 0, objectNoise: 1, hybrid: 2 },
   },
   motion:    { uniform: 'uMotion',    map: MOTION_UNIFORM_MAP },
   shapeSource: { uniform: 'uShapeType', map: { svg: 1, gltf: 2 } },
@@ -4958,6 +4967,7 @@ function initGL() {
     uRayBeamNoiseMask: { value: P.rayBeamNoiseMask },
     uRayBeamNoiseScale: { value: P.rayBeamNoiseScale },
     uSpectralCausticIntensity: { value: P.spectralCausticIntensity },
+    uSpectralCausticMapping: { value: SELECTS.spectralCausticMapping.map[P.spectralCausticMapping] },
     uSpectralCausticFocus: { value: P.spectralCausticFocus },
     uSpectralCausticWidth: { value: P.spectralCausticWidth },
     uSpectralCausticLightSize: { value: P.spectralCausticLightSize },
@@ -6079,6 +6089,8 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   if (mobileRenderQuery.matches && !PREVIEW) P.cameraDistance = MOBILE_CAMERA_DISTANCE_DEFAULT;
   motionMemory = buildMotionMemory();
   for (const mode of MOTION_KEYS) {
+    if (motionMemory.spectralCausticFocus) motionMemory.spectralCausticFocus[`${mode}|dark`] = 1.0;
+    if (motionMemory.spectralCausticSeparation) motionMemory.spectralCausticSeparation[`${mode}|dark`] = 1.0;
     if (motionMemory.transmission) motionMemory.transmission[`${mode}|light`] = 0.97;
     if (motionMemory.absorb) motionMemory.absorb[`${mode}|light`] = 1.35;
     if (motionMemory.envRefraction) motionMemory.envRefraction[`${mode}|light`] = 0.025;
