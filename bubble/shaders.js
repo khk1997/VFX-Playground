@@ -3517,23 +3517,55 @@ void main(){
   );
   vec3 brightSurface = surfaceLight * max(vec3(0.0), vec3(1.0) - brightBase)
     * mix(0.12, 0.82, clamp(uLightCardStrength, 0.0, 1.0));
-  float chromaLocal = mix(
-    0.50,
-    1.0,
-    smoothstep(0.04, 0.22, material.filmAmount)
+  // 淺底的彩色不平均鋪滿輪廓：一般曲面只留淡藍青色，完整光譜集中在折射
+  // 彎曲最強的折角、融合處與局部掠射面。全部重用既有遮罩，不增加射線取樣。
+  float prismColorFocus = smoothstep(0.18, 0.72, localPrism);
+  float rimColorFocus = smoothstep(0.12, 0.78, material.edgeFactor);
+  float rainbowFocus = clamp(
+    prismColorFocus * (0.42 + rimColorFocus * 0.58),
+    0.0,
+    1.0
   );
+  float coolColorFocus = rimColorFocus * (1.0 - rainbowFocus * 0.55);
+  float chromaLocal = smoothstep(0.055, 0.24, material.filmAmount)
+    * rainbowFocus;
   vec3 brightChroma = material.filmChroma * material.filmAmount
-    * brightBg * 2.8 * chromaLocal * sqrt(max(uMaterialExposure, 0.0))
+    * brightBg * 2.45 * chromaLocal * sqrt(max(uMaterialExposure, 0.0))
     * clamp(uLightChroma, 0.0, 1.0);
-  brightChroma += material.reflectionChroma * brightBg * 0.75
+  brightChroma += material.reflectionChroma * brightBg * 0.62 * rainbowFocus
     * clamp(uLightChroma, 0.0, 1.0);
-  brightChroma += backFilmChroma * brightBg * (0.08 + backRim * 0.65)
+  brightChroma += backFilmChroma * brightBg
+    * (backRim * 0.54 + material.filmAmount * 0.10) * rainbowFocus
+    * clamp(uLightChroma, 0.0, 1.0);
+  brightChroma += vec3(0.10, 0.48, 1.0) * brightBg
+    * coolColorFocus * (0.025 + localPrism * 0.055)
     * clamp(uLightChroma, 0.0, 1.0);
   vec3 brightComposite = clamp(
     brightBase + brightSurface + brightChroma,
     0.0,
     1.0
   );
+  // 右側藍色折射帶：以兩段邊緣遮罩相減，把色帶放在剪影內側而不是直接描邊；
+  // 再用右側法線、折射彎曲與內部光程控制強度，讓它跟著液體曲面變形。
+  float blueBandSide = smoothstep(
+    0.02,
+    0.78,
+    dot(N, normalize(vec3(0.82, -0.08, 0.56)))
+  );
+  float blueBandInner = smoothstep(0.14, 0.62, material.edgeFactor);
+  float blueBandOuterCut = smoothstep(0.78, 0.98, material.edgeFactor);
+  float blueBandDepth = clamp(pathLength * 1.45, 0.0, 1.0);
+  float blueBandMask = blueBandSide * blueBandInner * (1.0 - blueBandOuterCut)
+    * (0.34 + localPrism * 0.66) * (0.45 + blueBandDepth * 0.55);
+  vec3 blueBandColor = mix(
+    vec3(0.30, 0.78, 1.0),
+    vec3(0.08, 0.38, 1.0),
+    clamp(localPrism, 0.0, 1.0)
+  );
+  vec3 blueBandLight = blueBandColor * blueBandMask * 0.18
+    * clamp(uLightCardStrength, 0.0, 1.0) * whiteBackdrop;
+  brightComposite = 1.0
+    - (1.0 - brightComposite) * (1.0 - clamp(blueBandLight, 0.0, 0.42));
   // 白底仍需要少量暗反射才能讀出曲面，但不能把低亮度 HDRI 直接鋪滿整顆。
   // 沿用液態薄膜的做法：由反射方向生成一張寬而柔的冷藍卡，只在側下方與
   // 掠射區域局部壓低亮度；中央大面積透射保持乾淨。
