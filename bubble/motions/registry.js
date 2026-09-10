@@ -230,6 +230,18 @@ export const MOTIONS = {
         type: 'borrow', key: 'radius', label: '外殼大小',
       },
       {
+        key: 'researchShellTint', label: '淺底染色強度',
+        min: 0, max: 1, step: 0.01, value: 0.28,
+      },
+      {
+        key: 'researchShellTintColor', label: '淺底染色色彩',
+        type: 'color', value: '#1059ed',
+      },
+      {
+        key: 'researchShellTintEdge', label: '染色邊緣集中',
+        min: 0, max: 1, step: 0.01, value: 0.78,
+      },
+      {
         key: 'researchBreath', label: '呼吸幅度',
         min: 0, max: 0.06, step: 0.001, value: 0.033,
       },

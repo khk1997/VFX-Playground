@@ -119,6 +119,9 @@ uniform float uResearchShellAmount;
 uniform float uResearchShellSpeed;
 uniform float uResearchShellDensity;
 uniform float uResearchShellTexture;
+uniform float uResearchShellTint;
+uniform vec3 uResearchShellTintColor;
+uniform float uResearchShellTintEdge;
 // 紋理方向。三個分量合起來是一個向量,長度不重要(shader 會正規化),只有方向
 // 有意義;全為 0 時退回 +x。
 uniform float uResearchTextureDirX;
@@ -3229,6 +3232,7 @@ void main(){
   float researchIconPath = 0.0;
   float researchIconWeight = 0.0;
   vec3 researchIconTransmissionTint = vec3(1.0);
+  vec3 researchShellTransmissionTint = vec3(1.0);
   // icon 在這個像素上「被染色了多少」。淺底顯色（uLightShow）要靠它把自己從
   // icon 身上收回來 —— 見下方 showWeight。
   float researchIconMask = 0.0;
@@ -3540,6 +3544,25 @@ void main(){
 
 #ifdef FEATURE_RESEARCH
   // 環境折射混合完成後才吸收，避免環境滑桿把染色洗掉。後續表面高光照常疊加。
+  if (uLightBgGradientEnabled > 0.5 && uResearchShellTint > 0.0
+      && !researchIconHit) {
+    float shellSide = smoothstep(-0.22, 0.78,
+      dot(N, normalize(vec3(0.75, -0.58, 0.12))));
+    float shellEdge = pow(clamp(material.edgeFactor, 0.0, 1.0), 1.35);
+    float shellBroadDistribution = 0.045 + 0.955 * shellSide;
+    float shellEdgeDistribution = (0.045 + shellEdge * 1.65)
+      * (0.34 + shellSide * 0.66);
+    float shellDistribution = mix(
+      shellBroadDistribution,
+      shellEdgeDistribution,
+      clamp(uResearchShellTintEdge, 0.0, 1.0)
+    );
+    float shellOpticalDepth = (1.0 - exp(-max(pathLength, 0.0) * 3.6))
+      * shellDistribution * clamp(uResearchShellTint, 0.0, 1.0);
+    vec3 shellTintAbsorption = -log(clamp(uResearchShellTintColor, 0.002, 0.999));
+    researchShellTransmissionTint = exp(-shellTintAbsorption * shellOpticalDepth);
+  }
+  refractedBg *= researchShellTransmissionTint;
   refractedBg *= researchIconTransmissionTint;
 #endif
   // 白底以帶微冷色的透射衰減塑形；反射只填入剩餘亮度空間，避免大片 clipping。

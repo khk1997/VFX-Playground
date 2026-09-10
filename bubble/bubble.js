@@ -1066,6 +1066,7 @@ const COLORS = {
   lightBgGradientTop: 'uLightBgGradientTop',
   lightBgGradientBottom: 'uLightBgGradientBottom',
   researchIconTintColor: 'uResearchIconTintColor',
+  researchShellTintColor: 'uResearchShellTintColor',
   // 後處理的顏色不對應 uniform（它們是 post.js 每幀讀的），uniform 名稱留空，
   // 由下面兩處的特例分支處理。
   bloomTint: '',
@@ -4915,6 +4916,11 @@ function initGL() {
     uResearchShellSpeed: { value: P.researchShellSpeed },
     uResearchShellDensity: { value: P.researchShellDensity },
     uResearchShellTexture: { value: P.researchShellTexture },
+    uResearchShellTint: { value: P.researchShellTint },
+    uResearchShellTintEdge: { value: P.researchShellTintEdge },
+    uResearchShellTintColor: { value: new THREE.Color().setStyle(
+      P.researchShellTintColor, THREE.LinearSRGBColorSpace
+    ) },
     uResearchBubbles: { value: P.researchBubbles ? 1 : 0 },
     uResearchBubbleCount: { value: P.researchBubbleCount },
     uResearchBubbleMin: { value: P.researchBubbleMin },
@@ -5391,6 +5397,7 @@ function syncPanelToUniforms() {
     // 器上那三個原始數值，不能讓 three 的色彩管理把它當 sRGB 轉成線性（那會把
     // 比例整個扭掉）。同 uBgColor 的作法。
     else if (key === 'absorbColor' || key === 'researchIconTintColor'
+      || key === 'researchShellTintColor'
       || key === 'lightIconColor' || key === 'lightIconRimColor'
       || key === 'lightBgGradientTop' || key === 'lightBgGradientBottom') {
       uniforms[COLORS[key]].value.setStyle(P[key], THREE.LinearSRGBColorSpace);
@@ -5781,6 +5788,7 @@ function bindControls() {
       else if (key === 'bgColor') setBgColorUniform(el.value);
       // 見上面 applyAllUniforms 裡同一個特例的說明。
       else if (key === 'absorbColor' || key === 'researchIconTintColor'
+      || key === 'researchShellTintColor'
       || key === 'lightIconColor' || key === 'lightIconRimColor'
       || key === 'lightBgGradientTop' || key === 'lightBgGradientBottom') {
         if (uniforms) uniforms[uName].value.setStyle(el.value, THREE.LinearSRGBColorSpace);
@@ -6064,6 +6072,9 @@ function updateUIState() {
   setDisabled(document.getElementById('researchIconTint'), P.backdrop !== 'light');
   setDisabled(document.getElementById('researchIconTintColor'), P.backdrop !== 'light');
   setDisabled(document.getElementById('researchIconTintEdge'), P.backdrop !== 'light');
+  setDisabled(document.getElementById('researchShellTint'), P.backdrop !== 'light');
+  setDisabled(document.getElementById('researchShellTintColor'), P.backdrop !== 'light');
+  setDisabled(document.getElementById('researchShellTintEdge'), P.backdrop !== 'light');
   document.getElementById('lightShowRow').style.display = 'none';
   document.getElementById('lightLookDetails').style.display = 'none';
   document.getElementById('lightIconDetails').style.display = 'none';
