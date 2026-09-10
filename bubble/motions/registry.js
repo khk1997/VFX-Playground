@@ -409,6 +409,10 @@ export const MOTIONS = {
         min: 0, max: 1, step: 0.01, value: 0.65,
       },
       {
+        key: 'researchIconTintColor', label: '淺底染色色彩',
+        type: 'color', value: '#1059ed',
+      },
+      {
         // 相對整個循環移動 icon 的生命週期，不改外殼融合曲線。正值延後、負值
         // 提前；使用相位比例可讓循環秒數改變時仍維持相同的編舞位置。
         key: 'researchIconPhaseOffset', label: 'Icons 出現時機',
@@ -843,6 +847,7 @@ export const MOTION_PARAMS = Object.fromEntries(entries.map(([key, motion]) => [
 // 'subgroup' 是純排版的分節標記，本身沒有值；只有它帶 key 時（開關長在小節標題
 // 上的那種）才算一個布林參數。兩種情況都不能進 MOTION_PARAM_DEFAULTS。
 const isTextParam = param => param.type === 'text';
+const isColorParam = param => param.type === 'color';
 const isToggleParam = param => param.type === 'toggle'
   || (param.type === 'subgroup' && Boolean(param.key));
 // 'borrow' 借的是別處既有的控制項（同一個 key、同一份 P、同一顆 uniform），
@@ -852,7 +857,8 @@ const isLayoutParam = param => (param.type === 'subgroup' && !param.key)
   || param.type === 'borrow';
 export const MOTION_PARAM_DEFAULTS = Object.fromEntries(
   entries.flatMap(([, motion]) => (motion.params || [])
-    .filter(param => !isTextParam(param) && !isToggleParam(param) && !isLayoutParam(param))
+    .filter(param => !isTextParam(param) && !isColorParam(param)
+      && !isToggleParam(param) && !isLayoutParam(param))
     .map(param => [param.key, param.value])),
 );
 export const MOTION_TOGGLE_DEFAULTS = Object.fromEntries(
@@ -863,6 +869,11 @@ export const MOTION_TOGGLE_DEFAULTS = Object.fromEntries(
 export const MOTION_TEXT_DEFAULTS = Object.fromEntries(
   entries.flatMap(([, motion]) => (motion.params || [])
     .filter(isTextParam)
+    .map(param => [param.key, param.value])),
+);
+export const MOTION_COLOR_DEFAULTS = Object.fromEntries(
+  entries.flatMap(([, motion]) => (motion.params || [])
+    .filter(isColorParam)
     .map(param => [param.key, param.value])),
 );
 

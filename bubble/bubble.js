@@ -14,7 +14,7 @@ import {
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
   MOTION_OVERRIDES,
   MOTION_HDRI, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
-  MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
+  MOTION_TEXT_DEFAULTS, MOTION_COLOR_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
 } from './motions/registry.js?v=light-backdrop-30';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
@@ -737,6 +737,7 @@ const SPECTRAL_CAUSTIC_DEFAULTS = [
   '#52e6fc', '#40b3f9', '#3aa3e3', '#3fabf9', '#4dd8fb', '#3ba6f9', '#52e6fc',
 ];
 const COLOR_DEFAULTS  = {
+  ...MOTION_COLOR_DEFAULTS,
   bgColor: '#000000',
   // 光暈的顏色。白 = 不染色。
   bloomTint: '#ffffff',
@@ -1064,6 +1065,7 @@ const COLORS = {
   lightIconRimColor: 'uLightIconRimColor',
   lightBgGradientTop: 'uLightBgGradientTop',
   lightBgGradientBottom: 'uLightBgGradientBottom',
+  researchIconTintColor: 'uResearchIconTintColor',
   // 後處理的顏色不對應 uniform（它們是 post.js 每幀讀的），uniform 名稱留空，
   // 由下面兩處的特例分支處理。
   bloomTint: '',
@@ -4922,6 +4924,9 @@ function initGL() {
     uResearchTextureDirZ: { value: P.researchTextureDirZ },
     uResearchIconIOR: { value: P.researchIconIOR },
     uResearchIconTint: { value: P.researchIconTint },
+    uResearchIconTintColor: { value: new THREE.Color().setStyle(
+      P.researchIconTintColor, THREE.LinearSRGBColorSpace
+    ) },
     uResearchIconSizeA: { value: P.researchIconSizeA },
     uResearchIconSizeB: { value: P.researchIconSizeB },
     uResearchIconTailTip: { value: P.researchIconTailTip },
@@ -5384,7 +5389,8 @@ function syncPanelToUniforms() {
     // 吸收色不是「一道光的顏色」而是「每個通道剩下多少」的比例，所以要的是選色
     // 器上那三個原始數值，不能讓 three 的色彩管理把它當 sRGB 轉成線性（那會把
     // 比例整個扭掉）。同 uBgColor 的作法。
-    else if (key === 'absorbColor' || key === 'lightIconColor' || key === 'lightIconRimColor'
+    else if (key === 'absorbColor' || key === 'researchIconTintColor'
+      || key === 'lightIconColor' || key === 'lightIconRimColor'
       || key === 'lightBgGradientTop' || key === 'lightBgGradientBottom') {
       uniforms[COLORS[key]].value.setStyle(P[key], THREE.LinearSRGBColorSpace);
     }
@@ -5539,6 +5545,8 @@ function buildExtendedMotionControls() {
           if (optionSpec.hidden) option.hidden = true;
           control.append(option);
         }
+      } else if (param.type === 'color') {
+        control.type = 'color';
       } else {
         control.type = 'range';
         control.min = String(param.min);
@@ -5771,7 +5779,8 @@ function bindControls() {
       if (!uName) { /* 後處理的顏色由 renderComposite 每幀直接讀 P */ }
       else if (key === 'bgColor') setBgColorUniform(el.value);
       // 見上面 applyAllUniforms 裡同一個特例的說明。
-      else if (key === 'absorbColor' || key === 'lightIconColor' || key === 'lightIconRimColor'
+      else if (key === 'absorbColor' || key === 'researchIconTintColor'
+      || key === 'lightIconColor' || key === 'lightIconRimColor'
       || key === 'lightBgGradientTop' || key === 'lightBgGradientBottom') {
         if (uniforms) uniforms[uName].value.setStyle(el.value, THREE.LinearSRGBColorSpace);
       }
@@ -6052,6 +6061,7 @@ function updateUIState() {
   const lightBackdrop = false;
   const lightIcons = false;
   setDisabled(document.getElementById('researchIconTint'), P.backdrop !== 'light');
+  setDisabled(document.getElementById('researchIconTintColor'), P.backdrop !== 'light');
   document.getElementById('lightShowRow').style.display = 'none';
   document.getElementById('lightLookDetails').style.display = 'none';
   document.getElementById('lightIconDetails').style.display = 'none';

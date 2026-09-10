@@ -131,6 +131,7 @@ uniform float uResearchBubbleMin;
 uniform float uResearchBubbleMax;
 uniform float uResearchIconIOR;
 uniform float uResearchIconTint;
+uniform vec3 uResearchIconTintColor;
 uniform float uResearchIconSizeA;
 uniform float uResearchIconSizeB;
 uniform float uResearchIconTailTip;
@@ -3359,7 +3360,8 @@ void main(){
               * (0.045 + 0.955 * side)
               * smoothstep(0.0, 0.15, iconFacing)
               * researchIconWeight * clamp(uResearchIconTint, 0.0, 1.0);
-            researchIconTransmissionTint = exp(-vec3(2.8, 1.05, 0.075) * opticalDepth);
+            vec3 tintAbsorption = -log(clamp(uResearchIconTintColor, 0.002, 0.999));
+            researchIconTransmissionTint = exp(-tintAbsorption * opticalDepth);
           }
           float iconF0 = pow((relIOR - 1.0) / (relIOR + 1.0), 2.0);
           float iconFres = iconF0 + (1.0 - iconF0) * pow(1.0 - iconFacing, 5.0);
