@@ -130,6 +130,7 @@ uniform float uResearchBubbleCount;
 uniform float uResearchBubbleMin;
 uniform float uResearchBubbleMax;
 uniform float uResearchIconIOR;
+uniform float uResearchIconTint;
 uniform float uResearchIconSizeA;
 uniform float uResearchIconSizeB;
 uniform float uResearchIconTailTip;
@@ -295,6 +296,8 @@ uniform float uSpectralCausticWidth;
 uniform float uSpectralCausticLightSize;
 uniform float uSpectralCausticDensity;
 uniform float uSpectralCausticSoftness;
+// 薄膜噪聲的色塊柔化：壓低 fbm 第二個 octave 的權重。見 causticOctaves。
+uniform float uSpectralCausticFilmSoften;
 uniform float uSpectralCausticWarp;
 uniform float uSpectralCausticSeparation;
 uniform float uSpectralCausticBounce;
@@ -517,6 +520,16 @@ float transmissionSpread(){
 vec3 loopNoiseOffset(float speed){
   float phase = TAU * uTime / max(uLoopDuration, 0.001);
   return vec3(cos(phase), sin(phase), sin(phase * 2.0)) * speed;
+}
+
+// 焦散專用的兩 octave 噪聲。detail = 1.0 時與 fbmFast 完全等價（同樣兩次 snoise，
+// 同樣的權重），所以柔化滑桿在 0 的時候是精確的恆等運算，不動既有畫面。
+//
+// detail 往 0 收時只削掉第二個 octave —— 那一項正是讓色塊邊界皺起來的來源。
+// 色塊的大小由第一個 octave 決定，不受影響，所以視覺上是「邊界糊掉但大小不變」，
+// 而不是「整個變大」。這是它跟「Noise 相對尺度」的分工。
+float causticOctaves(vec3 p, float detail){
+  return 0.5 * snoise(p) + 0.25 * detail * snoise(p * 2.02);
 }
 
 // 環境：程序化棚燈（無 HDRI 時的預設反射來源）；rough 越大光斑越柔散
@@ -1808,7 +1821,7 @@ float researchBubbleMap(vec3 p, float phase){
   return d;
 }
 
-float researchIconMap(vec3 p){
+vec2 researchIconDistances(vec3 p){
   // 整體位移只作用在 icon、誕生漣漪與伴隨泡泡，不綁定第二外殼的融合時刻。
   // fract 讓正負位移都保持無縫循環；正值代表視覺事件延後。
   float phase = fract(uTime / max(uLoopDuration, 0.001) - uResearchIconPhaseOffset);
@@ -1845,7 +1858,12 @@ float researchIconMap(vec3 p){
   // 泡泡用更小的融合半徑併進來:它們不該跟 icon 黏成一坨(那是兩種東西),
   // 但也不能用 min —— 剛好擦過 icon 的那條交界會是梯度硬折,在折射玻璃裡
   // 就是一條亮線(同上)。0.012 只夠把交界抹成一圈細圓角。
-  return researchSmin(icons, researchBubbleMap(p, phase), 0.012);
+  return vec2(icons, researchBubbleMap(p, phase));
+}
+
+float researchIconMap(vec3 p){
+  vec2 distances = researchIconDistances(p);
+  return researchSmin(distances.x, distances.y, 0.012);
 }
 
 vec3 researchIconNormal(vec3 p){
@@ -1892,14 +1910,21 @@ void researchTraceIconExit(vec3 ro, vec3 rd, out vec3 exitPoint, out float pathL
   pathLength = t;
 }
 
-bool researchTraceIcon(vec3 ro, vec3 rd, float maxDistance, out vec3 hitPoint){
+bool researchTraceIcon(vec3 ro, vec3 rd, float maxDistance, out vec3 hitPoint,
+  out float iconWeight){
+  iconWeight = 0.0;
   float t = 0.006;
   // 步數從 28 提到 40：下面的步進係數為了 smin 的頸部調得比較保守，同樣的步數
   // 走不完整條弦，遠端那顆 icon 會整個消失。
   for (int i = 0; i < 40; i++) {
     hitPoint = ro + rd * t;
-    float d = researchIconMap(hitPoint);
-    if (d < 0.0012) return true;
+    vec2 distances = researchIconDistances(hitPoint);
+    float d = researchSmin(distances.x, distances.y, 0.012);
+    if (d < 0.0012) {
+      // 直接使用本次追蹤已算出的距離分辨對話泡與小氣泡，不多追一條射線。
+      iconWeight = smoothstep(-0.012, 0.012, distances.y - distances.x);
+      return true;
+    }
     // smin 併集不再是嚴格 Lipschitz(頸部附近會低估距離),步長係數比一般
     // sphere tracing 保守,否則兩顆球中間那條頸子會被跨過去、出現破洞。
     //
@@ -3200,6 +3225,8 @@ void main(){
   // 需要它單獨算一份「這顆 icon 自己的吸收」—— 全域的體積吸收是整顆水滴一起
   // 染色，沒辦法只讓 icon 顯色而外殼維持接近白。
   float researchIconPath = 0.0;
+  float researchIconWeight = 0.0;
+  vec3 researchIconTransmissionTint = vec3(1.0);
   // icon 在這個像素上「被染色了多少」。淺底顯色（uLightShow）要靠它把自己從
   // icon 身上收回來 —— 見下方 showWeight。
   float researchIconMask = 0.0;
@@ -3223,7 +3250,7 @@ void main(){
           p + insideDir * 0.004,
           insideDir,
           max(pathLength - 0.008, 0.0),
-          researchIconPoint
+          researchIconPoint, researchIconWeight
         );
         if (researchIconHit) researchIconN = researchIconNormal(researchIconPoint);
 #endif
@@ -3323,6 +3350,17 @@ void main(){
           float iconFacing = clamp(dot(-researchInsideDir, researchIconN), 0.0, 1.0);
           researchIconFacing = iconFacing;
           researchIconPath = iconPath;
+          if (uLightBgGradientEnabled > 0.5 && uResearchIconTint > 0.0) {
+            // 局部 Beer–Lambert 吸收：中央近乎無色，側下方累積藍色。
+            // 不替換反射、不混入白色、不改覆蓋率。薄邊與出生/消融自然退色。
+            float side = smoothstep(-0.22, 0.78,
+              dot(researchIconN, normalize(vec3(0.75, -0.58, 0.12))));
+            float opticalDepth = (1.0 - exp(-max(iconPath, 0.0) * 8.0))
+              * (0.045 + 0.955 * side)
+              * smoothstep(0.0, 0.15, iconFacing)
+              * researchIconWeight * clamp(uResearchIconTint, 0.0, 1.0);
+            researchIconTransmissionTint = exp(-vec3(2.8, 1.05, 0.075) * opticalDepth);
+          }
           float iconF0 = pow((relIOR - 1.0) / (relIOR + 1.0), 2.0);
           float iconFres = iconF0 + (1.0 - iconF0) * pow(1.0 - iconFacing, 5.0);
           vec3 iconReflection = sampleEnvironmentBackdrop(
@@ -3486,6 +3524,10 @@ void main(){
     refractedBg = mix(refractedBg, envRefraction, uEnvRefraction);
   }
 
+#ifdef FEATURE_RESEARCH
+  // 環境折射混合完成後才吸收，避免環境滑桿把染色洗掉。後續表面高光照常疊加。
+  refractedBg *= researchIconTransmissionTint;
+#endif
   // 白底以帶微冷色的透射衰減塑形；反射只填入剩餘亮度空間，避免大片 clipping。
   vec3 coolTransmission = mix(
     vec3(0.995, 0.998, 1.0),
@@ -4055,14 +4097,32 @@ void main(){
     float sizeFactor = clamp(uSpectralCausticWidth / 2.5, 0.0, 1.0);
     float objectNoiseScale = mix(0.55, 2.4, uSpectralCausticDensity);
     vec3 causticNoiseFlow = loopNoiseOffset(uSpectralCausticFlow);
-    float causticNoise = fbmFast(
-      causticP * uSpectralCausticNoiseScale * objectNoiseScale + causticNoiseFlow
+    // 柔化只掛在薄膜噪聲上。其餘三種 mapping 的 detail 恆為 1，causticOctaves
+    // 就等於原本的 fbmFast，一格都不變。uniform 決定的分支，不會發散。
+    float causticDetail = 1.0;
+    if (uSpectralCausticMapping == 3) {
+      causticDetail = 1.0 - uSpectralCausticFilmSoften;
+    }
+    float causticNoise = causticOctaves(
+      causticP * uSpectralCausticNoiseScale * objectNoiseScale + causticNoiseFlow,
+      causticDetail
     );
     float causticNoise01 = clamp(0.5 + causticNoise * 0.72, 0.0, 1.0);
     float noiseRidge = clamp(1.0 - abs(causticNoise01 * 2.0 - 1.0), 0.0, 1.0);
     float noiseBandWidth = mix(0.18, 0.78, sizeFactor);
     float noiseBand = smoothstep(1.0 - noiseBandWidth, 1.0, noiseRidge);
     float noiseSignedBand = causticNoise01 - 0.5;
+    // 薄膜噪聲（Blender 風）用的另外兩份噪聲。Blender 的 Noise Texture「Color」
+    // 輸出是三份彼此獨立的噪聲各當一個通道，不是把一個純量場丟進色帶查表 ——
+    // 所以它永遠不會出現等高線。這裡沿用同一個思路（見下面 mapping == 3）。
+    // 只有 mapping == 3 會走進來，其餘三種 mapping 不付這兩次 fbm。
+    vec3 filmNoiseVec = vec3(causticNoise, 0.0, 0.0);
+    if (uSpectralCausticMapping == 3) {
+      vec3 filmP = causticP * uSpectralCausticNoiseScale * objectNoiseScale
+        + causticNoiseFlow;
+      filmNoiseVec.y = causticOctaves(filmP + vec3(19.3, 7.1, 3.7), causticDetail);
+      filmNoiseVec.z = causticOctaves(filmP + vec3(-5.2, 11.9, 27.4), causticDetail);
+    }
     float bandScale = mix(1.5, 8.5, uSpectralCausticDensity);
     float fieldU = (dot(causticP, causticTangent) + flowOffset.x) * bandScale;
     float fieldV = (dot(causticP, causticBitangent) + flowOffset.y) * bandScale;
@@ -4088,6 +4148,14 @@ void main(){
       // 混合：保留 Wave 的受光方向，以 3D Noise 打散規律條紋與色彩位置。
       bandWave = clamp(bandWave * (0.45 + noiseBand * 0.75), 0.0, 1.0);
       signedBand = mix(signedBand, noiseSignedBand, 0.48);
+    } else if (uSpectralCausticMapping == 3) {
+      // 薄膜噪聲：沒有亮帶。亮度只做很淺的起伏（0.62..1），讓後面的
+      // focusExponent 仍然有作用，但不會把畫面切成一條一條。
+      bandWave = mix(
+        0.62,
+        1.0,
+        clamp(0.5 + filmNoiseVec.z * 0.9, 0.0, 1.0)
+      );
     }
     // B：粗糙度把焦散的亮帶攤開。bandWave 落在 0..1，pow 的指數調低會讓亮帶
     // 變寬——但同時整體變亮（底數 < 1，指數越小值越大）。所以這個乘數不能單獨
@@ -4119,8 +4187,62 @@ void main(){
       0.0,
       1.0
     );
+    vec3 causticRampColor =
+      texture2D(uSpectralCausticRamp, vec2(rainbowCoordinate, 0.5)).rgb;
+    if (uSpectralCausticMapping == 3) {
+      // 薄膜噪聲的顏色來源。
+      //
+      // 這裡刻意「不」用噪聲當色帶座標。只要色帶是用一個隨像素變動的座標去查，
+      // 色帶上任何一個窄特徵——一顆跟鄰居差很多的色標、或線性內插留下的折點——
+      // 都會沿著噪聲的等值線被拉成一條細線。這跟色標之間怎麼內插無關，是
+      // 「平滑場 → 一維查表」這個結構本身的產物。
+      //
+      // 改成：色帶只在四個「固定」座標各取一次色，每個像素取到的都是同一組
+      // 顏色，色帶上有什麼特徵都不會投影到畫面上；變動的只有這四個顏色之間的
+      // 混合權重，而權重是兩份獨立噪聲的平滑函數。等值線無從產生，剩下的只有
+      // 柔和的斑塊 —— 也就是 Blender 那張參考圖的樣子。
+      //
+      // 光譜分離控制四個取樣點離色帶中央多遠：0 時四點重疊成單色，1 時攤開到
+      // 整條色帶，語意跟其他 mapping 一致（顏色的變化幅度）。
+      float filmSpread = mix(0.12, 0.5, uSpectralCausticSeparation);
+      vec3 filmStopA = texture2D(
+        uSpectralCausticRamp, vec2(0.5 - filmSpread, 0.5)
+      ).rgb;
+      vec3 filmStopB = texture2D(
+        uSpectralCausticRamp, vec2(0.5 - filmSpread * 0.33, 0.5)
+      ).rgb;
+      vec3 filmStopC = texture2D(
+        uSpectralCausticRamp, vec2(0.5 + filmSpread * 0.33, 0.5)
+      ).rgb;
+      vec3 filmStopD = texture2D(
+        uSpectralCausticRamp, vec2(0.5 + filmSpread, 0.5)
+      ).rgb;
+      // 權重。clamp 之後再過一次 smoothstep：clamp 本身是折點（噪聲一撞到 0 或
+      // 1，斜率就從增益直接掉到 0），那條「剛好飽和」的等值線也會浮成細邊；
+      // smoothstep 兩端導數為 0，接上去整段映射的斜率才連續。
+      vec2 filmWeight = clamp(vec2(0.5) + filmNoiseVec.xy * 1.35, 0.0, 1.0);
+      filmWeight = filmWeight * filmWeight * (3.0 - 2.0 * filmWeight);
+      causticRampColor = mix(
+        mix(filmStopA, filmStopB, filmWeight.x),
+        mix(filmStopC, filmStopD, filmWeight.x),
+        filmWeight.y
+      );
+      // 亮度歸一化。色帶裡有深有淺，四個取樣點的亮度不一樣，混合權重一漂
+      // 亮度就跟著上上下下，在畫面上仍會讀成一塊一塊的明暗。薄膜的變化是
+      // 「色相在變」不是「亮度在變」，所以除掉自己的亮度統一拉到同一水平，
+      // 明暗一律交給焦散強度與遮罩決定。
+      float filmLuma = max(
+        dot(causticRampColor, vec3(0.2126, 0.7152, 0.0722)),
+        0.0025
+      );
+      causticRampColor = clamp(
+        causticRampColor * (0.66 / filmLuma),
+        0.0,
+        1.0
+      );
+    }
     vec3 causticSpectrum = separateSpectrum(
-      texture2D(uSpectralCausticRamp, vec2(rainbowCoordinate, 0.5)).rgb,
+      causticRampColor,
       uSpectralCausticSeparation
     );
 

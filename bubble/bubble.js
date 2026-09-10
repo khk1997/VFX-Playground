@@ -335,6 +335,7 @@ const DEFAULTS = {              // 數值滑桿
   spectralCausticLightSize: 0.33,
   spectralCausticDensity: 0.03,
   spectralCausticSoftness: 1,
+  spectralCausticFilmSoften: 0,
   spectralCausticWarp: 0.57,
   spectralCausticSeparation: 0,
   // 把七色查找表沿環形方向模糊融合：0 = 保留色標間的硬邊界，1 = 色彩與
@@ -822,6 +823,7 @@ const MOTION_SCOPED_KEYS = [
   'spectralCausticIntensity', 'spectralCausticFocus', 'spectralCausticSeparation',
   'spectralCausticBlend', 'spectralCausticWidth',
   'spectralCausticDensity', 'spectralCausticWarp', 'spectralCausticNoiseScale',
+  'spectralCausticFilmSoften',
   'spectralCausticAzimuth', 'spectralCausticElevation',
   'spectralCausticMapping',
   ...SPECTRAL_CAUSTIC_DEFAULTS.map((_, index) => `spectralCausticCol${index}`),
@@ -895,6 +897,7 @@ const BACKDROP_SCOPED_KEYS = new Set([
   'spectralCausticSeparation', 'spectralCausticBlend',
   'spectralCausticWidth', 'spectralCausticDensity',
   'spectralCausticWarp', 'spectralCausticNoiseScale',
+  'spectralCausticFilmSoften',
   'spectralCausticAzimuth', 'spectralCausticElevation',
   'dispersion', 'artPatternSpeed',
   'postExposure', 'postBrightness',
@@ -1031,7 +1034,7 @@ const SELECTS = {
   },
   spectralCausticMapping: {
     uniform: 'uSpectralCausticMapping',
-    map: { wave: 0, objectNoise: 1, hybrid: 2 },
+    map: { wave: 0, objectNoise: 1, hybrid: 2, filmNoise: 3 },
   },
   motion:    { uniform: 'uMotion',    map: MOTION_UNIFORM_MAP },
   shapeSource: { uniform: 'uShapeType', map: { svg: 1, gltf: 2 } },
@@ -1221,6 +1224,7 @@ const fmt = {
   spectralCausticLightSize: v => Math.round(v * 100) + '%',
   spectralCausticDensity: v => Math.round(v * 100) + '%',
   spectralCausticSoftness: v => Math.round(v * 100) + '%',
+  spectralCausticFilmSoften: v => v === 0 ? '不柔化' : Math.round(v * 100) + '%',
   spectralCausticWarp: v => Math.round(v * 100) + '%',
   spectralCausticSeparation: v => 'x' + v.toFixed(2),
   spectralCausticBlend: v => v === 0 ? '不融合' : Math.round(v * 100) + '%',
@@ -4917,6 +4921,7 @@ function initGL() {
     uResearchTextureDirY: { value: P.researchTextureDirY },
     uResearchTextureDirZ: { value: P.researchTextureDirZ },
     uResearchIconIOR: { value: P.researchIconIOR },
+    uResearchIconTint: { value: P.researchIconTint },
     uResearchIconSizeA: { value: P.researchIconSizeA },
     uResearchIconSizeB: { value: P.researchIconSizeB },
     uResearchIconTailTip: { value: P.researchIconTailTip },
@@ -4977,6 +4982,7 @@ function initGL() {
     uSpectralCausticLightSize: { value: P.spectralCausticLightSize },
     uSpectralCausticDensity: { value: P.spectralCausticDensity },
     uSpectralCausticSoftness: { value: P.spectralCausticSoftness },
+    uSpectralCausticFilmSoften: { value: P.spectralCausticFilmSoften },
     uSpectralCausticWarp: { value: P.spectralCausticWarp },
     uSpectralCausticSeparation: { value: P.spectralCausticSeparation },
     uSpectralCausticBounce: { value: P.spectralCausticBounce },
@@ -5897,6 +5903,13 @@ const GATES = {
   // 後處理各效果的附屬參數：效果關掉時那些滑桿沒有作用，一併收起來。
   bloomOn:              () => P.bloomEnabled,
   streaksOn:            () => P.streaksEnabled,
+  // 光譜焦散的「亮帶」參數。薄膜噪聲（filmNoise）在 mapping 分支裡把 bandWave
+  // 整個覆寫掉，所以曲面扭曲與內部反射對它完全沒有作用——面板照樣亮著給人調
+  // 卻毫無反應，比名字取錯更容易誤導。
+  //
+  // 只收這兩根。「尺度」與「光帶寬度」在薄膜噪聲下仍然有效（前者決定 3D Noise
+  // 的頻率，後者透過 focusExponent 影響明暗對比），收掉會拿走真的在動的控制項。
+  causticBandUI:        () => P.spectralCausticMapping !== 'filmNoise',
   // 私語的兩組附屬參數，理由同上：關掉／選「無」之後那些滑桿沒有作用。
   researchTextureOn:    () => Math.round(P.researchShellTexture) !== 6,
   researchBubblesOn:    () => P.researchBubbles,
@@ -6038,6 +6051,7 @@ function updateUIState() {
   }
   const lightBackdrop = false;
   const lightIcons = false;
+  setDisabled(document.getElementById('researchIconTint'), P.backdrop !== 'light');
   document.getElementById('lightShowRow').style.display = 'none';
   document.getElementById('lightLookDetails').style.display = 'none';
   document.getElementById('lightIconDetails').style.display = 'none';
