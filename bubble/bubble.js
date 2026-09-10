@@ -4924,6 +4924,7 @@ function initGL() {
     uResearchTextureDirZ: { value: P.researchTextureDirZ },
     uResearchIconIOR: { value: P.researchIconIOR },
     uResearchIconTint: { value: P.researchIconTint },
+    uResearchIconTintEdge: { value: P.researchIconTintEdge },
     uResearchIconTintColor: { value: new THREE.Color().setStyle(
       P.researchIconTintColor, THREE.LinearSRGBColorSpace
     ) },
@@ -6062,6 +6063,7 @@ function updateUIState() {
   const lightIcons = false;
   setDisabled(document.getElementById('researchIconTint'), P.backdrop !== 'light');
   setDisabled(document.getElementById('researchIconTintColor'), P.backdrop !== 'light');
+  setDisabled(document.getElementById('researchIconTintEdge'), P.backdrop !== 'light');
   document.getElementById('lightShowRow').style.display = 'none';
   document.getElementById('lightLookDetails').style.display = 'none';
   document.getElementById('lightIconDetails').style.display = 'none';

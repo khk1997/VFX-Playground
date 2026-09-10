@@ -413,6 +413,10 @@ export const MOTIONS = {
         type: 'color', value: '#1059ed',
       },
       {
+        key: 'researchIconTintEdge', label: '染色邊緣集中',
+        min: 0, max: 1, step: 0.01, value: 0.72,
+      },
+      {
         // 相對整個循環移動 icon 的生命週期，不改外殼融合曲線。正值延後、負值
         // 提前；使用相位比例可讓循環秒數改變時仍維持相同的編舞位置。
         key: 'researchIconPhaseOffset', label: 'Icons 出現時機',

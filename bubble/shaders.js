@@ -132,6 +132,7 @@ uniform float uResearchBubbleMax;
 uniform float uResearchIconIOR;
 uniform float uResearchIconTint;
 uniform vec3 uResearchIconTintColor;
+uniform float uResearchIconTintEdge;
 uniform float uResearchIconSizeA;
 uniform float uResearchIconSizeB;
 uniform float uResearchIconTailTip;
@@ -3356,9 +3357,20 @@ void main(){
             // 不替換反射、不混入白色、不改覆蓋率。薄邊與出生/消融自然退色。
             float side = smoothstep(-0.22, 0.78,
               dot(researchIconN, normalize(vec3(0.75, -0.58, 0.12))));
+            float visibleBoundary = smoothstep(0.0, 0.09, iconFacing);
+            float edgeBand = pow(1.0 - iconFacing, 1.45) * visibleBoundary;
+            float broadDistribution = 0.045 + 0.955 * side;
+            // 集中度越高，中央吸收越少，顏色移到仍有穩定 ray hit 的內側輪廓。
+            // side 保留參考圖右下方較濃的方向，不退化成均勻描邊。
+            float edgeDistribution = (0.055 + edgeBand * 1.55)
+              * (0.34 + side * 0.66);
+            float tintDistribution = mix(
+              broadDistribution,
+              edgeDistribution,
+              clamp(uResearchIconTintEdge, 0.0, 1.0)
+            );
             float opticalDepth = (1.0 - exp(-max(iconPath, 0.0) * 8.0))
-              * (0.045 + 0.955 * side)
-              * smoothstep(0.0, 0.15, iconFacing)
+              * tintDistribution
               * researchIconWeight * clamp(uResearchIconTint, 0.0, 1.0);
             vec3 tintAbsorption = -log(clamp(uResearchIconTintColor, 0.002, 0.999));
             researchIconTransmissionTint = exp(-tintAbsorption * opticalDepth);
