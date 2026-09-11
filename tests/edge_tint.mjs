@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { edgeTintParams, readEdgeTintStops, sampleEdgeTint } from '../bubble/edge-tint.js';
+import { edgeTintParams, readEdgeTintStops, sampleEdgeTint, edgeTintKeys, sanitizeEdgeTintValue } from '../bubble/edge-tint.js';
 
 const params = Object.fromEntries(['researchShell', 'researchIcon'].flatMap(prefix =>
   edgeTintParams(prefix).map(param => [param.key, param.value])));
@@ -30,3 +30,17 @@ for (const phase of [0, 0.25, 0.5, 0.75, 1]) {
 }
 assert.equal(params.researchShellMultiTint, false, 'Old presets retain single-color appearance');
 console.log('edge tint palette independence, wrapping and coincident stops passed');
+
+assert.ok(edgeTintKeys('researchShell').every(key => !edgeTintKeys('researchIcon').includes(key)));
+assert.equal(sanitizeEdgeTintValue('researchShellTint', 3), 1);
+assert.equal(sanitizeEdgeTintValue('researchIconTintStopPos0', -1), 0);
+assert.equal(sanitizeEdgeTintValue('researchIconMultiTintRotation', 900), 360);
+assert.equal(sanitizeEdgeTintValue('researchIconTintStopColor0', '#abC123'), '#abC123');
+for (const value of [NaN, Infinity, null, {}, 'invalid']) {
+  assert.equal(sanitizeEdgeTintValue('researchIconTint', value), undefined);
+}
+assert.equal(sanitizeEdgeTintValue('researchShellTintColor', 'red'), undefined);
+assert.equal(sanitizeEdgeTintValue('researchShellMultiTint', 'false'), undefined);
+assert.equal(sanitizeEdgeTintValue('researchShellMultiTint', false), false);
+assert.equal(sanitizeEdgeTintValue('unknown', 1), undefined);
+console.log('imported tint memory validation passed');

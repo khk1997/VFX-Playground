@@ -216,8 +216,7 @@ export function buildInspector({ defaults }) {
   colors.classList.add('inspectorColors');
   panes.look.prepend(colors);
   const notice = element('div', 'inspectorNotice');
-  notice.append(element('p', '', '局部染色適用於淺底。切換底色後，即可分別調整外殼與 Icons。'),
-    button('切換至淺底', () => writeControl('backdrop', 'light')));
+  notice.append(element('p', '', '深底與淺底的配色會分別保存。'));
   const colorBody = element('div', 'inspectorColorBody');
   colors.append(notice, colorBody);
   let target = 'researchShell';
@@ -229,6 +228,9 @@ export function buildInspector({ defaults }) {
   const status = element('output', 'inspectorStatus');
   status.setAttribute('aria-live', 'polite');
   let undo = null;
+  let colorContext = `${$('motion').value}|${$('backdrop').value}`;
+  const colorDefault = key => $('backdrop').value === 'dark'
+    && EDGE_TINT_TARGETS.some(prefix => key === `${prefix}Tint`) ? 0 : defaults[key];
   function applyValues(values, message) {
     undo = Object.fromEntries(Object.keys(values).map(key => [key, readControl(key)]));
     for (const [key, value] of Object.entries(values)) writeControl(key, value);
@@ -269,7 +271,7 @@ export function buildInspector({ defaults }) {
       applyValues(Object.fromEntries(keys.map(key => [key, readControl(key.replace(prefix, other))])), `已複製到${name}，之後仍可獨立調整。`);
     });
     const resetColor = button('重設這組配色', () => {
-      applyValues(Object.fromEntries(keys.map(key => [key, defaults[key]])), `已重設${name}配色。`);
+      applyValues(Object.fromEntries(keys.map(key => [key, colorDefault(key)])), `已重設${name}配色。`);
     });
     actions.append(copy, resetColor);
     card.append(picker.group, modeRow, singleSlot, palette.root, strength, edge, edgeHint, rotation, advanced, actions);
@@ -315,13 +317,19 @@ export function buildInspector({ defaults }) {
       input.style.setProperty('--range-progress', `${Math.max(0, Math.min(100, progress))}%`);
     });
     const light = $('backdrop').value === 'light';
+    const nextContext = `${$('motion').value}|${$('backdrop').value}`;
+    if (colorContext !== nextContext) {
+      colorContext = nextContext;
+      undo = null;
+      status.textContent = '';
+    }
     rowOf('bgMode').hidden = light;
     rowOf('bgColor').hidden = light;
     rowOf('lightBgGradientTop').hidden = !light;
     rowOf('lightBgGradientBottom').hidden = !light;
     backgroundNotes[1].hidden = !light;
-    notice.hidden = light;
-    colorBody.hidden = !light;
+    notice.hidden = false;
+    colorBody.hidden = false;
     objectPicker.select(target);
     undoButton.hidden = !undo;
     panel.querySelectorAll('.val[role="button"]').forEach(readout => {
@@ -340,11 +348,11 @@ export function buildInspector({ defaults }) {
       if (state.single.parentElement !== destination) destination.append(state.single);
       state.palette.refresh();
       state.palette.root.querySelectorAll('button, input[data-preset-ignore]').forEach(el => {
-        el.disabled = !light || !multi || $('motion').value !== 'research';
+        el.disabled = !multi || $('motion').value !== 'research';
       });
       for (const key of state.keys) {
         const el = $(key);
-        const current = readControl(key), baseline = defaults[key];
+        const current = readControl(key), baseline = colorDefault(key);
         const changed = typeof baseline === 'number' ? Number(current) !== baseline : current !== baseline;
         el.closest('.row')?.classList.toggle('is-modified', changed);
       }

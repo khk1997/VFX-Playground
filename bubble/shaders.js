@@ -1211,6 +1211,19 @@ vec3 researchBoundaryTint(
   return mix(baseColor, color, weight);
 }
 
+// A colored studio reflection for dark backdrops. Reuse optical depth so the
+// palette follows curved, thick boundaries and fades with the actual icon hit.
+// Keep bright white reflections and preserve the original result at zero strength.
+vec3 researchDarkBoundaryReflection(vec3 surface, vec3 tint, float depth) {
+  float peak = max(surface.r, max(surface.g, surface.b));
+  float whiteHighlight = smoothstep(0.72, 1.15, min(surface.r, min(surface.g, surface.b)));
+  float amount = (1.0 - exp(-max(depth, 0.0) * 3.0)) * (1.0 - whiteHighlight);
+  vec3 reflectedTint = tint * (0.32 + min(peak, 1.0) * 0.68);
+  vec3 colored = surface * mix(vec3(1.0), tint, 0.72)
+    + reflectedTint * (vec3(1.0) - clamp(surface, 0.0, 1.0));
+  return mix(surface, colored, clamp(amount, 0.0, 0.88));
+}
+
 
 // 側面／下緣權重的圓角半徑。這個常數存在的理由是折痕，不是造型：
 //
@@ -3261,6 +3274,8 @@ void main(){
   float researchIconWeight = 0.0;
   vec3 researchIconTransmissionTint = vec3(1.0);
   vec3 researchShellTransmissionTint = vec3(1.0);
+  vec3 researchBoundaryColor = vec3(1.0);
+  float researchBoundaryDepth = 0.0;
   // icon 在這個像素上「被染色了多少」。淺底顯色（uLightShow）要靠它把自己從
   // icon 身上收回來 —— 見下方 showWeight。
   float researchIconMask = 0.0;
@@ -3384,7 +3399,7 @@ void main(){
           float iconFacing = clamp(dot(-researchInsideDir, researchIconN), 0.0, 1.0);
           researchIconFacing = iconFacing;
           researchIconPath = iconPath;
-          if (uLightBgGradientEnabled > 0.5 && uResearchIconTint > 0.0) {
+          if (uResearchIconTint > 0.0) {
             // 局部 Beer–Lambert 吸收：中央近乎無色，側下方累積藍色。
             // 不替換反射、不混入白色、不改覆蓋率。薄邊與出生/消融自然退色。
             float side = smoothstep(-0.22, 0.78,
@@ -3423,6 +3438,8 @@ void main(){
             }
             vec3 tintAbsorption = -log(clamp(tintColor, 0.002, 0.999));
             researchIconTransmissionTint = exp(-tintAbsorption * opticalDepth);
+            researchBoundaryColor = tintColor;
+            researchBoundaryDepth = opticalDepth;
           }
           float iconF0 = pow((relIOR - 1.0) / (relIOR + 1.0), 2.0);
           float iconFres = iconF0 + (1.0 - iconF0) * pow(1.0 - iconFacing, 5.0);
@@ -3589,7 +3606,7 @@ void main(){
 
 #ifdef FEATURE_RESEARCH
   // 環境折射混合完成後才吸收，避免環境滑桿把染色洗掉。後續表面高光照常疊加。
-  if (uLightBgGradientEnabled > 0.5 && uResearchShellTint > 0.0
+  if (uResearchShellTint > 0.0
       && !researchIconHit) {
     float shellSide = smoothstep(-0.22, 0.78,
       dot(N, normalize(vec3(0.75, -0.58, 0.12))));
@@ -3622,6 +3639,8 @@ void main(){
     }
     vec3 shellTintAbsorption = -log(clamp(shellTintColor, 0.002, 0.999));
     researchShellTransmissionTint = exp(-shellTintAbsorption * shellOpticalDepth);
+    researchBoundaryColor = shellTintColor;
+    researchBoundaryDepth = shellOpticalDepth;
   }
   refractedBg *= researchShellTransmissionTint;
   refractedBg *= researchIconTransmissionTint;
@@ -4569,6 +4588,10 @@ void main(){
         + iconHighlight * 0.24) * iconBoundary, 0.0, mix(0.86, 0.72, iconClarity)) * uLightBackdrop;
     }
 
+  }
+  // Include the colored reflection in own energy before coverage / transparent export.
+  if (uLightBgGradientEnabled < 0.5 && researchBoundaryDepth > 0.0) {
+    finalColor = researchDarkBoundaryReflection(finalColor, researchBoundaryColor, researchBoundaryDepth);
   }
 #endif
   // 通用玻璃的 over 合成。finalColor 此刻是「黑場上的水滴自身能量」，也就是

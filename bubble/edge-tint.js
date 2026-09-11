@@ -9,6 +9,23 @@ export const EDGE_TINT_STOPS = [
   { color: '#bd83db', position: 0.76 },
 ];
 
+export function edgeTintKeys(prefix) {
+  return [`${prefix}Tint`, `${prefix}TintEdge`, `${prefix}TintColor`, ...edgeTintParams(prefix).map(p => p.key)];
+}
+
+// Validate imported per-backdrop memory against the existing control schema.
+export function sanitizeEdgeTintValue(key, value) {
+  const prefix = EDGE_TINT_TARGETS.find(p => edgeTintKeys(p).includes(key));
+  if (!prefix) return undefined;
+  if (key === `${prefix}TintColor` || key.includes('TintStopColor')) {
+    return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value : undefined;
+  }
+  if (key === `${prefix}MultiTint`) return typeof value === 'boolean' ? value : undefined;
+  const param = edgeTintParams(prefix).find(p => p.key === key) || { min: 0, max: 1 };
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  return Math.max(param.min, Math.min(param.max, value));
+}
+
 export function edgeTintParams(prefix) {
   return [
     { key: `${prefix}MultiTint`, label: '多色邊界', type: 'toggle', value: false },

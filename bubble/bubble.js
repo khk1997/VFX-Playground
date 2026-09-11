@@ -1,8 +1,8 @@
 'use strict';
 import * as THREE from 'three';
-import { buildInspector } from './inspector.js?v=inspector-2';
+import { buildInspector } from './inspector.js?v=dark-tint-1';
 let inspector = null;
-import { EDGE_TINT_TARGETS, EDGE_TINT_STOPS, edgeTintParams, readEdgeTintStops, sampleEdgeTint } from './edge-tint.js';
+import { EDGE_TINT_TARGETS, EDGE_TINT_STOPS, edgeTintParams, edgeTintKeys, sanitizeEdgeTintValue, readEdgeTintStops, sampleEdgeTint } from './edge-tint.js?v=dark-tint-1';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
 } from './shape-field.js?v=typewriter-1';
@@ -811,6 +811,7 @@ if (mobileRenderQuery.matches && !PREVIEW) P.cameraDistance = MOBILE_CAMERA_DIST
 // DEFAULTS/TOGGLE_DEFAULTS，只有某個模式的 overrides 有列到才使用特別預設。
 // 因此毛細波的鏡頭與光束設定不會在切換後汙染其他動態模式。
 const MOTION_SCOPED_KEYS = [
+  ...EDGE_TINT_TARGETS.flatMap(edgeTintKeys),
   'shapeDepth', 'shapeEdgeBevel', 'edgeDropsEnabled',
   'shapeLiquid', 'shapeLiquidPosition', 'shapeLiquidSize', 'shapeLiquidSpeed',
   'rayBeamIntensity', 'rayBeamSeparation', 'rayBeamChroma', 'rayBeamZoom',
@@ -879,6 +880,7 @@ const MOTION_SCOPED_KEYS = [
 // 深底外觀。淺底每一格的初始值現在都等於同一個模式的深底值（見
 // motionDefaultsFor）。
 const BACKDROP_SCOPED_KEYS = new Set([
+  ...EDGE_TINT_TARGETS.flatMap(edgeTintKeys),
   'bgMode', 'bgColor', 'materialStyle',
   'loopDuration', 'radius', 'count',
   'wobble', 'wobbleSpeed', 'researchIconIOR',
@@ -963,11 +965,11 @@ function motionDefaultsFor(key) {
   if (!BACKDROP_SCOPED_KEYS.has(key)) {
     return Object.fromEntries(MOTION_KEYS.map(m => [m, darkValue(m)]));
   }
-  // 兩個底色各記一格，但初始值相同：淺底的起點就是該模式的深底值。淺底之後的
-  // 手動微調會存在自己那一格，不會動到深底（見 BACKDROP_SCOPED_KEYS 的說明）。
+  // 兩個底色各記一格。局部染色在深底從 0 開始，保留既有未染色外觀；
+  // 淺底繼續使用原本的染色強度。
   return Object.fromEntries(MOTION_KEYS.flatMap(m => BACKDROP_KEYS.map(b => [
     `${m}|${b}`,
-    darkValue(m),
+    b === 'dark' && EDGE_TINT_TARGETS.some(p => key === `${p}Tint`) ? 0 : darkValue(m),
   ])));
 }
 function buildMotionMemory() {
@@ -1004,7 +1006,43 @@ function mirrorBackdropMemory() {
   const other = P.backdrop === 'dark' ? 'light' : 'dark';
   for (const key of BACKDROP_MEMORY_KEYS) {
     motionMemory[key][memorySlot(key, P.motion, P.backdrop)] = P[key];
-    motionMemory[key][memorySlot(key, P.motion, other)] = P[key];
+    if (!EDGE_TINT_TARGETS.some(p => edgeTintKeys(p).includes(key))) {
+      motionMemory[key][memorySlot(key, P.motion, other)] = P[key];
+    }
+  }
+}
+
+function serializeTintMemory() {
+  const tintMemory = {};
+  for (const key of EDGE_TINT_TARGETS.flatMap(edgeTintKeys)) {
+    tintMemory[key] = { ...motionMemory[key], [memorySlot(key)]: P[key] };
+  }
+  return { tintMemory };
+}
+
+function restoreTintMemory(payload) {
+  const saved = payload.extra?.tintMemory;
+  for (const key of EDGE_TINT_TARGETS.flatMap(edgeTintKeys)) {
+    const slots = motionDefaultsFor(key);
+    for (const slot of Object.keys(slots)) {
+      const value = sanitizeEdgeTintValue(key, saved?.[key]?.[slot]);
+      if (value !== undefined) slots[slot] = value;
+    }
+    if (!saved) {
+      // Legacy tint controls only affected light backdrops, even when saved on dark.
+      const value = payload.values[key] ?? (DEFAULTS[key] ?? TOGGLE_DEFAULTS[key] ?? COLOR_DEFAULTS[key]);
+      const valid = sanitizeEdgeTintValue(key, typeof value === 'string' && !key.includes('Color') ? Number(value) : value);
+      if (valid !== undefined) slots[`${P.motion}|light`] = valid;
+    } else {
+      // Visible controls are authoritative for the active backdrop.
+      slots[memorySlot(key)] = P[key];
+    }
+    motionMemory[key] = slots;
+    const el = document.getElementById(key);
+    const next = slots[memorySlot(key)];
+    if (el.type === 'checkbox') el.checked = next;
+    else el.value = next;
+    el.dispatchEvent(new Event(el.type === 'checkbox' ? 'change' : 'input', { bubbles: true }));
   }
 }
 // 切換底色情境時要搬的那一批。由交集導出而不是另外手寫一份名單：BACKDROP_SCOPED_KEYS
@@ -1419,7 +1457,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=edge-tint-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=dark-tint-1';
 import { createPostChain } from './post.js?v=post-mask-3';
 
 // cold compile 的時間量測（?diagTiming=1）。
@@ -6150,15 +6188,14 @@ function updateUIState() {
   const lightBackdrop = false;
   const lightIcons = false;
   for (const prefix of EDGE_TINT_TARGETS) {
-    const light = P.backdrop === 'light';
     const multi = P[`${prefix}MultiTint`];
     for (const suffix of ['Tint', 'TintEdge', 'TintColor']) {
-      setDisabled(document.getElementById(`${prefix}${suffix}`), !light);
+      setDisabled(document.getElementById(`${prefix}${suffix}`), false);
     }
     for (const param of edgeTintParams(prefix)) {
-      setDisabled(document.getElementById(param.key), !light || (param.key !== `${prefix}MultiTint` && !multi));
+      setDisabled(document.getElementById(param.key), param.key !== `${prefix}MultiTint` && !multi);
     }
-    document.getElementById(`${prefix}TintPalette`)?.classList.toggle('is-disabled', !light || !multi);
+    document.getElementById(`${prefix}TintPalette`)?.classList.toggle('is-disabled', !multi);
   }
   document.getElementById('lightShowRow').style.display = 'none';
   document.getElementById('lightLookDetails').style.display = 'none';
@@ -7939,13 +7976,15 @@ if (!PREVIEW && window.PresetIO) {
     ],
     assetNote: 'HDRI 與 SVG / GLB 素材無法存進參數檔，請自行載入',
     saveOn: ['#resetBtn'],
-    afterApply: () => {
+    serializeExtra: serializeTintMemory,
+    afterApply: payload => {
+      restoreTintMemory(payload);
       updateRampRows();
       buildRampLUT();
       buildSpectralCausticLUT();
       EDGE_TINT_TARGETS.forEach(updateEdgeTintPalette);
-      // 參數檔只寫得到當時所在底色那一格，另一格會留著內建預設，切過去就會
-      // 看到參數莫名跳動。淺底目前沒有獨立定案值，所以載入後兩格對齊。
+      // 其餘材質沿用既有載入規則；局部配色由 restoreTintMemory 分別還原，
+      // 不參與另一底色的鏡射。
       mirrorBackdropMemory();
       updateUIState();
     },
