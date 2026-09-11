@@ -11,16 +11,17 @@ rem (D3D11, Vulkan, OpenGL) with completely different shader compilers. The
 rem bubble shader compile hang has to be attributed to a specific backend before
 rem anything in the GLSL is touched.
 rem
-rem This script used to pass --use-angle=vulkan unconditionally, which means
-rem every Windows measurement taken with it describes the Vulkan backend only --
-rem and Vulkan is the most likely suspect. The default is now NO ANGLE flag at
-rem all, i.e. plain Chrome, so "normal Chrome" and "forced backend" are separate
-rem measurements.
+rem Measurements confirmed the D3D11 backend is the slow one (bubble shader
+rem variants take tens of seconds to compile there vs single digits on Vulkan
+rem and GL), and plain Chrome on this machine picks D3D11 when no flag is
+rem passed. So the default now forces Vulkan -- that's the "just works, don't
+rem think about it" path. Pass an explicit backend to override for testing.
 rem
-rem   start-server.bat            plain Chrome, no ANGLE flag (default)
+rem   start-server.bat            --use-angle=vulkan (default)
 rem   start-server.bat d3d11      --use-angle=d3d11
 rem   start-server.bat vulkan     --use-angle=vulkan
 rem   start-server.bat gl         --use-angle=gl
+rem   start-server.bat none       plain Chrome, no ANGLE flag
 rem
 rem Each backend gets its own --user-data-dir. Sharing one profile would share
 rem one GPU shader disk cache across all three runs, and a warm cache is exactly
@@ -39,13 +40,13 @@ set "URL=http://localhost:%PORT%/"
 set "MATRIX_URL=http://localhost:%PORT%/diagnostics/shader-matrix.html"
 
 set "BACKEND=%~1"
-if "%BACKEND%"=="" set "BACKEND=default"
+if "%BACKEND%"=="" set "BACKEND=vulkan"
 
 rem One statement per line on purpose: `if ... set A & set B` would run `set B`
 rem unconditionally, because the `if` only guards the first command in the chain.
 set "KNOWN="
 set "ANGLE_FLAG="
-if /i "%BACKEND%"=="default" set "KNOWN=1"
+if /i "%BACKEND%"=="none" set "KNOWN=1"
 if /i "%BACKEND%"=="d3d11" set "KNOWN=1"
 if /i "%BACKEND%"=="vulkan" set "KNOWN=1"
 if /i "%BACKEND%"=="gl" set "KNOWN=1"
@@ -56,7 +57,7 @@ if /i "%BACKEND%"=="gl" set "ANGLE_FLAG=--use-angle=gl"
 if not defined KNOWN (
     echo.
     echo [ERROR] Unknown backend "%BACKEND%".
-    echo Usage: start-server.bat [default^|d3d11^|vulkan^|gl]
+    echo Usage: start-server.bat [none^|d3d11^|vulkan^|gl]
     pause
     exit /b 1
 )

@@ -85,9 +85,13 @@ uniform float uTanHalfFov;
 uniform float uCompositionOffsetX;
 uniform float uCompositionOffsetY;
 uniform int   uMaxSteps;
-// 恆為 4。它的作用不是調整取樣數，而是讓 calcNormal 那個四面體迴圈的 trip count
-// 對 fxc 保持未知，迴圈才不會被靜態展開成 4 份 mapScene（見 calcNormal 的說明）。
+// 法線取樣數。四面體 4 個 tap、SVG 分軸中央差分 6 個 tap，兩者都恆定。
+//
+// 它們是 uniform 而不是常數，作用不是「可以調」，而是讓 calcNormal 那個共用迴圈的
+// trip count 對 fxc 保持未知：上界若是編譯期常數，fxc 會把迴圈攤平成一份一份的
+// mapScene，這一整套編譯規模的改善就沒了（見 calcNormal 的說明）。
 uniform int   uNormalTaps;
+uniform int   uNormalAxisTaps;
 
 // ===== shader cache 破壞用的 salt（?shaderRun=N）=====
 // 目的：強迫每次都是 cold compile。
@@ -115,6 +119,14 @@ uniform float uResearchShellAmount;
 uniform float uResearchShellSpeed;
 uniform float uResearchShellDensity;
 uniform float uResearchShellTexture;
+uniform float uResearchShellTint;
+uniform vec3 uResearchShellTintColor;
+uniform float uResearchShellTintEdge;
+uniform sampler2D uResearchShellTintRamp;
+uniform float uResearchShellMultiTint;
+uniform float uResearchShellMultiTintStrength;
+uniform float uResearchShellMultiTintRotation;
+uniform float uResearchShellMultiTintFocus;
 // 紋理方向。三個分量合起來是一個向量,長度不重要(shader 會正規化),只有方向
 // 有意義;全為 0 時退回 +x。
 uniform float uResearchTextureDirX;
@@ -126,6 +138,14 @@ uniform float uResearchBubbleCount;
 uniform float uResearchBubbleMin;
 uniform float uResearchBubbleMax;
 uniform float uResearchIconIOR;
+uniform float uResearchIconTint;
+uniform vec3 uResearchIconTintColor;
+uniform float uResearchIconTintEdge;
+uniform sampler2D uResearchIconTintRamp;
+uniform float uResearchIconMultiTint;
+uniform float uResearchIconMultiTintStrength;
+uniform float uResearchIconMultiTintRotation;
+uniform float uResearchIconMultiTintFocus;
 uniform float uResearchIconSizeA;
 uniform float uResearchIconSizeB;
 uniform float uResearchIconTailTip;
@@ -285,11 +305,14 @@ uniform float uRayBeamNoiseMask;
 uniform float uRayBeamNoiseScale;
 uniform float uSpectralCausticEnabled;
 uniform float uSpectralCausticIntensity;
+uniform int uSpectralCausticMapping;
 uniform float uSpectralCausticFocus;
 uniform float uSpectralCausticWidth;
 uniform float uSpectralCausticLightSize;
 uniform float uSpectralCausticDensity;
 uniform float uSpectralCausticSoftness;
+// 薄膜噪聲的色塊柔化：壓低 fbm 第二個 octave 的權重。見 causticOctaves。
+uniform float uSpectralCausticFilmSoften;
 uniform float uSpectralCausticWarp;
 uniform float uSpectralCausticSeparation;
 uniform float uSpectralCausticBounce;
@@ -327,6 +350,47 @@ uniform int   uTransparentBackground;
 //（見 mainImage 末段）
 uniform float uMembraneOverWhite;
 uniform vec3  uBgColor;
+// 淺底專屬的漸層背景（棚拍常見的無縫背景紙）：由頂到底柔和過渡，取代淺底時
+// 原本的純色 uBgColor。用畫面垂直方向（見 backgroundSample 裡的 d.y）驅動，
+// 不吃 uBgMode/uBgColor —— 選了淺底就直接是這個漸層，不需要另外切換。
+uniform vec3  uLightBgGradientTop;
+uniform vec3  uLightBgGradientBottom;
+// 只驅動這個漸層背景，刻意不用 uLightBackdrop（那顆目前釘死在兩個值都是 0，
+// 因為它還接著一大批尚未定案的淺底外觀邏輯 —— icon 顯色、brightComposite 等。
+// 這裡要的只是「選了淺底就顯示漸層背景」這一件事，所以另開一個乾淨的開關，
+// 不去牽動那些休眠中的路徑）。
+uniform float uLightBgGradientEnabled;
+// 底色情境（見 bubble.js 的 SELECT_DEFAULTS.backdrop）。0 = 深底，1 = 淺底。
+//
+// 這個材質在深底上的顯色方式是「自身能量」：水滴自己發出的光疊在黑場上，最後
+// 由 over 合成把背景讓進來。那套在白背景上會失效，而且失效的方式是數學上的必然
+// 而不是強度不足 —— over 合成是 final = own + bg·(1 - cover)，cover 取自身能量
+// 的峰值，背景為 1.0 時整式恆等於 1.0。自身能量被精確地抵銷掉。
+//
+// 淺底因此走另一條合成：同一份自身能量，改成「對背景的選擇性吸收」。留下來的
+// 顏色仍然是這個材質自己的顏色，所以換到白底看起來還是同一個材質，不是另外配
+// 一組美術模型（那是液態薄膜走的路，見 uMembraneOverWhite）。
+//
+// 三個作用點：白底專屬 brightComposite、低彩度自身能量的去暖色偏，以及
+// researchIconColor／researchIconMask（內部 icon 的獨立顯色）。深底時全部不讀。
+uniform float uLightBackdrop;
+// 淺底的體積強化。只在 uLightBackdrop 為 1 時壓低背光與掠射面。
+uniform float uLightShow;
+// 完整的淺底外觀。這組值只進入 bright/light 分支，深底路徑不讀取。
+uniform float uLightClarity;
+uniform float uLightDepth;
+uniform float uLightCardStrength;
+uniform float uLightChroma;
+// 淺底時內部 icon 的獨立顯色（見 researchIconColor）。刻意跟體積吸收脫鉤：
+// 這三根只在淺底作用，深底一律不讀，所以調它們動不到黑底的任何外觀。
+//
+// 顏色控制淡體積色；明暗反射卡獨立保留，避免可讀性依賴選色。
+uniform vec3  uLightIconColor;
+uniform float uLightIconClarity;
+uniform float uLightIconTint;
+uniform float uLightIconEdge;
+uniform vec3 uLightIconRimColor;
+uniform float uLightIconRimStrength;
 uniform float uEnvRefraction;
 uniform float uReflect;
 uniform float uTransmission;
@@ -473,6 +537,16 @@ vec3 loopNoiseOffset(float speed){
   return vec3(cos(phase), sin(phase), sin(phase * 2.0)) * speed;
 }
 
+// 焦散專用的兩 octave 噪聲。detail = 1.0 時與 fbmFast 完全等價（同樣兩次 snoise，
+// 同樣的權重），所以柔化滑桿在 0 的時候是精確的恆等運算，不動既有畫面。
+//
+// detail 往 0 收時只削掉第二個 octave —— 那一項正是讓色塊邊界皺起來的來源。
+// 色塊的大小由第一個 octave 決定，不受影響，所以視覺上是「邊界糊掉但大小不變」，
+// 而不是「整個變大」。這是它跟「Noise 相對尺度」的分工。
+float causticOctaves(vec3 p, float detail){
+  return 0.5 * snoise(p) + 0.25 * detail * snoise(p * 2.02);
+}
+
 // 環境：程序化棚燈（無 HDRI 時的預設反射來源）；rough 越大光斑越柔散
 vec3 proceduralEnv(vec3 d, float rough){
   vec3 col = mix(vec3(0.015, 0.02, 0.03), vec3(0.05, 0.06, 0.08), d.y * 0.5 + 0.5);
@@ -575,6 +649,15 @@ vec4 backgroundSample(vec3 rd, float extraBlur){
   if (uBgMode == 1 && uHasEnv == 1){
     return vec4(sampleEnvironmentBackdrop(rd, extraBlur), 1.0);
   }
+  if (uLightBgGradientEnabled > 0.5) {
+    // 棚拍無縫背景紙：頂到底柔和過渡，S 曲線讓中段變化最快、頭尾趨緩收斂，
+    // 讀起來才是「紙自然垂墜」的漸層，不是機械的線性內插。跟 proceduralEnv
+    // 同一個慣例，用歸一化方向的 d.y 當「畫面垂直位置」，折射、反射取樣同一支
+    // 函式時漸層會自然跟著彎折，穿過玻璃看仍是同一塊背景紙。
+    float t = smoothstep(-0.55, 0.55, rd.y);
+    vec3 gradient = mix(uLightBgGradientBottom, uLightBgGradientTop, t);
+    return vec4(gradient, uTransparentBackground == 1 ? 0.0 : 1.0);
+  }
   return vec4(uBgColor, uTransparentBackground == 1 ? 0.0 : 1.0);
 }
 
@@ -622,7 +705,15 @@ float microDropletDistance(vec3 p, vec4 sphere, vec4 shape){
 #endif // FEATURE_MICRO_DROPS
 
 #ifdef FEATURE_SHAPE_FIELD
-float decodeShape(float v){ return (v - 0.5) * 48.0; }
+// ===== 造型距離場的來源特化 =====
+//
+// 造型有兩種來源：SVG 擠出（uShapeType == 1）與 GLB 體積（uShapeType == 2），
+// 面板的「形狀來源」二選一。原版把兩支距離場都編進去，再用 uShapeType 在
+// runtime 選一支 —— 而 mapScene 攤平之後每一份都帶著兩支，其中一支必定是死碼。
+//
+// volumeShapeDistance 是 8 次 atlasVoxel（＝8 個 texture2D 加三線性插值），
+// 所以在 SVG 模式下這一刀砍掉的是編譯規模裡最大的一塊。
+#ifdef FEATURE_SHAPE_SVG
 // 硬體雙線性只有 C0 連續：梯度在每條 texel 邊界跳一次，格內近似常數。
 // 擠出側壁的法線完全等於這個 xy 梯度，而 edge 不隨 z 變化，於是每格 texel
 // 的固定法線會沿整個厚度重複，形成貫穿擠出深度的條紋（掠射角還會把 texel
@@ -713,6 +804,10 @@ float svgShapeDistance(vec3 p, bool smoothShape, int ch){
   }
   return result - shapeSoftnessFor(ch);
 }
+#endif // FEATURE_SHAPE_SVG
+
+#ifdef FEATURE_SHAPE_VOLUME
+float decodeShape(float v){ return (v - 0.5) * 48.0; }
 // ch 的意義與 sampleShapeField 相同：形狀變形模式把第二顆形狀的體素圖集放在
 // g 通道，其餘情況 r=g=b 都是同一個值。
 float atlasVoxel(vec3 cell, int ch){
@@ -751,6 +846,29 @@ float volumeShapeDistance(vec3 p, int ch){
   float edge = mix(z0, z1, f.z) * voxelSize - shapeSoftnessFor(ch) - topologyGuard;
   vec3 outside = max(gridP - (n - 1.0), vec3(0.0)) + max(-gridP, vec3(0.0));
   return edge + length(outside) * voxelSize;
+}
+#endif // FEATURE_SHAPE_VOLUME
+
+// 造型距離場的單一入口。mapScene 有三個呼叫點，原本每一個都寫成
+//   uShapeType == 1 ? svgShapeDistance(...) : volumeShapeDistance(...)
+// 於是兩支都被編一份。這裡把那個三元運算子搬進一個函式，兩支的存在與否交給
+// FEATURE_SHAPE_SVG / FEATURE_SHAPE_VOLUME 決定。
+//
+// 兩者都開時（?diag=allfeatures 的驗證組合）三條 if 覆蓋了 uShapeType 的所有取值，
+// 最後那個 return 到不了，行為與原本的三元運算子逐位元相同。
+//
+// 只開一支時多出一個型別檢查，那不是保險而是有意義的：換「形狀來源」的當下
+// uShapeType 就變成新值，而對應的變體要在背景編好幾秒後才會換上來。這幾秒裡寧可
+// 回傳遠距離（＝此刻沒有造型，跟切換模式時造型還沒出現是同一種過渡），也不要把
+// 體素圖集當成 SVG 高度場、或反過來，解讀出一團跟形狀無關的東西。
+float shapeDistance(vec3 p, bool smoothShape, int ch){
+#ifdef FEATURE_SHAPE_SVG
+  if (uShapeType == 1) return svgShapeDistance(p, smoothShape, ch);
+#endif
+#ifdef FEATURE_SHAPE_VOLUME
+  if (uShapeType != 1) return volumeShapeDistance(p, ch);
+#endif
+  return 1e6;
 }
 
 #endif // FEATURE_SHAPE_FIELD
@@ -795,7 +913,11 @@ float capillaryWave(vec3 p, int i){
 //              這是碎裂鏡頭的讀感來源，糊掉就只是另一種噪聲了。
 //
 // 每個 march step 只算一次（兩顆形狀共用），所以成本與形狀數無關。
-#ifdef FEATURE_SHAPE_FIELD
+//
+// FEATURE_DISSOLVE_FIELD 由 bubble.js 在「形狀變形的交接」或「形狀匯聚的成型波前」
+// 任一個成立時開啟（見 shaderFeatures）。其餘造型模式兩道波前都不存在，這整段
+// 連著裡面那個 3x3 Voronoi 迴圈都是死碼 —— 而它在攤平後是跟著 mapScene 一起乘的。
+#ifdef FEATURE_DISSOLVE_FIELD
 float voronoiCellValue(vec2 p){
   vec2 cell = floor(p);
   vec2 f = fract(p);
@@ -849,7 +971,7 @@ float dissolveField(vec3 p){
   return base;
 }
 
-#endif // FEATURE_SHAPE_FIELD
+#endif // FEATURE_DISSOLVE_FIELD
 
 // 毛細波共用的程序紋理。最後只回傳表面距離偏移，不搬動距離場取樣座標；
 // 這能避免高密度螺旋把座標映射折回中心，讓 SVG／GLB 縮成皺褶。
@@ -1072,6 +1194,37 @@ float sdTorus(vec3 p, float majorR, float minorR){
 #endif // FEATURE_STATIC_SHAPE
 
 #ifdef FEATURE_RESEARCH
+// Scene-space normals keep the palette attached to the geometry as the camera
+// moves. atan's pole is faded out; its seam wraps continuously in the LUT.
+vec3 researchBoundaryTint(
+  sampler2D palette, vec3 normal, float edge, float bend,
+  vec3 baseColor, float amount, float rotation, float focus
+) {
+  float radial = length(normal.xy);
+  float angle = radial > 0.0001 ? atan(normal.y, normal.x) / TAU : 0.0;
+  float phase = fract(angle - rotation / 360.0 + focus * bend * 0.12);
+  vec3 color = texture2D(palette, vec2(phase, 0.5)).rgb;
+  float boundary = smoothstep(0.025, 0.55, edge) * smoothstep(0.02, 0.22, radial);
+  float weight = clamp(amount * boundary, 0.0, 1.0);
+  // Mix transmission colors before taking log: layering colored absorption
+  // coefficients would turn complementary neighboring colors muddy.
+  return mix(baseColor, color, weight);
+}
+
+// A colored studio reflection for dark backdrops. Reuse optical depth so the
+// palette follows curved, thick boundaries and fades with the actual icon hit.
+// Keep bright white reflections and preserve the original result at zero strength.
+vec3 researchDarkBoundaryReflection(vec3 surface, vec3 tint, float depth) {
+  float peak = max(surface.r, max(surface.g, surface.b));
+  float whiteHighlight = smoothstep(0.72, 1.15, min(surface.r, min(surface.g, surface.b)));
+  float amount = (1.0 - exp(-max(depth, 0.0) * 3.0)) * (1.0 - whiteHighlight);
+  vec3 reflectedTint = tint * (0.32 + min(peak, 1.0) * 0.68);
+  vec3 colored = surface * mix(vec3(1.0), tint, 0.72)
+    + reflectedTint * (vec3(1.0) - clamp(surface, 0.0, 1.0));
+  return mix(surface, colored, clamp(amount, 0.0, 0.88));
+}
+
+
 // 側面／下緣權重的圓角半徑。這個常數存在的理由是折痕，不是造型：
 //
 // 這個遮罩原本寫成 abs(q.x) + max(-q.y, 0.0) * 0.55。q 是球心指向表面的單位
@@ -1714,7 +1867,7 @@ float researchBubbleMap(vec3 p, float phase){
   return d;
 }
 
-float researchIconMap(vec3 p){
+vec2 researchIconDistances(vec3 p){
   // 整體位移只作用在 icon、誕生漣漪與伴隨泡泡，不綁定第二外殼的融合時刻。
   // fract 讓正負位移都保持無縫循環；正值代表視覺事件延後。
   float phase = fract(uTime / max(uLoopDuration, 0.001) - uResearchIconPhaseOffset);
@@ -1751,7 +1904,12 @@ float researchIconMap(vec3 p){
   // 泡泡用更小的融合半徑併進來:它們不該跟 icon 黏成一坨(那是兩種東西),
   // 但也不能用 min —— 剛好擦過 icon 的那條交界會是梯度硬折,在折射玻璃裡
   // 就是一條亮線(同上)。0.012 只夠把交界抹成一圈細圓角。
-  return researchSmin(icons, researchBubbleMap(p, phase), 0.012);
+  return vec2(icons, researchBubbleMap(p, phase));
+}
+
+float researchIconMap(vec3 p){
+  vec2 distances = researchIconDistances(p);
+  return researchSmin(distances.x, distances.y, 0.012);
 }
 
 vec3 researchIconNormal(vec3 p){
@@ -1798,14 +1956,21 @@ void researchTraceIconExit(vec3 ro, vec3 rd, out vec3 exitPoint, out float pathL
   pathLength = t;
 }
 
-bool researchTraceIcon(vec3 ro, vec3 rd, float maxDistance, out vec3 hitPoint){
+bool researchTraceIcon(vec3 ro, vec3 rd, float maxDistance, out vec3 hitPoint,
+  out float iconWeight){
+  iconWeight = 0.0;
   float t = 0.006;
   // 步數從 28 提到 40：下面的步進係數為了 smin 的頸部調得比較保守，同樣的步數
   // 走不完整條弦，遠端那顆 icon 會整個消失。
   for (int i = 0; i < 40; i++) {
     hitPoint = ro + rd * t;
-    float d = researchIconMap(hitPoint);
-    if (d < 0.0012) return true;
+    vec2 distances = researchIconDistances(hitPoint);
+    float d = researchSmin(distances.x, distances.y, 0.012);
+    if (d < 0.0012) {
+      // 直接使用本次追蹤已算出的距離分辨對話泡與小氣泡，不多追一條射線。
+      iconWeight = smoothstep(-0.012, 0.012, distances.y - distances.x);
+      return true;
+    }
     // smin 併集不再是嚴格 Lipschitz(頸部附近會低估距離),步長係數比一般
     // sphere tracing 保守,否則兩顆球中間那條頸子會被跨過去、出現破洞。
     //
@@ -2138,8 +2303,22 @@ float mapScene(vec3 p, bool smoothShape){
     // 分開套在各自的通道上。fromCh/toCh 哪個是 A、哪個是 B 由 uShapeMorph 決定
     // （見下方），所以要先分出 A、B 各自的本地座標。
     vec3 shapePA = shapeP / uShapeAScale;
+#ifdef FEATURE_SHAPE_MORPH
     vec3 shapePB = shape2P / uShapeBScale;
+#endif
     float detailD;
+// ===== 兩顆形狀交接（形狀變形）的編譯期特化 =====
+//
+// uShapeMorph 只有形狀變形模式會設成非 0（見 bubble.js 的 morphSolid：其餘模式一律
+// uShapeMorph = 0），所以其他模式下這整條分支的 runtime 條件恆為 false。
+//
+// 它是造型場裡最貴的一塊：兩顆形狀各求一次造型距離（＝兩份 shapeDistance），再加
+// 一次 dissolveField。拿掉之後 mapScene 裡的造型距離場從 3 份降到 1 份，而每一份都
+// 要跟著 mapScene 的攤平份數一起乘。
+//
+// 形狀變形模式本身兩條都要編：雙通道貼圖還沒備妥時 morphSolid 是 false、
+// uShapeMorph 是 0，那時走的是下面的單形狀路徑。
+#ifdef FEATURE_SHAPE_MORPH
     if (uShapeMorph > 0.5) {
       // 兩顆形狀同時在場：舊的被「消失波前」削掉，新的被「出現波前」放出來，
       // 兩者聯集。單一貼圖的兩個通道，所以這裡沒有多綁任何取樣器。
@@ -2154,14 +2333,10 @@ float mapScene(vec3 p, bool smoothShape){
       // 兩顆形狀一定是同一種來源（面板的「形狀來源」對兩個匯入槽共用），所以
       // 這裡只需要看一次 uShapeType，不會出現一顆走 SVG、一顆走體素的情況。
       float dFrom = uMorphActive.x > 0.5
-        ? (uShapeType == 1
-          ? svgShapeDistance(shapePFrom, smoothShape, fromCh)
-          : volumeShapeDistance(shapePFrom, fromCh)) * uShapeScale * scaleFrom
+        ? shapeDistance(shapePFrom, smoothShape, fromCh) * uShapeScale * scaleFrom
         : 1e6;
       float dTo = uMorphActive.y > 0.5
-        ? (uShapeType == 1
-          ? svgShapeDistance(shapePTo, smoothShape, toCh)
-          : volumeShapeDistance(shapePTo, toCh)) * uShapeScale * scaleTo
+        ? shapeDistance(shapePTo, smoothShape, toCh) * uShapeScale * scaleTo
         : 1e6;
       float field = dissolveField(p);
       // 收頸：波前前方那一小段裡，對距離場加一個正偏移把實體「侵蝕變薄」。
@@ -2182,15 +2357,20 @@ float mapScene(vec3 p, bool smoothShape){
       float keptFrom = -smin(-dFrom, -(uShapeCut.z - field), k);
       float keptTo = -smin(-dTo, -(field - uShapeCut.w), k);
       detailD = smin(keptFrom, keptTo, k);
-    } else {
+    } else
+#endif // FEATURE_SHAPE_MORPH
+    {
       // 非 morph 情境下場上只有形狀 A（通道 0）。
-      detailD = (uShapeType == 1
-        ? svgShapeDistance(shapePA, smoothShape, 0)
-        : volumeShapeDistance(shapePA, 0)) * uShapeScale * uShapeAScale;
+      detailD = shapeDistance(shapePA, smoothShape, 0) * uShapeScale * uShapeAScale;
       // 形狀匯聚的成型波前：跟上面那組消失波前共用同一個 dissolveField、同一組
       // 擾動與收頸 uniform，差別只有兩點——只有一道波前（沒有第二顆形狀要交接），
       // 而且方向相反：morph 保留波前「之後」的舊形狀，這裡保留波前「之前」掃過
       // 的區域，也就是掃到哪裡才長到哪裡。
+// 成型波前只有形狀匯聚會用：uFormationCut 是 isFormationMotion(motion) && shapeField
+// && P.formationFrontOn 才會被設成 1（見 bubble.js 的 updateDropUniforms），其餘造型
+// 模式恆為 0。裡面的 dissolveField 含一個 3x3 Voronoi 迴圈，是跟著 mapScene 攤平
+// 份數一起乘的，所以其他模式不編它省下來的量很可觀。
+#ifdef FEATURE_FORMATION_CUT
       if (uFormationCut > 0.5) {
         float field = dissolveField(p);
         // 收頸在這裡的身分也跟著反過來：morph 是斷開前先變薄，這裡是剛長出來
@@ -2205,6 +2385,7 @@ float mapScene(vec3 p, bool smoothShape){
         // （-smin 的對偶）取交集，uShapeCutBlend 控制切口本身的軟硬。
         detailD = -smin(-detailD, -(field - uShapeCut.w), max(0.0001, uShapeCutBlend));
       }
+#endif // FEATURE_FORMATION_CUT
     }
     // 以 signed-distance 偏移形成表面波，不再把多個取樣座標擠向螺旋中心。
 #ifdef FEATURE_CAPILLARY
@@ -2276,10 +2457,11 @@ float mapScene(vec3 p, bool smoothShape){
   // 最大位移遠小於 0.25；遠離表面時略過 noise，不影響射線接近表面的安全性。
   //
   // 診斷探針 C（?diag=probe-no-wobble）只把這一段在編譯期拿掉。
-  // 它測的是「同一份 noise 被重複 inline」的代價：mapScene 在正式 shader 有 13 個
-  // 靜態呼叫點（raymarch 迴圈體、calcNormal 的 10 個 tap、traceExitSurface），每個
-  // 都會把這裡的 fbmFast 展開成 2 份 snoise。probe 階梯已經量到「noise 進 mapScene」
-  // 是 148ms → 600ms 那一跳的來源，這一刀就是同一個機制在正式規模下的代價。
+  // 它測的是「同一份 noise 被重複 inline」的代價：mapScene 在造型模式有 6 個靜態
+  // 呼叫點（raymarch 迴圈體 1、calcNormal 1、traceExitSurface 2 個呼叫點各帶自己的
+  // march 與一份 calcNormal），每個都會把這裡的 fbmFast 展開成 2 份 snoise。
+  // probe 階梯已經量到「noise 進 mapScene」是 148ms → 600ms 那一跳的來源，這一刀
+  // 就是同一個機制在正式規模下的代價。
   // 拿掉之後水滴表面會少一層擾動，所以這是探針不是可上線的設定。
 #ifndef PROBE_NO_GEOMETRY_WOBBLE
   float geometryWobble = uWobble * mix(1.0, 0.10, uShapeProgress);
@@ -2311,27 +2493,40 @@ vec3 calcNormal(vec3 p){
   // 側壁需要跨過約 2 texels 才能平均 SDF 殘留的次像素梯度跳動；
   // 厚度方向則不能用同樣的大步長，否則會跨過正面／側壁倒角。
   // 因此 SVG 改用分軸中央差分：XY 平滑輪廓梯度，Z 獨立保留倒角。
-// 這條 SVG 分軸中央差分是 6 份 mapScene，而下面的四面體是 4 份 —— 兩條都會被
-// 編譯，所以 calcNormal 一次呼叫就展開 10 份 mapScene。它有 3 個呼叫點，於是
-// 33 份總展開量裡有 30 份出自這裡（實測 B1a：把 traceExitSurface 那 20 份拿掉
-// 就從 127 秒降到 30 秒）。
+// ===== 法線路徑：兩條路徑共用一個迴圈 =====
 //
-// KEEP_SVG_NORMAL_BRANCH 由 bubble.js 決定：不帶 probe 時恆為開啟，正式版一個
-// 字都沒變；只有 probe-lean-normals 且造型場沒編進來時才關掉 —— 那種情況下
-// svgShapeDistance 根本不存在，這條分支是純粹的死碼。
-// ===== 法線路徑的編譯期特化 =====
+// 這裡的成本不是「算幾次」而是「編幾份」。原版是兩條展開的路徑：SVG 分軸中央差分
+// 6 份 mapScene ＋ 四面體 4 份 ＝ 每個呼叫點 10 份；而 calcNormal 有 3 個呼叫點
+// （main 一個、traceExitSurface 兩個），所以 33 份總展開量裡有 30 份出自這裡
+// （實測 B1a：把 traceExitSurface 那 20 份拿掉就從 127 秒降到 30 秒）。
 //
-// 這個函式有兩條路徑，執行期只會走一條，但兩條都會被編譯 —— SVG 分軸差分 6 份
-// mapScene、四面體 4 份，合計每個呼叫點 10 份。它有 3 個呼叫點，所以 33 份總展開量
-// 裡有 30 份出自這裡。
+// 兩條路徑其實是同一個形狀的取樣：
+//   法線 = normalize( Σ w_i · mapScene(p + w_i·h_i) / divisor )
+// 四面體是 4 個 tap、w_i 是四面體的正負號向量、divisor 為 1；SVG 是 6 個 tap、
+// w_i 是 ±單位軸、divisor 是各軸自己的步長。既然形狀一樣，就不需要兩份程式碼 ——
+// 收成一個 uniform 守衛的迴圈之後，整個 calcNormal 只剩 1 份 mapScene，三個呼叫點
+// 合計 3 份（原版 30 份）。
 //
-// NORMAL_TAPS_SVG / NORMAL_TAPS_TETRA 兩個都預設開啟（bubble.js 決定），此時展開結果
-// 與特化之前逐字相同，正式版不受影響。只留一條時，那條的 runtime 條件也一併消失 ——
-// 因為「條件成立」本來就是選到這個 variant 的理由。
+// 這個改寫是逐位元等價的，不是近似：
+//   * 四面體：svgPath 為 false 時 w = e、h_i = h、divisor = 1，acc 的累加式與展開式
+//     逐字相同，而 acc / vec3(1.0) 在 IEEE754 下就是 acc。
+//   * SVG：offset 由 axis*(sgn*h) 改成 (axis*sgn)*h，逐分量都是 ±1/±0 乘上同一個 h，
+//     兩種結合順序的結果完全相同（含 ±0 的正負號）；除法仍然留到最後一次做，
+//     所以每一軸都還是「(正 tap − 負 tap) / 該軸步長」。
+//   * 兩者唯一的差別是多了起始的 0.0 + 與其他軸加上的 ±0.0。那只可能改變零的正負號，
+//     而零的正負號經過 normalize 之後對下游沒有可見影響。
+// 這個主張是量出來的，不是推論：?diag=probe-unrolled-svg-taps 會編出上面那份展開的
+// 兩路徑原版，同一個造型模式、同一個 ?diagTime 下擷取兩次比對，實測全畫面 FNV hash
+// 相同、最大通道誤差 0（formation／SVG，1899x1209）。
 //
-// 注意 SVG 模式不能單純只編 SVG 那條：uShapeProgress 從 0 長到 1，在 0 附近走的是
-// 四面體那條。所以 variant 的鍵必須包含「造型此刻是否已經生效」，而不是只看造型型別，
-// 否則成形過程中的法線會變。這一點是這個設計能不能宣稱「數學完全一致」的關鍵。
+// NORMAL_TAPS_SVG / NORMAL_TAPS_TETRA 由 bubble.js 決定。SVG 模式兩條都要編：
+// uShapeProgress 從 0 長到 1，在 0 附近走的是四面體那條，所以「造型此刻是否已經
+// 生效」不能拿來當變體條件，否則成形過程中法線會換一條路徑。
+#ifdef PROBE_UNROLLED_SVG_TAPS
+// 驗證用（?diag=probe-unrolled-svg-taps）：迴圈化之前那份展開的兩路徑原版，逐字保留。
+// 它是上面那個等價主張的可重現證據，不是備援 —— 唯一該開它的時候就是重跑那組比對。
+// 代價很實在：mapScene 的靜態展開份數會從 3 拉回 24，formation 的 cold compile 實測
+// 從 75 秒變成 218 秒。
 #ifdef NORMAL_TAPS_SVG
 #ifdef NORMAL_TAPS_TETRA
   if (uShapeType == 1 && uShapeProgress > 0.001)
@@ -2349,38 +2544,78 @@ vec3 calcNormal(vec3 p){
   }
 #endif // NORMAL_TAPS_SVG
 #ifdef NORMAL_TAPS_TETRA
+  {
+    float svgH = svgTexel * 1.5;
+    float shapeH = uShapeType == 2 ? voxelH * 1.70 : svgH;
+    float h = mix(0.0009, shapeH, uShapeProgress);
+    // 四面體那條在這一輪之前就已經是迴圈了（見 uNormalTaps 的說明），所以這份
+    // 「原版」保留它原本的迴圈形式，只把 SVG 那條還原成展開式 —— 這一輪要驗的
+    // 就是 SVG 那條。
+    vec3 acc = vec3(0.0);
+    for (int i = 0; i < 4; i++) {
+      if (i >= uNormalTaps) break;
+      vec3 e = i == 0 ? k.xyy : (i == 1 ? k.yyx : (i == 2 ? k.yxy : k.xxx));
+      acc += e * mapScene(p + e * h, true);
+    }
+    return normalize(acc);
+  }
+#endif // NORMAL_TAPS_TETRA
+#endif // PROBE_UNROLLED_SVG_TAPS
+
+#ifndef PROBE_UNROLLED_SVG_TAPS
+  // 這一刻走的是 SVG 分軸差分還是四面體。只留一條路徑的變體裡它是編譯期常數，
+  // 下面所有的 svgPath ? A : B 都會被摺掉，等於直接寫死那一條。
+#ifdef NORMAL_TAPS_SVG
+#ifdef NORMAL_TAPS_TETRA
+  bool svgPath = uShapeType == 1 && uShapeProgress > 0.001;
+#endif
+#ifndef NORMAL_TAPS_TETRA
+  bool svgPath = true;
+#endif
+#endif
+#ifndef NORMAL_TAPS_SVG
+  bool svgPath = false;
+#endif
+  // SVG 的兩個步長：XY 跨約 2 texels 平滑輪廓梯度，Z 獨立且更小，才不會跨過
+  // 正面／側壁的倒角（見上方那段 texel 說明）。
+  float xyH = min(svgTexel * 2.0, max(svgTexel * 0.75, uShapeEdgeBevel * 0.48));
+  float zH = min(xyH, max(0.0009, uShapeEdgeBevel * 0.22));
+  // 四面體的單一步長：造型成形後跨到造型自己的尺度（體素 1.70 個格距、SVG 1.5 個
+  // texel），成形前收回 0.0009 的水滴尺度。
   float svgH = svgTexel * 1.5;
   float shapeH = uShapeType == 2 ? voxelH * 1.70 : svgH;
-  float h = mix(0.0009, shapeH, uShapeProgress);
-// 探針 A（?diag=probe-loop-normal-taps）：把四個 tap 收進一個迴圈。
-//
-// 目的只有一個 —— 靜態展開份數。四個展開的 tap 會讓 mapScene 被 inline 四份；
-// 收進迴圈只剩一份。runtime 仍然算四次，數學完全一樣。
-//
-// 那個 if (i >= uNormalTaps) break; 不是多餘的：迴圈上界若是編譯期常數 4，fxc 很可能
-// 直接展開，那就白做了。uNormalTaps 是 uniform（恆為 4），trip count 對編譯器未知，
-// 就跟主 raymarch 迴圈同一個形狀 —— 而我們實測過那個迴圈把上界從 4 改到 88，
-// 編譯時間只差 1.4%，也就是 fxc 確實沒有展開它。
-//
-// 累加順序刻意與展開式一致（i = 0→3）。唯一的差別是多了一個起始的 0.0 +，
-// 那在 IEEE754 下除了 -0.0 會變成 +0.0 之外完全等值，而零的正負號經過
-// normalize 之後對下游沒有可見影響。
+  float tetraH = mix(0.0009, shapeH, uShapeProgress);
+  // trip count 必須對 fxc 未知，迴圈才不會被展開成一份一份的 mapScene ——
+  // 這兩顆 uniform 恆為 6 / 4，存在的唯一理由就是這件事（見它們的宣告）。
+  int taps = svgPath ? uNormalAxisTaps : uNormalTaps;
+  // 分軸差分的除法留到最後一次做，才與展開式的 dx/xyH、dy/xyH、dz/zH 逐位元相同。
+  vec3 divisor = svgPath ? vec3(xyH, xyH, zH) : vec3(1.0);
   vec3 acc = vec3(0.0);
-  for (int i = 0; i < 4; i++) {
-    if (i >= uNormalTaps) break;
+  for (int i = 0; i < 6; i++) {
+    if (i >= taps) break;
+    // SVG：i = 0..5 依序是 +x, -x, +y, -y, +z, -z，與展開式的評估順序一致。
+    vec3 axis = i < 2
+      ? vec3(1.0, 0.0, 0.0)
+      : (i < 4 ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0));
+    float sgn = (i == 0 || i == 2 || i == 4) ? 1.0 : -1.0;
+    // 四面體：i = 0..3 的四個正負號向量，與展開式的順序一致。
     vec3 e = i == 0 ? k.xyy : (i == 1 ? k.yyx : (i == 2 ? k.yxy : k.xxx));
-    acc += e * mapScene(p + e * h, true);
+    // 權重向量同時當取樣偏移的方向：offset = w * h，累加也是 w * 該 tap 的值。
+    vec3 w = svgPath ? axis * sgn : e;
+    float h = svgPath ? (i < 4 ? xyH : zH) : tetraH;
+    acc += w * mapScene(p + w * h, true);
   }
-  return normalize(acc);
-#endif // NORMAL_TAPS_TETRA
+  return normalize(acc / divisor);
+#endif // PROBE_UNROLLED_SVG_TAPS
 }
 
 #ifdef PROBE_LEAN_NORMALS
 // 出口法線專用的四面體法線（?diag=probe-lean-normals）。
 //
-// 存在的理由純粹是 inline 展開量：完整的 calcNormal 含 SVG 分軸差分（6 份）與
-// 四面體（4 份）兩條路徑，兩條都會被編譯，所以每個呼叫點都是 10 份 mapScene。
-// traceExitSurface 有 2 個呼叫點，光是它就貢獻 20 份。
+// 存在的理由純粹是 inline 展開量。它是在 calcNormal 還是兩條展開路徑（SVG 6 份 ＋
+// 四面體 4 份，每個呼叫點 10 份）的時候加的，那時 traceExitSurface 的 2 個呼叫點光
+// 自己就貢獻 20 份。calcNormal 收成單一迴圈之後每個呼叫點只剩 1 份，這支 probe 能
+// 省下的量因此小很多，留著只是為了跟當時的量測結果對得上。
 //
 // 這一版只保留四面體那條，h 的算法與 calcNormal 的非 SVG 路徑逐字相同，所以在
 // 非 SVG 造型上結果應該一致；差別只出現在 SVG 造型的出口法線上 —— 那裡會少掉
@@ -2764,7 +2999,7 @@ vec3 visibleSpectrum(float t){
   return clamp(vec3(red, green, blue), 0.0, 1.0);
 }
 
-vec3 separateSpectrum(vec3 spectrum){
+vec3 separateSpectrum(vec3 spectrum, float separationControl){
   float lum = dot(spectrum, vec3(0.2126, 0.7152, 0.0722));
   // 粗糙度會把色散「洗掉」，而不只是「弄柔」——這是霧面玻璃不會打出彩虹的原因。
   //
@@ -2779,7 +3014,7 @@ vec3 separateSpectrum(vec3 spectrum){
   // 但刻意保留 35% 不收（係數 0.65 而不是 1.0）：扇形最外緣永遠只有最外側的
   // 波長到得了，所以即使很粗糙也還是「霧玻璃透出的彩色暈光」，不是純灰。
   // 收到 0 會過頭，看起來像色散被關掉，而不是被散射。
-  float separation = uDispersionSeparation * (1.0 - transmissionSpread() * 0.65);
+  float separation = separationControl * (1.0 - transmissionSpread() * 0.65);
   vec3 separated = mix(
     vec3(lum),
     spectrum,
@@ -2979,7 +3214,13 @@ void main(){
   // 就問不出「背景到底有多亮」了。
   float trueBgLum = bgLum;
   if (universalGlass) bgLum = 0.0;
-  float brightBg = smoothstep(0.45, 0.90, bgLum);
+  // 通用玻璃的 bgLum 會刻意歸零，因為暗底自身能量要在黑場生成；但使用者明確
+  // 選擇淺底時，最終材質仍必須切到 brightComposite。舊寫法只看歸零後的 bgLum，
+  // 使整條 Light Look 永遠不可達，畫面實際仍是黑底 HDRI 反射再疊白背景。
+  float brightBg = max(
+    smoothstep(0.45, 0.90, bgLum),
+    universalGlass ? clamp(uLightBackdrop, 0.0, 1.0) : 0.0
+  );
   // 灰底維持原本美術模型；只有純色畫布接近白色時才做保色補償。
   //
   // 這裡原本還乘一個「亮底保色」開關，已移除：它在唯一預設材質（通用玻璃）下
@@ -2992,7 +3233,7 @@ void main(){
   // 通用玻璃把它關掉、再切到液態薄膜，那個 false 會跟著生效並悄悄改掉薄膜的
   // 外觀，而此時滑桿是灰的、使用者無從得知。
   float whiteBackdrop = (1.0 - float(uBgMode))
-    * smoothstep(0.82, 0.97, bgLum);
+    * smoothstep(0.82, 0.97, trueBgLum);
   vec3 darkComposite = mix(universalGlass ? vec3(0.0) : bg.rgb,
     material.darkColor, material.darkAlpha);
 
@@ -3022,6 +3263,22 @@ void main(){
   vec3 researchInsideDir = rd;
   float researchIconFres = 0.0;
   float researchIconBend = 0.0;
+  // 淺底局部玻璃的反射／厚度色，在外殼合成後套用以保持辨識度。
+  vec3 researchIconColor = vec3(1.0);
+  // icon 表面的正對程度（1 = 正視，0 = 掠射），用來柔化真正剪影邊界。
+  float researchIconFacing = 1.0;
+  // 光在 icon 內部走過的長度。深底時它只是併進總光程（見 pathLength），淺底另外
+  // 需要它單獨算一份「這顆 icon 自己的吸收」—— 全域的體積吸收是整顆水滴一起
+  // 染色，沒辦法只讓 icon 顯色而外殼維持接近白。
+  float researchIconPath = 0.0;
+  float researchIconWeight = 0.0;
+  vec3 researchIconTransmissionTint = vec3(1.0);
+  vec3 researchShellTransmissionTint = vec3(1.0);
+  vec3 researchBoundaryColor = vec3(1.0);
+  float researchBoundaryDepth = 0.0;
+  // icon 在這個像素上「被染色了多少」。淺底顯色（uLightShow）要靠它把自己從
+  // icon 身上收回來 —— 見下方 showWeight。
+  float researchIconMask = 0.0;
 #endif
   bool needsEnvironmentTransmission =
     uBgMode == 0 && uHasEnv == 1
@@ -3042,7 +3299,7 @@ void main(){
           p + insideDir * 0.004,
           insideDir,
           max(pathLength - 0.008, 0.0),
-          researchIconPoint
+          researchIconPoint, researchIconWeight
         );
         if (researchIconHit) researchIconN = researchIconNormal(researchIconPoint);
 #endif
@@ -3090,6 +3347,19 @@ void main(){
         // A：折射進來的背景依粗糙度預濾波。這是「霧面玻璃」最主要的視覺來源——
         // 畫面九成以上的內容走這條路徑，接上這裡滑桿才真的有感。
         refractedBg = backgroundSample(exitDir, roughBlur).rgb;
+        // 註：這裡試過「RGB 通道各自以不同折射率取樣」的真色散（chromatic
+        // aberration），結論是不划算，已經移除。留個記錄避免重踩：
+        //
+        // 一、做在這一行沒有意義。純色畫布下 backgroundSample 完全不看方向
+        // （直接回傳 uBgColor），三個通道取到同一個常數，相減恆為零。
+        //
+        // 二、改成對 HDRI 取樣（白底時唯一帶方向資訊的來源）雖然會動，但要多
+        // 付兩次環境取樣，而效果在均勻白底上肉眼分辨不出來 —— 這是物理限制而
+        // 不是實作問題：所有方向看過去都一樣亮的背景，折射影像本身就沒有錯位
+        // 可言。真實產品照的彩虹來自棚燈與反光板的不均勻，不是那張白紙。
+        //
+        // 所以白底的色散顯色一律走互補扣除（RAY／ART／LIGHT 三條線都是，各自
+        // 見 beamAbsorbAmount／absorbAmount／causticAbsorbAmount）。
 
 #ifdef FEATURE_RESEARCH
         // 內部物件與外殼是同一種液態玻璃,只有折射率不同,所以它不該自己疊一層
@@ -3127,6 +3397,50 @@ void main(){
           if (dot(shellOut, shellOut) < 0.0001) shellOut = iconOut;
           vec3 iconTransmitted = backgroundSample(normalize(shellOut), roughBlur).rgb;
           float iconFacing = clamp(dot(-researchInsideDir, researchIconN), 0.0, 1.0);
+          researchIconFacing = iconFacing;
+          researchIconPath = iconPath;
+          if (uResearchIconTint > 0.0) {
+            // 局部 Beer–Lambert 吸收：中央近乎無色，側下方累積藍色。
+            // 不替換反射、不混入白色、不改覆蓋率。薄邊與出生/消融自然退色。
+            float side = smoothstep(-0.22, 0.78,
+              dot(researchIconN, normalize(vec3(0.75, -0.58, 0.12))));
+            float visibleBoundary = smoothstep(0.0, 0.09, iconFacing);
+            float edgeBand = pow(1.0 - iconFacing, 1.45) * visibleBoundary;
+            float broadDistribution = 0.045 + 0.955 * side;
+            // 集中度越高，中央吸收越少，顏色移到仍有穩定 ray hit 的內側輪廓。
+            // side 保留參考圖右下方較濃的方向，不退化成均勻描邊。
+            float edgeDistribution = (0.055 + edgeBand * 1.55)
+              * (0.34 + side * 0.66);
+            float tintDistribution = mix(
+              broadDistribution,
+              edgeDistribution,
+              clamp(uResearchIconTintEdge, 0.0, 1.0)
+            );
+            float opticalDepth = (1.0 - exp(-max(iconPath, 0.0) * 8.0))
+              * tintDistribution
+              * researchIconWeight * clamp(uResearchIconTint, 0.0, 1.0);
+            vec3 tintColor = uResearchIconTintColor;
+            if (uResearchIconMultiTint > 0.5) {
+              float multi = clamp(uResearchIconMultiTintStrength, 0.0, 1.0);
+              float bend = clamp(length(iconOut - researchInsideDir), 0.0, 1.0);
+              tintColor = researchBoundaryTint(uResearchIconTintRamp, researchIconN,
+                1.0 - iconFacing, bend, tintColor, multi,
+                uResearchIconMultiTintRotation, uResearchIconMultiTintFocus);
+              // Let all palette segments show, retaining a softer directional bias.
+              float multiDistribution = mix(0.35 + 0.65 * side,
+                (0.035 + edgeBand * 1.65) * (0.75 + 0.25 * side),
+                clamp(uResearchIconTintEdge, 0.0, 1.0));
+              float focusWeight = mix(1.0, 0.65 + 0.85 * bend,
+                clamp(uResearchIconMultiTintFocus, 0.0, 1.0));
+              opticalDepth = (1.0 - exp(-max(iconPath, 0.0) * 8.0))
+                * mix(tintDistribution, multiDistribution * focusWeight, multi)
+                * researchIconWeight * clamp(uResearchIconTint, 0.0, 1.0);
+            }
+            vec3 tintAbsorption = -log(clamp(tintColor, 0.002, 0.999));
+            researchIconTransmissionTint = exp(-tintAbsorption * opticalDepth);
+            researchBoundaryColor = tintColor;
+            researchBoundaryDepth = opticalDepth;
+          }
           float iconF0 = pow((relIOR - 1.0) / (relIOR + 1.0), 2.0);
           float iconFres = iconF0 + (1.0 - iconF0) * pow(1.0 - iconFacing, 5.0);
           vec3 iconReflection = sampleEnvironmentBackdrop(
@@ -3134,6 +3448,10 @@ void main(){
           );
           iconFres = clamp(iconFres, 0.0, 1.0);
           researchIconFres = iconFres;
+          // 淺底的明暗由後面的局部反射卡塑形。此處只保留透射，避免
+          // Fresnel 在整圈剪影同時拉暗；深底仍用原本的環境反射。
+          vec3 iconReflectionLight = iconTransmitted;
+          iconReflection = mix(iconReflection, iconReflectionLight, uLightBackdrop);
           refractedBg = mix(iconTransmitted, iconReflection, iconFres);
           // icon 內部那一段光程併進總光程,體積吸收因此自然變厚一點。
           pathLength += iconPath;
@@ -3268,24 +3586,84 @@ void main(){
       envRefraction,
       vec3(0.2126, 0.7152, 0.0722)
     );
-    vec3 cleanBrightRefraction = vec3(envRefractionLum)
-      * vec3(0.975, 0.995, 1.035);
+    // 淺底只保留 HDRI 的亮度結構。暗部用 sqrt 曲線柔和抬起，中間調與高光
+    // 逐步退回原亮度，避免硬 clamp 造成乳白塑膠感。
+    float envShadowWeight = 1.0 - smoothstep(0.18, 0.86, envRefractionLum);
+    float liftedEnvLum = mix(
+      envRefractionLum,
+      sqrt(max(envRefractionLum, 0.0)),
+      envShadowWeight * 0.58
+    );
+    vec3 cleanBrightRefraction = vec3(liftedEnvLum)
+      * vec3(0.985, 1.0, 1.025);
     envRefraction = mix(
       envRefraction,
       cleanBrightRefraction,
-      whiteBackdrop * 0.94
+      whiteBackdrop
     );
     refractedBg = mix(refractedBg, envRefraction, uEnvRefraction);
   }
 
+#ifdef FEATURE_RESEARCH
+  // 環境折射混合完成後才吸收，避免環境滑桿把染色洗掉。後續表面高光照常疊加。
+  if (uResearchShellTint > 0.0
+      && !researchIconHit) {
+    float shellSide = smoothstep(-0.22, 0.78,
+      dot(N, normalize(vec3(0.75, -0.58, 0.12))));
+    float shellEdge = pow(clamp(material.edgeFactor, 0.0, 1.0), 1.35);
+    float shellBroadDistribution = 0.045 + 0.955 * shellSide;
+    float shellEdgeDistribution = (0.045 + shellEdge * 1.65)
+      * (0.34 + shellSide * 0.66);
+    float shellDistribution = mix(
+      shellBroadDistribution,
+      shellEdgeDistribution,
+      clamp(uResearchShellTintEdge, 0.0, 1.0)
+    );
+    float shellOpticalDepth = (1.0 - exp(-max(pathLength, 0.0) * 3.6))
+      * shellDistribution * clamp(uResearchShellTint, 0.0, 1.0);
+    vec3 shellTintColor = uResearchShellTintColor;
+    if (uResearchShellMultiTint > 0.5) {
+      float multi = clamp(uResearchShellMultiTintStrength, 0.0, 1.0);
+      float bend = clamp(localPrism, 0.0, 1.0);
+      shellTintColor = researchBoundaryTint(uResearchShellTintRamp, N,
+        material.edgeFactor, bend, shellTintColor, multi,
+        uResearchShellMultiTintRotation, uResearchShellMultiTintFocus);
+      float multiDistribution = mix(0.35 + 0.65 * shellSide,
+        (0.025 + shellEdge * 1.75) * (0.75 + 0.25 * shellSide),
+        clamp(uResearchShellTintEdge, 0.0, 1.0));
+      float focusWeight = mix(1.0, 0.65 + 0.85 * bend,
+        clamp(uResearchShellMultiTintFocus, 0.0, 1.0));
+      shellOpticalDepth = (1.0 - exp(-max(pathLength, 0.0) * 3.6))
+        * mix(shellDistribution, multiDistribution * focusWeight, multi)
+        * clamp(uResearchShellTint, 0.0, 1.0);
+    }
+    vec3 shellTintAbsorption = -log(clamp(shellTintColor, 0.002, 0.999));
+    researchShellTransmissionTint = exp(-shellTintAbsorption * shellOpticalDepth);
+    researchBoundaryColor = shellTintColor;
+    researchBoundaryDepth = shellOpticalDepth;
+  }
+  refractedBg *= researchShellTransmissionTint;
+  refractedBg *= researchIconTransmissionTint;
+#endif
   // 白底以帶微冷色的透射衰減塑形；反射只填入剩餘亮度空間，避免大片 clipping。
   vec3 coolTransmission = mix(
     vec3(0.995, 0.998, 1.0),
     vec3(0.94, 0.97, 1.0),
     material.edgeFactor
   );
+  // 借用液態薄膜的乾淨白底模型：中央先以近乎無色的背景透射為主，厚度吸收
+  // 只保留使用者指定的比例；輪廓仍由 Fresnel、折射與後面的反射卡塑形。
+  vec3 lightVolumeAbsorption = mix(
+    vec3(1.0), volumeAbsorption, clamp(uLightDepth * 0.72, 0.0, 1.0)
+  );
   vec3 brightBase = refractedBg * material.transmission * coolTransmission
-    * volumeAbsorption * (1.0 - backFres * 0.72);
+    * lightVolumeAbsorption * (1.0 - backFres * 0.12);
+  vec3 cleanLightTransmission = refractedBg * coolTransmission
+    * (1.0 - backFres * 0.06);
+  float lightClarityMask = clamp(uLightClarity, 0.0, 1.0)
+    * (1.0 - material.edgeFactor * material.edgeFactor * material.edgeFactor * 0.48)
+    * (1.0 - backRim * 0.10);
+  brightBase = mix(brightBase, cleanLightTransmission, lightClarityMask);
   // 參考白棚拍攝的透明液體：厚處保留極淡冷色，而不是讓白背景與
   // 暖色 HDRI 相乘成灰米色。僅由亮底保色開關控制，不借用其他滑桿。
   float brightBodyDepth = whiteBackdrop * clamp(
@@ -3298,27 +3676,103 @@ void main(){
   brightBase = mix(
     brightBase,
     brightBase * vec3(0.82, 0.93, 1.0),
-    brightBodyDepth
+    brightBodyDepth * clamp(uLightDepth, 0.0, 1.0)
   );
   vec3 surfaceLight = clamp(
     material.baseSurface + material.filmSurface * 0.08 + vec3(backFres * 0.10),
     0.0,
     1.0
   );
-  vec3 brightSurface = surfaceLight * max(vec3(0.0), vec3(1.0) - brightBase) * 0.82;
-  float chromaLocal = mix(
-    0.50,
-    1.0,
-    smoothstep(0.04, 0.22, material.filmAmount)
+  // 表面反射在淺底轉成中性冷白，並只保留 HDRI 最亮的棚燈區域；一般牆面與
+  // 暖灰中間調不再大面積鋪進玻璃。使用已算好的 surfaceLight，不增加環境取樣。
+  float surfaceLightLum = dot(surfaceLight, vec3(0.2126, 0.7152, 0.0722));
+  float studioHighlight = smoothstep(0.42, 0.88, surfaceLightLum);
+  vec3 neutralSurfaceLight = vec3(surfaceLightLum) * vec3(0.985, 1.0, 1.02);
+  surfaceLight = mix(surfaceLight, neutralSurfaceLight, whiteBackdrop * 0.96);
+  vec3 brightSurface = surfaceLight * max(vec3(0.0), vec3(1.0) - brightBase)
+    * mix(0.12, 0.82, clamp(uLightCardStrength, 0.0, 1.0))
+    * mix(1.0, 0.16 + studioHighlight * 0.84, whiteBackdrop);
+  // 淺底的彩色不平均鋪滿輪廓：一般曲面只留淡藍青色，完整光譜集中在折射
+  // 彎曲最強的折角、融合處與局部掠射面。全部重用既有遮罩，不增加射線取樣。
+  float prismColorFocus = smoothstep(0.18, 0.72, localPrism);
+  float rimColorFocus = smoothstep(0.12, 0.78, material.edgeFactor);
+  float rainbowFocus = clamp(
+    prismColorFocus * (0.42 + rimColorFocus * 0.58),
+    0.0,
+    1.0
   );
+  float coolColorFocus = rimColorFocus * (1.0 - rainbowFocus * 0.55);
+  float chromaLocal = smoothstep(0.055, 0.24, material.filmAmount)
+    * rainbowFocus;
   vec3 brightChroma = material.filmChroma * material.filmAmount
-    * brightBg * 2.8 * chromaLocal * sqrt(max(uMaterialExposure, 0.0));
-  brightChroma += material.reflectionChroma * brightBg * 0.75;
-  brightChroma += backFilmChroma * brightBg * (0.08 + backRim * 0.65);
+    * brightBg * 2.45 * chromaLocal * sqrt(max(uMaterialExposure, 0.0))
+    * clamp(uLightChroma, 0.0, 1.0);
+  brightChroma += material.reflectionChroma * brightBg
+    * mix(0.62, 0.08, whiteBackdrop) * rainbowFocus
+    * clamp(uLightChroma, 0.0, 1.0);
+  brightChroma += backFilmChroma * brightBg
+    * (backRim * 0.54 + material.filmAmount * 0.10) * rainbowFocus
+    * clamp(uLightChroma, 0.0, 1.0);
+  brightChroma += vec3(0.10, 0.48, 1.0) * brightBg
+    * coolColorFocus * (0.025 + localPrism * 0.055)
+    * clamp(uLightChroma, 0.0, 1.0);
   vec3 brightComposite = clamp(
     brightBase + brightSurface + brightChroma,
     0.0,
     1.0
+  );
+  // 右側藍色折射帶：以兩段邊緣遮罩相減，把色帶放在剪影內側而不是直接描邊；
+  // 再用右側法線、折射彎曲與內部光程控制強度，讓它跟著液體曲面變形。
+  float blueBandSide = smoothstep(
+    0.02,
+    0.78,
+    dot(N, normalize(vec3(0.82, -0.08, 0.56)))
+  );
+  float blueBandInner = smoothstep(0.14, 0.62, material.edgeFactor);
+  float blueBandOuterCut = smoothstep(0.78, 0.98, material.edgeFactor);
+  float blueBandDepth = clamp(pathLength * 1.45, 0.0, 1.0);
+  float blueBandMask = blueBandSide * blueBandInner * (1.0 - blueBandOuterCut)
+    * (0.34 + localPrism * 0.66) * (0.45 + blueBandDepth * 0.55);
+  vec3 blueBandColor = mix(
+    vec3(0.30, 0.78, 1.0),
+    vec3(0.08, 0.38, 1.0),
+    clamp(localPrism, 0.0, 1.0)
+  );
+  vec3 blueBandLight = blueBandColor * blueBandMask * 0.18
+    * clamp(uLightCardStrength, 0.0, 1.0) * whiteBackdrop;
+  brightComposite = 1.0
+    - (1.0 - brightComposite) * (1.0 - clamp(blueBandLight, 0.0, 0.42));
+  // 白底仍需要少量暗反射才能讀出曲面，但不能把低亮度 HDRI 直接鋪滿整顆。
+  // 沿用液態薄膜的做法：由反射方向生成一張寬而柔的冷藍卡，只在側下方與
+  // 掠射區域局部壓低亮度；中央大面積透射保持乾淨。
+  vec3 lightStudioReflectDir = reflect(rd, N);
+  float lightCoolCard = pow(max(dot(
+    lightStudioReflectDir, normalize(vec3(0.70, -0.30, 0.64))
+  ), 0.0), mix(4.2, 1.7, uRoughness));
+  lightCoolCard = max(
+    lightCoolCard,
+    smoothstep(-0.22, 0.84, dot(N, normalize(vec3(0.78, -0.42, 0.18)))) * 0.52
+  );
+  float lightCoolCardWeight = lightCoolCard
+    * clamp(uLightCardStrength, 0.0, 1.0)
+    * (material.edgeFactor * material.edgeFactor * material.edgeFactor * 0.045
+      + backRim * 0.012);
+  // 鏡面卡只會形成小片高光，不能單獨描述大體積；再以真正的曲面法線建立
+  // 一個寬廣的棚燈明暗面。上左方受光、右下方轉成冷藍，沒有噪聲或 HDRI
+  // 低頻紋理，因此有立體感但不會重新變髒。
+  float lightFormFacing = clamp(
+    dot(N, normalize(vec3(-0.46, 0.58, 0.68))) * 0.5 + 0.5,
+    0.0,
+    1.0
+  );
+  float lightFormShade = pow(1.0 - lightFormFacing, 1.35);
+  lightCoolCardWeight += lightFormShade
+    * clamp(uLightCardStrength, 0.0, 1.0)
+    * material.edgeFactor * material.edgeFactor * material.edgeFactor * 0.035;
+  brightComposite = mix(
+    brightComposite,
+    brightComposite * vec3(0.72, 0.86, 1.0),
+    clamp(lightCoolCardWeight, 0.0, 0.08)
   );
   // 暗色純色背景也保留 HDRI 內部結構，但只在水滴中央以低權重 screen 合成；
   // 邊緣仍交給原有黑膜、Fresnel 與薄膜彩色輪廓，避免整顆變成明亮環境貼圖。
@@ -3562,13 +4016,10 @@ void main(){
     // 很小 —— 在黑底上小點靠明暗對比就很搶眼，在白底上一樣大的小點卻不顯眼，這是
     // 白底看起來還是比較弱的真正原因。sqrt 把中低能量一起抬起來，彩帶因此鋪得開，
     // 而峰值處又不會過飽和（跟 ART 藝術色散用的是同一招）。
-    beamAbsorb = mix(
-      vec3(1.0),
-      beamHue,
-      clamp(sqrt(max(beamPeak, 0.0)) * 0.85, 0.0, 0.72) * brightWash
-    );
-
-    vec3 beamTransmission = mix(vec3(0.76, 0.90, 1.0), beamHue, 0.62);
+    // 位置遮罩：白底的顯色只發生在物理上說得通的地方 —— 邊緣、折射真正彎曲
+    // 處、背面 rim。指數 2.2 是刻意的「沒有下限」：舊版這裡是
+    // mix(0.18, 1.0, beamLocality)，下限 0.18 的語意是「即使完全不在邊界也還是
+    // 塗 18%」，大片平坦白區因此被染色，那就是「色塊貼在玻璃上」的來源。
     float beamLocality = clamp(
       material.edgeFactor * 0.76
         + localPrism * 0.62
@@ -3577,16 +4028,32 @@ void main(){
       0.0,
       1.0
     );
-    float beamBrightSupport = max(whiteBackdrop, membraneMode * brightBg);
-    float beamTransmissionAmount = beamBrightSupport * clamp(
-      sqrt(max(beamPeak, 0.0))
-        * 0.42
-        * mix(0.18, 1.0, beamLocality)
-        * mix(1.0, 1.36, membraneMode),
-      0.0,
-      0.30
+    // 這一層是套在整張 finalColor 上的濾色（見下方 beamAbsorb 的使用處），
+    // 原本無視位置，而 beamPeak 的圖樣覆蓋面積很大，所以它是白底色塊感最主要
+    // 的來源。同樣接上 locality 閘門。
+    //
+    // 純黑底時 brightWash 為 0 → depth 為 0 → mix 回傳 vec3(1)，是精確的恆等
+    // 運算，黑底的定案外觀不受影響。
+    float beamAbsorbDepth = clamp(
+      sqrt(max(beamPeak, 0.0)) * 0.85, 0.0, 0.72
+    ) * brightWash;
+    beamAbsorb = mix(
+      vec3(1.0), beamHue, beamAbsorbDepth * pow(beamLocality, 2.2)
     );
-    finalColor = mix(beamScreen, beamTransmission, beamTransmissionAmount);
+
+    // 白底的顯色：從白光扣掉光譜的補色。互補關係讓紅／青、綠／洋紅成對出現，
+    // 讀起來是分光；舊版是把一個飽和色平塗混進去，沒有互補關係，讀起來是顏料。
+    //
+    // beamBrightSupport 在深底為 0（membraneMode 恆為 0，材質已統一為通用玻璃），
+    // 所以 amount 為 0、乘數為 vec3(1)，深底同樣是精確的恆等運算。
+    float beamBrightSupport = max(whiteBackdrop, membraneMode * brightBg);
+    float beamAbsorbAmount = beamBrightSupport * clamp(
+      sqrt(max(beamPeak, 0.0)) * 0.78 * pow(beamLocality, 2.2),
+      0.0,
+      0.46
+    );
+    vec3 beamComplement = vec3(1.0) - beamHue;
+    finalColor = beamScreen * (vec3(1.0) - beamComplement * beamAbsorbAmount);
   }
 #endif // FEATURE_PRISM_SATURATION：稜光彩度後處理 beam chroma post-processing
   // 通用玻璃的亮底補償仍由原開關管理；液態薄膜本身就是透射模型，不依賴該開關。
@@ -3616,7 +4083,8 @@ void main(){
       artOpd / dispersionPeriod
     );
     vec3 prismSpectrum = separateSpectrum(
-      visibleSpectrum(spectrumCoordinate)
+      visibleSpectrum(spectrumCoordinate),
+      uDispersionSeparation
     );
     // 銳利度收束每個 OPD 週期的邊界，但週期內仍完整走過一次彩虹。
     float cycleEnvelope = sin(spectrumCoordinate * PI);
@@ -3643,15 +4111,18 @@ void main(){
     // screen 合成使焦散維持透明發光感，而不是實體顏料。
     vec3 prismScreen = 1.0
       - (1.0 - finalColor) * (1.0 - prismLight);
-    // 白色已沒有 screen 的加色空間；亮底改成彩色透射（選擇性吸收），
-    // 強度仍由 prismAmount 單調控制，0 時與舊合成完全一致。
-    vec3 prismTransmission = mix(
-      vec3(0.76, 0.90, 1.0),
-      prismSpectrum,
-      0.62
-    );
-    // 平方根是感知式響應：低強度仍能在白底看見，高強度則逐漸壓縮，
-    // 保持 0 → 無效果且全程單調，不會讓 50% 直接變成不透明彩色貼圖。
+    // 白色已沒有 screen 的加色空間，所以亮底走「互補扣除」：真實色散是把白光
+    // 分開，某個方向多了紅就必然少了青，所以從白光裡扣掉光譜的補色，紅／青、
+    // 綠／洋紅會自動成對出現。舊版是把一個飽和色平塗混進去，沒有互補關係，
+    // 讀起來是顏料而不是光。
+    //
+    // 位置遮罩的指數 2.2 同樣是刻意「沒有下限」：舊版是
+    // mix(0.18, 1.0, whitePrismLocality)，那個 0.18 下限讓完全不在邊界的平坦
+    // 白區照樣被塗色 —— 「色塊貼在玻璃上」就是這麼來的。
+    //
+    // sqrt 是感知式響應：低強度在白底仍看得見，高強度逐漸壓縮，保持 0 → 無效果
+    // 且全程單調。brightColorSupport 在深底為 0（membraneMode 恆為 0，材質已
+    // 統一為通用玻璃），amount 為 0、乘數為 vec3(1)，深底是精確的恆等運算。
     float whitePrismLocality = clamp(
       material.edgeFactor * 0.76
         + localPrism * 0.62
@@ -3660,19 +4131,15 @@ void main(){
       0.0,
       1.0
     );
-    float prismTransmissionAmount = brightColorSupport * clamp(
+    float absorbAmount = brightColorSupport * clamp(
       sqrt(max(prismAmount, 0.0))
-        * (0.42 + 0.08 * uDispersionSeparation)
-        * mix(0.18, 1.0, whitePrismLocality)
-        * mix(1.0, 1.36, membraneMode),
+        * (0.62 + 0.18 * uDispersionSeparation)
+        * pow(whitePrismLocality, 2.2),
       0.0,
-      0.30
+      0.42
     );
-    finalColor = mix(
-      prismScreen,
-      prismTransmission,
-      prismTransmissionAmount
-    );
+    vec3 prismAbsorb = vec3(1.0) - prismSpectrum;
+    finalColor = prismScreen * (vec3(1.0) - prismAbsorb * absorbAmount);
   }
 #endif // FEATURE_DISPERSION：色散／光譜 dispersion / spectral
 
@@ -3742,6 +4209,37 @@ void main(){
     float loopPhase = fract(uTime / max(uLoopDuration, 0.001)) * 2.0 * PI;
     vec2 flowOffset = vec2(cos(loopPhase), sin(loopPhase))
       * uSpectralCausticFlow * 1.4;
+    // Object Coordinate → Mapping → 3D Noise。這一份 Noise 後面也直接供遮罩使用，
+    // 三種 mapping 都只付一次 fbmFast，不重複生成另一張噪聲場。
+    float sizeFactor = clamp(uSpectralCausticWidth / 2.5, 0.0, 1.0);
+    float objectNoiseScale = mix(0.55, 2.4, uSpectralCausticDensity);
+    vec3 causticNoiseFlow = loopNoiseOffset(uSpectralCausticFlow);
+    // 柔化只掛在薄膜噪聲上。其餘三種 mapping 的 detail 恆為 1，causticOctaves
+    // 就等於原本的 fbmFast，一格都不變。uniform 決定的分支，不會發散。
+    float causticDetail = 1.0;
+    if (uSpectralCausticMapping == 3) {
+      causticDetail = 1.0 - uSpectralCausticFilmSoften;
+    }
+    float causticNoise = causticOctaves(
+      causticP * uSpectralCausticNoiseScale * objectNoiseScale + causticNoiseFlow,
+      causticDetail
+    );
+    float causticNoise01 = clamp(0.5 + causticNoise * 0.72, 0.0, 1.0);
+    float noiseRidge = clamp(1.0 - abs(causticNoise01 * 2.0 - 1.0), 0.0, 1.0);
+    float noiseBandWidth = mix(0.18, 0.78, sizeFactor);
+    float noiseBand = smoothstep(1.0 - noiseBandWidth, 1.0, noiseRidge);
+    float noiseSignedBand = causticNoise01 - 0.5;
+    // 薄膜噪聲（Blender 風）用的另外兩份噪聲。Blender 的 Noise Texture「Color」
+    // 輸出是三份彼此獨立的噪聲各當一個通道，不是把一個純量場丟進色帶查表 ——
+    // 所以它永遠不會出現等高線。這裡沿用同一個思路（見下面 mapping == 3）。
+    // 只有 mapping == 3 會走進來，其餘三種 mapping 不付這兩次 fbm。
+    vec3 filmNoiseVec = vec3(causticNoise, 0.0, 0.0);
+    if (uSpectralCausticMapping == 3) {
+      vec3 filmP = causticP * uSpectralCausticNoiseScale * objectNoiseScale
+        + causticNoiseFlow;
+      filmNoiseVec.y = causticOctaves(filmP + vec3(19.3, 7.1, 3.7), causticDetail);
+      filmNoiseVec.z = causticOctaves(filmP + vec3(-5.2, 11.9, 27.4), causticDetail);
+    }
     float bandScale = mix(1.5, 8.5, uSpectralCausticDensity);
     float fieldU = (dot(causticP, causticTangent) + flowOffset.x) * bandScale;
     float fieldV = (dot(causticP, causticBitangent) + flowOffset.y) * bandScale;
@@ -3758,7 +4256,24 @@ void main(){
       bandWave,
       bounceWave * uSpectralCausticBounce * 0.78
     );
-    float sizeFactor = clamp(uSpectralCausticWidth / 2.5, 0.0, 1.0);
+    float signedBand = fract(warpedBand * 0.5 + 0.5) - 0.5;
+    if (uSpectralCausticMapping == 1) {
+      // 純物件噪聲：Noise 同時決定亮帶強度與 LUT 橫向色彩座標。
+      bandWave = noiseBand;
+      signedBand = noiseSignedBand;
+    } else if (uSpectralCausticMapping == 2) {
+      // 混合：保留 Wave 的受光方向，以 3D Noise 打散規律條紋與色彩位置。
+      bandWave = clamp(bandWave * (0.45 + noiseBand * 0.75), 0.0, 1.0);
+      signedBand = mix(signedBand, noiseSignedBand, 0.48);
+    } else if (uSpectralCausticMapping == 3) {
+      // 薄膜噪聲：沒有亮帶。亮度只做很淺的起伏（0.62..1），讓後面的
+      // focusExponent 仍然有作用，但不會把畫面切成一條一條。
+      bandWave = mix(
+        0.62,
+        1.0,
+        clamp(0.5 + filmNoiseVec.z * 0.9, 0.0, 1.0)
+      );
+    }
     // B：粗糙度把焦散的亮帶攤開。bandWave 落在 0..1，pow 的指數調低會讓亮帶
     // 變寬——但同時整體變亮（底數 < 1，指數越小值越大）。所以這個乘數不能單獨
     // 用，必須配下面那個補償。
@@ -3783,15 +4298,69 @@ void main(){
     );
     // 把每一條亮帶本身展開成完整光譜，而不是讓不同亮帶各自只有
     // 一種顏色。signedBand 是目前像素相對聚光帶中心的橫向位置。
-    float signedBand = fract(warpedBand * 0.5 + 0.5) - 0.5;
     float rainbowCoordinate = clamp(
       0.5 + signedBand * mix(1.8, 10.0, uSpectralCausticSeparation)
         + dot(causticN, causticTangent) * 0.06,
       0.0,
       1.0
     );
+    vec3 causticRampColor =
+      texture2D(uSpectralCausticRamp, vec2(rainbowCoordinate, 0.5)).rgb;
+    if (uSpectralCausticMapping == 3) {
+      // 薄膜噪聲的顏色來源。
+      //
+      // 這裡刻意「不」用噪聲當色帶座標。只要色帶是用一個隨像素變動的座標去查，
+      // 色帶上任何一個窄特徵——一顆跟鄰居差很多的色標、或線性內插留下的折點——
+      // 都會沿著噪聲的等值線被拉成一條細線。這跟色標之間怎麼內插無關，是
+      // 「平滑場 → 一維查表」這個結構本身的產物。
+      //
+      // 改成：色帶只在四個「固定」座標各取一次色，每個像素取到的都是同一組
+      // 顏色，色帶上有什麼特徵都不會投影到畫面上；變動的只有這四個顏色之間的
+      // 混合權重，而權重是兩份獨立噪聲的平滑函數。等值線無從產生，剩下的只有
+      // 柔和的斑塊 —— 也就是 Blender 那張參考圖的樣子。
+      //
+      // 光譜分離控制四個取樣點離色帶中央多遠：0 時四點重疊成單色，1 時攤開到
+      // 整條色帶，語意跟其他 mapping 一致（顏色的變化幅度）。
+      float filmSpread = mix(0.12, 0.5, uSpectralCausticSeparation);
+      vec3 filmStopA = texture2D(
+        uSpectralCausticRamp, vec2(0.5 - filmSpread, 0.5)
+      ).rgb;
+      vec3 filmStopB = texture2D(
+        uSpectralCausticRamp, vec2(0.5 - filmSpread * 0.33, 0.5)
+      ).rgb;
+      vec3 filmStopC = texture2D(
+        uSpectralCausticRamp, vec2(0.5 + filmSpread * 0.33, 0.5)
+      ).rgb;
+      vec3 filmStopD = texture2D(
+        uSpectralCausticRamp, vec2(0.5 + filmSpread, 0.5)
+      ).rgb;
+      // 權重。clamp 之後再過一次 smoothstep：clamp 本身是折點（噪聲一撞到 0 或
+      // 1，斜率就從增益直接掉到 0），那條「剛好飽和」的等值線也會浮成細邊；
+      // smoothstep 兩端導數為 0，接上去整段映射的斜率才連續。
+      vec2 filmWeight = clamp(vec2(0.5) + filmNoiseVec.xy * 1.35, 0.0, 1.0);
+      filmWeight = filmWeight * filmWeight * (3.0 - 2.0 * filmWeight);
+      causticRampColor = mix(
+        mix(filmStopA, filmStopB, filmWeight.x),
+        mix(filmStopC, filmStopD, filmWeight.x),
+        filmWeight.y
+      );
+      // 亮度歸一化。色帶裡有深有淺，四個取樣點的亮度不一樣，混合權重一漂
+      // 亮度就跟著上上下下，在畫面上仍會讀成一塊一塊的明暗。薄膜的變化是
+      // 「色相在變」不是「亮度在變」，所以除掉自己的亮度統一拉到同一水平，
+      // 明暗一律交給焦散強度與遮罩決定。
+      float filmLuma = max(
+        dot(causticRampColor, vec3(0.2126, 0.7152, 0.0722)),
+        0.0025
+      );
+      causticRampColor = clamp(
+        causticRampColor * (0.66 / filmLuma),
+        0.0,
+        1.0
+      );
+    }
     vec3 causticSpectrum = separateSpectrum(
-      texture2D(uSpectralCausticRamp, vec2(rainbowCoordinate, 0.5)).rgb
+      causticRampColor,
+      uSpectralCausticSeparation
     );
 
     // 可獨立混合的 Fresnel 與循環 Noise 遮罩。0 完全不限制焦散；
@@ -3807,11 +4376,7 @@ void main(){
       fresnelMask,
       membraneMode * membraneFold * uSpectralCausticFresnelMask * 0.86
     );
-    vec3 causticNoiseFlow = loopNoiseOffset(uSpectralCausticFlow);
-    float causticNoise = fbmFast(
-      causticP * uSpectralCausticNoiseScale + causticNoiseFlow
-    );
-    float noiseMask = smoothstep(0.32, 0.68, 0.5 + causticNoise * 0.72);
+    float noiseMask = smoothstep(0.32, 0.68, causticNoise01);
     noiseMask = mix(1.0, noiseMask, uSpectralCausticNoiseMask);
 
     float hdriDrive = 1.0;
@@ -3847,23 +4412,27 @@ void main(){
       causticLight.r,
       max(causticLight.g, causticLight.b)
     );
-    vec3 causticTransmission = mix(
-      vec3(0.76, 0.91, 1.0),
-      causticSpectrum,
-      0.68
+    // 白底的顯色跟 RAY／ART 同一套：互補扣除加上位置遮罩。
+    //
+    // 這一條原本是三者裡色塊感最重的，因為舊版連 locality 都沒有 —— 混色權重
+    // 只看光帶強度 causticPeak，上限還開到 0.62，所以白底上整條光帶都會被塗成
+    // 飽和色。這裡補上位置遮罩：焦散的顯色集中在掠射（causticEdgeFactor）與
+    // 入射角折疊（incidenceFold）真的強的地方。
+    //
+    // brightColorSupport 在深底為 0，amount 為 0、乘數為 vec3(1)，深底是精確的
+    // 恆等運算。
+    float causticLocality = pow(
+      clamp(causticEdgeFactor * 0.85 + incidenceFold * 0.55, 0.0, 1.0),
+      2.0
     );
-    float causticTransmissionAmount = brightColorSupport
-      * clamp(
-        causticPeak * mix(0.52, 0.78, membraneMode)
-          + membraneMode * membraneFold * causticPeak * 0.18,
-        0.0,
-        0.62
-      );
-    finalColor = mix(
-      causticScreen,
-      causticTransmission,
-      causticTransmissionAmount
+    float causticAbsorbAmount = brightColorSupport * clamp(
+      causticPeak * 0.85 * causticLocality,
+      0.0,
+      0.5
     );
+    vec3 causticAbsorb = vec3(1.0) - causticSpectrum;
+    finalColor = causticScreen
+      * (vec3(1.0) - causticAbsorb * causticAbsorbAmount);
   }
 #endif // FEATURE_SPECTRAL_CAUSTICS：光譜焦散 spectral caustics
 
@@ -3910,6 +4479,9 @@ void main(){
     vec3 iconSpec = sampleEnvironmentBackdrop(
       reflect(researchInsideDir, researchIconN), roughBlur * 0.35
     );
+    // 棚燈那一份的亮度。淺底只用它的「明暗結構」來決定哪裡該留白（見下面
+    // iconDensity 的高光那一行），不把米黃色的牆面染進 icon。
+    float iconSpecLum = dot(iconSpec, vec3(0.2126, 0.7152, 0.0722));
     // screen 合成：亮處不會爆掉，暗處等於直接加上去。
     //
     // 位置很關鍵：必須在下面那段通用玻璃的 over 合成「之前」。這一圈亮邊是水滴
@@ -3918,7 +4490,108 @@ void main(){
     // （見結尾的 uTransparentBackground 分支）是拿 universalOwnEnergy 反解的，
     // 會整個略過這一圈亮邊 —— 症狀就是「viewer 看得到氣泡邊界，去背 PNG 疊回
     // 黑底卻淡掉了」，而且 alpha 也沒把它算進覆蓋率。
-    finalColor = 1.0 - (1.0 - finalColor) * (1.0 - clamp(iconSpec * iconRim, 0.0, 1.0));
+    // 深底：原本那條 screen，一個係數都沒動。
+    vec3 iconScreened = 1.0
+      - (1.0 - finalColor) * (1.0 - clamp(iconSpec * iconRim, 0.0, 1.0));
+    finalColor = mix(finalColor, iconScreened, 1.0 - uLightBackdrop);
+    // 淺底：寬暗卡、窄白卡與厚度色共同塑形，明暗跟隨真正的反射方向。
+    // 不用 Fresnel 把整圈塗黑；正面仍保留淡色與透射，掠射處才局部加深。
+    if (uLightBackdrop > 0.0) {
+      vec3 iconReflectDir = reflect(researchInsideDir, researchIconN);
+      float iconDarkCard = pow(max(dot(iconReflectDir,
+        normalize(vec3(0.72, -0.38, 0.58))), 0.0), mix(3.8, 1.8, uRoughness));
+      // 寬卡的柔和包覆：只靠鏡面峰值在旋轉時會縮成小點，補上同側低頻暗面。
+      iconDarkCard = max(iconDarkCard, smoothstep(-0.35, 0.85,
+        dot(researchIconN, normalize(vec3(0.82, -0.48, 0.12)))) * 0.78);
+      float iconWhiteCard = pow(max(dot(iconReflectDir,
+        normalize(vec3(-0.48, 0.66, 0.58))), 0.0), mix(24.0, 7.0, uRoughness));
+      float iconHighlight = max(iconWhiteCard, smoothstep(1.6, 5.0, iconSpecLum) * 0.65);
+      float iconThickness = 1.0 - exp(-max(researchIconPath, 0.0) * 4.5);
+      float iconEdge = exp(-researchIconPath * max(uLightIconEdge, 0.01));
+      // 真正剪影處收柔，避免 ray hit / miss 形成一條硬描邊。
+      float iconBoundary = smoothstep(0.0, 0.12, researchIconFacing);
+      float iconDensity = (0.42 + iconThickness * 0.35 + iconEdge * 0.10)
+        * clamp(uLightIconTint, 0.0, 1.0);
+      // 選擇性透射：厚處累積色彩，薄處透亮。不要先與白色大幅混合，
+      // 否則最後的背景合成會再稀釋一次，把 icon 洗成乳白色。
+      float iconClarity = clamp(uLightIconClarity, 0.0, 1.0);
+      float iconOpticalDepth = (0.24 + iconThickness * 1.20)
+        * clamp(uLightIconTint, 0.0, 1.0) * mix(1.0, 0.34, iconClarity);
+      vec3 iconBodyColor = pow(clamp(uLightIconColor, 0.035, 1.0),
+        vec3(iconOpticalDepth));
+      // 彩色只在曲面轉折聚集；本體色與邊緣色分開，才能保留清透中央。
+      // 取真正的 icon 法線，動畫旋轉時色帶跟著曲面移動。
+      float iconColorRim = pow(1.0 - researchIconFacing,
+        max(0.4, uLightIconEdge * 0.35));
+      iconColorRim *= clamp(uLightIconRimStrength, 0.0, 1.0);
+      // 白棚玻璃的色彩不只是一條描邊：下側寬反射面帶色，上側留柔白窗光。
+      // 使用同一顆自訂邊緣色，色帶仍跟著 icon 法線旋轉，沒有貼死的平面漸層。
+      float iconColorCard = iconDarkCard * clamp(uLightIconRimStrength, 0.0, 1.0);
+      float iconColorWeight = clamp(iconColorRim + iconColorCard * 1.25, 0.0, 0.94);
+      iconBodyColor *= mix(vec3(1.0),
+        clamp(uLightIconRimColor, 0.035, 1.0), iconColorWeight);
+      float iconCardStrength = iconDarkCard * (0.58 + iconEdge * 0.22)
+        * clamp(uReflect * uMaterialExposure, 0.0, 2.0) * 0.5
+        * mix(1.0, 0.62, iconClarity);
+      // icon 需要比外殼更清楚的內部界面。暗卡保持局部並染成乾淨冷藍，不使用
+      // HDRI 原本的灰褐低頻反射；如此中央仍透，側面卻有接近黑底版的曲面層次。
+      float iconCoolCardWeight = clamp(
+        iconCardStrength * (0.52 + uLightCardStrength * 0.54), 0.0, 0.58
+      );
+      researchIconColor = mix(
+        iconBodyColor,
+        iconBodyColor * vec3(0.22, 0.52, 0.84),
+        iconCoolCardWeight
+      );
+      // 厚度與掠射面再形成一層柔和藍色暗面。它不依賴 HDRI 的平均亮度，因此在
+      // 白紙上仍持續存在；白卡高光會在下一段覆回去，保留玻璃的亮暗反射層次。
+      float iconSculptShade = clamp(
+        iconDarkCard * 0.38
+          + iconThickness * 0.14
+          + iconColorRim * 0.16,
+        0.0,
+        0.46
+      ) * mix(0.72, 1.0, clamp(uLightCardStrength, 0.0, 1.0));
+      float iconFormFacing = clamp(
+        dot(researchIconN, normalize(vec3(-0.46, 0.58, 0.68))) * 0.5 + 0.5,
+        0.0,
+        1.0
+      );
+      iconSculptShade = clamp(
+        iconSculptShade
+          + pow(1.0 - iconFormFacing, 1.25)
+            * (0.18 + uLightCardStrength * 0.22),
+        0.0,
+        0.58
+      );
+      researchIconColor = mix(
+        researchIconColor,
+        researchIconColor * vec3(0.34, 0.68, 0.98),
+        iconSculptShade
+      );
+      float iconSoftbox = pow(max(dot(iconReflectDir,
+        normalize(vec3(-0.48, 0.66, 0.58))), 0.0), mix(4.0, 2.0, uRoughness));
+      researchIconColor = mix(researchIconColor, vec3(0.97, 0.99, 1.0), iconSoftbox * 0.62);
+      researchIconColor = mix(researchIconColor, vec3(1.0), iconHighlight * 0.88);
+      float iconClearCenter = (1.0 - iconEdge) * (1.0 - iconColorWeight);
+      researchIconColor = mix(
+        researchIconColor,
+        vec3(0.975, 0.993, 1.0),
+        iconClarity * iconClearCenter * 0.82
+      );
+      // 反射不依賴色彩濃度；把濃度歸零仍是能讀出曲面的無色玻璃。
+      // 柔白反射也要有覆蓋率，否則低染色濃度會把外殼紋理再次透進亮面，
+      // 讓 icon 像一片起皺的薄膜。仍保留至少 14% 的下層透射。
+      float iconSurfaceCoverage = mix(0.50, 0.22, iconClarity)
+        + iconThickness * mix(0.18, 0.08, iconClarity);
+      researchIconMask = clamp((max(max(iconDensity, iconSurfaceCoverage), iconColorWeight * 0.92) + iconDarkCard * 0.42
+        + iconHighlight * 0.24) * iconBoundary, 0.0, mix(0.86, 0.72, iconClarity)) * uLightBackdrop;
+    }
+
+  }
+  // Include the colored reflection in own energy before coverage / transparent export.
+  if (uLightBgGradientEnabled < 0.5 && researchBoundaryDepth > 0.0) {
+    finalColor = researchDarkBoundaryReflection(finalColor, researchBoundaryColor, researchBoundaryDepth);
   }
 #endif
   // 通用玻璃的 over 合成。finalColor 此刻是「黑場上的水滴自身能量」，也就是
@@ -3932,6 +4605,27 @@ void main(){
   // 的版本：加上透射光後夾到 [0,1] 是給不透明畫面用的，亮部很容易在那裡就
   // 先被截頂，再拿截頂後的值去反減、反除只會把能量憑空削掉，去背結果就會
   // 比畫面上看到的暗、也比較不飽和。
+  // 淺底：把「低彩度」的自身能量去掉暖色偏。
+  //
+  // 棚燈 HDRI 是米黃色的，那點暖色在深底上完全看不出來（周圍全黑，眼睛沒有
+  // 白參考），一旦被抬到白背景上就變成一層灰褐色的濁 —— 這就是原本「黑黑
+  // 髒髒」裡的「髒」，跟體積吸收造成的「黑」是兩件不同的事。
+  //
+  // 只處理低彩度的部分：藍色焦散、色散彩虹、薄膜彩邊這些有彩度的項目是這個
+  // 材質的識別特徵，一律原封不動保留，換到白底也要看得出是同一個材質。
+  if (universalGlass && uLightBackdrop > 0.0) {
+    float ownLum = dot(finalColor, vec3(0.2126, 0.7152, 0.0722));
+    float ownChroma = max(finalColor.r, max(finalColor.g, finalColor.b))
+      - min(finalColor.r, min(finalColor.g, finalColor.b));
+    // 留一點冷偏而不是純灰：這個材質本來就是冷色系的液態玻璃（吸收色預設
+    // #68b2e7），純灰會讓它在白底上讀起來像水泥。
+    vec3 ownClean = vec3(ownLum) * vec3(0.94, 0.975, 1.03);
+    finalColor = mix(
+      finalColor,
+      ownClean,
+      (1.0 - smoothstep(0.04, 0.22, ownChroma)) * uLightBackdrop
+    );
+  }
   vec3 universalOwnEnergy = finalColor;
   if (universalGlass) {
     universalTransmitted = refractedBg * material.transmission * volumeAbsorption
@@ -3946,7 +4640,61 @@ void main(){
       0.0,
       1.0
     );
-    finalColor = clampOutput(finalColor + universalTransmitted * (1.0 - universalCovered));
+    // 淺底把覆蓋率抬高。這是整個白底問題的核心一行，說明如下。
+    //
+    // over 合成是 final = own + bg·(1 - cover)，而 cover 取的是自身能量的峰值。
+    // 背景為白（1.0）時代進去就是：
+    //
+    //     final = own + 1·(1 - peak(own))
+    //
+    // 對灰階的自身能量，這恆等於 1.0 —— 不管 own 多大都一樣。也就是說「覆蓋率
+    // 等於能量峰值」這個設定，在白背景上會精確地把自身能量抵銷掉。深底時它是
+    // 對的（bg 為 0，final = own，能量完整保留），白底時它是災難。
+    //
+    // 抬高 cover 就打破這個抵銷：讓開的背景比自身能量還多，差額就是這個材質在
+    // 白底上留下的痕跡，而留下來的顏色仍然是 own 自己的顏色 —— 也就是黑底那套
+    // 材質的色相，不是另外配一組。這正是「同一個材質換到白底」該有的做法。
+    //
+    // pow 的指數小於 1，作用是把「暗但有色相」的大片區域抬起來。這個材質在黑底
+    // 上絕大部分面積都是暗的（深藍玻璃），線性的 cover 會讓那些區域在白底上幾乎
+    // 完全消失，只剩幾道高光 —— 症狀就是「輪廓跟顏色都看不清楚」。
+    // uLightShow 是唯一的美術旋鈕（面板上的「淺底顯色」）。0 = 完全不抬，行為
+    // 與深底的公式逐字相同，水滴在白底上會像原本那樣被抵銷掉；1 = 抬到最強，
+    // 材質幾乎不透明。指數與增益一起走同一根，因為它們表達的是同一件事：
+    // 「這個材質在白底上要留下多少痕跡」。
+    if (uLightBackdrop > 0.5) {
+      // brightComposite 已經包含白底透射、厚度、反射卡與彩邊，是一張完成的白底
+      // 合成。若再套一次暗底用的 own + bg·(1-cover)，白色透射會被重複加回來，
+      // 前面建立的所有明暗都被洗成接近純白，正是畫面看起來 2D 的主因。
+      float lightVolumeMask = clamp(
+        material.edgeFactor * 0.34
+          + backRim * 0.18
+          + pow(1.0 - lightFormFacing, 1.2) * 0.64,
+        0.0,
+        1.0
+      );
+#ifdef FEATURE_RESEARCH
+      // icon 有自己的材質明暗，避免外殼的體積強化再次壓過它們。
+      lightVolumeMask *= 1.0 - smoothstep(0.04, 0.42, researchIconMask);
+#endif
+      finalColor = mix(
+        finalColor,
+        finalColor * vec3(0.68, 0.84, 0.98),
+        clamp(uLightShow, 0.0, 1.0) * lightVolumeMask
+      );
+      finalColor = clampOutput(finalColor);
+    } else {
+      // 深底維持原本的自身能量 over 路徑，公式與定案輸出不變。
+      finalColor = clampOutput(
+        finalColor + universalTransmitted * (1.0 - universalCovered)
+      );
+    }
+#ifdef FEATURE_RESEARCH
+    // 局部反射卡保留明暗面；深底 mask 為零，沿用原本合成。
+    finalColor = clampOutput(
+      mix(finalColor, researchIconColor, clamp(researchIconMask, 0.0, 1.0))
+    );
+#endif
   }
 
   // 稜光光芒的減法那一半，套在「已經合成完背景」的顏色上。
@@ -3985,6 +4733,15 @@ void main(){
       outputAlpha = clamp(universalCovered, 0.02, 1.0);
       // 自身能量也要吃同一份光譜吸收，否則去背輸出會比畫面上看到的少一層彩帶。
       finalColor = clamp(universalOwnEnergy * beamAbsorb / outputAlpha, 0.0, 1.0);
+#ifdef FEATURE_RESEARCH
+      if (researchIconMask > 0.0) {
+        float iconAlpha = clamp(researchIconMask, 0.0, 1.0);
+        float combinedAlpha = iconAlpha + outputAlpha * (1.0 - iconAlpha);
+        finalColor = clamp((finalColor * outputAlpha * (1.0 - iconAlpha)
+          + researchIconColor * beamAbsorb * iconAlpha) / combinedAlpha, 0.0, 1.0);
+        outputAlpha = combinedAlpha;
+      }
+#endif
     } else if (uMembraneOverWhite > 0.5) {
       // 液態薄膜的去背輸出。膜身「就是背景」（見 transparentMembrane 那行），
       // 而且亮底顯色路徑是由背景亮度開的閘 —— 把背景抽成黑色等於連材質模型

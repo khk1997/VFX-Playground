@@ -86,6 +86,7 @@
       // 套用後提醒使用者自行載入。
       assetNote = '',
       afterApply = null,
+      serializeExtra = null,
       autosave = true,
       storageKey = `vfx:${effect}:last`,
       // 這些按鈕會以程式方式改變參數而不派發事件(例如「重設」),
@@ -128,6 +129,7 @@
         values: values(),
       };
       if (note) payload.note = note;
+      if (typeof serializeExtra === 'function') payload.extra = serializeExtra();
       return payload;
     }
 
@@ -166,7 +168,7 @@
         applying = false;
       }
 
-      if (typeof afterApply === 'function') afterApply();
+      if (typeof afterApply === 'function') afterApply(data);
       save();
 
       const unknown = Object.keys(incoming).filter(id => !byId.has(id));
@@ -192,7 +194,7 @@
       if (!raw) return false;
       try {
         const data = JSON.parse(raw);
-        if (!data.values || !Object.keys(data.values).length) return false;
+        if (!data.values || (!Object.keys(data.values).length && !data.extra)) return false;
         apply(data);
         return true;
       } catch (_) {

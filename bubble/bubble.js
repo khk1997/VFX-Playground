@@ -1,5 +1,8 @@
 'use strict';
 import * as THREE from 'three';
+import { buildInspector } from './inspector.js?v=dark-tint-1';
+let inspector = null;
+import { EDGE_TINT_TARGETS, EDGE_TINT_STOPS, edgeTintParams, edgeTintKeys, sanitizeEdgeTintValue, readEdgeTintStops, sampleEdgeTint } from './edge-tint.js?v=dark-tint-1';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
 } from './shape-field.js?v=typewriter-1';
@@ -12,9 +15,10 @@ import {
 import {
   MOTION_UNIFORM_MAP, MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_RADIUS,
   MOTION_DEFAULT_LOOP_DURATION, MOTION_DEFAULT_DOLLY, MOTION_SVG_DEMO,
-  MOTION_OVERRIDES, MOTION_HDRI, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
-  MOTION_TEXT_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=installing-defaults-2';
+  MOTION_OVERRIDES,
+  MOTION_HDRI, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
+  MOTION_TEXT_DEFAULTS, MOTION_COLOR_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
+} from './motions/registry.js?v=edge-tint-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
@@ -216,6 +220,9 @@ const DIAG = (() => {
     // 驗證用：編進所有功能，等同變體特化之前的萬能 shader（見 shaderFeatures）。
     allFeatures: set.has('allfeatures'),
     probeLoopNormalTaps: set.has('probe-loop-normal-taps'),
+    // 反向探針：把 SVG 分軸差分的六個 tap 換回展開式，用來證明迴圈化沒有改變數學
+    // （見 shaders.js 的 PROBE_UNROLLED_SVG_TAPS）。
+    probeUnrolledSvgTaps: set.has('probe-unrolled-svg-taps'),
     probeMapscenePlain: set.has('probe-mapscene-plain'),
     probeMapsceneSplit: set.has('probe-mapscene-split'),
     probeModeNone: set.has('probe-mode-none'),
@@ -244,8 +251,6 @@ const canvas = document.getElementById('stage');
 const mobileRenderQuery = window.matchMedia('(max-width: 760px)');
 const GLASS_HDRI_URL = new URL('./assets/photo_studio2_london_hall_1k.hdr', import.meta.url).href;
 const GLASS_HDRI_LABEL = 'photo_studio2_london_hall_1k.hdr';
-const MEMBRANE_HDRI_URL = new URL('./assets/christmas_photo_studio_04_1k.hdr', import.meta.url).href;
-const MEMBRANE_HDRI_LABEL = 'christmas_photo_studio_04_1k.hdr';
 // 動態模式自己指定的環境貼圖（registry.js 的 hdri 欄位）。HDRI 平常跟著材質
 // 類型走，但某些模式的外觀是照特定一張棚燈校出來的，換一張反射就全變了。
 function motionEnvironmentFor(motion) {
@@ -270,6 +275,22 @@ const MAX_NEGATIVE_DROPS = 4;
 
 /* ===== 參數 ===== */
 const DEFAULTS = {              // 數值滑桿
+  // 淺底的體積強化：只壓低背光面與掠射面，正面透射保持乾淨。
+  lightShow: 0.25,
+  // 白底專屬的完整外觀控制。shader 只在 uLightBackdrop > 0 時讀取，Dark
+  // 分支的公式與定案參數完全不受影響。
+  lightClarity: 0.65,
+  lightDepth: 0.30,
+  lightCardStrength: 0.75,
+  lightChroma: 0.58,
+  // 淺底 icon 的獨立顯色（見 shaders.js 的 researchIconFilter）。只在底色情境為
+  // 淺底時作用，深底一律不讀 —— 調這幾根動不到黑底的任何外觀。
+  //
+  // 濃度控制體積顯色，明暗反射卡獨立保留；邊緣集中微調輪廓帶寬度。
+  lightIconClarity: 0.58,
+  lightIconTint: 0.42,
+  lightIconEdge: 5.2,
+  lightIconRimStrength: 0.62,
   ...MOTION_PARAM_DEFAULTS,
   thickness: 250,
   thickVar: 400,
@@ -317,6 +338,7 @@ const DEFAULTS = {              // 數值滑桿
   spectralCausticLightSize: 0.33,
   spectralCausticDensity: 0.03,
   spectralCausticSoftness: 1,
+  spectralCausticFilmSoften: 0,
   spectralCausticWarp: 0.57,
   spectralCausticSeparation: 0,
   // 把七色查找表沿環形方向模糊融合：0 = 保留色標間的硬邊界，1 = 色彩與
@@ -654,11 +676,15 @@ const isFormationMotion = motion => motion === 'formation';
 const SELECT_DEFAULTS = {
   postToneMap: 'none',
   bgMode: 'color',
+  // 淺底版本尚未定案，目前固定走既有深底材質路徑。
+  backdrop: 'dark',
   materialStyle: 'universal',
   colorMode: 'spectral',
   motion: 'static',
   shapeSource: 'svg',
   shapeQuality: 'balanced',
+  // 虛擬光譜焦散的空間 mapping。wave 保留既有 preset 外觀。
+  spectralCausticMapping: 'wave',
   // 抗鋸齒程度：全螢幕 raymarch shader 沒有多邊形邊緣可以靠 MSAA 磨平（見 initGL
   // 建立 renderer 時關閉 antialias 的說明），畫面唯一能消鋸齒的手段是把渲染解析度
   // 拉高過顯示解析度、再讓瀏覽器縮小回去——也就是超取樣。這個滑桿控制的正是超取樣
@@ -714,6 +740,7 @@ const SPECTRAL_CAUSTIC_DEFAULTS = [
   '#52e6fc', '#40b3f9', '#3aa3e3', '#3fabf9', '#4dd8fb', '#3ba6f9', '#52e6fc',
 ];
 const COLOR_DEFAULTS  = {
+  ...MOTION_COLOR_DEFAULTS,
   bgColor: '#000000',
   // 光暈的顏色。白 = 不染色。
   bloomTint: '#ffffff',
@@ -721,6 +748,14 @@ const COLOR_DEFAULTS  = {
   // absorbCoefficient）。這個值配上濃度 ×1，算出來就是這兩個控制項出現以前
   // 寫死的吸收係數，所以預設外觀不變。
   absorbColor: '#68b2e7',
+  // 淺底 icon 的體積色，與清透底色混合；明暗反射由材質獨立塑形。
+  lightIconColor: '#d9f3ff',
+  lightIconRimColor: '#3aa9df',
+  // 淺底專屬的棚拍無縫背景紙漸層（見 shaders.js 的 backgroundSample）。只在
+  // uLightBackdrop 為 1 時取代 bgColor，不受 bgMode/bgColor 影響，選淺底就是
+  // 這個漸層。頂到底：近白 → 冷調柔灰，是常見的攝影棚無縫背景紙配色。
+  lightBgGradientTop: '#ffffff',
+  lightBgGradientBottom: '#c9ccd1',
   // 液態薄膜原本各自寫死一個偏藍紫色常數的 5 處，現在各自開一個選色器直接
   // 取代常數，選色器選什麼顏色，畫面上那一處就是那個顏色。預設值都是原本
   // 那個常數本身，維持改動前的外觀。
@@ -736,12 +771,10 @@ const COLOR_DEFAULTS  = {
 const P = { ...DEFAULTS, ...MOTION_TEXT_DEFAULTS, ...SELECT_DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS };
 const extendedMotions = createExtendedMotionRuntime(P);
 
-// 材質切換不是同一組滑桿換 shader 分支：通用玻璃與液態薄膜各自保留一份
-// HDRI／材質狀態。離開時記住使用者微調，回來時恢復；第一次進入薄膜則使用
-// 白底參考圖的校準值。鏡頭、動畫與配色不在這裡，切材質時不應改變構圖或動作。
+// 材質目前統一為通用玻璃。保留單一 profile，供 HDRI 匯入與重設共用。
 const MATERIAL_PROFILE_KEYS = [
   'hdriYaw', 'hdriPitch', 'hdriBlur', 'envRefraction',
-  'membraneDepth', 'reflect', 'transmission', 'materialExposure',
+  'reflect', 'transmission', 'materialExposure',
   'roughness', 'fresnel', 'ior',
   // 薄膜式藝術色散：白底薄膜的顯色幾乎全靠它，跟通用玻璃要的分佈差很多
   // （通用玻璃靠折射堆疊出顏色，薄膜是整片透光、顏色要自己長出來），
@@ -755,42 +788,17 @@ const pickMaterialProfile = source => Object.fromEntries(
 );
 const MATERIAL_PROFILE_DEFAULTS = {
   universal: pickMaterialProfile(P),
-  membrane: {
-    hdriYaw: -45,
-    hdriPitch: 20,
-    hdriBlur: 0.18,
-    envRefraction: 0.21,
-    membraneDepth: 0.65,
-    reflect: 1.6,
-    transmission: 1,
-    materialExposure: 1,
-    roughness: 0.17,
-    fresnel: 1.05,
-    ior: 1.6,
-    dispersion: 0.05,
-    dispersionSeparation: 1.5,
-    artThickness: 295,
-    artThickVar: 130,
-    artNoiseScale: 0.5,
-    artPatternSpeed: 0.01,
-    artGravity: 0.52,
-    causticScale: 1,
-    causticSharpness: 0.65,
-  },
 };
 const MATERIAL_ENVIRONMENT_DEFAULTS = {
-  membrane: { url: MEMBRANE_HDRI_URL, label: MEMBRANE_HDRI_LABEL, isHDR: true, file: null },
   universal: { url: GLASS_HDRI_URL, label: GLASS_HDRI_LABEL, isHDR: true, file: null },
 };
 let materialProfiles = {};
 let materialEnvironments = {};
 function resetMaterialProfiles() {
   materialProfiles = {
-    membrane: { ...MATERIAL_PROFILE_DEFAULTS.membrane },
     universal: { ...MATERIAL_PROFILE_DEFAULTS.universal },
   };
   materialEnvironments = {
-    membrane: { ...MATERIAL_ENVIRONMENT_DEFAULTS.membrane },
     universal: { ...MATERIAL_ENVIRONMENT_DEFAULTS.universal },
   };
 }
@@ -803,6 +811,7 @@ if (mobileRenderQuery.matches && !PREVIEW) P.cameraDistance = MOBILE_CAMERA_DIST
 // DEFAULTS/TOGGLE_DEFAULTS，只有某個模式的 overrides 有列到才使用特別預設。
 // 因此毛細波的鏡頭與光束設定不會在切換後汙染其他動態模式。
 const MOTION_SCOPED_KEYS = [
+  ...EDGE_TINT_TARGETS.flatMap(edgeTintKeys),
   'shapeDepth', 'shapeEdgeBevel', 'edgeDropsEnabled',
   'shapeLiquid', 'shapeLiquidPosition', 'shapeLiquidSize', 'shapeLiquidSpeed',
   'rayBeamIntensity', 'rayBeamSeparation', 'rayBeamChroma', 'rayBeamZoom',
@@ -816,9 +825,12 @@ const MOTION_SCOPED_KEYS = [
   'rayBeamAzimuth', 'rayBeamElevation', 'rayBeamRefract', 'rayBeamNoiseMask',
   'rayDispersionEnabled', 'rayBeamPattern',
   'spectralCausticEnabled',
-  'spectralCausticIntensity', 'spectralCausticFocus', 'spectralCausticBlend',
+  'spectralCausticIntensity', 'spectralCausticFocus', 'spectralCausticSeparation',
+  'spectralCausticBlend', 'spectralCausticWidth',
   'spectralCausticDensity', 'spectralCausticWarp', 'spectralCausticNoiseScale',
+  'spectralCausticFilmSoften',
   'spectralCausticAzimuth', 'spectralCausticElevation',
+  'spectralCausticMapping',
   ...SPECTRAL_CAUSTIC_DEFAULTS.map((_, index) => `spectralCausticCol${index}`),
   // 藝術色散的開關，跟上面的光譜焦散開關同一個身分。
   'dispersionEnabled',
@@ -831,12 +843,15 @@ const MOTION_SCOPED_KEYS = [
   // 起伏的時間項。私語模式要把外殼定格（wobbleSpeed 0），而 wobble 本身保留，
   // 所以兩條都得按模式記憶，只列 wobble 會讓外殼照樣流動。
   'wobbleSpeed',
+  // 白底預設需要切換純色背景；兩個底色各自記憶，不影響深底設定。
+  'bgMode', 'bgColor',
   'materialStyle',
   // 材質那一組。必須排在 materialStyle 後面：切換材質類型會由
   // switchMaterialProfile 還原該類型記住的整組材質值，而模式記憶是照這個陣列
   // 的順序逐一寫回的，排在後面模式的 override 才蓋得過材質類型的 profile。
   'transmission', 'reflect', 'materialExposure', 'roughness', 'fresnel', 'ior',
-  'hdriBlur', 'dispersion', 'artPatternSpeed',
+  'hdriYaw', 'hdriPitch', 'hdriBlur', 'envRefraction',
+  'dispersion', 'artPatternSpeed', 'absorbColor', 'researchIconIOR',
   // 水滴形態這兩條同樣沒列進來，所以 research overrides 裡的 viscosity 0.82 /
   // surfaceTension 0.92 從來沒被寫回控制項，面板一直是全域的 0.78 / 0.82。
   'viscosity', 'surfaceTension',
@@ -853,29 +868,192 @@ const MOTION_SCOPED_KEYS = [
   'bloomEnabled', 'streaksEnabled', 'streakCount', 'streakAngle', 'streakLength',
   'streakChroma', 'streakIntensity',
 ];
+// 會按「模式＋底色情境」各記一格的參數。
+//
+// 這裡原本掛著一份白底定案數值（LIGHT_BACKDROP_PRESET），切到淺底時整組寫進
+// 控制項。那組值已經整批捨棄：它是在「深底 shader 路徑 + 白背景」上調出來的，
+// 而那條路徑的美術模型是「在黑場上加光」，白底上加光會被最終 over 合成精確
+// 抵銷（見 shaders.js 的 universalCovered 那段），所以再怎麼調都到不了深底的
+// 質感。淺底的做法要重新來，起點回到「跟深底一模一樣」。
+//
+// 名單本身保留：兩個底色仍各自記一格，所以在淺底上調參數不會污染已經定案的
+// 深底外觀。淺底每一格的初始值現在都等於同一個模式的深底值（見
+// motionDefaultsFor）。
+const BACKDROP_SCOPED_KEYS = new Set([
+  ...EDGE_TINT_TARGETS.flatMap(edgeTintKeys),
+  'bgMode', 'bgColor', 'materialStyle',
+  'loopDuration', 'radius', 'count',
+  'wobble', 'wobbleSpeed', 'researchIconIOR',
+  'capillaryHeight', 'capillaryRings', 'capillarySpeed',
+  'viscosity', 'surfaceTension',
+  'reflect', 'absorb', 'absorbColor',
+  'transmission',
+  'roughness', 'fresnel', 'ior',
+  'rayBeamIntensity', 'rayBeamSeparation', 'rayBeamChroma',
+  'rayBeamZoom', 'rayBeamRings',
+  'rayBeamAzimuth', 'rayBeamElevation', 'rayBeamRefract',
+  'rayBeamFresnelMask', 'rayBeamNoiseScale',
+  // 淺底預設關閉 RAY 模擬色散；列入底色記憶後，切回深底仍會恢復深底的開啟
+  // 狀態，使用者在任一底色手動切換也只會改到該底色自己的記憶格。
+  'rayDispersionEnabled',
+  'spectralCausticEnabled',
+  'spectralCausticCol2', 'spectralCausticCol4',
+  'spectralCausticCol5', 'spectralCausticCol6',
+  'spectralCausticIntensity', 'spectralCausticFocus',
+  'spectralCausticSeparation', 'spectralCausticBlend',
+  'spectralCausticWidth', 'spectralCausticDensity',
+  'spectralCausticWarp', 'spectralCausticNoiseScale',
+  'spectralCausticFilmSoften',
+  'spectralCausticAzimuth', 'spectralCausticElevation',
+  'dispersion', 'artPatternSpeed',
+  'postExposure', 'postBrightness',
+  'postContrast', 'postGrain', 'postGrainScale',
+  'bloomEnabled', 'streaksEnabled',
+  'streakCount', 'streakLength', 'streakIntensity',
+  'cameraDistance', 'cameraRotationY', 'cameraRotationX',
+  'spin', 'hdriYaw', 'hdriPitch', 'hdriBlur',
+  'envRefraction',
+]);
+// 就是 SELECTS.backdrop.map 的那兩個鍵。不從 SELECTS 讀是因為那張表在這一行
+// 之後才宣告，讀它會撞上 const 的 TDZ。
+const BACKDROP_KEYS = ['dark', 'light'];
+// 記憶格的位址。跟底色無關的參數照舊只按模式記一格；BACKDROP_SCOPED_KEYS 裡
+// 的則按「模式＋底色情境」記，兩個情境互不覆蓋。
+//
+// 只有這一個函式知道位址長什麼樣，所有讀寫都走它 —— 之前的坑就是同一個 key
+// 有兩處各自索引，改了一處另一處悄悄用舊格。
+function memorySlot(key, motion = P.motion, backdrop = P.backdrop) {
+  return BACKDROP_SCOPED_KEYS.has(key) ? `${motion}|${backdrop}` : motion;
+}
+// 把一批被記憶的參數從「舊的格子」搬到「新的格子」：先把控制項現在的值存回舊
+// 格，再把新格記得的值寫回控制項並觸發它自己的 input/change。
+//
+// 觸發事件而不是直接改 P，是為了讓 uniform、顯示文字、applyEdgeDropDistribution
+// 之類的副作用照常各跑一次，不必在這裡重複一份。切模式與切底色情境走的是同一支
+// —— 兩者的差別只有「哪些 key」與「格子的哪一維在變」。
+function applyMemorySlots(keys, fromMotion, toMotion, fromBackdrop, toBackdrop) {
+  for (const key of keys) {
+    motionMemory[key][memorySlot(key, fromMotion, fromBackdrop)] = P[key];
+    const el = document.getElementById(key);
+    if (!el) continue;
+    const next = motionMemory[key][memorySlot(key, toMotion, toBackdrop)];
+    if (el.type === 'checkbox') {
+      el.checked = next;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    } else {
+      el.value = next;
+      el.dispatchEvent(new Event(
+        el.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true },
+      ));
+    }
+  }
+}
 function motionDefaultsFor(key) {
+  const intrinsicByMode = {
+    count: MOTION_DEFAULT_COUNTS,
+    radius: MOTION_DEFAULT_RADIUS,
+    loopDuration: MOTION_DEFAULT_LOOP_DURATION,
+    dollyEnabled: MOTION_DEFAULT_DOLLY,
+  };
   const base = key in DEFAULTS ? DEFAULTS[key]
     : key in TOGGLE_DEFAULTS ? TOGGLE_DEFAULTS[key]
       : key in COLOR_DEFAULTS ? COLOR_DEFAULTS[key]
         : SELECT_DEFAULTS[key];
-  return Object.fromEntries(MOTION_KEYS.map(m => [m, MOTION_OVERRIDES[m]?.[key] ?? base]));
+  const darkValue = m => MOTION_OVERRIDES[m]?.[key]
+    ?? intrinsicByMode[key]?.[m]
+    ?? base;
+  if (!BACKDROP_SCOPED_KEYS.has(key)) {
+    return Object.fromEntries(MOTION_KEYS.map(m => [m, darkValue(m)]));
+  }
+  // 兩個底色各記一格。局部染色在深底從 0 開始，保留既有未染色外觀；
+  // 淺底繼續使用原本的染色強度。
+  return Object.fromEntries(MOTION_KEYS.flatMap(m => BACKDROP_KEYS.map(b => [
+    `${m}|${b}`,
+    b === 'dark' && EDGE_TINT_TARGETS.some(p => key === `${p}Tint`) ? 0 : darkValue(m),
+  ])));
 }
 function buildMotionMemory() {
   return {
-    count: { ...MOTION_DEFAULT_COUNTS },
-    radius: { ...MOTION_DEFAULT_RADIUS },
-    loopDuration: { ...MOTION_DEFAULT_LOOP_DURATION },
-    dollyEnabled: { ...MOTION_DEFAULT_DOLLY },
+    count: motionDefaultsFor('count'),
+    radius: motionDefaultsFor('radius'),
+    loopDuration: motionDefaultsFor('loopDuration'),
+    dollyEnabled: motionDefaultsFor('dollyEnabled'),
     ...Object.fromEntries(MOTION_SCOPED_KEYS.map(k => [k, motionDefaultsFor(k)])),
   };
 }
 let motionMemory = buildMotionMemory();
+// 淺底使用高調棚拍玻璃的起始值；使用者後續
+// 手動調整的值仍會記在淺底自己的記憶格，不會影響深底。
+for (const motion of MOTION_KEYS) {
+  if (motionMemory.spectralCausticFocus) motionMemory.spectralCausticFocus[`${motion}|dark`] = 1.0;
+  if (motionMemory.spectralCausticSeparation) motionMemory.spectralCausticSeparation[`${motion}|dark`] = 1.0;
+  if (motionMemory.transmission) motionMemory.transmission[`${motion}|light`] = 0.97;
+  if (motionMemory.absorb) motionMemory.absorb[`${motion}|light`] = 1.35;
+  if (motionMemory.envRefraction) motionMemory.envRefraction[`${motion}|light`] = 0.025;
+  if (motionMemory.fresnel) motionMemory.fresnel[`${motion}|light`] = 0.12;
+  if (motionMemory.rayDispersionEnabled) motionMemory.rayDispersionEnabled[`${motion}|light`] = false;
+  if (motionMemory.bloomEnabled) motionMemory.bloomEnabled[`${motion}|light`] = false;
+  if (motionMemory.streaksEnabled) motionMemory.streaksEnabled[`${motion}|light`] = false;
+}
 const MOTION_MEMORY_KEYS = Object.keys(motionMemory);
+// 把目前這一格的值鏡射到另一個底色情境的同一格。
+//
+// 為什麼需要：載入參數檔（或自動保存的還原）只會寫進「當時所在底色」那一格，
+// 另一格還留著內建預設。於是切換底色時，那些 key 會突然跳回預設值，看起來像
+// 「淺底又跟深底不一樣了」。淺底目前沒有獨立的定案數值（見 BACKDROP_SCOPED_KEYS
+// 的說明），所以載入後兩格應該相同，之後使用者在淺底調什麼才是真正的差異。
+function mirrorBackdropMemory() {
+  const other = P.backdrop === 'dark' ? 'light' : 'dark';
+  for (const key of BACKDROP_MEMORY_KEYS) {
+    motionMemory[key][memorySlot(key, P.motion, P.backdrop)] = P[key];
+    if (!EDGE_TINT_TARGETS.some(p => edgeTintKeys(p).includes(key))) {
+      motionMemory[key][memorySlot(key, P.motion, other)] = P[key];
+    }
+  }
+}
+
+function serializeTintMemory() {
+  const tintMemory = {};
+  for (const key of EDGE_TINT_TARGETS.flatMap(edgeTintKeys)) {
+    tintMemory[key] = { ...motionMemory[key], [memorySlot(key)]: P[key] };
+  }
+  return { tintMemory };
+}
+
+function restoreTintMemory(payload) {
+  const saved = payload.extra?.tintMemory;
+  for (const key of EDGE_TINT_TARGETS.flatMap(edgeTintKeys)) {
+    const slots = motionDefaultsFor(key);
+    for (const slot of Object.keys(slots)) {
+      const value = sanitizeEdgeTintValue(key, saved?.[key]?.[slot]);
+      if (value !== undefined) slots[slot] = value;
+    }
+    if (!saved) {
+      // Legacy tint controls only affected light backdrops, even when saved on dark.
+      const value = payload.values[key] ?? (DEFAULTS[key] ?? TOGGLE_DEFAULTS[key] ?? COLOR_DEFAULTS[key]);
+      const valid = sanitizeEdgeTintValue(key, typeof value === 'string' && !key.includes('Color') ? Number(value) : value);
+      if (valid !== undefined) slots[`${P.motion}|light`] = valid;
+    } else {
+      // Visible controls are authoritative for the active backdrop.
+      slots[memorySlot(key)] = P[key];
+    }
+    motionMemory[key] = slots;
+    const el = document.getElementById(key);
+    const next = slots[memorySlot(key)];
+    if (el.type === 'checkbox') el.checked = next;
+    else el.value = next;
+    el.dispatchEvent(new Event(el.type === 'checkbox' ? 'change' : 'input', { bubbles: true }));
+  }
+}
+// 切換底色情境時要搬的那一批。由交集導出而不是另外手寫一份名單：BACKDROP_SCOPED_KEYS
+// 裡若有哪個 key 忘了加進 MOTION_SCOPED_KEYS，它在 motionMemory 裡根本沒有格子，
+// 手寫名單會在這裡炸掉，交集則是安全地略過它。
+const BACKDROP_MEMORY_KEYS = MOTION_MEMORY_KEYS.filter(k => BACKDROP_SCOPED_KEYS.has(k));
 // 初始模式（SELECT_DEFAULTS.motion）不會經過 select 的 change 事件，
 // 切模式時「套用該模式記憶值」那段回寫邏輯不會跑。以前預設模式是分裂、
 // 沒有 overrides，這個落差看不出來；現在預設模式換成靜態、帶了整組材質
 // overrides，得在這裡把起始 P 值先補成該模式記得的值，跟切換模式時的行為一致。
-for (const key of MOTION_MEMORY_KEYS) P[key] = motionMemory[key][P.motion];
+for (const key of MOTION_MEMORY_KEYS) P[key] = motionMemory[key][memorySlot(key)];
 
 // 自訂漸層色標（最多 6，可調位置）— reset 用
 const STOP_MAX = 6;
@@ -888,11 +1066,17 @@ const RAMP_DEFAULT = {
 // select 字串 → int uniform
 const SELECTS = {
   bgMode:    { uniform: 'uBgMode',    map: { color: 0, hdri: 1 } },
-  materialStyle: { uniform: 'uMaterialStyle', map: { membrane: 1, universal: 2 } },
+  // 這份淺底參數是在既有通用玻璃路徑上調成，因此兩種底色都使用同一 shader 路徑。
+  backdrop:  { uniform: 'uLightBackdrop', map: { dark: 0, light: 0 } },
+  materialStyle: { uniform: 'uMaterialStyle', map: { universal: 2 } },
   colorMode: { uniform: 'uColorMode', map: { spectral: 0, ramp: 1 } },
   rayBeamPattern: {
     uniform: 'uRayBeamPattern',
     map: { grid: 0, starburst: 1, ring: 2, softbox: 3, window: 4 },
+  },
+  spectralCausticMapping: {
+    uniform: 'uSpectralCausticMapping',
+    map: { wave: 0, objectNoise: 1, hybrid: 2, filmNoise: 3 },
   },
   motion:    { uniform: 'uMotion',    map: MOTION_UNIFORM_MAP },
   shapeSource: { uniform: 'uShapeType', map: { svg: 1, gltf: 2 } },
@@ -916,8 +1100,16 @@ const SELECTS = {
   } },
 };
 const COLORS = {
+  ...Object.fromEntries(EDGE_TINT_TARGETS.flatMap(prefix =>
+    EDGE_TINT_STOPS.map((_, i) => [`${prefix}TintStopColor${i}`, '']))),
   bgColor: 'uBgColor',
   absorbColor: 'uAbsorbColor',
+  lightIconColor: 'uLightIconColor',
+  lightIconRimColor: 'uLightIconRimColor',
+  lightBgGradientTop: 'uLightBgGradientTop',
+  lightBgGradientBottom: 'uLightBgGradientBottom',
+  researchIconTintColor: 'uResearchIconTintColor',
+  researchShellTintColor: 'uResearchShellTintColor',
   // 後處理的顏色不對應 uniform（它們是 post.js 每幀讀的），uniform 名稱留空，
   // 由下面兩處的特例分支處理。
   bloomTint: '',
@@ -931,6 +1123,8 @@ const COLORS = {
 // 布林 uniform，而是把 uEdgeDropCount 歸零，這樣關閉液滴時仍保留邊緣圓角
 // （圓角半徑由獨立的 uShapeEdgeBevel 控制，見 svgShapeDistance 的 smin 半徑）。
 const TOGGLES = {
+  ...Object.fromEntries(EDGE_TINT_TARGETS.map(prefix =>
+    [`${prefix}MultiTint`, `u${prefix[0].toUpperCase()}${prefix.slice(1)}MultiTint`])),
   filmEnabled: 'uFilmEnabled',
   dispersionEnabled: 'uDispersionEnabled',
   rayDispersionEnabled: 'uRayDispersionEnabled',
@@ -1078,6 +1272,7 @@ const fmt = {
   spectralCausticLightSize: v => Math.round(v * 100) + '%',
   spectralCausticDensity: v => Math.round(v * 100) + '%',
   spectralCausticSoftness: v => Math.round(v * 100) + '%',
+  spectralCausticFilmSoften: v => v === 0 ? '不柔化' : Math.round(v * 100) + '%',
   spectralCausticWarp: v => Math.round(v * 100) + '%',
   spectralCausticSeparation: v => 'x' + v.toFixed(2),
   spectralCausticBlend: v => v === 0 ? '不融合' : Math.round(v * 100) + '%',
@@ -1262,7 +1457,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=whisper-icon-phase-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=dark-tint-1';
 import { createPostChain } from './post.js?v=post-mask-3';
 
 // cold compile 的時間量測（?diagTiming=1）。
@@ -1401,7 +1596,8 @@ function runDiagTiming(onDone) {
     mesh.material = mat;
     activeVariantKey = key;
   }
-  initialCompileDone = true;   // 計時模式自己負責首編，之後的切換交回 syncShaderVariant
+  // 計時模式自己負責首編，之後的切換交回 syncShaderVariant（含補做被擋下的那一次）。
+  markInitialCompileDone();
 
   const gl = renderer.getContext();
   let ext = null;
@@ -1616,6 +1812,30 @@ function waitForEnvSettled() {
 // 首次算繪前的背景預編譯。只做一次，結果快取成 promise。
 let initialCompilePromise = null;
 let initialCompileDone = false;
+// 首編的起算時刻與實測耗時。耗時是背景預熱要不要做的依據（見 prewarmSkipReason），
+// 起算時刻則是「準備中」提示的計秒基準（見 shaderStateNote）。
+let initialCompileStartedAt = null;
+let initialCompileMs = null;
+// 首編進行中被擋下來的變體切換。
+//
+// 只用一個布林而不是佇列是刻意的：syncShaderVariant() 每次都重新讀當下的
+// variantState()，所以「補做一次」自然就等於「用最新狀態補做」。窗口內連切五個模式
+// 也只會編最後那一個需要的變體，中間那些過期的根本不會被排進來。
+let pendingVariantSync = false;
+
+// 首編完成。旗標與補做綁在一起，避免哪天多一條設定旗標的路徑又忘了補做 ——
+// 這個 regression 的成因正是「設了旗標但沒有人補做」。
+function markInitialCompileDone() {
+  initialCompileDone = true;
+  if (pendingVariantSync) {
+    pendingVariantSync = false;
+    syncShaderVariant();
+  }
+  updateShaderState();
+  // 稍微延後再開始背景預熱，讓首幀先順順地畫出來。預熱本身不阻塞主執行緒
+  // （這是它的前提條件之一），但排在首幀之後開始還是比較穩。
+  setTimeout(prewarmVariants, 1200);
+}
 function ensureInitialCompile() {
   if (initialCompilePromise) return initialCompilePromise;
   initialCompilePromise = waitForEnvSettled().then(() => {
@@ -1634,29 +1854,35 @@ function ensureInitialCompile() {
         + '（未編譯的 ' + activeVariantKey + ' 已丟棄）');
       activeVariantKey = key;
     }
-    const t0 = performance.now();
+    initialCompileStartedAt = performance.now();
+    updateShaderState();
     return (renderer.compileAsync
       ? renderer.compileAsync(scene, camera)
       : Promise.resolve())
       .then(() => {
+        // 這個數字是背景預熱的判斷依據：慢才值得預熱（見 prewarmSkipReason）。
+        initialCompileMs = performance.now() - initialCompileStartedAt;
         console.info('[bubble variant] 首次 program 背景編譯完成 '
-          + Math.round(performance.now() - t0) + 'ms（主執行緒未被阻塞）key=' + key);
+          + Math.round(initialCompileMs) + 'ms（主執行緒未被阻塞）key=' + key);
       });
   }).catch(err => {
     // 失敗也要放行：讓 three.js 走原本的同步路徑，畫面該出來還是要出來。
     console.warn('[bubble variant] 背景預編譯失敗，退回同步路徑：' + err.message);
   }).then(() => {
-    initialCompileDone = true;
+    // 首編完成的當下才重新看狀態：窗口內被擋下來的切換在這裡一次補做，
+    // 而且用的是「現在」的狀態，不是被擋當下的狀態。
+    markInitialCompileDone();
   });
   return initialCompilePromise;
 }
 
-function buildVariantMaterial() {
+// V 可以傳入，用來蓋出「別的模式」那一支材質（背景預熱要用；見 prewarmVariants）。
+function buildVariantMaterial(V = variantState()) {
   const mat = new THREE.ShaderMaterial({
     uniforms,                       // 所有變體共用同一組 uniform 物件
     vertexShader: VERT,
     fragmentShader: usesBaselineShader() ? FRAG_BASELINE : FRAG,
-    defines: shaderFeatures(),
+    defines: shaderFeatures(V),
     depthTest: false, depthWrite: false,
   });
   mat.envMap = pmremTarget.texture;
@@ -1670,12 +1896,37 @@ function buildVariantMaterial() {
 // 一整輪診斷才避開的主執行緒阻塞又加回來。所以新變體一律先在離屏 scene 上用
 // compileAsync 預編譯，resolve 之後才換上去；這段期間畫面繼續用舊變體算繪，
 // 不會黑掉也不需要 loading UI。
+// 變體切換一律延到這一輪事件處理跑完才決定。
+//
+// 原因：切一次動態模式會連帶還原一整組「按模式各自記憶」的參數（見 motionMemory），
+// 而每一個控制項的處理都會各自呼叫進來一次。同步處理的話，中間那些過渡狀態也會各自
+// 發動一次背景編譯 —— 實測切到毛細波時，中途的「毛細波＋光譜焦散開」組合就被真的編了
+// 一支，那是三十秒的 fxc 工作，而它從頭到尾沒有任何一幀會用到；而且 WebGL 沒有取消
+// 編譯的手段，發出去就只能等它跑完。
+//
+// 合併之後只看最後那個狀態。這是安全的，因為 syncShaderVariantNow() 每次都重新讀當下
+// 的 variantState()，本來就沒有「把每一次都做一遍」的語意 —— 跟 pendingVariantSync
+// 用一個布林而不是佇列是同一個道理。
+let variantSyncScheduled = false;
 function syncShaderVariant() {
+  if (variantSyncScheduled) return;
+  variantSyncScheduled = true;
+  setTimeout(() => {
+    variantSyncScheduled = false;
+    syncShaderVariantNow();
+  }, 0);
+}
+
+function syncShaderVariantNow() {
   if (!inited || !mesh) return;
-  // 首支 variant 還沒定案前一律不動作。這一段是「冷載入只編一次」的關鍵：
-  // HDRI 載入完成會呼叫進來，若此時就去編有 env 的那一支，就會與 ensureInitialCompile
-  // 之後要編的那一支重複。ensureInitialCompile 本來就會讀當下最新狀態，交給它就好。
-  if (!initialCompileDone) return;
+  // 首支 variant 還沒定案前不立刻開新編譯 —— 那會把「冷載入只編一次」又打回原形。
+  // 但也不能就這樣丟掉：記下來，等首編 resolve 時由 markInitialCompileDone() 用當下
+  // 最新的狀態補做一次。
+  //
+  // 少了這個 pending，窗口內（env 已就緒、首編仍在跑，正式頁約 8 秒）的任何變體變更
+  // 都會被永久吞掉 —— 例如切到需要造型場的模式時，造型資料照常載入，但編出來的
+  // shader 沒有 FEATURE_SHAPE_FIELD，於是預設造型永遠不顯示，而且不會自行恢復。
+  if (!initialCompileDone) { pendingVariantSync = true; return; }
   const key = variantKey();
   if (key === activeVariantKey) return;
 
@@ -1684,6 +1935,7 @@ function syncShaderVariant() {
     const t0 = performance.now();
     mesh.material = cached;
     activeVariantKey = key;
+    updateShaderState();
     variantStats.命中++;
     variantStats.最後一次切換ms = Math.round((performance.now() - t0) * 10) / 10;
     variantStats.最後一次是命中 = true;
@@ -1695,17 +1947,47 @@ function syncShaderVariant() {
   if (variantSwapInFlight === key) return;   // 已經在背景編這一支了
   variantSwapInFlight = key;
   const t0 = performance.now();
+  // 背景編譯的計時。變體切換用的是 compileAsync，不會經過 startDiagTiming 那條
+  // 量測路徑，所以「這一支編了多久／有沒有編完」在報告裡本來是看不到的 ——
+  // 而 shape 類 variant 正好卡在這裡。一併記下開始當下的 context 遺失次數，
+  // 才分得出「編很久」與「編到 GPU driver 逾時重置」。
+  variantStats.進行中 = {
+    key,
+    開始於ms: Math.round(t0),
+    已經過ms: 0,
+    開始時contextLost: glTimeline.contextLost次數,
+    狀態: '編譯中',
+  };
+  updateShaderState();
   const next = buildVariantMaterial();
   const stage = new THREE.Scene();
   const stageMesh = new THREE.Mesh(mesh.geometry, next);
   stageMesh.frustumCulled = false;
   stage.add(stageMesh);
 
+  // 這一支的「進行中」紀錄該收掉了。
+  //
+  // 一定要走這條路而不是直接在成功那一段清掉：finish() 有兩條提早 return（目標已經換
+  // 人、鍵已經變了），舊版在那兩條路上把 variantStats.進行中 留著不清。那時它只是診斷
+  // 欄位所以看不出來，但現在「準備中」提示與外部的就緒判斷都讀它 —— 留著就會永遠顯示
+  // 「編譯中」。實測踩過：切到毛細波時 motionMemory 的還原會連帶觸發好幾次
+  // syncShaderVariant，中間那幾支正好走的就是這兩條提早 return。
+  const clearInFlight = () => {
+    if (variantStats.進行中 && variantStats.進行中.key === key) variantStats.進行中 = null;
+    updateShaderState();
+  };
   const finish = () => {
     // 期間使用者可能又切到別的組合；只有還是同一個目標才換上去。
-    if (variantSwapInFlight !== key) { try { next.dispose(); } catch (_) {} return; }
+    if (variantSwapInFlight !== key) { try { next.dispose(); } catch (_) {} clearInFlight(); return; }
     variantSwapInFlight = null;
-    if (variantKey() !== key) { try { next.dispose(); } catch (_) {} syncShaderVariant(); return; }
+    if (variantKey() !== key) {
+      try { next.dispose(); } catch (_) {}
+      clearInFlight();
+      // 這裡是「編好的那一支已經過期」的補做，直接走立即版：狀態已經定案了，
+      // 再延一輪只是讓正確的那一支更晚開始編。
+      syncShaderVariantNow();
+      return;
+    }
     variantCache.set(key, next);
     mesh.material = next;
     activeVariantKey = key;
@@ -1713,8 +1995,18 @@ function syncShaderVariant() {
     variantStats.未命中++;
     variantStats.最後一次切換ms = Math.round((performance.now() - t0) * 10) / 10;
     variantStats.最後一次是命中 = false;
+    const lostDuring = glTimeline.contextLost次數
+      - (variantStats.進行中 ? variantStats.進行中.開始時contextLost : 0);
+    variantStats.進行中 = null;
+    variantStats.最後一次編譯 = {
+      key,
+      耗時ms: variantStats.最後一次切換ms,
+      期間contextLost: lostDuring,
+    };
+    updateShaderState();
     console.info('[bubble variant] 新編 ' + key
-      + '（' + variantStats.最後一次切換ms + 'ms，背景編譯）');
+      + '（' + variantStats.最後一次切換ms + 'ms，背景編譯'
+      + (lostDuring ? '，期間 context 遺失 ' + lostDuring + ' 次' : '') + '）');
   };
 
   const compiled = renderer.compileAsync
@@ -1722,9 +2014,189 @@ function syncShaderVariant() {
     : Promise.resolve(renderer.compile(stage, camera));
   compiled.then(finish).catch(err => {
     variantSwapInFlight = null;
+    // 一樣要認鍵：這個 catch 可能是一支早就過期的編譯回來的，不能把後面那支
+    // 正在進行的紀錄清掉（見 clearInFlight 的說明）。
+    if (variantStats.進行中 && variantStats.進行中.key === key) {
+      variantStats.進行中.狀態 = '失敗：' + err.message;
+      variantStats.最後一次編譯 = {
+        key,
+        耗時ms: Math.round(performance.now() - t0),
+        期間contextLost: glTimeline.contextLost次數 - variantStats.進行中.開始時contextLost,
+        結果: '失敗：' + err.message,
+      };
+      variantStats.進行中 = null;
+    }
+    updateShaderState();
     console.error('[bubble variant] 預編譯失敗 ' + key + '：' + err.message);
     try { next.dispose(); } catch (_) {}
   });
+}
+
+// ===== 背景預熱 =====
+//
+// 為什麼要有這個：Windows 預設的 ANGLE D3D11 後端用 fxc 編一支造型變體要數十秒
+// （本機實測 formation 34s、morph 55s，七個造型模式合計 154s），而 Chrome 的 D3D
+// bytecode 快取是跟著 profile 持久的 —— 同一支第二次只要 2 秒。也就是說這個成本
+// 本質上是「每個組合一次」，不是「每次切換一次」。既然如此，就不該讓使用者在切模式
+// 的當下才付：首編落地之後在背景把各模式會用到的那幾支依序編掉，等使用者真的切過去
+// 就是快取命中。
+//
+// 為什麼是「有條件」而不是一律預熱 —— 這件事只在「編譯慢，而且慢在背景」才划算：
+//   * macOS 的 ANGLE Metal 與 Windows 的 ANGLE Vulkan 後端本來就是個位數秒
+//     （實測 Vulkan 七個模式合計 20s），預熱等於白燒 GPU。
+//   * 更關鍵的是 Vulkan 後端沒有 KHR_parallel_shader_compile，three.js 的 compileAsync
+//     在那裡會退回同步路徑 —— 預熱會把主執行緒一支一支地扣住，那比不預熱糟得多。
+// 所以兩個條件都要成立才做：擴充在（＝真的非阻塞），而且首編實測真的慢。這樣同一份
+// 程式碼在三種環境下都會做對的事，不必判斷平台，也不會在未來的新後端上猜錯。
+// research 與 typewriter／split 是各自獨立的 FEATURE_* 旗標，不像 formation／melt
+// 等造型模式那樣共用同一組 shapeField 組合鍵 —— 沒有任何一支既有目標會「順便」
+// 編到它們，所以要自己各佔一個名額，否則使用者切過去時永遠是冷編。
+const PREWARM_MOTIONS = [
+  'formation', 'melt', 'morph', 'weave', 'shatter', 'jelly', 'capillary',
+  'research', 'typewriter', 'split',
+];
+// 首編超過這個時間才值得預熱。個位數秒的環境多編幾支只是浪費。
+const PREWARM_MIN_COMPILE_MS = 4000;
+const prewarmStats = {
+  狀態: '未啟動', 已備妥: 0, 本來就有: 0, 失敗: 0,
+  進行中: null, 待編清單: [], 總耗時ms: 0,
+};
+
+// 回傳「不做的理由」，null 表示該做。
+function prewarmSkipReason() {
+  if (PREVIEW) return '預覽模式不預熱';
+  if (DIAG.any || FORCE_FEATURES.length || SHADER_RUN !== null) {
+    return '診斷模式不預熱（會污染 cold compile 量測與 GPU 的 shader 快取）';
+  }
+  if (mobileRenderQuery.matches) return '行動裝置不預熱（耗電，而且那邊的編譯器本來就快）';
+  if (!renderer || !renderer.compileAsync || !mesh) return 'renderer 尚未就緒';
+  let parallel = false;
+  try { parallel = !!renderer.getContext().getExtension('KHR_parallel_shader_compile'); } catch (_) {}
+  if (!parallel) return '沒有 KHR_parallel_shader_compile，預熱會阻塞主執行緒';
+  if (initialCompileMs === null) return '首編耗時未知';
+  if (initialCompileMs < PREWARM_MIN_COMPILE_MS) {
+    return '首編只花 ' + Math.round(initialCompileMs) + 'ms，這個環境不需要預熱';
+  }
+  return null;
+}
+
+function prewarmVariants() {
+  if (prewarmStats.狀態 !== '未啟動') return;
+  const skip = prewarmSkipReason();
+  if (skip) {
+    prewarmStats.狀態 = '略過：' + skip;
+    console.info('[bubble prewarm] ' + skip);
+    return;
+  }
+  prewarmStats.狀態 = '進行中';
+  const targets = [];
+  const seen = new Set([activeVariantKey]);
+  for (const motion of PREWARM_MOTIONS) {
+    const V = variantState(motion);
+    const key = variantKey(V);
+    // 一支會被多個模式共用（例如融化與崩解噴濺的旗標組合完全相同），只編一次。
+    if (seen.has(key) || variantCache.has(key)) continue;
+    seen.add(key);
+    targets.push({ motion, key, V });
+  }
+  prewarmStats.待編清單 = targets.map(t => t.motion + ' → ' + t.key);
+  console.info('[bubble prewarm] 開始背景預熱 ' + targets.length + ' 支：'
+    + prewarmStats.待編清單.join('、'));
+  const t0All = performance.now();
+  (async () => {
+    for (const t of targets) {
+      // 使用者的操作永遠優先。同時丟兩支給驅動只會讓使用者正在等的那一支更慢，
+      // 所以正在為使用者編的時候就讓路。
+      while (variantSwapInFlight) await new Promise(r => setTimeout(r, 400));
+      if (variantCache.has(t.key)) { prewarmStats.本來就有++; continue; }
+      const t0 = performance.now();
+      prewarmStats.進行中 = { motion: t.motion, key: t.key, 開始於ms: Math.round(t0) };
+      updateShaderState();
+      const mat = buildVariantMaterial(t.V);
+      const stage = new THREE.Scene();
+      const stageMesh = new THREE.Mesh(mesh.geometry, mat);
+      stageMesh.frustumCulled = false;
+      stage.add(stageMesh);
+      try {
+        await renderer.compileAsync(stage, camera);
+      } catch (err) {
+        prewarmStats.失敗++;
+        prewarmStats.進行中 = null;
+        try { mat.dispose(); } catch (_) {}
+        console.warn('[bubble prewarm] ' + t.key + ' 預熱失敗：' + err.message);
+        continue;
+      }
+      prewarmStats.進行中 = null;
+      // 這段時間使用者可能已經自己切過去、把同一支編好了。
+      if (variantCache.has(t.key)) {
+        try { mat.dispose(); } catch (_) {}
+        prewarmStats.本來就有++;
+        continue;
+      }
+      variantCache.set(t.key, mat);
+      evictVariantsIfNeeded();
+      prewarmStats.已備妥++;
+      console.info('[bubble prewarm] ' + t.motion + ' ' + t.key + ' 已備妥（'
+        + Math.round(performance.now() - t0) + 'ms，背景編譯）');
+    }
+    prewarmStats.總耗時ms = Math.round(performance.now() - t0All);
+    prewarmStats.狀態 = '完成';
+    prewarmStats.進行中 = null;
+    updateShaderState();
+    console.info('[bubble prewarm] 完成：新編 ' + prewarmStats.已備妥 + ' 支，共 '
+      + prewarmStats.總耗時ms + 'ms');
+  })();
+}
+
+// ===== 「正在準備 shader」的提示 =====
+//
+// 存在的理由：在慢的後端上切到造型模式之後，數十秒內畫面完全不會變，而在這之前
+// 頁面上沒有任何訊號 —— 使用者只會覺得壞了。這一段不改變任何算繪行為，只是把已經
+// 在 variantStats / prewarmStats 裡的狀態顯示出來。
+//
+// 只有等超過 SHADER_STATE_DELAY_MS 才顯示。快的後端（macOS Metal、Windows Vulkan）
+// 這個等待只有一兩秒，閃一下反而吵。
+const SHADER_STATE_DELAY_MS = 1500;
+let shaderStateTicker = 0;
+
+// 回傳 { 級別, 文字 }，沒有要顯示的東西就回 null。
+function shaderStateNote() {
+  // 使用者此刻正在等的那一支。兩種情況：切模式切在首編窗口內（等首編），或是
+  // 一般的變體切換（等 syncShaderVariant 那一支）。
+  const 等變體 = !!variantSwapInFlight && variantSwapInFlight === variantKey();
+  const 等首編 = !initialCompileDone && !!initialCompilePromise;
+  const 開始於 = 等變體 && variantStats.進行中 ? variantStats.進行中.開始於ms
+    : 等首編 ? initialCompileStartedAt : null;
+  if ((等變體 || 等首編) && 開始於 !== null) {
+    const 已等ms = performance.now() - 開始於;
+    if (已等ms < SHADER_STATE_DELAY_MS) return null;
+    // 使用者正在等 → 亮一點。這是「你現在看不到造型是因為這個」的訊息。
+    return { 級別: 'waiting', 文字: 'shader 首次編譯中 ' + Math.round(已等ms / 1000) + 's'
+      + ' —— 頁面可正常操作，編好會自動顯示。同一個組合只需要編這一次。' };
+  }
+  if (prewarmStats.進行中) {
+    const 全部 = prewarmStats.待編清單.length;
+    const 第幾 = prewarmStats.已備妥 + prewarmStats.本來就有 + prewarmStats.失敗 + 1;
+    // 使用者沒有在等 → 維持一般說明字的亮度，只是交代背景在忙什麼。
+    return { 級別: 'busy',
+      文字: '背景預先編譯其他動態模式的 shader（' + 第幾 + '/' + 全部 + '）—— 可正常使用' };
+  }
+  return null;
+}
+
+function updateShaderState() {
+  const el = document.getElementById('shaderState');
+  if (!el) return;
+  const state = shaderStateNote();
+  el.textContent = state ? state.文字 : '';
+  el.hidden = !state;
+  el.classList.toggle('busy', state ? state.級別 === 'busy' : false);
+  el.classList.toggle('waiting', state ? state.級別 === 'waiting' : false);
+  // 有事情在跑就每半秒刷一次秒數；跑完把 timer 收掉，不留背景輪詢。
+  const 忙 = !!variantSwapInFlight || !!prewarmStats.進行中
+    || (!initialCompileDone && !!initialCompilePromise);
+  if (忙 && !shaderStateTicker) shaderStateTicker = setInterval(updateShaderState, 500);
+  if (!忙 && shaderStateTicker) { clearInterval(shaderStateTicker); shaderStateTicker = 0; }
 }
 
 // ===== 變體狀態 =====
@@ -1740,41 +2212,63 @@ function syncShaderVariant() {
 // （0–6）時整條形狀場都不該存在：不只是不畫出來，連負形空腔、微滴、匯入 UI
 // 都要一起關掉，否則內建展示造型的空腔會被挖進程序化幾何裡，變成畫面上莫名
 // 其妙多出來的孔洞。
-function staticUsesImportedShape() {
-  return P.motion !== 'static' || P.staticShape === 7;
+function staticUsesImportedShape(motion = P.motion) {
+  return motion !== 'static' || P.staticShape === 7;
 }
 
-function variantState() {
-  const shapeField = usesShapeField(P.motion) && staticUsesImportedShape();
+// motion 可以覆寫，用來問「如果切到某個模式，那一刻會需要哪一支變體」。背景預熱就是
+// 靠它算出還沒編過的那幾支的鍵與 defines（見 prewarmVariants）。
+function variantState(motion = P.motion) {
+  // 有幾個變體軸是「按模式各自記憶」的（見 motionMemory）：問別的模式時必須讀那個
+  // 模式記住的值，不是當下這個模式的值。少了這一層，預熱會編出永遠不會被命中的鍵
+  // —— 例如果凍記住的是「光譜焦散關閉」，拿當下的值去算就會編錯一支。
+  const scoped = key => (motion === P.motion ? P[key] : motionMemory[key][motion]);
+  const shapeField = usesShapeField(motion) && staticUsesImportedShape(motion);
   // 造型型別：面板的「形狀來源」。SVG 的 6-tap 法線只有在造型場真的編進來、
   // 而且型別是 SVG 時才可能被走到（uShapeType == 1 且 uShapeProgress > 0.001）。
   // 只看型別不看進度是刻意的：uShapeProgress 是動畫值，收進鍵裡會讓造型成形過程中
   // 不斷切換變體。所以 SVG 模式兩條法線路徑都編，維持原本的數學。
   const svgNormals = shapeField && P.shapeSource === 'svg';
+  // 兩顆形狀交接（形狀變形）與成型波前（形狀匯聚）：mapScene 裡兩塊互斥的分支，
+  // 各自的 runtime 開關只有自己那個模式會設起來。兩者共用 dissolveField，所以
+  // 那個函式（含 3x3 Voronoi）只要有一邊要就得編。
+  //
+  // 這兩項必須進變體鍵：少了它們，形狀匯聚與形狀變形的其他旗標組合完全相同
+  // （都是造型場＋微滴＋負形），會在快取裡撞成同一個鍵卻對應兩份不同的 defines。
+  const shapeMorph = shapeField && motion === 'morph';
+  const formationCut = shapeField && isFormationMotion(motion) && P.formationFrontOn;
   return {
     // --- 幾何 ---
     shapeField,
     svgNormals,
+    // 造型距離場的來源。面板的「形狀來源」二選一，另一支在這個變體裡是死碼
+    // （見 shaders.js 的 shapeDistance）。svgNormals 與 shapeSvg 條件相同但意義
+    // 不同：一個決定法線路徑，一個決定距離場來源，所以分開列。
+    shapeSvg: svgNormals,
+    shapeVolume: shapeField && P.shapeSource !== 'svg',
+    shapeMorph,
+    formationCut,
+    dissolveField: shapeMorph || formationCut,
     // 毛細波的程序紋理現在也服務靜態模式：兩者共用同一支 capillarySurfaceOffset，
     // 只是分別套在形狀場（毛細波）與程序化 SDF（靜態的內建幾何）上。
     // 私語(research)的外殼紋理跟毛細波共用同一份 Noise／Voronoi 等函式
     // (見 shaders.js 的 researchProceduralTexture)，所以也要編進這個旗標。
-    capillaryTexture: P.motion === 'capillary' || P.motion === 'static'
-      || P.motion === 'research',
+    capillaryTexture: motion === 'capillary' || motion === 'static'
+      || motion === 'research',
     // 靜態模式選了內建幾何（staticShape 0-6）時才編譯程序化 SDF；選了「匯入」
     // （staticShape 7）就完全交給上面的 shapeField 走形狀場，兩邊不同時混進 d。
-    staticShape: P.motion === 'static' && P.staticShape !== 7,
-    research: P.motion === 'research',
-    typewriter: P.motion === 'typewriter',
+    staticShape: motion === 'static' && P.staticShape !== 7,
+    research: motion === 'research',
+    typewriter: motion === 'typewriter',
     // 微滴的實際條件與 updateMicroDrops 的 activeCount 完全一致：四種模式之一，
     // 而且造型場真的在（微滴的 anchors 也來自匯入的造型）。
     microDrops: shapeField
-      && (isFormationMotion(P.motion) || P.motion === 'shatter'
-        || P.motion === 'melt' || P.motion === 'morph'),
+      && (isFormationMotion(motion) || motion === 'shatter'
+        || motion === 'melt' || motion === 'morph'),
     // 衛星滴與毛細回彈波只在分裂的 pinch-off 產生（見 bubble.js 寫入 satelliteDrops
     // 與 elasticEvent 的地方，其餘模式一律歸零）。
-    satellites: P.motion === 'split',
-    capillaryWave: P.motion === 'split',
+    satellites: motion === 'split',
+    capillaryWave: motion === 'split',
     // 負形（空腔）是造型的一部分：anchors 由 shapeCavityBase 產生，沒有匯入造型
     // 就永遠是空陣列。
     negativeField: shapeField,
@@ -1784,10 +2278,10 @@ function variantState() {
     // 的 FEATURE_THIN_FILM 說明）。
     thinFilm: !!P.filmEnabled,
     // 液態薄膜材質：只有 uMaterialStyle === 1 才走那個分支。
-    liquidFilm: P.materialStyle === 'membrane',
+    liquidFilm: scoped('materialStyle') === 'membrane',
     dispersion: !!P.dispersionEnabled,
     prismBeam: !!P.rayDispersionEnabled,
-    spectralCaustics: !!P.spectralCausticEnabled,
+    spectralCaustics: !!scoped('spectralCausticEnabled'),
     // 稜光的另外四種圖樣：只有選了非預設圖樣才需要。
     beamPatterns: P.rayBeamPattern !== 'grid',
     // 環境／PMREM 取樣。HDRI 載入前是 0，載入後變 1 —— 這是少數會在執行期改變的軸，
@@ -1801,23 +2295,28 @@ function variantState() {
 // 診斷覆寫必須進鍵裡：它們會改變 shaderFeatures() 產生的 defines，但不改變
 // variantState()。少了這一段，同一個鍵會對應到兩支不同的 shader，快取就會拿錯東西
 // （實測踩過：context 遺失後重建，拿到的是別組 defines 的材質）。
+//
+// dissolveField 刻意不佔一個字元：它恆等於 shapeMorph || formationCut，也就是
+// R 與 T 兩個字元的函數，不會有「鍵相同但 defines 不同」的情形。
 function variantKey(v = variantState()) {
   const flag = (on, ch) => (on ? ch : '-');
   const diagSalt = DIAG.any || FORCE_FEATURES.length
     ? '.d[' + DIAG.list.join('+') + (FORCE_FEATURES.length ? '|' + FORCE_FEATURES.join('+') : '') + ']'
     : '';
   return [
-    'g' + flag(v.shapeField, 'S') + flag(v.svgNormals, 'V') + flag(v.capillaryTexture, 'C')
+    'g' + flag(v.shapeField, 'S') + flag(v.svgNormals, 'V') + flag(v.shapeVolume, 'G')
+      + flag(v.capillaryTexture, 'C')
       + flag(v.microDrops, 'M') + flag(v.satellites, 'A') + flag(v.capillaryWave, 'W')
-      + flag(v.negativeField, 'N') + flag(v.staticShape, 'X') + flag(v.research, 'R')
-      + flag(v.typewriter, 'T'),
+      + flag(v.negativeField, 'N') + flag(v.staticShape, 'X') + flag(v.research, 'H')
+      + flag(v.typewriter, 'Y') + flag(v.shapeMorph, 'R') + flag(v.formationCut, 'T'),
     'o' + flag(v.thinFilm, 'F') + flag(v.liquidFilm, 'L') + flag(v.dispersion, 'D')
       + flag(v.prismBeam, 'P') + flag(v.spectralCaustics, 'K') + flag(v.beamPatterns, 'B')
       + flag(v.envPmrem, 'E'),
   ].join('.') + diagSalt;
 }
 
-function shaderFeatures() {
+// V 可以傳入，用來為「別的模式」算 defines（背景預熱要用；見 prewarmVariants）。
+function shaderFeatures(V = variantState()) {
   // minshader2 = minshader + 兩項編譯期收斂（見下方 slim2 的使用處）。
   // minshader 在 Windows ANGLE 上還是跨不過編譯門檻（實測與 compileonly 體感相同），
   // 所以再往下砍固定迴圈上限與分支數，但一樣不碰任何數學。
@@ -1865,8 +2364,6 @@ function shaderFeatures() {
   // 為什麼要這樣做：Windows 的 ANGLE→HLSL→fxc 會把所有函式攤平成一個巨大的函式，
   // 而優化器成本對函式大小是超線性的。實測把萬能 shader 拆成當下需要的最小組合，
   // cold compile 從兩分鐘級一路降到個位數秒級。
-  const V = variantState();
-
   const defines = {
     // --- 幾何：mapScene 的子系統，由 motion 決定 ---
     FEATURE_SHAPE_FIELD: V.shapeField ? '' : false,
@@ -1878,6 +2375,18 @@ function shaderFeatures() {
     FEATURE_NEGATIVE_FIELD: V.negativeField ? '' : false,
     FEATURE_RESEARCH: V.research ? '' : false,
     FEATURE_TYPEWRITER: V.typewriter ? '' : false,
+
+    // --- 造型場內部：只編這個模式真的走得到的那幾塊 ---
+    // 距離場來源二選一（SVG 擠出／GLB 體積）。體積那支是 8 次 atlasVoxel，
+    // 也就是 8 個 texture2D 加三線性插值，攤平後是造型模式最大的一塊。
+    FEATURE_SHAPE_SVG: V.shapeSvg ? '' : false,
+    FEATURE_SHAPE_VOLUME: V.shapeVolume ? '' : false,
+    // 兩顆形狀交接：只有形狀變形會設 uShapeMorph。它自己就帶兩份造型距離場。
+    FEATURE_SHAPE_MORPH: V.shapeMorph ? '' : false,
+    // 成型波前：只有形狀匯聚會設 uFormationCut。
+    FEATURE_FORMATION_CUT: V.formationCut ? '' : false,
+    // 上面兩者共用的消失場（含一個 3x3 Voronoi 迴圈），有一邊要就得編。
+    FEATURE_DISSOLVE_FIELD: V.dissolveField ? '' : false,
 
     // --- 法線路徑：只編當下這個造型型別真正會走到的那一條 ---
     // SVG 造型的 6-tap 分軸差分與四面體 4-tap 在原版是兩條 runtime 分支，兩條都會
@@ -1919,6 +2428,9 @@ function shaderFeatures() {
     defines.FEATURE_SHAPE_FIELD = false;
     defines.FEATURE_CAPILLARY = false;
     defines.FEATURE_MICRO_DROPS = false;
+    // dissolveField 的守衛是獨立的（它同時服務 morph 與成型波前兩塊），造型場整個
+    // 關掉時它就沒有呼叫者了，這裡跟著關掉才不會白編一個 Voronoi 迴圈。
+    defines.FEATURE_DISSOLVE_FIELD = false;
   }
   if (DIAG.minshader2 || DIAG.lowcompileloops) {
     defines.FEATURE_BEAM_PATTERNS = false;
@@ -1956,6 +2468,10 @@ function shaderFeatures() {
     defines.NORMAL_TAPS_TETRA = '';
   }
   if (DIAG.singleReflectionSample) defines.PROBE_SINGLE_REFLECTION_SAMPLE = '';
+  // 驗證用：把 calcNormal 的 SVG 分軸差分換回迴圈化之前那六個展開的 tap。
+  // 這一支只該在做逐像素 A/B 時開 —— 它會把 mapScene 的靜態展開份數從 2 拉回 7，
+  // 也就是回到這一輪要修掉的那個編譯規模。
+  if (DIAG.probeUnrolledSvgTaps) defines.PROBE_UNROLLED_SVG_TAPS = '';
   if (DIAG.probeNoWobble) defines.PROBE_NO_GEOMETRY_WOBBLE = '';
   if (DIAG.probeNoRefractionFilm || DIAG.probeNoTraceExit) defines.PROBE_NO_TRACE_EXIT = '';
   if (DIAG.probeNoRefractionFilm || DIAG.probeNoArtDispersion) defines.PROBE_NO_ART_DISPERSION = '';
@@ -4312,6 +4828,15 @@ function setBgColorUniform(hex) {
   uniforms.uBgColor.value.setStyle(hex, THREE.LinearSRGBColorSpace);
 }
 
+// canvas 是 position:absolute; inset:0，正常情況下完全蓋住 body，這個背景色
+// 只在畫面還沒畫出第一幀（或極端縮放留出的縫）時看得到。淺底時同步成跟 shader
+// 一樣的漸層，避免那個瞬間跟畫出來的漸層不一致。
+function pageBackgroundCss(fallback) {
+  return P.backdrop === 'light'
+    ? `linear-gradient(to bottom, ${P.lightBgGradientTop}, ${P.lightBgGradientBottom})`
+    : fallback;
+}
+
 function makeRampTexture() {
   rampTex = new THREE.DataTexture(new Uint8Array(RAMP_W * 4), RAMP_W, 1, THREE.RGBAFormat);
   rampTex.colorSpace = THREE.SRGBColorSpace;
@@ -4322,6 +4847,55 @@ function makeRampTexture() {
   rampTex.generateMipmaps = false;
   buildRampLUT();
   return rampTex;
+}
+
+// Raw channel ratios, matching the existing single-color absorption uniforms.
+// Reuse textures on reinitialization; editing one palette uploads only that LUT.
+const edgeTintTextures = {};
+function updateEdgeTintPalette(prefix) {
+  const stops = readEdgeTintStops(P, prefix);
+  const texture = edgeTintTextures[prefix];
+  if (texture) {
+    const data = texture.image.data;
+    for (let x = 0; x < RAMP_W; x++) {
+      const rgb = sampleEdgeTint(stops, (x + 0.5) / RAMP_W);
+      data.set([...rgb.map(Math.round), 255], x * 4);
+    }
+    texture.needsUpdate = true;
+  }
+  const preview = document.getElementById(`${prefix}TintPreview`);
+  if (preview) {
+    const cssStops = Array.from({ length: 65 }, (_, i) => {
+      const rgb = sampleEdgeTint(stops, i / 64).map(Math.round);
+      return `rgb(${rgb.join(',')}) ${i / 64 * 100}%`;
+    });
+    preview.style.background = `linear-gradient(to right, ${cssStops.join(',')})`;
+  }
+}
+function updateEdgeTintForKey(key) {
+  const prefix = EDGE_TINT_TARGETS.find(target => key.startsWith(`${target}TintStop`));
+  if (prefix) updateEdgeTintPalette(prefix);
+}
+function makeEdgeTintUniforms() {
+  const result = {};
+  for (const prefix of EDGE_TINT_TARGETS) {
+    if (!edgeTintTextures[prefix]) {
+      const texture = new THREE.DataTexture(new Uint8Array(RAMP_W * 4), RAMP_W, 1, THREE.RGBAFormat);
+      texture.colorSpace = THREE.NoColorSpace;
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.ClampToEdgeWrapping;
+      texture.minFilter = texture.magFilter = THREE.LinearFilter;
+      texture.generateMipmaps = false;
+      edgeTintTextures[prefix] = texture;
+    }
+    updateEdgeTintPalette(prefix);
+    const u = `u${prefix[0].toUpperCase()}${prefix.slice(1)}`;
+    result[`${u}TintRamp`] = { value: edgeTintTextures[prefix] };
+    for (const suffix of ['MultiTint', 'MultiTintStrength', 'MultiTintRotation', 'MultiTintFocus']) {
+      result[`${u}${suffix}`] = { value: Number(P[`${prefix}${suffix}`]) };
+    }
+  }
+  return result;
 }
 
 /* ===== 虛擬光譜焦散七色查找表 ===== */
@@ -4422,10 +4996,11 @@ function initGL() {
     uCompositionOffsetX: { value: 0 },
     uCompositionOffsetY: { value: 0 },
     uMaxSteps:   { value: qualitySteps },
-    // 只有 probe-loop-normal-taps 的 shader 會宣告這顆；其餘變體 three.js 找不到
-    // location 就直接略過。恆為 4 —— 它的作用是讓 trip count 對 fxc 保持未知，
-    // 不是拿來調整取樣數的。
+    // 這兩顆的作用都不是調整取樣數，而是讓 calcNormal 兩條法線路徑的迴圈 trip count
+    // 對 fxc 保持未知，迴圈才不會被靜態展開成一份一份的 mapScene（見 shaders.js 的
+    // calcNormal）。所以值恆定：四面體 4 個 tap、SVG 分軸中央差分 6 個 tap。
     uNormalTaps: { value: 4 },
+    uNormalAxisTaps: { value: 6 },
     uCount:      { value: Math.round(P.count) },
     uViscosity:  { value: P.viscosity },
     uWobble:     { value: P.wobble },
@@ -4435,6 +5010,12 @@ function initGL() {
     uResearchShellSpeed: { value: P.researchShellSpeed },
     uResearchShellDensity: { value: P.researchShellDensity },
     uResearchShellTexture: { value: P.researchShellTexture },
+    ...makeEdgeTintUniforms(),
+    uResearchShellTint: { value: P.researchShellTint },
+    uResearchShellTintEdge: { value: P.researchShellTintEdge },
+    uResearchShellTintColor: { value: new THREE.Color().setStyle(
+      P.researchShellTintColor, THREE.LinearSRGBColorSpace
+    ) },
     uResearchBubbles: { value: P.researchBubbles ? 1 : 0 },
     uResearchBubbleCount: { value: P.researchBubbleCount },
     uResearchBubbleMin: { value: P.researchBubbleMin },
@@ -4443,6 +5024,11 @@ function initGL() {
     uResearchTextureDirY: { value: P.researchTextureDirY },
     uResearchTextureDirZ: { value: P.researchTextureDirZ },
     uResearchIconIOR: { value: P.researchIconIOR },
+    uResearchIconTint: { value: P.researchIconTint },
+    uResearchIconTintEdge: { value: P.researchIconTintEdge },
+    uResearchIconTintColor: { value: new THREE.Color().setStyle(
+      P.researchIconTintColor, THREE.LinearSRGBColorSpace
+    ) },
     uResearchIconSizeA: { value: P.researchIconSizeA },
     uResearchIconSizeB: { value: P.researchIconSizeB },
     uResearchIconTailTip: { value: P.researchIconTailTip },
@@ -4497,11 +5083,13 @@ function initGL() {
     uRayBeamNoiseMask: { value: P.rayBeamNoiseMask },
     uRayBeamNoiseScale: { value: P.rayBeamNoiseScale },
     uSpectralCausticIntensity: { value: P.spectralCausticIntensity },
+    uSpectralCausticMapping: { value: SELECTS.spectralCausticMapping.map[P.spectralCausticMapping] },
     uSpectralCausticFocus: { value: P.spectralCausticFocus },
     uSpectralCausticWidth: { value: P.spectralCausticWidth },
     uSpectralCausticLightSize: { value: P.spectralCausticLightSize },
     uSpectralCausticDensity: { value: P.spectralCausticDensity },
     uSpectralCausticSoftness: { value: P.spectralCausticSoftness },
+    uSpectralCausticFilmSoften: { value: P.spectralCausticFilmSoften },
     uSpectralCausticWarp: { value: P.spectralCausticWarp },
     uSpectralCausticSeparation: { value: P.spectralCausticSeparation },
     uSpectralCausticBounce: { value: P.spectralCausticBounce },
@@ -4533,7 +5121,24 @@ function initGL() {
     uBgMode:     { value: SELECTS.bgMode.map[P.bgMode] },
     uMaterialStyle: { value: SELECTS.materialStyle.map[P.materialStyle] },
     uTransparentBackground: { value: 0 },
+    uLightBackdrop: { value: SELECTS.backdrop.map[P.backdrop] },
+    // 直接讀 P.backdrop 字串，不透過 SELECTS.backdrop.map（那張表兩個值目前都
+    // 映射成 0，見 uLightBackdrop 旁的說明）。
+    uLightBgGradientEnabled: { value: P.backdrop === 'light' ? 1 : 0 },
+    uLightShow:  { value: P.lightShow },
+    uLightClarity: { value: P.lightClarity },
+    uLightDepth: { value: P.lightDepth },
+    uLightCardStrength: { value: P.lightCardStrength },
+    uLightChroma: { value: P.lightChroma },
+    uLightIconColor: { value: new THREE.Color().setStyle(P.lightIconColor, THREE.LinearSRGBColorSpace) },
+    uLightIconClarity: { value: P.lightIconClarity },
+    uLightIconTint: { value: P.lightIconTint },
+    uLightIconEdge: { value: P.lightIconEdge },
+    uLightIconRimColor: { value: new THREE.Color().setStyle(P.lightIconRimColor, THREE.LinearSRGBColorSpace) },
+    uLightIconRimStrength: { value: P.lightIconRimStrength },
     uBgColor:    { value: new THREE.Color().setStyle(P.bgColor, THREE.LinearSRGBColorSpace) },
+    uLightBgGradientTop: { value: new THREE.Color().setStyle(P.lightBgGradientTop, THREE.LinearSRGBColorSpace) },
+    uLightBgGradientBottom: { value: new THREE.Color().setStyle(P.lightBgGradientBottom, THREE.LinearSRGBColorSpace) },
     uMembraneBaseColor: { value: new THREE.Color(P.membraneBaseColor) },
     uMembraneVeilColor: { value: new THREE.Color(P.membraneVeilColor) },
     uMembraneReflectionColor: { value: new THREE.Color(P.membraneReflectionColor) },
@@ -4878,6 +5483,7 @@ function syncPanelToUniforms() {
     const u = uniforms[SELECTS[key].uniform];
     if (u) u.value = SELECTS[key].map[P[key]];
   }
+  uniforms.uLightBgGradientEnabled.value = P.backdrop === 'light' ? 1 : 0;
   for (const key of Object.keys(TOGGLES)) applyToggle(key);
   for (const key of Object.keys(COLORS)) {
     if (!COLORS[key]) continue;
@@ -4885,10 +5491,16 @@ function syncPanelToUniforms() {
     // 吸收色不是「一道光的顏色」而是「每個通道剩下多少」的比例，所以要的是選色
     // 器上那三個原始數值，不能讓 three 的色彩管理把它當 sRGB 轉成線性（那會把
     // 比例整個扭掉）。同 uBgColor 的作法。
-    else if (key === 'absorbColor') uniforms[COLORS[key]].value.setStyle(P[key], THREE.LinearSRGBColorSpace);
+    else if (key === 'absorbColor' || key === 'researchIconTintColor'
+      || key === 'researchShellTintColor'
+      || key === 'lightIconColor' || key === 'lightIconRimColor'
+      || key === 'lightBgGradientTop' || key === 'lightBgGradientBottom') {
+      uniforms[COLORS[key]].value.setStyle(P[key], THREE.LinearSRGBColorSpace);
+    }
     else uniforms[COLORS[key]].value.set(P[key]);
   }
-  document.body.style.background = (P.bgMode === 'hdri') ? '#000' : P.bgColor;
+  EDGE_TINT_TARGETS.forEach(updateEdgeTintPalette);
+  document.body.style.background = (P.bgMode === 'hdri') ? '#000' : pageBackgroundCss(P.bgColor);
 }
 
 // 把「匯集時間／完成停留」換算回具體秒數並列出散開段，讓使用者一次看到循環
@@ -5037,6 +5649,8 @@ function buildExtendedMotionControls() {
           if (optionSpec.hidden) option.hidden = true;
           control.append(option);
         }
+      } else if (param.type === 'color') {
+        control.type = 'color';
       } else {
         control.type = 'range';
         control.min = String(param.min);
@@ -5049,7 +5663,27 @@ function buildExtendedMotionControls() {
       if (param.type !== 'select') value.id = `${param.key}_v`;
       if (track) row.append(label, control, track, value);
       else row.append(label, control, value);
-      container.append(row);
+      if (param.tintPalette) {
+        const prefix = param.tintPalette;
+        let palette = container.querySelector(`#${prefix}TintPalette`);
+        if (!palette) {
+          palette = document.createElement('details');
+          palette.id = `${prefix}TintPalette`;
+          palette.className = 'tintPalette';
+          const summary = document.createElement('summary');
+          summary.textContent = '邊界色盤 · 6 色';
+          const preview = document.createElement('span');
+          preview.id = `${prefix}TintPreview`;
+          preview.className = 'tintPalettePreview';
+          summary.append(preview);
+          const note = document.createElement('p');
+          note.className = 'tintPaletteNote';
+          note.textContent = '位置沿輪廓繞一圈；拉開色標可拓寬色帶。首尾自動接色。';
+          palette.append(summary, note);
+          container.append(palette);
+        }
+        palette.append(row);
+      } else container.append(row);
       // 文字輸入底下掛一行狀態：幾句、烘出幾個字形、字體有沒有 fallback。
       // 字體 fallback 是靜默的（fillText 找不到就換一套字形），沒有這行的話
       // 使用者只會覺得「字看起來怪」而不知道原因。
@@ -5099,7 +5733,7 @@ function bindControls() {
       if (key === 'cameraRotationX') rot.x = P[key] * Math.PI / 180;
       if (key === 'cameraRotationY') rot.y = P[key] * Math.PI / 180;
       if (MOTION_MEMORY_KEYS.includes(key)) {
-        motionMemory[key][P.motion] = key === 'count' ? Math.round(P[key]) : P[key];
+        motionMemory[key][memorySlot(key)] = key === 'count' ? Math.round(P[key]) : P[key];
       }
       if (key === 'shapeLiquidPosition') applyEdgeDropDistribution(P[key]);
       if (key === 'shapeAScale') scheduleShapeAScaleRebuild();
@@ -5110,6 +5744,7 @@ function bindControls() {
       // 會改變哪些控制項該顯示，staticShape 還會改變要編譯哪一支 shader。
       // 走 SELECTS 的字串型 select 在 change 時會自動呼叫 updateUIState() 與
       // syncShaderVariant()，但這兩個走的是這裡的數值型通用迴圈，得自己補。
+      updateEdgeTintForKey(key);
       if (key === 'spectralCausticBlend') buildSpectralCausticLUT();
       if (key === 'capillaryTexture') applyGates();
       // 同理：私語的程序紋理選「無」時，紋理方向那三根滑桿要一起收起來。
@@ -5163,6 +5798,12 @@ function bindControls() {
       if (key === 'materialStyle' && previousValue !== P[key]) {
         switchMaterialProfile(previousValue, P[key]);
       }
+      if (key === 'backdrop' && previousValue !== P[key]) {
+        // 只搬跟底色有關的那幾根，其餘的兩個情境共用同一格，碰都不該碰。
+        applyMemorySlots(
+          BACKDROP_MEMORY_KEYS, P.motion, P.motion, previousValue, P[key],
+        );
+      }
       if (key === 'motion' && previousMotion !== P.motion) {
         // 毛細波只允許形狀場本體。舊的自動保存／參數檔可能還記著早期版本的
         // count=12；除了渲染端強制歸零，這裡也把模式記憶清成 0，避免隱藏欄位
@@ -5171,19 +5812,7 @@ function bindControls() {
         // 每個按模式記憶的參數：先把舊模式剛才的值存回去，再把新模式記得的值
         // 寫回控制項並觸發它自己的 input/change，讓 uniform、顯示文字、
         // applyEdgeDropDistribution 之類的副作用照常跑一次，不必在這裡重複。
-        for (const memKey of MOTION_MEMORY_KEYS) {
-          motionMemory[memKey][previousMotion] = P[memKey];
-          const memEl = document.getElementById(memKey);
-          if (memEl.type === 'checkbox') {
-            memEl.checked = motionMemory[memKey][P.motion];
-            memEl.dispatchEvent(new Event('change', { bubbles: true }));
-          } else {
-            memEl.value = motionMemory[memKey][P.motion];
-            memEl.dispatchEvent(new Event(
-              memEl.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true },
-            ));
-          }
-        }
+        applyMemorySlots(MOTION_MEMORY_KEYS, previousMotion, P.motion, P.backdrop, P.backdrop);
         previousDropT = null;
         // 模式指定的 HDRI：進出私語這類自帶環境貼圖的模式時要換圖，回到沒有
         // 指定的模式則換回材質類型原本那張。兩邊都沒有指定就不用動 —— 重載一
@@ -5193,6 +5822,9 @@ function bindControls() {
         }
       }
       if (uniforms && uniforms[uniform]) uniforms[uniform].value = map[el.value];
+      if (key === 'backdrop' && uniforms) {
+        uniforms.uLightBgGradientEnabled.value = P.backdrop === 'light' ? 1 : 0;
+      }
       updateUIState();
       if (key === 'shapeQuality' && previousValue !== P[key]) {
         scheduleGLBRebuild();
@@ -5220,7 +5852,7 @@ function bindControls() {
     const label = el.closest('.toggleRow')?.querySelector('label');
     const update = () => {
       P[key] = el.checked;
-      if (MOTION_MEMORY_KEYS.includes(key)) motionMemory[key][P.motion] = P[key];
+      if (MOTION_MEMORY_KEYS.includes(key)) motionMemory[key][memorySlot(key)] = P[key];
       if (valEl) valEl.textContent = P[key] ? '開啟' : '關閉';
       applyToggle(key);
       updateUIState();
@@ -5269,13 +5901,19 @@ function bindControls() {
     const uName = COLORS[key];
     const update = () => {
       P[key] = el.value;
-      if (!uName) { /* 後處理的顏色由 renderComposite 每幀直接讀 P */ }
+      updateEdgeTintForKey(key);
+      if (!uName) { /* LUT / 後處理顏色不直接對應 uniform */ }
       else if (key === 'bgColor') setBgColorUniform(el.value);
       // 見上面 applyAllUniforms 裡同一個特例的說明。
-      else if (key === 'absorbColor') { if (uniforms) uniforms[uName].value.setStyle(el.value, THREE.LinearSRGBColorSpace); }
+      else if (key === 'absorbColor' || key === 'researchIconTintColor'
+      || key === 'researchShellTintColor'
+      || key === 'lightIconColor' || key === 'lightIconRimColor'
+      || key === 'lightBgGradientTop' || key === 'lightBgGradientBottom') {
+        if (uniforms) uniforms[uName].value.setStyle(el.value, THREE.LinearSRGBColorSpace);
+      }
       else if (uniforms) uniforms[uName].value.set(el.value);
       if (key === 'bgColor') {
-        document.body.style.background = (P.bgMode === 'hdri') ? '#000' : el.value;
+        document.body.style.background = (P.bgMode === 'hdri') ? '#000' : pageBackgroundCss(el.value);
         updateUIState();
       }
       requestPausedRender();
@@ -5283,6 +5921,19 @@ function bindControls() {
     el.value = P[key];
     if (!PREVIEW && !el._bound) { el.addEventListener('input', update); el._bound = true; }
     update();
+  }
+  const clearIconPreset = document.getElementById('clearIconPreset');
+  if (!PREVIEW && !clearIconPreset._bound) {
+    clearIconPreset.addEventListener('click', () => {
+      for (const [key, value] of Object.entries({ lightIconColor: '#d9f3ff',
+        lightIconClarity: 0.58, lightIconTint: 0.42, lightIconRimColor: '#3aa9df',
+        lightIconRimStrength: 0.62, lightIconEdge: 5.2 })) {
+        const input = document.getElementById(key);
+        input.value = value;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    });
+    clearIconPreset._bound = true;
   }
   bindSpectralCausticColors();
   bindRamp();
@@ -5388,6 +6039,13 @@ const GATES = {
   // 後處理各效果的附屬參數：效果關掉時那些滑桿沒有作用，一併收起來。
   bloomOn:              () => P.bloomEnabled,
   streaksOn:            () => P.streaksEnabled,
+  // 光譜焦散的「亮帶」參數。薄膜噪聲（filmNoise）在 mapping 分支裡把 bandWave
+  // 整個覆寫掉，所以曲面扭曲與內部反射對它完全沒有作用——面板照樣亮著給人調
+  // 卻毫無反應，比名字取錯更容易誤導。
+  //
+  // 只收這兩根。「尺度」與「光帶寬度」在薄膜噪聲下仍然有效（前者決定 3D Noise
+  // 的頻率，後者透過 focusExponent 影響明暗對比），收掉會拿走真的在動的控制項。
+  causticBandUI:        () => P.spectralCausticMapping !== 'filmNoise',
   // 私語的兩組附屬參數，理由同上：關掉／選「無」之後那些滑桿沒有作用。
   researchTextureOn:    () => Math.round(P.researchShellTexture) !== 6,
   researchBubblesOn:    () => P.researchBubbles,
@@ -5437,7 +6095,7 @@ const borrowedRows = new Map();
 // 個 id。再開一份等於把同一個狀態放兩個地方，遲早要處理兩邊同步。
 function syncBorrowedRows() {
   const wanted = new Map();
-  document.querySelectorAll('#extendedMotionControls .borrowAnchor').forEach(anchor => {
+  document.querySelectorAll('#panel .borrowAnchor').forEach(anchor => {
     const block = anchor.closest('.modeBlock');
     if (block && block.dataset.gate && !gateOpen(block.dataset.gate)) return;
     wanted.set(anchor.dataset.borrow, anchor);
@@ -5518,34 +6176,36 @@ function updateUIState() {
   });
   const colorBackground = P.bgMode === 'color';
   const bgc = document.getElementById('bgColor');
-  const materialStyle = document.getElementById('materialStyle');
-  const membraneOption = materialStyle.querySelector('option[value="membrane"]');
   bgc.disabled = !colorBackground;
   bgc.closest('.row').style.opacity = colorBackground ? 1 : 0.4;
-  // 液態薄膜的合成是專為純白畫布設計（見 shaders.js 對應段落的白底假設）。
-  // 背景一旦離開 #fff，立即收斂回通用玻璃，避免下拉顯示一個實際不成立、
-  // shader 又無法合理解讀的組合。之前拿掉這個限制想讓薄膜通用背景，但薄膜
-  // 的顯色路徑（亮底 transmission、白卡/藍卡反射、去背用的白底反乘）都是
-  // 針對白底寫死的美術模型，不是簡單的背景取樣，所以重新鎖回純白。
-  const pureWhiteBackground = colorBackground
-    && P.bgColor.toLowerCase() === '#ffffff';
-  membraneOption.disabled = !pureWhiteBackground;
-  if (!pureWhiteBackground && P.materialStyle === 'membrane') {
-    const previousStyle = P.materialStyle;
-    P.materialStyle = 'universal';
-    materialStyle.value = 'universal';
-    switchMaterialProfile(previousStyle, 'universal');
-    if (uniforms) uniforms.uMaterialStyle.value = SELECTS.materialStyle.map.universal;
-  }
-  const membraneMaterial = P.materialStyle === 'membrane';
-  const membraneDepth = document.getElementById('membraneDepth');
-  membraneDepth.disabled = !membraneMaterial;
-  document.getElementById('membraneDepthRow').style.display = membraneMaterial ? '' : 'none';
+  // 已移除液態薄膜材質；相容節點固定隱藏，舊參數檔也會被 materialStyle 收斂為 universal。
+  document.getElementById('membraneDepth').disabled = true;
+  document.getElementById('membraneDepthRow').style.display = 'none';
   for (const key of ['membraneBaseColor', 'membraneVeilColor', 'membraneReflectionColor', 'membraneCardColor', 'membraneShadeColor']) {
-    document.getElementById(key).disabled = !membraneMaterial;
-    document.getElementById(key + 'Row').style.display = membraneMaterial ? '' : 'none';
+    document.getElementById(key).disabled = true;
+    document.getElementById(key + 'Row').style.display = 'none';
   }
-  document.body.style.background = colorBackground ? P.bgColor : '#000';
+  const lightBackdrop = false;
+  const lightIcons = false;
+  for (const prefix of EDGE_TINT_TARGETS) {
+    const multi = P[`${prefix}MultiTint`];
+    for (const suffix of ['Tint', 'TintEdge', 'TintColor']) {
+      setDisabled(document.getElementById(`${prefix}${suffix}`), false);
+    }
+    for (const param of edgeTintParams(prefix)) {
+      setDisabled(document.getElementById(param.key), param.key !== `${prefix}MultiTint` && !multi);
+    }
+    document.getElementById(`${prefix}TintPalette`)?.classList.toggle('is-disabled', !multi);
+  }
+  document.getElementById('lightShowRow').style.display = 'none';
+  document.getElementById('lightLookDetails').style.display = 'none';
+  document.getElementById('lightIconDetails').style.display = 'none';
+  for (const key of ['lightShow', 'lightClarity', 'lightDepth', 'lightCardStrength', 'lightChroma',
+    'lightIconClarity', 'lightIconColor', 'lightIconTint', 'lightIconEdge', 'lightIconRimColor', 'lightIconRimStrength']) {
+    const shellControl = ['lightShow', 'lightClarity', 'lightDepth', 'lightCardStrength', 'lightChroma'].includes(key);
+    setDisabled(document.getElementById(key), shellControl ? !lightBackdrop : !lightIcons);
+  }
+  document.body.style.background = colorBackground ? pageBackgroundCss(P.bgColor) : '#000';
   // 輪廓液滴的模式閘門（形狀場 + SVG 擠出）走 data-gate；這裡只剩它自己的主
   // 開關。主開關關閉時只停掉會移動的液滴，「邊緣水滴」因為同時決定擠出邊緣的
   // 圓角，標了 .keepEnabled 而保持可用 —— 這樣才做得出「圓角擠出但沒有液滴」。
@@ -5577,25 +6237,38 @@ function updateUIState() {
   }
   // 模型品質（GLB 專用）、形狀厚度與邊緣圓角（都只作用於 SVG 擠出的
   // svgShapeDistance，GLB 走 volumeShapeDistance 根本不讀）全部走 data-gate。
-
+  inspector?.refresh();
 }
 
 document.getElementById('resetBtn').addEventListener('click', () => {
   // 重設不換動態模式：按重設是想把「現在這個模式」的參數歸零，不是想被丟回
   // 分裂模式再自己切回來。
   const motion = P.motion;
+  const backdrop = P.backdrop;
   Object.assign(P, DEFAULTS, MOTION_TEXT_DEFAULTS, SELECT_DEFAULTS, TOGGLE_DEFAULTS, COLOR_DEFAULTS);
   P.motion = motion;
+  P.backdrop = backdrop;
   resetMaterialProfiles();
   if (mobileRenderQuery.matches && !PREVIEW) P.cameraDistance = MOBILE_CAMERA_DISTANCE_DEFAULT;
   motionMemory = buildMotionMemory();
+  for (const mode of MOTION_KEYS) {
+    if (motionMemory.spectralCausticFocus) motionMemory.spectralCausticFocus[`${mode}|dark`] = 1.0;
+    if (motionMemory.spectralCausticSeparation) motionMemory.spectralCausticSeparation[`${mode}|dark`] = 1.0;
+    if (motionMemory.transmission) motionMemory.transmission[`${mode}|light`] = 0.97;
+    if (motionMemory.absorb) motionMemory.absorb[`${mode}|light`] = 1.35;
+    if (motionMemory.envRefraction) motionMemory.envRefraction[`${mode}|light`] = 0.025;
+    if (motionMemory.fresnel) motionMemory.fresnel[`${mode}|light`] = 0.12;
+    if (motionMemory.rayDispersionEnabled) motionMemory.rayDispersionEnabled[`${mode}|light`] = false;
+    if (motionMemory.bloomEnabled) motionMemory.bloomEnabled[`${mode}|light`] = false;
+    if (motionMemory.streaksEnabled) motionMemory.streaksEnabled[`${mode}|light`] = false;
+  }
   // 每個模式各自記憶的那幾項（顆數／滴徑／循環秒數／前後拉伸／擠出外觀）要套用
   // 「這個模式」的預設，不能停在共用預設上。共用預設是給分裂模式用的數字——
   // 例如循環 12 秒、顆數 2，留在形狀變形上就完全不對。
   //
   // 平常這件事是由模式切換的處理去做的，但這裡刻意不換模式，那條路徑不會觸發，
   // 所以得自己補。
-  for (const key of MOTION_MEMORY_KEYS) P[key] = motionMemory[key][motion];
+  for (const key of MOTION_MEMORY_KEYS) P[key] = motionMemory[key][memorySlot(key, motion)];
   resetSpectralCausticColors();
   resetRamp();
   bindControls();
@@ -6264,8 +6937,18 @@ function captureFrameForDiff(key) {
     console.info('[bubble diag] 已擷取畫面 "' + key + '"：' + w + 'x' + h
       + '，hash=' + hash.toString(16) + '，取樣 ' + (sample.length / 4) + ' 像素'
       + '，uTime=' + record.simT);
+    return { ok: true, hash, width: w, height: h };
   } catch (e) {
-    console.error('[bubble diag] 擷取畫面失敗：' + e.message);
+    // 幾乎一定是 localStorage 配額：一筆擷取約 700KB，而配額只有 5MB 上下，
+    // 存到第七、八筆就滿了。失敗訊息一定要把原因跟清法講出來 —— 否則讀回來只是
+    // null，下游會以為「擷取到一張空畫面」而不是「根本沒存進去」，那是會白花
+    // 一整輪量測時間的誤判。
+    const 已存筆數 = Object.keys(localStorage).filter(k => k.startsWith('vfx:diagpix:')).length;
+    console.error('[bubble diag] 擷取畫面失敗：' + e.message
+      + '（localStorage 目前有 ' + 已存筆數 + ' 筆擷取，每筆約 700KB，配額約 5MB。'
+      + '清掉：Object.keys(localStorage)'
+      + '.filter(k=>k.startsWith("vfx:diagpix:")).forEach(k=>localStorage.removeItem(k))）');
+    return { ok: false, 錯誤: e.message, 已存筆數 };
   }
 }
 
@@ -6305,6 +6988,32 @@ window.__bubbleDiagComparePixels = function (keyA, keyB) {
           : '有可見差異，需要檢查',
     diag: { [keyA]: a.diag, [keyB]: b.diag },
   };
+};
+
+// 在「現在這個狀態」算繪一幀並擷取起來，供逐像素 A/B。
+//
+// ?diagCapture= 只在 DIAG.static 的第一幀觸發，那一幀必然是頁面預設模式（分裂）。
+// 造型類模式沒有 URL 參數可以直接進入，得先像使用者那樣切模式、等造型匯入、
+// 等變體在背景編好，才有「同一支 shader 的同一幀」可比 —— 那些等待由外部驅動
+// （__bubbleDiagReport 已經把需要的狀態全部攤出來了），這裡只負責最後那一步。
+//
+// 算繪路徑與 DIAG.static 那一段逐字相同：先對齊 last 讓 dt≈0，走完整的 frame()
+// 而不是只呼叫 renderer.render()，讀像素緊接在同一個 task 內，最後把 frame()
+// 自己排下去的那次 RAF 取消掉，只留這一幀。
+window.__bubbleDiagRenderAndCapture = function (key) {
+  if (!inited) return { 錯誤: 'WebGL 尚未初始化' };
+  last = performance.now();
+  frame(performance.now());
+  const result = captureFrameForDiff(key);
+  if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+  const saved = result.ok
+    ? JSON.parse(localStorage.getItem('vfx:diagpix:' + key) || 'null')
+    : null;
+  return saved
+    ? { key, 尺寸: saved.width + 'x' + saved.height, hash: saved.hash.toString(16),
+      simT: saved.simT, 取樣像素數: saved.sample.length / 4,
+      目前變體: activeVariantKey, defines: mesh.material.defines }
+    : { 錯誤: '擷取失敗：' + (result.錯誤 || '(未知)'), 已存筆數: result.已存筆數 };
 };
 
 // 診斷用的現況報告。任何時候都可以在 console 呼叫 __bubbleDiagReport()，
@@ -6375,9 +7084,74 @@ window.__bubbleDiagReport = function () {
     // 過程中後端有沒有換過人（見 glTimeline）。
     gl時間軸: glTimeline,
     shader規模: computeShaderStats(),
+    // 造型場的完整 runtime 狀態。「造型資料在不在」與「shader 有沒有把它編進來」是
+    // 兩件事，要並排看才分得出是資料沒到還是 shader 沒編。
+    造型: (() => {
+      const d = (mesh && mesh.material) ? mesh.material.defines || {} : {};
+      const has = k => d[k] !== false && d[k] !== undefined;
+      const tex = uniforms ? uniforms.uShapeTex.value : null;
+      const img = tex && tex.image ? tex.image : null;
+      return {
+        motion: P.motion,
+        shapeSource: P.shapeSource,
+        usesShapeField: usesShapeField(P.motion),
+        // --- shader 端 ---
+        FEATURE_SHAPE_FIELD已編入: has('FEATURE_SHAPE_FIELD'),
+        NORMAL_TAPS_SVG: has('NORMAL_TAPS_SVG'),
+        NORMAL_TAPS_TETRA: has('NORMAL_TAPS_TETRA'),
+        FEATURE_MICRO_DROPS: has('FEATURE_MICRO_DROPS'),
+        FEATURE_NEGATIVE_FIELD: has('FEATURE_NEGATIVE_FIELD'),
+        // 造型場內部的模式特化。FEATURE_SHAPE_SVG / VOLUME 應該正好對上 uShapeType
+        // （1 / 2）；不一致就代表變體還在背景編譯中，此刻 shapeDistance 會回傳
+        // 遠距離，造型暫時不顯示（見 shaders.js 的 shapeDistance）。
+        FEATURE_SHAPE_SVG: has('FEATURE_SHAPE_SVG'),
+        FEATURE_SHAPE_VOLUME: has('FEATURE_SHAPE_VOLUME'),
+        FEATURE_SHAPE_MORPH: has('FEATURE_SHAPE_MORPH'),
+        FEATURE_FORMATION_CUT: has('FEATURE_FORMATION_CUT'),
+        FEATURE_DISSOLVE_FIELD: has('FEATURE_DISSOLVE_FIELD'),
+        // --- uniform 端 ---
+        uShapeType: uniforms ? uniforms.uShapeType.value : null,
+        uShapeProgress: uniforms ? uniforms.uShapeProgress.value : null,
+        uShapeGrid: uniforms ? uniforms.uShapeGrid.value : null,
+        uShapeScale: uniforms ? uniforms.uShapeScale.value : null,
+        uShapeTex有貼圖: !!tex,
+        uShapeTex尺寸: img ? (img.width + 'x' + img.height) : '(無)',
+        // --- 造型資料端 ---
+        shapeField存在: !!shapeField,
+        shapeTargetsBase長度: shapeTargetsBase.length,
+        shapeTargets長度: shapeTargets.length,
+        shapeCavityBase長度: shapeCavityBase.length,
+        shapeFieldSource,
+        builtinSvgVariant,
+        期望的內建造型: MOTION_SVG_DEMO[P.motion] || 'question',
+        shapeConverting,
+        shapeImportingKind,
+        使用者匯入的檔案: { svg: !!userShapeFiles.svg, gltf: !!userShapeFiles.gltf },
+      };
+    })(),
     變體: {
       目前key: activeVariantKey,
+      應該要的key: variantKey(),
+      首編已完成: initialCompileDone,
+      待補做的切換: pendingVariantSync,
+      編譯中的key: variantSwapInFlight,
+      // 進行中的背景編譯：每次讀報告時重算已經過時間，這樣就能直接看出
+      // 「還在編」與「已經卡死」的差別，不必自己掐錶。
+      進行中編譯: variantStats.進行中 ? {
+        ...variantStats.進行中,
+        已經過ms: Math.round(performance.now() - variantStats.進行中.開始於ms),
+        期間contextLost: glTimeline.contextLost次數 - variantStats.進行中.開始時contextLost,
+      } : null,
       狀態: variantState(),
+      // 背景預熱。「略過」不是壞事 —— 快的後端本來就不該預熱（見 prewarmSkipReason）。
+      預熱: {
+        ...prewarmStats,
+        首編耗時ms: initialCompileMs === null ? null : Math.round(initialCompileMs),
+        進行中: prewarmStats.進行中 ? {
+          ...prewarmStats.進行中,
+          已經過ms: Math.round(performance.now() - prewarmStats.進行中.開始於ms),
+        } : null,
+      },
       已快取: [...variantCache.keys()],
       快取上限: VARIANT_CACHE_LIMIT,
       ...variantStats,
@@ -7177,6 +7951,7 @@ function frame(now) {
 }
 
 buildExtendedMotionControls();
+if (!PREVIEW) inspector = buildInspector({ defaults: { ...DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS } });
 bindControls();
 bindTextControls();
 
@@ -7189,17 +7964,28 @@ if (!PREVIEW && window.PresetIO) {
     // 模式類控件必須先套用：切換動態模式會連帶覆寫水滴數量，
     // 配色數量會決定色標列的顯示，順序顛倒會讓後套的值被蓋掉。
     applyFirst: [
-      'motion', 'bgMode', 'bgColor', 'materialStyle', 'colorMode', 'shapeSource', 'shapeQuality',
+      'motion', 'backdrop', 'bgMode', 'bgColor',
+      'materialStyle', 'colorMode', 'shapeSource', 'shapeQuality',
       'rayBeamPattern',
       'filmEnabled', 'dispersionEnabled', 'rayDispersionEnabled',
       'spectralCausticEnabled', 'rampCount',
     ],
+    exclude: [
+      'materialStyle', 'membraneDepth', 'membraneBaseColor', 'membraneVeilColor',
+      'membraneReflectionColor', 'membraneCardColor', 'membraneShadeColor',
+    ],
     assetNote: 'HDRI 與 SVG / GLB 素材無法存進參數檔，請自行載入',
     saveOn: ['#resetBtn'],
-    afterApply: () => {
+    serializeExtra: serializeTintMemory,
+    afterApply: payload => {
+      restoreTintMemory(payload);
       updateRampRows();
       buildRampLUT();
       buildSpectralCausticLUT();
+      EDGE_TINT_TARGETS.forEach(updateEdgeTintPalette);
+      // 其餘材質沿用既有載入規則；局部配色由 restoreTintMemory 分別還原，
+      // 不參與另一底色的鏡射。
+      mirrorBackdropMemory();
       updateUIState();
     },
   }).restore();

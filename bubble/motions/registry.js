@@ -1,4 +1,5 @@
 'use strict';
+import { edgeTintParams } from '../edge-tint.js';
 
 // 動態模式的單一資料來源。
 //
@@ -189,14 +190,15 @@ export const MOTIONS = {
       dispersion: 0.03,
       dispersionSeparation: 1.5,
       artPatternSpeed: 0,
-      // 使用者實測後定案的後處理整組（2026-09-02 存檔匯入）：體積吸收拉濃，
-      // 顆粒放大顆粒感、縮小粒徑，開 Bloom 與條紋光芒各自給一組收斂過的手感。
+      // 使用者實測後定案的後處理整組（2026-09-02 存檔匯入；曝光／亮度已於
+      // 2026-09-08 改回全域預設 1.0 / 0）：體積吸收拉濃，顆粒放大顆粒感、
+      // 縮小粒徑，開 Bloom 與條紋光芒各自給一組收斂過的手感。
       // 其餘後處理欄位（門檻、強度、擴散範圍…）沒有列在這裡，維持全域預設 ——
       // 使用者只調了這幾根，其餘沒有理由跟著漂。
       absorb: 5.05,
-      postExposure: 1.13,
+      postExposure: 1.0,
       postContrast: 1.33,
-      postBrightness: -0.02,
+      postBrightness: 0,
       postGrain: 0.033,
       postGrainScale: 0.6,
       bloomEnabled: false,
@@ -228,6 +230,19 @@ export const MOTIONS = {
         // 通用名稱是「水滴大小」，但在這個模式裡它就是整顆外殼的半徑。
         type: 'borrow', key: 'radius', label: '外殼大小',
       },
+      {
+        key: 'researchShellTint', label: '淺底染色強度',
+        min: 0, max: 1, step: 0.01, value: 0.28,
+      },
+      {
+        key: 'researchShellTintColor', label: '淺底染色色彩',
+        type: 'color', value: '#1059ed',
+      },
+      {
+        key: 'researchShellTintEdge', label: '染色邊緣集中',
+        min: 0, max: 1, step: 0.01, value: 0.78,
+      },
+      ...edgeTintParams('researchShell'),
       {
         key: 'researchBreath', label: '呼吸幅度',
         min: 0, max: 0.06, step: 0.001, value: 0.033,
@@ -403,6 +418,19 @@ export const MOTIONS = {
         // 「icon Icons」會被顯示成「ICON ICONS」。
         type: 'subgroup', label: '對話泡 Icons',
       },
+      {
+        key: 'researchIconTint', label: '淺底染色強度',
+        min: 0, max: 1, step: 0.01, value: 0.65,
+      },
+      {
+        key: 'researchIconTintColor', label: '淺底染色色彩',
+        type: 'color', value: '#1059ed',
+      },
+      {
+        key: 'researchIconTintEdge', label: '染色邊緣集中',
+        min: 0, max: 1, step: 0.01, value: 0.72,
+      },
+      ...edgeTintParams('researchIcon'),
       {
         // 相對整個循環移動 icon 的生命週期，不改外殼融合曲線。正值延後、負值
         // 提前；使用相位比例可讓循環秒數改變時仍維持相同的編舞位置。
@@ -838,6 +866,7 @@ export const MOTION_PARAMS = Object.fromEntries(entries.map(([key, motion]) => [
 // 'subgroup' 是純排版的分節標記，本身沒有值；只有它帶 key 時（開關長在小節標題
 // 上的那種）才算一個布林參數。兩種情況都不能進 MOTION_PARAM_DEFAULTS。
 const isTextParam = param => param.type === 'text';
+const isColorParam = param => param.type === 'color';
 const isToggleParam = param => param.type === 'toggle'
   || (param.type === 'subgroup' && Boolean(param.key));
 // 'borrow' 借的是別處既有的控制項（同一個 key、同一份 P、同一顆 uniform），
@@ -847,7 +876,8 @@ const isLayoutParam = param => (param.type === 'subgroup' && !param.key)
   || param.type === 'borrow';
 export const MOTION_PARAM_DEFAULTS = Object.fromEntries(
   entries.flatMap(([, motion]) => (motion.params || [])
-    .filter(param => !isTextParam(param) && !isToggleParam(param) && !isLayoutParam(param))
+    .filter(param => !isTextParam(param) && !isColorParam(param)
+      && !isToggleParam(param) && !isLayoutParam(param))
     .map(param => [param.key, param.value])),
 );
 export const MOTION_TOGGLE_DEFAULTS = Object.fromEntries(
@@ -858,6 +888,11 @@ export const MOTION_TOGGLE_DEFAULTS = Object.fromEntries(
 export const MOTION_TEXT_DEFAULTS = Object.fromEntries(
   entries.flatMap(([, motion]) => (motion.params || [])
     .filter(isTextParam)
+    .map(param => [param.key, param.value])),
+);
+export const MOTION_COLOR_DEFAULTS = Object.fromEntries(
+  entries.flatMap(([, motion]) => (motion.params || [])
+    .filter(isColorParam)
     .map(param => [param.key, param.value])),
 );
 

@@ -1,0 +1,82 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Post background regression</title>
+<script type="importmap">{"imports":{"three":"../node_modules/three/build/three.module.js"}}</script>
+<h1>Post background regression</h1>
+<pre id="result">Running…</pre>
+<script type="module">
+import * as THREE from 'three';
+import { createPostChain } from '../bubble/post.js';
+const renderer = new THREE.WebGLRenderer();
+renderer.setSize(64, 64);
+const scene = new THREE.Scene();
+const camera = new THREE.Camera();
+const material = new THREE.ShaderMaterial({
+  uniforms: { bg: { value: new THREE.Color(1, 1, 1) } },
+  vertexShader: `varying vec2 vUv; void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}`,
+  fragmentShader: `varying vec2 vUv; uniform vec3 bg; void main(){
+    bool object = abs(vUv.x-.5)<.2 && abs(vUv.y-.5)<.2;
+    gl_FragColor=object ? vec4(.2,.4,.6,1.) : vec4(bg,0.);
+  }`,
+});
+scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
+const chain = createPostChain(renderer);
+const target = new THREE.WebGLRenderTarget(64,64);
+const defaults = { intensity:0, streaks:false, exposure:1, toneMap:0,
+  aberration:0, contrast:1, brightness:0, grain:0, grainScale:1,
+  grainSeed:1, tint:new THREE.Color(1,1,1), transparent:false,
+  threshold:1, knee:.5, clampMax:8, backdrop:0, radius:.5 };
+const lines=[];
+let failures=0;
+function render(params){
+  chain.render(scene,camera,target,{...defaults,...params});
+  const pixels=new Uint8Array(64*64*4);
+  renderer.readRenderTargetPixels(target,0,0,64,64,pixels);
+  return pixels;
+}
+for (const bg of [1,.5,0]) {
+  material.uniforms.bg.value.setRGB(bg,bg,bg);
+  const reference=render({});
+  for (const [name,params] of [
+    ['exposure low',{exposure:.25}],['exposure high',{exposure:2}],
+    ...[1,2,3,4,5].map(toneMap=>['tone '+toneMap,{toneMap}]),
+    ['grain',{grain:.8}],['grade',{contrast:1.7,brightness:.2}],
+    ['aberration',{aberration:4}],
+    ['combined',{exposure:.4,toneMap:3,grain:.3,contrast:1.5,brightness:.1,aberration:3}],
+  ]) {
+    const pixels=render(params);
+    let outsideDiff=0, insideDiff=0;
+    for(let y=0;y<64;y++) for(let x=0;x<64;x++) {
+      const outside=x<12||x>51||y<12||y>51;
+      const inside=x>24&&x<40&&y>24&&y<40;
+      for(let c=0;c<3;c++) {
+        const i=(y*64+x)*4+c;
+        const d=Math.abs(pixels[i]-reference[i]);
+        if(outside) outsideDiff=Math.max(outsideDiff,d);
+        if(inside) insideDiff=Math.max(insideDiff,d);
+      }
+    }
+    const ok=outsideDiff===0 && (name==='aberration'||insideDiff>0);
+    if(!ok) failures++;
+    lines.push(`${ok?'PASS':'FAIL'} bg=${bg} ${name}: background delta=${outsideDiff}, object delta=${insideDiff}`);
+  }
+}
+// 光暈應保留輪廓外能量；去背輸出的空白像素應保持透明。
+material.uniforms.bg.value.setRGB(0,0,0);
+const glow=render({intensity:2,threshold:.05});
+let outsideGlow=0;
+for(let y=0;y<64;y++) for(let x=0;x<64;x++) {
+  if(x<18||x>45||y<18||y>45) {
+    const i=(y*64+x)*4;
+    outsideGlow=Math.max(outsideGlow,glow[i],glow[i+1],glow[i+2]);
+  }
+}
+if(!outsideGlow) failures++;
+lines.push(`${outsideGlow?'PASS':'FAIL'} bloom outside silhouette=${outsideGlow}`);
+const transparent=render({transparent:true,exposure:.4,toneMap:3,grain:.4});
+const clear=transparent[3]===0 && transparent[(32*64+32)*4+3]===255;
+if(!clear) failures++;
+lines.push(`${clear?'PASS':'FAIL'} transparent background alpha preserved`);
+document.querySelector('#result').textContent=`${failures} failures\n`+lines.join('\n');
+chain.dispose(); target.dispose(); material.dispose(); renderer.dispose();
+</script>
