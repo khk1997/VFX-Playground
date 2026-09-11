@@ -763,3 +763,13 @@
     #exportStageGuide > i::before { top: 6px; left: -18px; width: 48px; height: 1px; }
     #exportStageGuide > i::after { top: -18px; left: 6px; width: 1px; height: 48px; }
   }
+
+/* Independent edge palettes reuse the regular, preset-aware controls. */
+.tintPalette { margin: 8px 0 12px; border: 1px solid var(--line, #ffffff20); border-radius: 8px; padding: 8px; }
+.tintPalette > summary { cursor: pointer; font-size: 11px; flex-wrap: wrap; }
+.tintPalette > summary::before { transform: none; }
+.tintPalette[open] > summary::before { transform: rotate(90deg); }
+.tintPalettePreview { display: block; flex: 0 0 100%; height: 12px; border-radius: 4px; margin-top: 7px; }
+.tintPaletteNote { font-size: 10px; line-height: 1.6; opacity: .65; margin: 8px 0; }
+.tintPalette.is-disabled { opacity: .45; }
+.tintPalette .row { min-width: 0; }

@@ -1,5 +1,6 @@
 'use strict';
 import * as THREE from 'three';
+import { EDGE_TINT_TARGETS, EDGE_TINT_STOPS, edgeTintParams, readEdgeTintStops, sampleEdgeTint } from './edge-tint.js';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
 } from './shape-field.js?v=typewriter-1';
@@ -15,7 +16,7 @@ import {
   MOTION_OVERRIDES,
   MOTION_HDRI, MOTION_KEYS, MOTION_PARAMS, MOTION_PARAM_DEFAULTS,
   MOTION_TEXT_DEFAULTS, MOTION_COLOR_DEFAULTS, MOTION_TOGGLE_DEFAULTS, usesShapeField, motionGates,
-} from './motions/registry.js?v=light-backdrop-30';
+} from './motions/registry.js?v=edge-tint-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
@@ -1059,6 +1060,8 @@ const SELECTS = {
   } },
 };
 const COLORS = {
+  ...Object.fromEntries(EDGE_TINT_TARGETS.flatMap(prefix =>
+    EDGE_TINT_STOPS.map((_, i) => [`${prefix}TintStopColor${i}`, '']))),
   bgColor: 'uBgColor',
   absorbColor: 'uAbsorbColor',
   lightIconColor: 'uLightIconColor',
@@ -1080,6 +1083,8 @@ const COLORS = {
 // 布林 uniform，而是把 uEdgeDropCount 歸零，這樣關閉液滴時仍保留邊緣圓角
 // （圓角半徑由獨立的 uShapeEdgeBevel 控制，見 svgShapeDistance 的 smin 半徑）。
 const TOGGLES = {
+  ...Object.fromEntries(EDGE_TINT_TARGETS.map(prefix =>
+    [`${prefix}MultiTint`, `u${prefix[0].toUpperCase()}${prefix.slice(1)}MultiTint`])),
   filmEnabled: 'uFilmEnabled',
   dispersionEnabled: 'uDispersionEnabled',
   rayDispersionEnabled: 'uRayDispersionEnabled',
@@ -1412,7 +1417,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=light-crystal-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=edge-tint-1';
 import { createPostChain } from './post.js?v=post-mask-3';
 
 // cold compile 的時間量測（?diagTiming=1）。
@@ -4804,6 +4809,55 @@ function makeRampTexture() {
   return rampTex;
 }
 
+// Raw channel ratios, matching the existing single-color absorption uniforms.
+// Reuse textures on reinitialization; editing one palette uploads only that LUT.
+const edgeTintTextures = {};
+function updateEdgeTintPalette(prefix) {
+  const stops = readEdgeTintStops(P, prefix);
+  const texture = edgeTintTextures[prefix];
+  if (texture) {
+    const data = texture.image.data;
+    for (let x = 0; x < RAMP_W; x++) {
+      const rgb = sampleEdgeTint(stops, (x + 0.5) / RAMP_W);
+      data.set([...rgb.map(Math.round), 255], x * 4);
+    }
+    texture.needsUpdate = true;
+  }
+  const preview = document.getElementById(`${prefix}TintPreview`);
+  if (preview) {
+    const cssStops = Array.from({ length: 65 }, (_, i) => {
+      const rgb = sampleEdgeTint(stops, i / 64).map(Math.round);
+      return `rgb(${rgb.join(',')}) ${i / 64 * 100}%`;
+    });
+    preview.style.background = `linear-gradient(to right, ${cssStops.join(',')})`;
+  }
+}
+function updateEdgeTintForKey(key) {
+  const prefix = EDGE_TINT_TARGETS.find(target => key.startsWith(`${target}TintStop`));
+  if (prefix) updateEdgeTintPalette(prefix);
+}
+function makeEdgeTintUniforms() {
+  const result = {};
+  for (const prefix of EDGE_TINT_TARGETS) {
+    if (!edgeTintTextures[prefix]) {
+      const texture = new THREE.DataTexture(new Uint8Array(RAMP_W * 4), RAMP_W, 1, THREE.RGBAFormat);
+      texture.colorSpace = THREE.NoColorSpace;
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.ClampToEdgeWrapping;
+      texture.minFilter = texture.magFilter = THREE.LinearFilter;
+      texture.generateMipmaps = false;
+      edgeTintTextures[prefix] = texture;
+    }
+    updateEdgeTintPalette(prefix);
+    const u = `u${prefix[0].toUpperCase()}${prefix.slice(1)}`;
+    result[`${u}TintRamp`] = { value: edgeTintTextures[prefix] };
+    for (const suffix of ['MultiTint', 'MultiTintStrength', 'MultiTintRotation', 'MultiTintFocus']) {
+      result[`${u}${suffix}`] = { value: Number(P[`${prefix}${suffix}`]) };
+    }
+  }
+  return result;
+}
+
 /* ===== 虛擬光譜焦散七色查找表 ===== */
 let spectralCausticTex = null;
 function readSpectralCausticColors() {
@@ -4916,6 +4970,7 @@ function initGL() {
     uResearchShellSpeed: { value: P.researchShellSpeed },
     uResearchShellDensity: { value: P.researchShellDensity },
     uResearchShellTexture: { value: P.researchShellTexture },
+    ...makeEdgeTintUniforms(),
     uResearchShellTint: { value: P.researchShellTint },
     uResearchShellTintEdge: { value: P.researchShellTintEdge },
     uResearchShellTintColor: { value: new THREE.Color().setStyle(
@@ -5404,6 +5459,7 @@ function syncPanelToUniforms() {
     }
     else uniforms[COLORS[key]].value.set(P[key]);
   }
+  EDGE_TINT_TARGETS.forEach(updateEdgeTintPalette);
   document.body.style.background = (P.bgMode === 'hdri') ? '#000' : pageBackgroundCss(P.bgColor);
 }
 
@@ -5567,7 +5623,27 @@ function buildExtendedMotionControls() {
       if (param.type !== 'select') value.id = `${param.key}_v`;
       if (track) row.append(label, control, track, value);
       else row.append(label, control, value);
-      container.append(row);
+      if (param.tintPalette) {
+        const prefix = param.tintPalette;
+        let palette = container.querySelector(`#${prefix}TintPalette`);
+        if (!palette) {
+          palette = document.createElement('details');
+          palette.id = `${prefix}TintPalette`;
+          palette.className = 'tintPalette';
+          const summary = document.createElement('summary');
+          summary.textContent = '邊界色盤 · 6 色';
+          const preview = document.createElement('span');
+          preview.id = `${prefix}TintPreview`;
+          preview.className = 'tintPalettePreview';
+          summary.append(preview);
+          const note = document.createElement('p');
+          note.className = 'tintPaletteNote';
+          note.textContent = '位置沿輪廓繞一圈；拉開色標可拓寬色帶。首尾自動接色。';
+          palette.append(summary, note);
+          container.append(palette);
+        }
+        palette.append(row);
+      } else container.append(row);
       // 文字輸入底下掛一行狀態：幾句、烘出幾個字形、字體有沒有 fallback。
       // 字體 fallback 是靜默的（fillText 找不到就換一套字形），沒有這行的話
       // 使用者只會覺得「字看起來怪」而不知道原因。
@@ -5628,6 +5704,7 @@ function bindControls() {
       // 會改變哪些控制項該顯示，staticShape 還會改變要編譯哪一支 shader。
       // 走 SELECTS 的字串型 select 在 change 時會自動呼叫 updateUIState() 與
       // syncShaderVariant()，但這兩個走的是這裡的數值型通用迴圈，得自己補。
+      updateEdgeTintForKey(key);
       if (key === 'spectralCausticBlend') buildSpectralCausticLUT();
       if (key === 'capillaryTexture') applyGates();
       // 同理：私語的程序紋理選「無」時，紋理方向那三根滑桿要一起收起來。
@@ -5784,7 +5861,8 @@ function bindControls() {
     const uName = COLORS[key];
     const update = () => {
       P[key] = el.value;
-      if (!uName) { /* 後處理的顏色由 renderComposite 每幀直接讀 P */ }
+      updateEdgeTintForKey(key);
+      if (!uName) { /* LUT / 後處理顏色不直接對應 uniform */ }
       else if (key === 'bgColor') setBgColorUniform(el.value);
       // 見上面 applyAllUniforms 裡同一個特例的說明。
       else if (key === 'absorbColor' || key === 'researchIconTintColor'
@@ -6069,12 +6147,17 @@ function updateUIState() {
   }
   const lightBackdrop = false;
   const lightIcons = false;
-  setDisabled(document.getElementById('researchIconTint'), P.backdrop !== 'light');
-  setDisabled(document.getElementById('researchIconTintColor'), P.backdrop !== 'light');
-  setDisabled(document.getElementById('researchIconTintEdge'), P.backdrop !== 'light');
-  setDisabled(document.getElementById('researchShellTint'), P.backdrop !== 'light');
-  setDisabled(document.getElementById('researchShellTintColor'), P.backdrop !== 'light');
-  setDisabled(document.getElementById('researchShellTintEdge'), P.backdrop !== 'light');
+  for (const prefix of EDGE_TINT_TARGETS) {
+    const light = P.backdrop === 'light';
+    const multi = P[`${prefix}MultiTint`];
+    for (const suffix of ['Tint', 'TintEdge', 'TintColor']) {
+      setDisabled(document.getElementById(`${prefix}${suffix}`), !light);
+    }
+    for (const param of edgeTintParams(prefix)) {
+      setDisabled(document.getElementById(param.key), !light || (param.key !== `${prefix}MultiTint` && !multi));
+    }
+    document.getElementById(`${prefix}TintPalette`)?.classList.toggle('is-disabled', !light || !multi);
+  }
   document.getElementById('lightShowRow').style.display = 'none';
   document.getElementById('lightLookDetails').style.display = 'none';
   document.getElementById('lightIconDetails').style.display = 'none';
@@ -7857,6 +7940,7 @@ if (!PREVIEW && window.PresetIO) {
       updateRampRows();
       buildRampLUT();
       buildSpectralCausticLUT();
+      EDGE_TINT_TARGETS.forEach(updateEdgeTintPalette);
       // 參數檔只寫得到當時所在底色那一格，另一格會留著內建預設，切過去就會
       // 看到參數莫名跳動。淺底目前沒有獨立定案值，所以載入後兩格對齊。
       mirrorBackdropMemory();

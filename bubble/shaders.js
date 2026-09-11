@@ -122,6 +122,11 @@ uniform float uResearchShellTexture;
 uniform float uResearchShellTint;
 uniform vec3 uResearchShellTintColor;
 uniform float uResearchShellTintEdge;
+uniform sampler2D uResearchShellTintRamp;
+uniform float uResearchShellMultiTint;
+uniform float uResearchShellMultiTintStrength;
+uniform float uResearchShellMultiTintRotation;
+uniform float uResearchShellMultiTintFocus;
 // 紋理方向。三個分量合起來是一個向量,長度不重要(shader 會正規化),只有方向
 // 有意義;全為 0 時退回 +x。
 uniform float uResearchTextureDirX;
@@ -136,6 +141,11 @@ uniform float uResearchIconIOR;
 uniform float uResearchIconTint;
 uniform vec3 uResearchIconTintColor;
 uniform float uResearchIconTintEdge;
+uniform sampler2D uResearchIconTintRamp;
+uniform float uResearchIconMultiTint;
+uniform float uResearchIconMultiTintStrength;
+uniform float uResearchIconMultiTintRotation;
+uniform float uResearchIconMultiTintFocus;
 uniform float uResearchIconSizeA;
 uniform float uResearchIconSizeB;
 uniform float uResearchIconTailTip;
@@ -1184,6 +1194,24 @@ float sdTorus(vec3 p, float majorR, float minorR){
 #endif // FEATURE_STATIC_SHAPE
 
 #ifdef FEATURE_RESEARCH
+// Scene-space normals keep the palette attached to the geometry as the camera
+// moves. atan's pole is faded out; its seam wraps continuously in the LUT.
+vec3 researchBoundaryTint(
+  sampler2D palette, vec3 normal, float edge, float bend,
+  vec3 baseColor, float amount, float rotation, float focus
+) {
+  float radial = length(normal.xy);
+  float angle = radial > 0.0001 ? atan(normal.y, normal.x) / TAU : 0.0;
+  float phase = fract(angle - rotation / 360.0 + focus * bend * 0.12);
+  vec3 color = texture2D(palette, vec2(phase, 0.5)).rgb;
+  float boundary = smoothstep(0.025, 0.55, edge) * smoothstep(0.02, 0.22, radial);
+  float weight = clamp(amount * boundary, 0.0, 1.0);
+  // Mix transmission colors before taking log: layering colored absorption
+  // coefficients would turn complementary neighboring colors muddy.
+  return mix(baseColor, color, weight);
+}
+
+
 // 側面／下緣權重的圓角半徑。這個常數存在的理由是折痕，不是造型：
 //
 // 這個遮罩原本寫成 abs(q.x) + max(-q.y, 0.0) * 0.55。q 是球心指向表面的單位
@@ -3376,7 +3404,24 @@ void main(){
             float opticalDepth = (1.0 - exp(-max(iconPath, 0.0) * 8.0))
               * tintDistribution
               * researchIconWeight * clamp(uResearchIconTint, 0.0, 1.0);
-            vec3 tintAbsorption = -log(clamp(uResearchIconTintColor, 0.002, 0.999));
+            vec3 tintColor = uResearchIconTintColor;
+            if (uResearchIconMultiTint > 0.5) {
+              float multi = clamp(uResearchIconMultiTintStrength, 0.0, 1.0);
+              float bend = clamp(length(iconOut - researchInsideDir), 0.0, 1.0);
+              tintColor = researchBoundaryTint(uResearchIconTintRamp, researchIconN,
+                1.0 - iconFacing, bend, tintColor, multi,
+                uResearchIconMultiTintRotation, uResearchIconMultiTintFocus);
+              // Let all palette segments show, retaining a softer directional bias.
+              float multiDistribution = mix(0.35 + 0.65 * side,
+                (0.035 + edgeBand * 1.65) * (0.75 + 0.25 * side),
+                clamp(uResearchIconTintEdge, 0.0, 1.0));
+              float focusWeight = mix(1.0, 0.65 + 0.85 * bend,
+                clamp(uResearchIconMultiTintFocus, 0.0, 1.0));
+              opticalDepth = (1.0 - exp(-max(iconPath, 0.0) * 8.0))
+                * mix(tintDistribution, multiDistribution * focusWeight, multi)
+                * researchIconWeight * clamp(uResearchIconTint, 0.0, 1.0);
+            }
+            vec3 tintAbsorption = -log(clamp(tintColor, 0.002, 0.999));
             researchIconTransmissionTint = exp(-tintAbsorption * opticalDepth);
           }
           float iconF0 = pow((relIOR - 1.0) / (relIOR + 1.0), 2.0);
@@ -3559,7 +3604,23 @@ void main(){
     );
     float shellOpticalDepth = (1.0 - exp(-max(pathLength, 0.0) * 3.6))
       * shellDistribution * clamp(uResearchShellTint, 0.0, 1.0);
-    vec3 shellTintAbsorption = -log(clamp(uResearchShellTintColor, 0.002, 0.999));
+    vec3 shellTintColor = uResearchShellTintColor;
+    if (uResearchShellMultiTint > 0.5) {
+      float multi = clamp(uResearchShellMultiTintStrength, 0.0, 1.0);
+      float bend = clamp(localPrism, 0.0, 1.0);
+      shellTintColor = researchBoundaryTint(uResearchShellTintRamp, N,
+        material.edgeFactor, bend, shellTintColor, multi,
+        uResearchShellMultiTintRotation, uResearchShellMultiTintFocus);
+      float multiDistribution = mix(0.35 + 0.65 * shellSide,
+        (0.025 + shellEdge * 1.75) * (0.75 + 0.25 * shellSide),
+        clamp(uResearchShellTintEdge, 0.0, 1.0));
+      float focusWeight = mix(1.0, 0.65 + 0.85 * bend,
+        clamp(uResearchShellMultiTintFocus, 0.0, 1.0));
+      shellOpticalDepth = (1.0 - exp(-max(pathLength, 0.0) * 3.6))
+        * mix(shellDistribution, multiDistribution * focusWeight, multi)
+        * clamp(uResearchShellTint, 0.0, 1.0);
+    }
+    vec3 shellTintAbsorption = -log(clamp(shellTintColor, 0.002, 0.999));
     researchShellTransmissionTint = exp(-shellTintAbsorption * shellOpticalDepth);
   }
   refractedBg *= researchShellTransmissionTint;
