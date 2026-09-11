@@ -1,5 +1,7 @@
 'use strict';
 import * as THREE from 'three';
+import { buildInspector } from './inspector.js?v=inspector-2';
+let inspector = null;
 import { EDGE_TINT_TARGETS, EDGE_TINT_STOPS, edgeTintParams, readEdgeTintStops, sampleEdgeTint } from './edge-tint.js';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
@@ -6055,7 +6057,7 @@ const borrowedRows = new Map();
 // 個 id。再開一份等於把同一個狀態放兩個地方，遲早要處理兩邊同步。
 function syncBorrowedRows() {
   const wanted = new Map();
-  document.querySelectorAll('#extendedMotionControls .borrowAnchor').forEach(anchor => {
+  document.querySelectorAll('#panel .borrowAnchor').forEach(anchor => {
     const block = anchor.closest('.modeBlock');
     if (block && block.dataset.gate && !gateOpen(block.dataset.gate)) return;
     wanted.set(anchor.dataset.borrow, anchor);
@@ -6198,7 +6200,7 @@ function updateUIState() {
   }
   // 模型品質（GLB 專用）、形狀厚度與邊緣圓角（都只作用於 SVG 擠出的
   // svgShapeDistance，GLB 走 volumeShapeDistance 根本不讀）全部走 data-gate。
-
+  inspector?.refresh();
 }
 
 document.getElementById('resetBtn').addEventListener('click', () => {
@@ -7912,6 +7914,7 @@ function frame(now) {
 }
 
 buildExtendedMotionControls();
+if (!PREVIEW) inspector = buildInspector({ defaults: { ...DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS } });
 bindControls();
 bindTextControls();
 
