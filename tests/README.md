@@ -48,3 +48,9 @@ both backgrounds and verifies that the six fixed-time renders remain distinct.
 `bubble_gpu_profile.py` uses Chrome's hardware WebGL timer-query extension to
 measure complete GPU composite time for representative modes at high, balanced,
 and low adaptive-quality tiers.
+
+`shader_structure.mjs` verifies that the large fragment shader is assembled from
+the environment, geometry, and optics source modules exactly once and in the
+required order. The extraction preserved the assembled shader byte-for-byte;
+the structural test protects the module boundaries without freezing future GLSL
+changes to a permanent hash.

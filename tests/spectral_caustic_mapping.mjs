@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { FRAG } from '../bubble/shaders.js';
 
-const shader = readFileSync(new URL('../bubble/shaders.js', import.meta.url), 'utf8');
+const shader = FRAG;
 
 assert.match(
   shader,

@@ -1461,7 +1461,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=reflection-quality-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=structured-1';
 import { createPostChain } from './post.js?v=post-mask-3';
 
 // cold compile 的時間量測（?diagTiming=1）。
