@@ -111,13 +111,13 @@ def main():
 
                 play = page.locator("#playCtl")
                 if play.count() and play.is_visible():
-                    before = play.inner_text()
+                    before = play.get_attribute("aria-label") or play.inner_text()
                     play.click()
                     # Some effects finish their panel-centering transition while
                     # simulation time is paused. Observe only after that UI-only
                     # transition has settled.
                     page.wait_for_timeout(1400)
-                    after = play.inner_text()
+                    after = play.get_attribute("aria-label") or play.inner_text()
                     metrics["playToggleChanged"] = before != after
                     metrics["playToggleTested"] = True
                     paused_frame_a = page.locator("#stage").screenshot()

@@ -146,6 +146,7 @@ def compact_diag(report: dict) -> dict[str, object]:
         "motion": report["模式"]["motion"],
         "gl": report["gl環境"],
         "dimensions": report["尺寸"],
+        "adaptiveQuality": report.get("效能"),
         "raymarch": report["raymarch"],
         "variant": {
             "activeKey": variant["目前key"],

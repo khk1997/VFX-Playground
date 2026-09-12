@@ -23,3 +23,7 @@ python3 tests/bubble_baseline.py \
   --output /tmp/vfx-bubble-baseline/current \
   --reference /tmp/vfx-bubble-baseline/phase-1/report.json
 ```
+
+`bubble_adaptive_runtime.py` exercises the runtime policies that screenshots do
+not cover: automatic desktop quality, OS reduced-motion pause/override, and
+single-pointer canvas dragging.
