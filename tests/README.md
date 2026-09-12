@@ -30,3 +30,6 @@ single-pointer canvas dragging.
 
 `bubble_inspector_ux.py` verifies progressive common/full controls, persistent
 keyboard tabs, A/B quick comparison, and the mobile sheet's sticky layout.
+
+`adaptive_quality.mjs` unit-tests the extracted quality state machine without a
+browser or WebGL context.
