@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { buildInspector } from './inspector.js?v=visual-presets-1';
 import { createAdaptiveQuality, QUALITY_TIER_NAMES } from './adaptive-quality.js?v=2';
 import { initQuickSlots } from './quick-slots.js?v=1';
+import { createGpuProfiler } from './gpu-profiler.js?v=1';
 let inspector = null;
 import { EDGE_TINT_TARGETS, EDGE_TINT_STOPS, edgeTintParams, edgeTintKeys, sanitizeEdgeTintValue, readEdgeTintStops, sampleEdgeTint } from './edge-tint.js?v=dark-tint-1';
 import {
@@ -2498,6 +2499,7 @@ function shaderFeatures(V = variantState()) {
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
 let pmremGenerator = null, pmremTarget = null;
+let gpuProfiler = null;
 let inited = false;
 // 裝置本身撐得住的解析度上限，不受使用者「抗鋸齒」偏好影響——DIAG.lowres／
 // PREVIEW 場景本來就該固定走最省資源那一路，不該被手動調高的超取樣蓋過去。
@@ -4986,6 +4988,7 @@ function initGL() {
   renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false });
   renderer.setClearColor(0x000000, 1);
   renderer.setPixelRatio(adaptiveQuality.snapshot().dpr);
+  gpuProfiler = createGpuProfiler(renderer.getContext());
   // 診斷：把 renderer 剛建立時的後端記下來（此時還沒有編譯任何 program），並開始
   // 監聽 context 遺失。「這個 context 一開始就是軟體算繪」與「編譯把 GPU process
   // 打掉之後才掉下去」在事後是分不出來的，除非兩個時間點都留下紀錄。
@@ -6683,6 +6686,8 @@ function postActive() {
 }
 
 function renderComposite(target = null, superSample = 1) {
+  gpuProfiler?.beginFrame();
+  try {
   const transparent = uniforms.uTransparentBackground.value === 1;
   // 高於 1 的高光只有在「畫進後處理的半浮點貼圖」時才留得住。去背輸出例外：
   // 那條路徑的反預乘推導假設值域是 0–1（見主 shader 結尾），HDR 會讓它算出
@@ -6740,6 +6745,9 @@ function renderComposite(target = null, superSample = 1) {
     // 預覽與成品上的光暈大小會差一個超採樣倍率。
     superSample,
   });
+  } finally {
+    gpuProfiler?.endFrame();
+  }
 }
 
 function requestPausedRender() {
@@ -7005,6 +7013,25 @@ window.__bubbleDiagRenderAndCapture = function (key) {
       simT: saved.simT, 取樣像素數: saved.sample.length / 4,
       目前變體: activeVariantKey, defines: mesh.material.defines }
     : { 錯誤: '擷取失敗：' + (result.錯誤 || '(未知)'), 已存筆數: result.已存筆數 };
+};
+
+// Hardware GPU timing for local acceptance. Timer queries measure the complete
+// composite without forcing a synchronous readback. Restore the user's adaptive
+// tier after the requested sample set finishes.
+window.__bubbleProfileGpu = async function ({ tier = 'high', samples = 16, warmup = 3 } = {}) {
+  if (!inited || !gpuProfiler) return { supported: false, reason: 'WebGL 尚未初始化' };
+  const nextTier = QUALITY_TIER_NAMES.indexOf(tier);
+  if (nextTier < 0) throw new Error(`Unknown quality tier: ${tier}`);
+  const previousTier = adaptiveQuality.snapshot().tierIndex;
+  setQualityTier(nextTier);
+  markInteraction();
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  try {
+    const result = await gpuProfiler.measure({ samples, warmup });
+    return { ...result, tier, quality: adaptiveQuality.snapshot() };
+  } finally {
+    setQualityTier(previousTier);
+  }
 };
 
 // 診斷用的現況報告。任何時候都可以在 console 呼叫 __bubbleDiagReport()，

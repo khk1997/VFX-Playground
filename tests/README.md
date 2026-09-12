@@ -44,3 +44,7 @@ server and `safaridriver` when running the complete real-browser matrix.
 
 `bubble_visual_presets.py` captures all three coordinated Installing styles on
 both backgrounds and verifies that the six fixed-time renders remain distinct.
+
+`bubble_gpu_profile.py` uses Chrome's hardware WebGL timer-query extension to
+measure complete GPU composite time for representative modes at high, balanced,
+and low adaptive-quality tiers.
