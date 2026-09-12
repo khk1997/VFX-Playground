@@ -28,6 +28,17 @@ PLAY_CONTROL_PAGES = {
 }
 
 
+def capture_stage(page):
+    """Capture the stage without waiting for an actively rendered canvas to settle."""
+    box = page.locator("#stage").bounding_box()
+    assert box, "stage does not have a visible capture area"
+    return page.screenshot(
+        clip=box,
+        animations="disabled",
+        timeout=90_000,
+    )
+
+
 def main():
     output = OUTPUT_DIR / MODE
     output.mkdir(parents=True, exist_ok=True)
@@ -111,25 +122,25 @@ def main():
 
                 play = page.locator("#playCtl")
                 if play.count() and play.is_visible():
-                    before = play.inner_text()
+                    before = play.get_attribute("aria-label") or play.inner_text()
                     play.click()
                     # Some effects finish their panel-centering transition while
                     # simulation time is paused. Observe only after that UI-only
                     # transition has settled.
                     page.wait_for_timeout(1400)
-                    after = play.inner_text()
+                    after = play.get_attribute("aria-label") or play.inner_text()
                     metrics["playToggleChanged"] = before != after
                     metrics["playToggleTested"] = True
-                    paused_frame_a = page.locator("#stage").screenshot()
+                    paused_frame_a = capture_stage(page)
                     page.wait_for_timeout(250)
-                    paused_frame_b = page.locator("#stage").screenshot()
+                    paused_frame_b = capture_stage(page)
                     metrics["pausedFrameStable"] = paused_frame_a == paused_frame_b
 
                     play.click()
                     page.wait_for_timeout(100)
-                    resumed_frame_a = page.locator("#stage").screenshot()
+                    resumed_frame_a = capture_stage(page)
                     page.wait_for_timeout(250)
-                    resumed_frame_b = page.locator("#stage").screenshot()
+                    resumed_frame_b = capture_stage(page)
                     metrics["resumedFrameChanged"] = resumed_frame_a != resumed_frame_b
 
                 first_range = page.locator('input[type="range"]').first
@@ -171,7 +182,7 @@ def main():
                     after = page.locator("#selectionIndex").inner_text()
                     metrics["carouselChanged"] = before != after
 
-            page.screenshot(path=str(output / f"{name}.png"))
+            page.screenshot(path=str(output / f"{name}.png"), timeout=90_000)
             results[name] = {
                 "status": response.status if response else None,
                 "metrics": metrics,

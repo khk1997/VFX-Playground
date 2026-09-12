@@ -1,0 +1,37 @@
+name: Bubble checks
+
+on:
+  pull_request:
+    paths:
+      - "bubble/**"
+      - "tests/**"
+      - "*.js"
+      - "*.css"
+      - ".github/workflows/bubble-checks.yml"
+  push:
+    branches: [main]
+    paths:
+      - "bubble/**"
+      - "tests/**"
+      - "*.js"
+      - "*.css"
+      - ".github/workflows/bubble-checks.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Run deterministic Bubble checks
+        run: python tests/run_release_checks.py --unit-only

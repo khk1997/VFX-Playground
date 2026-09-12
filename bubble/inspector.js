@@ -1,4 +1,5 @@
 import { EDGE_TINT_TARGETS, EDGE_TINT_STOPS, edgeTintParams } from './edge-tint.js';
+import { INSTALLING_VISUAL_PRESETS, installingVisualPresetValues } from './visual-presets.js';
 
 const $ = id => document.getElementById(id);
 const rowOf = id => $(id)?.closest('.row');
@@ -56,6 +57,8 @@ function segmented(labels, onSelect, name) {
 export function buildInspector({ defaults }) {
   const panel = $('panel');
   panel.classList.add('inspector');
+  const DEPTH_KEY = 'vfx:bubble:control-depth';
+  const PAGE_KEY = 'vfx:bubble:inspector-page';
   const groups = [...panel.querySelectorAll(':scope > details.group')];
   const groupOf = id => $(id).closest('details.group');
   const motion = groupOf('motion');
@@ -77,6 +80,47 @@ export function buildInspector({ defaults }) {
   rowOf('motion').querySelector('label').textContent = '動態模式';
   rowOf('backdrop').querySelector('label').textContent = '預覽底色';
 
+  let controlDepth = 'concise';
+  try {
+    const saved = localStorage.getItem(DEPTH_KEY);
+    if (saved === 'concise' || saved === 'complete') controlDepth = saved;
+  } catch (_) {}
+  const depthWrap = element('div', 'inspectorDepth');
+  const depthMeta = element('div', 'inspectorDepthMeta');
+  const depthHeading = element('span', 'inspectorDepthLabel', '控制深度');
+  const qualityStatus = element('output', 'inspectorQuality');
+  qualityStatus.id = 'renderQualityStatus';
+  qualityStatus.setAttribute('aria-live', 'polite');
+  qualityStatus.title = '預覽品質會依裝置效能自動調整，輸出不受影響';
+  depthMeta.append(depthHeading, qualityStatus);
+  const depthHelp = element('span', 'inspectorDepthHelp', '常用保留主要調整；完整顯示所有參數');
+  const depthPicker = segmented([['concise', '常用'], ['complete', '完整']], value => {
+    setControlDepth(value);
+  }, '控制深度');
+  depthPicker.group.classList.add('inspectorDepthPicker');
+  depthWrap.append(depthMeta, depthPicker.group, depthHelp);
+  header.append(depthWrap);
+
+  function setControlDepth(value, persist = true) {
+    controlDepth = value === 'complete' ? 'complete' : 'concise';
+    panel.dataset.controlDepth = controlDepth;
+    document.body.dataset.controlDepth = controlDepth;
+    depthPicker.select(controlDepth);
+    depthHelp.textContent = controlDepth === 'complete'
+      ? '目前顯示全部參數'
+      : '常用保留主要調整；完整顯示所有參數';
+    if (persist) {
+      try { localStorage.setItem(DEPTH_KEY, controlDepth); } catch (_) {}
+    }
+  }
+
+  function setQualityStatus(state = {}) {
+    const labels = { high: '高品質', balanced: '平衡', low: '效能' };
+    const tier = labels[state.tier] ? state.tier : 'high';
+    qualityStatus.dataset.tier = tier;
+    qualityStatus.textContent = `預覽 · ${labels[tier]}`;
+  }
+
   const tabs = element('div', 'inspectorTabs');
   tabs.setAttribute('role', 'tablist');
   tabs.setAttribute('aria-label', '參數分類');
@@ -84,6 +128,7 @@ export function buildInspector({ defaults }) {
   const panes = {};
   const tabButtons = [];
   function selectPage(key) {
+    if (!panes[key]) return;
     for (const [id, pane] of Object.entries(panes)) pane.hidden = id !== key;
     tabButtons.forEach(el => {
       const active = el.dataset.page === key;
@@ -91,6 +136,7 @@ export function buildInspector({ defaults }) {
       el.tabIndex = active ? 0 : -1;
     });
     panel.scrollTop = 0;
+    try { localStorage.setItem(PAGE_KEY, key); } catch (_) {}
   }
   for (const [key, text] of [['shape', '造型'], ['motion', '動態'], ['look', '外觀'], ['scene', '場景']]) {
     const tab = button(text, () => selectPage(key));
@@ -212,6 +258,54 @@ export function buildInspector({ defaults }) {
   formationTiming.append(rowOf('gatherDuration'), rowOf('shapeHold'), $('timelineSummary'));
   panes.motion.prepend(formationTiming);
 
+  // 常用模式是展示層，控制項本體仍留在 DOM，完整模式可立即恢復。這份清單只挑
+  // 會直接改變構圖、節奏或主要材質印象的控制；精細噪聲、光學與後期參數歸完整。
+  const primaryControls = new Set([
+    'loopDuration', 'holdBreath', 'formationVariety', 'formationArc',
+    'weaveSizeMin', 'weaveSizeMax', 'weaveDriftAmount', 'weaveOrbit',
+    'shatterRest', 'shatterChargeTime', 'shatterFlight', 'shatterReform', 'shatterRange',
+    'meltRate', 'meltHang', 'meltSag', 'meltFall', 'meltSizeMin', 'meltSizeMax',
+    'morphHold', 'morphStagger', 'morphArc', 'morphSwell',
+    'jellyStyle', 'jellyPokes', 'jellyAmount', 'jellyBounces', 'jellyDamping',
+    'typeText', 'typeSize', 'typeTracking', 'typeDepth', 'typeBevel',
+    'flowSpeed', 'shapeMotionOn', 'shapeSpinY', 'shapeBreathe', 'shapeBob',
+    'shapeSource', 'shapeQuality', 'shapeAScale', 'shapeInput', 'gatherDuration',
+    'shapeHold', 'microCount', 'shapeDepth', 'shapeEdgeBevel', 'shapeLiquid',
+    'shapeLiquidPosition', 'shapeLiquidSize', 'shapeLiquidSpeed',
+    'count', 'radius', 'viscosity', 'spread', 'wobble',
+    'materialStyle', 'reflect', 'transmission', 'absorb', 'absorbColor',
+    'materialExposure', 'roughness', 'fresnel', 'ior',
+    'cameraDistance', 'cameraRotationY', 'cameraRotationX', 'spin', 'dollyEnabled',
+    'bgMode', 'bgColor', 'lightBgGradientTop', 'lightBgGradientBottom', 'lightShow',
+    'lightClarity', 'lightDepth', 'lightChroma', 'hdriYaw', 'hdriPitch', 'hdriBlur',
+    'researchShellTint', 'researchShellTintColor', 'researchShellTintEdge',
+    'researchBreath', 'researchCompanionSize', 'researchCompanionExposure',
+    'researchCompanionDepth', 'researchCompanionHold', 'researchCompanionPath',
+    'researchShellTexture', 'researchShellAmount', 'researchShellSpeed',
+    'researchShellDensity', 'researchBubbles', 'researchBubbleCount',
+    'researchIconTint', 'researchIconTintColor', 'researchIconTintEdge',
+    'researchIconPhaseOffset', 'researchIconBirthStagger', 'researchIconSizeA',
+    'researchIconSizeB', 'researchIconAspect', 'researchIconSpread',
+    'researchIconStagger', 'researchIconDepth',
+  ]);
+  for (const prefix of EDGE_TINT_TARGETS) {
+    primaryControls.add(`${prefix}MultiTint`);
+    primaryControls.add(`${prefix}MultiTintStrength`);
+    primaryControls.add(`${prefix}MultiTintRotation`);
+    for (let index = 0; index < EDGE_TINT_STOPS.length; index++) {
+      primaryControls.add(`${prefix}TintStopColor${index}`);
+      primaryControls.add(`${prefix}TintStopPos${index}`);
+    }
+  }
+  panel.querySelectorAll('.row').forEach(row => {
+    if (row.closest('.inspectorHeader')) return;
+    const control = row.querySelector('input[id], select[id], textarea[id]');
+    if (control && !primaryControls.has(control.id)) row.classList.add('inspectorExpert');
+  });
+  for (const expertGroup of [post, quality, share, tips, surface]) {
+    expertGroup.classList.add('inspectorExpert');
+  }
+
   const colors = section('局部配色', 'research');
   colors.classList.add('inspectorColors');
   panes.look.prepend(colors);
@@ -237,6 +331,27 @@ export function buildInspector({ defaults }) {
     status.textContent = message;
     refresh();
   }
+  const stylePresets = element('div', 'inspectorStylePresets');
+  const stylePresetHeading = element('div', 'inspectorStylePresetHeading');
+  stylePresetHeading.append(
+    element('span', '', '推薦風格'),
+    element('span', '', '深／淺底自動對應'),
+  );
+  const stylePresetButtons = element('div', 'inspectorStylePresetButtons');
+  for (const preset of INSTALLING_VISUAL_PRESETS) {
+    const presetButton = button(preset.label, () => {
+      applyValues(
+        installingVisualPresetValues(preset.id, $('backdrop').value),
+        `已套用${preset.label}風格；外殼與 Icons 仍可分別調整。`,
+      );
+    });
+    presetButton.classList.add('inspectorStylePreset');
+    presetButton.dataset.visualPreset = preset.id;
+    presetButton.style.setProperty('--preset-swatch', preset.swatch);
+    stylePresetButtons.append(presetButton);
+  }
+  stylePresets.append(stylePresetHeading, stylePresetButtons);
+  colorBody.prepend(stylePresets);
   for (const prefix of EDGE_TINT_TARGETS) {
     const card = element('div', 'inspectorColorCard');
     card.dataset.tintTarget = prefix;
@@ -363,9 +478,15 @@ export function buildInspector({ defaults }) {
       $(`${prefix}MultiTintRotation_v`).textContent = `${$(`${prefix}MultiTintRotation`).value}°`;
     }
   }
-  selectPage('look');
+  let initialPage = 'look';
+  try {
+    const saved = localStorage.getItem(PAGE_KEY);
+    if (saved && panes[saved]) initialPage = saved;
+  } catch (_) {}
+  setControlDepth(controlDepth, false);
+  selectPage(initialPage);
   refresh();
-  return { refresh };
+  return { refresh, setQualityStatus };
 }
 
 function buildPalette(prefix, applyValues) {

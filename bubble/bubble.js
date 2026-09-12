@@ -1,6 +1,9 @@
 'use strict';
 import * as THREE from 'three';
-import { buildInspector } from './inspector.js?v=dark-tint-1';
+import { buildInspector } from './inspector.js?v=visual-presets-1';
+import { createAdaptiveQuality, QUALITY_TIER_NAMES } from './adaptive-quality.js?v=2';
+import { initQuickSlots } from './quick-slots.js?v=1';
+import { createGpuProfiler } from './gpu-profiler.js?v=1';
 let inspector = null;
 import { EDGE_TINT_TARGETS, EDGE_TINT_STOPS, edgeTintParams, edgeTintKeys, sanitizeEdgeTintValue, readEdgeTintStops, sampleEdgeTint } from './edge-tint.js?v=dark-tint-1';
 import {
@@ -249,6 +252,7 @@ if (DIAG.any) console.info('[bubble diag] 啟用:', DIAG.list.join(', '));
 
 const canvas = document.getElementById('stage');
 const mobileRenderQuery = window.matchMedia('(max-width: 760px)');
+const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
 const GLASS_HDRI_URL = new URL('./assets/photo_studio2_london_hall_1k.hdr', import.meta.url).href;
 const GLASS_HDRI_LABEL = 'photo_studio2_london_hall_1k.hdr';
 // 動態模式自己指定的環境貼圖（registry.js 的 hdri 欄位）。HDRI 平常跟著材質
@@ -1457,7 +1461,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=dark-tint-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=structured-1';
 import { createPostChain } from './post.js?v=post-mask-3';
 
 // cold compile 的時間量測（?diagTiming=1）。
@@ -1827,6 +1831,9 @@ let pendingVariantSync = false;
 // 這個 regression 的成因正是「設了旗標但沒有人補做」。
 function markInitialCompileDone() {
   initialCompileDone = true;
+  // 首編耗時不屬於持續算繪 FPS；從完成這一刻重新開樣本窗口。
+  adaptiveQuality.resetSamples(performance.now(), true);
+  lastInteractionAt = performance.now();
   if (pendingVariantSync) {
     pendingVariantSync = false;
     syncShaderVariant();
@@ -2365,6 +2372,9 @@ function shaderFeatures(V = variantState()) {
   // 而優化器成本對函式大小是超線性的。實測把萬能 shader 拆成當下需要的最小組合，
   // cold compile 從兩分鐘級一路降到個位數秒級。
   const defines = {
+    // 行動裝置只需要四方向 PMREM 補樣，讓預處理器把另外四個龐大的
+    // textureCubeUV 展開從 shader 原始碼移除；桌面高品質仍使用完整八方向。
+    MAX_REFLECTION_SAMPLES: mobileRenderQuery.matches ? 4 : 8,
     // --- 幾何：mapScene 的子系統，由 motion 決定 ---
     FEATURE_SHAPE_FIELD: V.shapeField ? '' : false,
     FEATURE_CAPILLARY: V.capillaryTexture ? '' : false,
@@ -2489,6 +2499,7 @@ function shaderFeatures(V = variantState()) {
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
 let pmremGenerator = null, pmremTarget = null;
+let gpuProfiler = null;
 let inited = false;
 // 裝置本身撐得住的解析度上限，不受使用者「抗鋸齒」偏好影響——DIAG.lowres／
 // PREVIEW 場景本來就該固定走最省資源那一路，不該被手動調高的超取樣蓋過去。
@@ -2497,22 +2508,27 @@ const deviceMaxDpr = DIAG.lowres ? 1 : PREVIEW ? 1 : mobileRenderQuery.matches
   : Math.min(window.devicePixelRatio || 1, 2);
 // 這兩個原本是 const，現在會被 applyAntialiasLevel() 依使用者選的超取樣倍率
 // 重算，所以改 let。倍率 ×1（預設）時算出來的值跟原本寫死的一模一樣。
-let maxRenderDpr = deviceMaxDpr;
+const initialMaxRenderDpr = deviceMaxDpr;
 // 拖曳時的解析度。fragment 成本與像素面積成線性（實測 1/12 像素 → 1/8.5 幀時），
 // 所以這個下限是互動流暢度最大的單一槓桿：舊版桌面只從 2.0 降到 1.75，像素僅少
 // 23%；降到 1.25 後只剩 39%。放手後會立刻回到 maxRenderDpr。
-let minRenderDpr = DIAG.lowres ? 1 : PREVIEW ? 1 : Math.min(maxRenderDpr, 1.25);
-let qualityDpr = maxRenderDpr;
-let qualitySteps = PREVIEW ? 56 : mobileRenderQuery.matches ? 64 : 88;
-let qualitySampleStarted = performance.now();
-let qualitySampleFrames = 0;
-let qualityLowSamples = 0;
-let qualityHighSamples = 0;
+const initialMinRenderDpr = DIAG.lowres ? 1 : PREVIEW ? 1 : Math.min(initialMaxRenderDpr, 1.25);
+const adaptiveQuality = createAdaptiveQuality({
+  mobile: mobileRenderQuery.matches,
+  preview: PREVIEW,
+  maxDpr: initialMaxRenderDpr,
+  minDpr: initialMinRenderDpr,
+  onChange: state => {
+    if (document.body) document.body.dataset.renderQuality = state.tier;
+    inspector?.setQualityStatus(state);
+    refreshRenderQuality();
+  },
+});
 
 const rot = { x: P.cameraRotationX * Math.PI / 180, y: P.cameraRotationY * Math.PI / 180 };
 const vel = { x: 0, y: 0 };
 let compositionOffsetX = 0;
-let dragging = false, lastX = 0, lastY = 0;
+let dragging = false, activeCanvasPointerId = null, lastX = 0, lastY = 0;
 const rotM4 = new THREE.Matrix4();
 const tmpX = new THREE.Matrix4();
 const tmpZ = new THREE.Matrix4();
@@ -4971,7 +4987,8 @@ function initGL() {
   // 全螢幕 shader 本身沒有多邊形鋸齒，關閉 MSAA 可省下額外 framebuffer 成本。
   renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false });
   renderer.setClearColor(0x000000, 1);
-  renderer.setPixelRatio(qualityDpr);
+  renderer.setPixelRatio(adaptiveQuality.snapshot().dpr);
+  gpuProfiler = createGpuProfiler(renderer.getContext());
   // 診斷：把 renderer 剛建立時的後端記下來（此時還沒有編譯任何 program），並開始
   // 監聽 context 遺失。「這個 context 一開始就是軟體算繪」與「編譯把 GPU process
   // 打掉之後才掉下去」在事後是分不出來的，除非兩個時間點都留下紀錄。
@@ -4995,7 +5012,7 @@ function initGL() {
     uTanHalfFov: { value: 0.42 },
     uCompositionOffsetX: { value: 0 },
     uCompositionOffsetY: { value: 0 },
-    uMaxSteps:   { value: qualitySteps },
+    uMaxSteps:   { value: adaptiveQuality.snapshot().steps },
     // 這兩顆的作用都不是調整取樣數，而是讓 calcNormal 兩條法線路徑的迴圈 trip count
     // 對 fxc 保持未知，迴圈才不會被靜態展開成一份一份的 mapScene（見 shaders.js 的
     // calcNormal）。所以值恆定：四面體 4 個 tap、SVG 分軸中央差分 6 個 tap。
@@ -5156,7 +5173,7 @@ function initGL() {
     uMembraneDepth: { value: P.membraneDepth },
     uRoughness:  { value: P.roughness },
     uIOR:        { value: P.ior },
-    uReflectionSampleCount: { value: mobileRenderQuery.matches ? 4 : 8 },
+    uReflectionSampleCount: { value: adaptiveQuality.snapshot().reflectionSamples },
     uHdriYaw:    { value: P.hdriYaw },
     uHdriPitch:  { value: P.hdriPitch },
     uHdriBlur:   { value: P.hdriBlur },
@@ -5286,22 +5303,12 @@ function resolveMaxSteps() {
   if (DIAG.lowsteps) return 32;
   // 多水滴 + 形狀場會增加每一步的取樣成本；60 步仍足以覆蓋保守包圍球，
   // 並避免高 DPR 桌面在 Formation 模式失去即時預覽能力。
+  const qualitySteps = adaptiveQuality.snapshot().steps;
   if (usesShapeField(P.motion)) return Math.min(qualitySteps, dragging ? 48 : 60);
   return dragging ? Math.min(qualitySteps, 56) : qualitySteps;
 }
 
-/* ===== 省電節流 =====
- * 桌面完全沒有自動降載：sampleRenderQuality 開頭就有 `!mobileRenderQuery.matches`
- * 的早退，所以在桌面上永遠是滿 DPR、滿步數、跟著螢幕更新率一路算下去。機器夠快
- * 就不會掉幀，於是它會很樂意把整張 GPU 燒滿來維持 60fps —— 這就是「放著跑一陣子
- * 機器就發燙」的來源，不是哪裡寫得慢。
- *
- * 這裡只在「使用者沒有在互動」時降影格率，不動解析度、不動步數，所以每一張畫面
- * 的品質完全不變，只有更新頻率變低。要降解析度才會影響畫質，那個代價這裡不付。
- *
- * 沒有開關：既然畫質不受影響、互動時又完全不介入，就沒有想關掉它的情境，多一個
- * 開關只是多一個要解釋與維護的東西。
- */
+/* ===== 省電節流與自動品質 ===== */
 // 30fps：主迴圈把 dt 夾在 0.05 秒，影格間隔一旦超過它，動畫就會開始「變慢」而不
 // 只是「變頓」（因為每幀推進的時間被截掉）。30fps 的間隔是 0.033 秒還在安全範圍，
 // 再往下就得先把那個夾值一起改，所以停在這裡。
@@ -5313,7 +5320,7 @@ const POWER_SAVE_INTERVAL = 1000 / POWER_SAVE_FPS;
 // 停手多久算閒置。太短會在「調完一個滑桿、正在看效果」時就降頻，那一刻其實最需要
 // 流暢；4 秒足夠跨過調參數的空檔。
 const IDLE_DELAY_MS = 4000;
-let lastInteractionAt = 0;
+let lastInteractionAt = performance.now();
 let lastRenderedAt = 0;
 let windowFocused = true;
 let powerSaveThrottled = false;
@@ -5364,11 +5371,17 @@ function shouldSkipFrame(now) {
 
 function refreshRenderQuality() {
   if (!renderer || !uniforms) return;
-  const interactionDpr = dragging ? Math.min(qualityDpr, minRenderDpr) : qualityDpr;
+  const quality = adaptiveQuality.snapshot();
+  uniforms.uReflectionSampleCount.value = quality.reflectionSamples;
+  const interactionDpr = dragging ? Math.min(quality.dpr, quality.minDpr) : quality.dpr;
   if (Math.abs(renderer.getPixelRatio() - interactionDpr) > 0.01) {
     renderer.setPixelRatio(interactionDpr);
     resize();
   }
+}
+
+function setQualityTier(nextTier) {
+  adaptiveQuality.setTier(nextTier);
 }
 
 // 使用者手動選的超取樣倍率套進 deviceMaxDpr。全螢幕 raymarch shader 沒有多邊形
@@ -5377,57 +5390,21 @@ function refreshRenderQuality() {
 // 平滑掉——這正是 renderer.setPixelRatio 在做的事，這裡只是讓使用者自己決定
 // 倍率，而不是被 devicePixelRatio 和寫死的 1.5／2 上限卡死。
 //
-// mobile 版的自動降載（sampleRenderQuality）會在這個新上限之下繼續運作：它只在
-// qualityDpr 掉到 minRenderDpr 或升回 maxRenderDpr 之間切換，兩者都已經按新倍率
-// 重算過，所以兩套機制不會互相打架。
+// 自動品質會在這個新上限之下繼續運作；各層 DPR 都依新倍率重算。
 function applyAntialiasLevel() {
   if (DIAG.lowres || PREVIEW) return; // 這兩個場景一律鎖最省資源那一路，不給覆寫
   const multiplier = SELECTS.antialiasLevel.map[P.antialiasLevel] ?? 1;
-  maxRenderDpr = deviceMaxDpr * multiplier;
-  minRenderDpr = Math.min(maxRenderDpr, 1.25 * multiplier);
-  qualityDpr = maxRenderDpr;
-  refreshRenderQuality();
+  const maxRenderDpr = deviceMaxDpr * multiplier;
+  const minRenderDpr = Math.min(maxRenderDpr, 1.25 * multiplier);
+  adaptiveQuality.updateLimits(maxRenderDpr, minRenderDpr);
 }
 
 function sampleRenderQuality(now) {
-  if (PREVIEW || !mobileRenderQuery.matches) return;
-  // 節流期間不要取樣：這時候的 30fps 是我們自己壓的，不是 GPU 跟不上。混進統計
-  // 會讓行動裝置把解析度與步數一起降下去，變成「省電模式順便掉畫質」。
-  if (powerSaveThrottled) {
-    qualitySampleStarted = now;
-    qualitySampleFrames = 0;
-    return;
-  }
-  qualitySampleFrames++;
-  const elapsed = now - qualitySampleStarted;
-  if (elapsed < 2000) return;
-
-  const fps = qualitySampleFrames * 1000 / elapsed;
-  qualitySampleStarted = now;
-  qualitySampleFrames = 0;
-
-  if (fps < 42) {
-    qualityLowSamples++;
-    qualityHighSamples = 0;
-    if (qualityLowSamples >= 2 && (qualityDpr > minRenderDpr || qualitySteps > 56)) {
-      qualityDpr = minRenderDpr;
-      qualitySteps = 56;
-      qualityLowSamples = 0;
-      refreshRenderQuality();
-    }
-  } else if (fps > 55) {
-    qualityHighSamples++;
-    qualityLowSamples = 0;
-    if (qualityHighSamples >= 3 && (qualityDpr < maxRenderDpr || qualitySteps < 64)) {
-      qualityDpr = maxRenderDpr;
-      qualitySteps = 64;
-      qualityHighSamples = 0;
-      refreshRenderQuality();
-    }
-  } else {
-    qualityLowSamples = 0;
-    qualityHighSamples = 0;
-  }
+  // 編譯、拖曳、離線輸出與省電節流都有刻意的停頓或品質調整，不能拿來推斷 GPU
+  // 的持續算繪能力。尤其 shader 背景切換若混進樣本，會在剛切模式時錯降一級。
+  adaptiveQuality.sample(now, {
+    blocked: powerSaveThrottled || dragging || exportJob || shapeConverting || variantSwapInFlight,
+  });
 }
 
 /* ===== 拖曳旋轉 ===== */
@@ -5438,12 +5415,17 @@ function bindPointer() {
     canvas.addEventListener(type, markInteraction, { passive: true });
   }
   canvas.addEventListener('pointerdown', e => {
+    if (activeCanvasPointerId !== null) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (e.pointerType !== 'mouse' && !e.isPrimary) return;
+    activeCanvasPointerId = e.pointerId;
     dragging = true; lastX = e.clientX; lastY = e.clientY;
+    canvas.dataset.dragging = 'true';
     canvas.setPointerCapture(e.pointerId);
     refreshRenderQuality();
   });
   canvas.addEventListener('pointermove', e => {
-    if (!dragging) return;
+    if (!dragging || e.pointerId !== activeCanvasPointerId) return;
     const dx = e.clientX - lastX, dy = e.clientY - lastY;
     lastX = e.clientX; lastY = e.clientY;
     rot.y = Math.max(-Math.PI, Math.min(Math.PI, rot.y + dx * 0.006));
@@ -5455,7 +5437,10 @@ function bindPointer() {
     vel.y = dx * 0.006; vel.x = dy * 0.006;
   });
   const end = e => {
+    if (e.pointerId !== activeCanvasPointerId) return;
     dragging = false;
+    activeCanvasPointerId = null;
+    delete canvas.dataset.dragging;
     refreshRenderQuality();
     try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
   };
@@ -6653,6 +6638,7 @@ function ensureShapeForCurrentSource() {
 
 /* ===== 播放/暫停：面板按鈕、postMessage、分頁隱藏三者共同決定 ===== */
 let userPaused = false, extPaused = PREVIEW;
+let reducedMotionPaused = !PREVIEW && reducedMotionQuery.matches;
 let exportJob = null;
 let exportPreviewSettings = null;
 let exportPreviewContext = null;
@@ -6663,7 +6649,15 @@ const pauseBtnIcon = document.getElementById('playCtlIcon');
 const pauseBtnLabel = document.getElementById('playCtlLabel');
 const PAUSE_ICON = '<rect x="5" y="4" width="3.2" height="12" rx="1" fill="currentColor"/><rect x="11.8" y="4" width="3.2" height="12" rx="1" fill="currentColor"/>';
 const PLAY_ICON = '<path d="M6 4.2v11.6a.9.9 0 0 0 1.37.76l9.2-5.8a.9.9 0 0 0 0-1.52l-9.2-5.8A.9.9 0 0 0 6 4.2Z" fill="currentColor"/>';
-function isPaused() { return userPaused || extPaused || shapeConverting || exportJob || document.hidden; }
+function playbackPaused() { return userPaused || reducedMotionPaused; }
+function isPaused() { return playbackPaused() || extPaused || shapeConverting || exportJob || document.hidden; }
+function updatePlayControl() {
+  const paused = playbackPaused();
+  pauseBtnIcon.innerHTML = paused ? PLAY_ICON : PAUSE_ICON;
+  pauseBtnLabel.textContent = paused ? '播放' : '暫停';
+  pauseBtn.setAttribute('aria-label', paused ? '播放動畫' : '暫停動畫');
+  pauseBtn.title = paused ? '播放動畫' : '暫停動畫';
+}
 // 後處理鏈。第一次真的要用到時才建立 —— 全部關閉時連 render target 都不該配置。
 let postChain = null;
 const bloomTintColor = new THREE.Color();
@@ -6692,6 +6686,8 @@ function postActive() {
 }
 
 function renderComposite(target = null, superSample = 1) {
+  gpuProfiler?.beginFrame();
+  try {
   const transparent = uniforms.uTransparentBackground.value === 1;
   // 高於 1 的高光只有在「畫進後處理的半浮點貼圖」時才留得住。去背輸出例外：
   // 那條路徑的反預乘推導假設值域是 0–1（見主 shader 結尾），HDR 會讓它算出
@@ -6749,13 +6745,16 @@ function renderComposite(target = null, superSample = 1) {
     // 預覽與成品上的光暈大小會差一個超採樣倍率。
     superSample,
   });
+  } finally {
+    gpuProfiler?.endFrame();
+  }
 }
 
 function requestPausedRender() {
   // 暫停時 frame() 不跑，但循環秒數仍可能被改（拉時間軸、換模式、改文字），
   // 匯出對話框也常常是在暫停狀態下打開的，所以這條路也要廣播。
   broadcastLoopDuration();
-  if ((!userPaused && !extPaused) || shapeConverting || exportJob || document.hidden || pausedRenderRaf) return;
+  if (!isPaused() || shapeConverting || exportJob || document.hidden || pausedRenderRaf) return;
   pausedRenderRaf = requestAnimationFrame(() => {
     pausedRenderRaf = 0;
     if (isPaused() && !shapeConverting && !exportJob && !document.hidden) {
@@ -7016,6 +7015,25 @@ window.__bubbleDiagRenderAndCapture = function (key) {
     : { 錯誤: '擷取失敗：' + (result.錯誤 || '(未知)'), 已存筆數: result.已存筆數 };
 };
 
+// Hardware GPU timing for local acceptance. Timer queries measure the complete
+// composite without forcing a synchronous readback. Restore the user's adaptive
+// tier after the requested sample set finishes.
+window.__bubbleProfileGpu = async function ({ tier = 'high', samples = 16, warmup = 3 } = {}) {
+  if (!inited || !gpuProfiler) return { supported: false, reason: 'WebGL 尚未初始化' };
+  const nextTier = QUALITY_TIER_NAMES.indexOf(tier);
+  if (nextTier < 0) throw new Error(`Unknown quality tier: ${tier}`);
+  const previousTier = adaptiveQuality.snapshot().tierIndex;
+  setQualityTier(nextTier);
+  markInteraction();
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  try {
+    const result = await gpuProfiler.measure({ samples, warmup });
+    return { ...result, tier, quality: adaptiveQuality.snapshot() };
+  } finally {
+    setQualityTier(previousTier);
+  }
+};
+
 // 診斷用的現況報告。任何時候都可以在 console 呼叫 __bubbleDiagReport()，
 // 帶 ?diag= 時初始化完成後也會自動印一次。純讀取，不改變任何狀態。
 window.__bubbleDiagReport = function () {
@@ -7174,6 +7192,21 @@ window.__bubbleDiagReport = function () {
       'renderer.getPixelRatio()': renderer ? renderer.getPixelRatio() : '(未初始化)',
       像素數: gl ? (gl.drawingBufferWidth * gl.drawingBufferHeight).toLocaleString() : '(未初始化)',
     },
+    效能: (() => {
+      const quality = adaptiveQuality.snapshot();
+      return {
+      自動品質層級: quality.tier,
+      最近取樣FPS: quality.lastFps === null ? null : Math.round(quality.lastFps * 10) / 10,
+      qualityDpr: quality.dpr,
+      maxRenderDpr: quality.maxDpr,
+      minRenderDpr: quality.minDpr,
+      qualitySteps: quality.steps,
+      reflectionSamples: quality.reflectionSamples,
+      省電節流中: powerSaveThrottled,
+      減少動態效果暫停: reducedMotionPaused,
+      畫布拖曳中: dragging,
+      };
+    })(),
     raymarch: {
       'uMaxSteps(本幀)': steps,
       主迴圈硬上限: 88,
@@ -7280,6 +7313,7 @@ window.__bubbleDiagReport = function () {
           主滴MAXN: pick('MAX_DROPS_COMPILE', 12),
           主raymarch展開: pick('MAX_MARCH_COMPILE', 88),
           內部折射展開: pick('MAX_INTERIOR_COMPILE', 28),
+          反射環形取樣上限: pick('MAX_REFLECTION_SAMPLES', 8),
           微滴MAX_MICRO: (d && d.FEATURE_MICRO_DROPS === false) ? '整個迴圈已移除' : 48,
           負形MAX_NEGATIVE: 4,
         };
@@ -7338,6 +7372,11 @@ let diagOnceDone = false;
 function syncLoop() {
   if (isPaused()) {
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+    // 系統減少動態效果在首次進頁時就暫停，但仍先完成初始化並畫一張靜態預覽。
+    if (reducedMotionPaused && !document.hidden && !shapeConverting && !exportJob) {
+      if (!inited) initGL();
+      ensureInitialCompile().then(requestPausedRender);
+    }
   } else {
     if (!inited) initGL();
     // 計時模式：先跑非阻塞的編譯輪詢，量到數字之後才交回原本的流程。
@@ -7403,9 +7442,18 @@ function syncLoop() {
   }
 }
 pauseBtn.addEventListener('click', () => {
-  userPaused = !userPaused;
-  pauseBtnIcon.innerHTML = userPaused ? PLAY_ICON : PAUSE_ICON;
-  pauseBtnLabel.textContent = userPaused ? '播放' : '暫停';
+  if (reducedMotionPaused) reducedMotionPaused = false;
+  else userPaused = !userPaused;
+  document.body.dataset.reducedMotion = reducedMotionPaused ? 'paused' : 'allowed';
+  updatePlayControl();
+  syncLoop();
+});
+reducedMotionQuery.addEventListener('change', event => {
+  if (PREVIEW) return;
+  reducedMotionPaused = event.matches;
+  document.body.dataset.reducedMotion = reducedMotionPaused ? 'paused' : 'allowed';
+  if (reducedMotionPaused) setQualityTier(QUALITY_TIER_NAMES.length - 1);
+  updatePlayControl();
   syncLoop();
 });
 window.addEventListener('message', e => {
@@ -7951,7 +7999,10 @@ function frame(now) {
 }
 
 buildExtendedMotionControls();
-if (!PREVIEW) inspector = buildInspector({ defaults: { ...DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS } });
+if (!PREVIEW) {
+  inspector = buildInspector({ defaults: { ...DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS } });
+  inspector.setQualityStatus(adaptiveQuality.snapshot());
+}
 bindControls();
 bindTextControls();
 
@@ -7996,47 +8047,12 @@ if (!PREVIEW) {
   const quickSlots = document.getElementById('quickSlots');
   const quickStatus = document.getElementById('quickSlotsStatus');
   const preset = window.PresetIO?.of('prism-drops');
-  const storageKey = 'vfx:prism-drops:quick-slots';
-  let savedSlots = [];
-  try { savedSlots = JSON.parse(localStorage.getItem(storageKey) || '[]'); } catch (_) { savedSlots = []; }
-
-  if (quickSlots && preset) {
-    const buttons = [...quickSlots.querySelectorAll('[data-slot]')];
-    const announce = message => {
-      quickStatus.textContent = message;
-      clearTimeout(announce.timer);
-      announce.timer = setTimeout(() => { quickStatus.textContent = ''; }, 1800);
-    };
-    const syncSlots = () => buttons.forEach((button, index) => {
-      const saved = Boolean(savedSlots[index]);
-      button.classList.toggle('is-saved', saved);
-      button.title = saved ? `載入暫存 ${index + 1}（右鍵清除）` : `儲存目前參數到 ${index + 1}`;
-    });
-    const persist = () => {
-      try { localStorage.setItem(storageKey, JSON.stringify(savedSlots)); } catch (_) { announce('瀏覽器無法保存暫存'); }
-    };
-    buttons.forEach((button, index) => {
-      button.addEventListener('click', () => {
-        if (savedSlots[index]) {
-          try {
-            preset.apply(savedSlots[index]);
-            announce(`已載入暫存 ${index + 1}`);
-          } catch (_) { savedSlots[index] = null; persist(); syncSlots(); announce('暫存資料已失效'); }
-        } else {
-          savedSlots[index] = preset.serialize(`快速暫存 ${index + 1}`);
-          persist(); syncSlots(); announce(`已儲存暫存 ${index + 1}`);
-        }
-      });
-      button.addEventListener('contextmenu', event => {
-        event.preventDefault();
-        if (!savedSlots[index]) return;
-        savedSlots[index] = null;
-        persist(); syncSlots(); announce(`已清除暫存 ${index + 1}`);
-      });
-    });
-    syncSlots();
-  }
+  initQuickSlots({ root: quickSlots, status: quickStatus, preset });
 }
 
+document.body.dataset.reducedMotion = reducedMotionPaused ? 'paused' : 'allowed';
+if (reducedMotionPaused) setQualityTier(QUALITY_TIER_NAMES.length - 1);
+else setQualityTier(adaptiveQuality.snapshot().tierIndex);
+updatePlayControl();
 syncLoop();
 if (!PREVIEW) exportEvent('prism-export-ready', { loopDuration: P.loopDuration });
