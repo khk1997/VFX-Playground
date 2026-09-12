@@ -1,4 +1,5 @@
 import { EDGE_TINT_TARGETS, EDGE_TINT_STOPS, edgeTintParams } from './edge-tint.js';
+import { INSTALLING_VISUAL_PRESETS, installingVisualPresetValues } from './visual-presets.js';
 
 const $ = id => document.getElementById(id);
 const rowOf = id => $(id)?.closest('.row');
@@ -330,6 +331,27 @@ export function buildInspector({ defaults }) {
     status.textContent = message;
     refresh();
   }
+  const stylePresets = element('div', 'inspectorStylePresets');
+  const stylePresetHeading = element('div', 'inspectorStylePresetHeading');
+  stylePresetHeading.append(
+    element('span', '', '推薦風格'),
+    element('span', '', '深／淺底自動對應'),
+  );
+  const stylePresetButtons = element('div', 'inspectorStylePresetButtons');
+  for (const preset of INSTALLING_VISUAL_PRESETS) {
+    const presetButton = button(preset.label, () => {
+      applyValues(
+        installingVisualPresetValues(preset.id, $('backdrop').value),
+        `已套用${preset.label}風格；外殼與 Icons 仍可分別調整。`,
+      );
+    });
+    presetButton.classList.add('inspectorStylePreset');
+    presetButton.dataset.visualPreset = preset.id;
+    presetButton.style.setProperty('--preset-swatch', preset.swatch);
+    stylePresetButtons.append(presetButton);
+  }
+  stylePresets.append(stylePresetHeading, stylePresetButtons);
+  colorBody.prepend(stylePresets);
   for (const prefix of EDGE_TINT_TARGETS) {
     const card = element('div', 'inspectorColorCard');
     card.dataset.tintTarget = prefix;

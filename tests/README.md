@@ -41,3 +41,6 @@ information, and writes screenshots plus an acceptance report outside the repo.
 It can also run Playwright WebKit as an engine-compatibility fallback; that result
 is labelled WebKit and is not treated as a system Safari run. Start both the project
 server and `safaridriver` when running the complete real-browser matrix.
+
+`bubble_visual_presets.py` captures all three coordinated Installing styles on
+both backgrounds and verifies that the six fixed-time renders remain distinct.

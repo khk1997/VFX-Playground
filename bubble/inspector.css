@@ -80,6 +80,13 @@ body[data-control-depth="concise"] #quickSlots [data-slot="5"] { display: none; 
 .inspectorColorCard > .inspectorSegments { width: 160px; padding: 2px; background: transparent; margin-bottom: 14px; }
 #panel .inspectorColorCard > .inspectorSegments button { padding: 6px 8px; }
 .inspectorPalette { padding: 0; margin: 0 0 24px; }
+.inspectorStylePresets { margin: 0 0 18px; }
+.inspectorStylePresetHeading { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin: 0 2px 9px; color: #c9c9cf; font-size: 12px; }
+.inspectorStylePresetHeading span:last-child { color: #77777d; font-size: 9px; }
+.inspectorStylePresetButtons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+#panel .inspectorStylePreset { display: grid; gap: 6px; min-width: 0; padding: 7px 8px 8px; color: #d7d7dc; background: #141416; border: 1px solid #ffffff14; border-radius: 12px; font-size: 11px; cursor: pointer; }
+#panel .inspectorStylePreset::before { content: ''; display: block; width: 100%; height: 7px; border-radius: 99px; background: var(--preset-swatch); box-shadow: inset 0 0 0 1px #ffffff18; }
+#panel .inspectorStylePreset:hover { color: #fff; background: #202023; border-color: #ffffff26; }
 .inspectorRamp { position: relative; height: 62px; margin: 8px 16px 14px; touch-action: none; }
 .inspectorRampPreview { display: block; position: absolute; inset: 6px 0 auto; height: 5px; border-radius: 99px; opacity: .8; }
 #panel .inspectorStop {

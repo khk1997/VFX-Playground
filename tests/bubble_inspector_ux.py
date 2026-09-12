@@ -56,7 +56,7 @@ def check_desktop(browser, base_url: str) -> dict[str, object]:
     # Tabs use roving focus and remember the last page.
     page.locator("#inspectorTab-shape").click()
     page.locator("#inspectorTab-shape").press("ArrowRight")
-    assert page.locator("#inspectorTab-motion").get_attribute("aria-selected") == "true"
+    assert page.locator("#inspectorTab-motion").get_attribute("aria-selected") == "true", "ArrowRight did not select motion"
 
     # A/B reuses the existing quick-slot serialization instead of maintaining a
     # second preset implementation.
@@ -77,12 +77,37 @@ def check_desktop(browser, base_url: str) -> dict[str, object]:
     page.wait_for_timeout(150)
     assert reflect.input_value() == original, "A/B slot did not restore the saved value"
 
+    # Coordinated visual presets tune shell/icons separately for each backdrop,
+    # while continuing to use the existing per-backdrop memory.
+    page.locator("#motion").select_option("research")
+    page.locator("#inspectorTab-look").click()
+    prism = page.locator('[data-visual-preset="prism"]')
+    assert prism.is_visible(), "Prism preset is not visible in Installing/look"
+    prism.click()
+    assert page.locator("#researchShellMultiTint").is_checked(), "shell multicolor was not enabled"
+    assert page.locator("#researchIconMultiTint").is_checked(), "icon multicolor was not enabled"
+    dark_shell = page.locator("#researchShellTint").input_value()
+    dark_icon = page.locator("#researchIconTint").input_value()
+    assert dark_shell != dark_icon, "preset collapsed shell and icon tuning"
+    page.locator("#backdrop").select_option("light")
+    prism.click()
+    light_shell = page.locator("#researchShellTint").input_value()
+    assert light_shell != dark_shell, "preset did not distinguish light and dark tuning"
+    page.locator("#backdrop").select_option("dark")
+    page.wait_for_timeout(100)
+    assert page.locator("#researchShellTint").input_value() == dark_shell, "dark preset memory was not restored"
+
     page.reload(wait_until="networkidle")
     page.wait_for_selector("#panel.inspector[data-control-depth=\"complete\"]")
-    assert page.locator("#inspectorTab-motion").get_attribute("aria-selected") == "true"
+    assert page.locator("#inspectorTab-look").get_attribute("aria-selected") == "true", "last inspector page was not restored"
     assert not errors, f"desktop inspector page errors: {errors}"
     context.close()
-    return {"expertControls": expert_count, "valuesPreserved": True, "abCompared": True}
+    return {
+        "expertControls": expert_count,
+        "valuesPreserved": True,
+        "abCompared": True,
+        "visualPresets": True,
+    }
 
 
 def check_mobile(browser, base_url: str) -> dict[str, object]:
