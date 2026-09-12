@@ -48,6 +48,7 @@ def check_reduced_motion(browser, base_url: str) -> dict[str, object]:
     report = page.evaluate("window.__bubbleDiagReport()")
     assert report["效能"]["減少動態效果暫停"] is True
     assert report["效能"]["自動品質層級"] == "low"
+    assert report["效能"]["reflectionSamples"] == 4
 
     frame_a = page.locator("#stage").screenshot()
     page.wait_for_timeout(350)
@@ -89,6 +90,8 @@ def check_adaptive_quality(browser, base_url: str) -> dict[str, object]:
     page.evaluate("clearInterval(window.__qualityKeepAwake)")
     adapted = page.evaluate("window.__bubbleDiagReport()['效能']")
     assert adapted["qualitySteps"] < initial["qualitySteps"]
+    assert initial["reflectionSamples"] == 8
+    assert adapted["reflectionSamples"] == 4
     assert adapted["最近取樣FPS"] is not None
     assert not errors, f"adaptive-quality page errors: {errors}"
     context.close()
@@ -105,6 +108,10 @@ def check_pointer_input(browser, base_url: str) -> dict[str, object]:
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     open_page(page, base_url)
+
+    mobile_report = page.evaluate("window.__bubbleDiagReport()")
+    assert mobile_report["效能"]["reflectionSamples"] == 4
+    assert mobile_report["shaderVariant"]["編譯期迴圈上限"]["反射環形取樣上限"] == 4
 
     stage = page.locator("#stage")
     before = float(page.locator("#cameraRotationY").input_value())

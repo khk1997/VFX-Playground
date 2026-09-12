@@ -495,6 +495,11 @@ const int   MAXN = MAX_DROPS_COMPILE;
 #ifndef MAX_INTERIOR_COMPILE
 #define MAX_INTERIOR_COMPILE 28
 #endif
+// 行動版永遠只用四方向環形補樣，編譯時直接移除另外四次展開的 textureCubeUV。
+// 桌面版仍保留八方向，由 uReflectionSampleCount 在執行時選完整或省電路徑。
+#ifndef MAX_REFLECTION_SAMPLES
+#define MAX_REFLECTION_SAMPLES 8
+#endif
 // 跟 bubble.js 的 MAX_MICRO_DROPS 綁死。下面的迴圈在 m >= uMicroCount 時動態跳出，
 // 所以拉高這個值只是讓著色器能容納更多微滴，不會讓沒用到的那些也付出取樣成本。
 const int   MAX_MICRO = 48;
@@ -604,6 +609,7 @@ vec3 sampleReflection(vec3 d, float rough){
       ring += textureCubeUV(uPmremMap, normalize(d - axis * radius), rough).rgb;
       ring += textureCubeUV(uPmremMap, normalize(d + ortho * radius), rough).rgb;
       ring += textureCubeUV(uPmremMap, normalize(d - ortho * radius), rough).rgb;
+#if MAX_REFLECTION_SAMPLES > 4
       if (uReflectionSampleCount > 4) {
         ring += textureCubeUV(uPmremMap, normalize(d + (axis + ortho) * radius * SQRT_HALF), rough).rgb;
         ring += textureCubeUV(uPmremMap, normalize(d + (axis - ortho) * radius * SQRT_HALF), rough).rgb;
@@ -617,6 +623,11 @@ vec3 sampleReflection(vec3 d, float rough){
         float centerWeight = mix(0.68, 0.24, blur);
         center = mix(prefiltered, center, centerWeight);
       }
+#else
+      vec3 prefiltered = (center + ring) / 5.0;
+      float centerWeight = mix(0.68, 0.24, blur);
+      center = mix(prefiltered, center, centerWeight);
+#endif
     }
 #endif // PROBE_SINGLE_REFLECTION_SAMPLE
     return center;

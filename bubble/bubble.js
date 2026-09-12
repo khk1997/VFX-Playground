@@ -1,7 +1,7 @@
 'use strict';
 import * as THREE from 'three';
 import { buildInspector } from './inspector.js?v=dark-tint-1';
-import { createAdaptiveQuality, QUALITY_TIER_NAMES } from './adaptive-quality.js?v=1';
+import { createAdaptiveQuality, QUALITY_TIER_NAMES } from './adaptive-quality.js?v=2';
 import { initQuickSlots } from './quick-slots.js?v=1';
 let inspector = null;
 import { EDGE_TINT_TARGETS, EDGE_TINT_STOPS, edgeTintParams, edgeTintKeys, sanitizeEdgeTintValue, readEdgeTintStops, sampleEdgeTint } from './edge-tint.js?v=dark-tint-1';
@@ -1460,7 +1460,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=dark-tint-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=reflection-quality-1';
 import { createPostChain } from './post.js?v=post-mask-3';
 
 // cold compile 的時間量測（?diagTiming=1）。
@@ -2371,6 +2371,9 @@ function shaderFeatures(V = variantState()) {
   // 而優化器成本對函式大小是超線性的。實測把萬能 shader 拆成當下需要的最小組合，
   // cold compile 從兩分鐘級一路降到個位數秒級。
   const defines = {
+    // 行動裝置只需要四方向 PMREM 補樣，讓預處理器把另外四個龐大的
+    // textureCubeUV 展開從 shader 原始碼移除；桌面高品質仍使用完整八方向。
+    MAX_REFLECTION_SAMPLES: mobileRenderQuery.matches ? 4 : 8,
     // --- 幾何：mapScene 的子系統，由 motion 決定 ---
     FEATURE_SHAPE_FIELD: V.shapeField ? '' : false,
     FEATURE_CAPILLARY: V.capillaryTexture ? '' : false,
@@ -5166,7 +5169,7 @@ function initGL() {
     uMembraneDepth: { value: P.membraneDepth },
     uRoughness:  { value: P.roughness },
     uIOR:        { value: P.ior },
-    uReflectionSampleCount: { value: mobileRenderQuery.matches ? 4 : 8 },
+    uReflectionSampleCount: { value: adaptiveQuality.snapshot().reflectionSamples },
     uHdriYaw:    { value: P.hdriYaw },
     uHdriPitch:  { value: P.hdriPitch },
     uHdriBlur:   { value: P.hdriBlur },
@@ -5365,6 +5368,7 @@ function shouldSkipFrame(now) {
 function refreshRenderQuality() {
   if (!renderer || !uniforms) return;
   const quality = adaptiveQuality.snapshot();
+  uniforms.uReflectionSampleCount.value = quality.reflectionSamples;
   const interactionDpr = dragging ? Math.min(quality.dpr, quality.minDpr) : quality.dpr;
   if (Math.abs(renderer.getPixelRatio() - interactionDpr) > 0.01) {
     renderer.setPixelRatio(interactionDpr);
@@ -7169,6 +7173,7 @@ window.__bubbleDiagReport = function () {
       maxRenderDpr: quality.maxDpr,
       minRenderDpr: quality.minDpr,
       qualitySteps: quality.steps,
+      reflectionSamples: quality.reflectionSamples,
       省電節流中: powerSaveThrottled,
       減少動態效果暫停: reducedMotionPaused,
       畫布拖曳中: dragging,
@@ -7280,6 +7285,7 @@ window.__bubbleDiagReport = function () {
           主滴MAXN: pick('MAX_DROPS_COMPILE', 12),
           主raymarch展開: pick('MAX_MARCH_COMPILE', 88),
           內部折射展開: pick('MAX_INTERIOR_COMPILE', 28),
+          反射環形取樣上限: pick('MAX_REFLECTION_SAMPLES', 8),
           微滴MAX_MICRO: (d && d.FEATURE_MICRO_DROPS === false) ? '整個迴圈已移除' : 48,
           負形MAX_NEGATIVE: 4,
         };

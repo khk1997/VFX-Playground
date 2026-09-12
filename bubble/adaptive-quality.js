@@ -13,6 +13,7 @@ export function createAdaptiveQuality({
   let currentMinDpr = minDpr;
   let dpr = maxDpr;
   let steps = preview ? 56 : mobile ? 64 : 88;
+  let reflectionSamples = mobile ? 4 : 8;
   let lastFps = null;
   let sampleStarted = now();
   let sampleFrames = 0;
@@ -21,12 +22,19 @@ export function createAdaptiveQuality({
 
   function profile(nextTier) {
     const stepProfiles = mobile ? [64, 60, 56] : [88, 72, 60];
+    // 桌面高品質保留完整八方向環形補樣；需要降載時先收成四方向。
+    // 行動版的 shader 編譯期就只保留四方向，因此三個層級都必須維持 4。
+    const reflectionProfiles = mobile ? [4, 4, 4] : [8, 4, 4];
     const dprProfiles = [
       currentMaxDpr,
       Math.max(currentMinDpr, currentMaxDpr * 0.8),
       currentMinDpr,
     ];
-    return { dpr: dprProfiles[nextTier], steps: stepProfiles[nextTier] };
+    return {
+      dpr: dprProfiles[nextTier],
+      steps: stepProfiles[nextTier],
+      reflectionSamples: reflectionProfiles[nextTier],
+    };
   }
 
   function snapshot() {
@@ -38,16 +46,21 @@ export function createAdaptiveQuality({
       maxDpr: currentMaxDpr,
       minDpr: currentMinDpr,
       steps,
+      reflectionSamples,
     };
   }
 
   function setTier(nextTier) {
     const next = Math.max(0, Math.min(QUALITY_TIER_NAMES.length - 1, nextTier));
     const nextProfile = profile(next);
-    const changed = tier !== next || dpr !== nextProfile.dpr || steps !== nextProfile.steps;
+    const changed = tier !== next
+      || dpr !== nextProfile.dpr
+      || steps !== nextProfile.steps
+      || reflectionSamples !== nextProfile.reflectionSamples;
     tier = next;
     dpr = nextProfile.dpr;
     steps = nextProfile.steps;
+    reflectionSamples = nextProfile.reflectionSamples;
     if (changed) onChange(snapshot());
     return snapshot();
   }
