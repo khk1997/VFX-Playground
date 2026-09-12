@@ -55,10 +55,10 @@ required order. The extraction preserved the assembled shader byte-for-byte;
 the structural test protects the module boundaries without freezing future GLSL
 changes to a permanent hash.
 
-`run_release_checks.py` is the single pre-publish entry point used locally and by
-GitHub Actions. It runs every Node unit test, starts the local preview server, and
-then checks Bubble's basic controls, adaptive runtime, inspector layout, and six
-Installing visual-preset renders:
+`run_release_checks.py` is the single pre-publish entry point. It runs every Node
+unit test and Python syntax check, starts the local preview server, and then checks
+Bubble's basic controls, adaptive runtime, inspector layout, and six Installing
+visual-preset renders:
 
 ```sh
 python3 tests/run_release_checks.py
@@ -66,4 +66,6 @@ python3 tests/run_release_checks.py
 
 Hardware GPU timing and the installed-browser matrix remain manual release checks
 because CI does not provide representative Apple/Windows GPU hardware or system
-Safari.
+Safari. GitHub Actions runs the deterministic subset with `--unit-only`; hosted
+Linux software WebGL blocks the browser main thread while compiling this unusually
+large shader, so it cannot provide a stable or representative animation result.

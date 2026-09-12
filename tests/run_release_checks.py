@@ -43,10 +43,20 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=4173)
     parser.add_argument("--output", type=Path, default=Path("/tmp/vfx-release-checks"))
+    parser.add_argument(
+        "--unit-only",
+        action="store_true",
+        help="run deterministic source checks without starting a WebGL browser",
+    )
     args = parser.parse_args()
 
     for test in NODE_TESTS:
         run(["node", str(test.relative_to(ROOT))])
+    run([sys.executable, "-m", "compileall", "-q", "tests"])
+
+    if args.unit_only:
+        print("\nAll deterministic Bubble checks passed.")
+        return 0
 
     server = subprocess.Popen(
         [sys.executable, "serve.py", str(args.port)],

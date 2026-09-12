@@ -21,9 +21,9 @@ permissions:
   contents: read
 
 jobs:
-  browser-regression:
+  deterministic-checks:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
 
     steps:
       - uses: actions/checkout@v4
@@ -33,17 +33,5 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: Install browser test dependencies
-        run: |
-          python -m pip install --disable-pip-version-check playwright pillow
-          python -m playwright install --with-deps chromium
-      - name: Run Bubble release checks
-        run: python tests/run_release_checks.py
-      - name: Upload visual diagnostics on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: bubble-check-diagnostics
-          path: /tmp/vfx-release-checks
-          if-no-files-found: ignore
-          retention-days: 7
+      - name: Run deterministic Bubble checks
+        run: python tests/run_release_checks.py --unit-only
