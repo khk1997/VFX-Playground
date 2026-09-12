@@ -39,6 +39,16 @@ def wait_for_server(port: int, process: subprocess.Popen[bytes]) -> None:
     raise TimeoutError(f"preview server did not open port {port}")
 
 
+def ensure_port_available(port: int) -> None:
+    probe = socket.socket()
+    try:
+        probe.bind(("127.0.0.1", port))
+    except OSError as error:
+        raise RuntimeError(f"preview port {port} is already in use") from error
+    finally:
+        probe.close()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=4173)
@@ -58,6 +68,7 @@ def main() -> int:
         print("\nAll deterministic Bubble checks passed.")
         return 0
 
+    ensure_port_available(args.port)
     server = subprocess.Popen(
         [sys.executable, "serve.py", str(args.port)],
         cwd=ROOT,
