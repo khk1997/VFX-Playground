@@ -27,3 +27,6 @@ python3 tests/bubble_baseline.py \
 `bubble_adaptive_runtime.py` exercises the runtime policies that screenshots do
 not cover: automatic desktop quality, OS reduced-motion pause/override, and
 single-pointer canvas dragging.
+
+`bubble_inspector_ux.py` verifies progressive common/full controls, persistent
+keyboard tabs, A/B quick comparison, and the mobile sheet's sticky layout.

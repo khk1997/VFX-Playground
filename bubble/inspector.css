@@ -46,6 +46,16 @@
 #panel.inspector input[type=color]::-moz-color-swatch { border: 0; border-radius: 50%; }
 #panel.inspector .row select { min-width: 0; height: 36px; font-size: 13px; padding: 4px 12px; border-radius: 99px !important; background: #242426 !important; border-color: #ffffff16 !important; }
 .inspectorHeader .row .val:empty { display: none; }
+.inspectorDepth { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 5px 12px; margin: 2px 0 12px; }
+.inspectorDepthLabel { font-size: 11px; color: #8e8e93; letter-spacing: .04em; }
+.inspectorDepthHelp { grid-column: 1 / -1; font-size: 10px; color: #77777d; line-height: 1.4; }
+.inspectorDepthPicker.inspectorSegments { width: 150px; justify-self: end; margin: 0; padding: 3px; }
+#panel.inspector .inspectorDepthPicker button { padding: 7px 8px; font-size: 12px; }
+#panel.inspector[data-control-depth="concise"] .inspectorExpert { display: none !important; }
+body[data-control-depth="concise"] #quickSlots [data-slot="2"],
+body[data-control-depth="concise"] #quickSlots [data-slot="3"],
+body[data-control-depth="concise"] #quickSlots [data-slot="4"],
+body[data-control-depth="concise"] #quickSlots [data-slot="5"] { display: none; }
 .inspectorTabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 16px 0 14px; padding: 4px; border-radius: 99px; background: #1c1c1e; }
 #panel.inspector .inspectorTabs button { border: 0 !important; background: transparent !important; border-radius: 99px; padding: 9px 0; color: #98989e !important; font-size: 13px; }
 #panel.inspector .inspectorTabs button[aria-selected=true] { color: #fff !important; background: #38383b !important; }
@@ -114,11 +124,13 @@
 .quickSlotsGrid button.is-saved { background: #7957ff33; border-color: #967dff; box-shadow: none; }
 @media (max-width: 760px) {
   /* Both sticky rows share a scroll origin; top padding would expose content above them. */
-  #panel.inspector { padding-top: 0 !important; scroll-padding-top: 260px; }
+  #panel.inspector { padding-top: 0 !important; scroll-padding-top: 302px; }
   .inspectorHeader { top: 62px; margin: 0 -16px 14px; padding: 6px 16px 0; }
   #panel .inspectorHeader h2, #panel .inspectorHeader .sub { display: none; }
   #panel.inspector .row label { flex-basis: 106px; }
   .inspectorTabs { margin-top: 8px; }
+  #panel.inspector .inspectorTabs button { min-height: 44px; }
+  #panel.inspector .inspectorDepthPicker button { min-height: 40px; }
   #panel.inspector { border-radius: 26px 26px 0 0 !important; }
   #panel .inspectorStop { width: 28px; height: 28px; }
   #panel.inspector .mobile-sheet-handle {

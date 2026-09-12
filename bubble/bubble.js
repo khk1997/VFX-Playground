@@ -8067,6 +8067,11 @@ if (!PREVIEW) {
 
   if (quickSlots && preset) {
     const buttons = [...quickSlots.querySelectorAll('[data-slot]')];
+    const quickLabel = quickSlots.querySelector('.quickSlotsLabel');
+    if (quickLabel) {
+      quickLabel.textContent = 'A/B 比較';
+      quickLabel.title = '空白鍵儲存目前參數；已有內容時點擊切換比較';
+    }
     const announce = message => {
       quickStatus.textContent = message;
       clearTimeout(announce.timer);
@@ -8074,8 +8079,11 @@ if (!PREVIEW) {
     };
     const syncSlots = () => buttons.forEach((button, index) => {
       const saved = Boolean(savedSlots[index]);
+      const slotName = index === 0 ? 'A' : index === 1 ? 'B' : String(index + 1);
+      button.textContent = slotName;
       button.classList.toggle('is-saved', saved);
-      button.title = saved ? `載入暫存 ${index + 1}（右鍵清除）` : `儲存目前參數到 ${index + 1}`;
+      button.setAttribute('aria-label', saved ? `載入比較 ${slotName}` : `儲存目前參數到比較 ${slotName}`);
+      button.title = saved ? `載入比較 ${slotName}（右鍵清除）` : `儲存目前參數到比較 ${slotName}`;
     });
     const persist = () => {
       try { localStorage.setItem(storageKey, JSON.stringify(savedSlots)); } catch (_) { announce('瀏覽器無法保存暫存'); }

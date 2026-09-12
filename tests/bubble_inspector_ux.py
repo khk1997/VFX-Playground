@@ -1,0 +1,140 @@
+"""Check Bubble's progressive controls, A/B slots, and mobile panel layout."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+
+from playwright.sync_api import sync_playwright
+
+
+def open_inspector(page, base_url: str) -> None:
+    response = page.goto(
+        f"{base_url}/bubble/index.html?diag=inspector-ux",
+        wait_until="networkidle",
+        timeout=45_000,
+    )
+    assert response and response.status == 200
+    page.wait_for_selector("#panel.inspector[data-control-depth]")
+    page.wait_for_function(
+        "document.querySelector('[data-slot=\"0\"]')?.textContent === 'A'"
+    )
+
+
+def control_snapshot(page) -> dict[str, object]:
+    return page.evaluate(
+        """() => Object.fromEntries([...document.querySelectorAll(
+            '#panel input[id], #panel select[id], #panel textarea[id]'
+        )].map(node => [node.id, node.type === 'checkbox' ? node.checked : node.value]))"""
+    )
+
+
+def check_desktop(browser, base_url: str) -> dict[str, object]:
+    context = browser.new_context(
+        viewport={"width": 1100, "height": 760},
+        reduced_motion="reduce",
+    )
+    page = context.new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    open_inspector(page, base_url)
+
+    panel = page.locator("#panel")
+    assert panel.get_attribute("data-control-depth") == "concise"
+    assert page.locator("#inspectorPage-look details:has(#postExposure)").is_hidden()
+    assert page.locator("[data-slot=\"2\"]").is_hidden()
+    expert_count = page.locator("#panel .inspectorExpert").count()
+    assert expert_count > 40, "too few controls were classified for progressive disclosure"
+
+    before = control_snapshot(page)
+    page.get_by_role("button", name="完整", exact=True).click()
+    assert panel.get_attribute("data-control-depth") == "complete"
+    assert page.locator("#inspectorPage-look details:has(#postExposure)").is_visible()
+    assert page.locator("[data-slot=\"2\"]").is_visible()
+    assert control_snapshot(page) == before, "depth switch changed control values"
+
+    # Tabs use roving focus and remember the last page.
+    page.locator("#inspectorTab-shape").click()
+    page.locator("#inspectorTab-shape").press("ArrowRight")
+    assert page.locator("#inspectorTab-motion").get_attribute("aria-selected") == "true"
+
+    # A/B reuses the existing quick-slot serialization instead of maintaining a
+    # second preset implementation.
+    reflect = page.locator("#reflect")
+    original = reflect.input_value()
+    page.locator("[data-slot=\"0\"]").click()
+    assert "is-saved" in (page.locator("[data-slot=\"0\"]").get_attribute("class") or "")
+    reflect.evaluate(
+        """node => {
+            node.value = String(Math.min(Number(node.max), Number(node.value) + 0.1));
+            node.dispatchEvent(new Event('input', { bubbles: true }));
+        }"""
+    )
+    changed = reflect.input_value()
+    assert changed != original
+    page.locator("[data-slot=\"1\"]").click()
+    page.locator("[data-slot=\"0\"]").click()
+    page.wait_for_timeout(150)
+    assert reflect.input_value() == original, "A/B slot did not restore the saved value"
+
+    page.reload(wait_until="networkidle")
+    page.wait_for_selector("#panel.inspector[data-control-depth=\"complete\"]")
+    assert page.locator("#inspectorTab-motion").get_attribute("aria-selected") == "true"
+    assert not errors, f"desktop inspector page errors: {errors}"
+    context.close()
+    return {"expertControls": expert_count, "valuesPreserved": True, "abCompared": True}
+
+
+def check_mobile(browser, base_url: str) -> dict[str, object]:
+    context = browser.new_context(
+        viewport={"width": 390, "height": 844},
+        is_mobile=True,
+        has_touch=True,
+        reduced_motion="reduce",
+    )
+    page = context.new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    open_inspector(page, base_url)
+    panel = page.locator("#panel")
+    metrics = panel.evaluate(
+        """node => ({ clientWidth: node.clientWidth, scrollWidth: node.scrollWidth })"""
+    )
+    assert metrics["scrollWidth"] <= metrics["clientWidth"] + 1
+
+    tabs = page.locator(".inspectorTabs button")
+    assert tabs.count() == 4
+    for index in range(tabs.count()):
+        assert tabs.nth(index).bounding_box()["height"] >= 40
+
+    before_top = page.locator(".inspectorHeader").bounding_box()["y"]
+    panel.evaluate("node => { node.scrollTop = 360; }")
+    page.wait_for_timeout(100)
+    after_top = page.locator(".inspectorHeader").bounding_box()["y"]
+    assert abs(before_top - after_top) <= 2, "mobile inspector header did not remain sticky"
+    assert not errors, f"mobile inspector page errors: {errors}"
+    context.close()
+    return {"noHorizontalOverflow": True, "stickyHeader": True, "touchTabs": True}
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--base-url", default="http://127.0.0.1:4173")
+    args = parser.parse_args()
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True)
+        results = {
+            "desktop": check_desktop(browser, args.base_url),
+            "mobile": check_mobile(browser, args.base_url),
+        }
+        browser.close()
+    print(results)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except AssertionError as error:
+        print(error, file=sys.stderr)
+        sys.exit(1)
