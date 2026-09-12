@@ -45,6 +45,7 @@ def check_reduced_motion(browser, base_url: str) -> dict[str, object]:
 
     assert page.locator("body").get_attribute("data-reduced-motion") == "paused"
     assert page.locator("#playCtl").get_attribute("aria-label") == "播放動畫"
+    assert page.locator("#renderQualityStatus").inner_text() == "預覽 · 效能"
     report = page.evaluate("window.__bubbleDiagReport()")
     assert report["效能"]["減少動態效果暫停"] is True
     assert report["效能"]["自動品質層級"] == "low"
@@ -76,6 +77,7 @@ def check_adaptive_quality(browser, base_url: str) -> dict[str, object]:
     open_page(page, base_url)
 
     initial = page.evaluate("window.__bubbleDiagReport()['效能']")
+    assert page.locator("#renderQualityStatus").inner_text() == "預覽 · 高品質"
     # Keep the page out of the intentional idle 30 FPS cap while the adaptive
     # sampler observes the real renderer throughput.
     page.evaluate(
@@ -92,6 +94,7 @@ def check_adaptive_quality(browser, base_url: str) -> dict[str, object]:
     assert adapted["qualitySteps"] < initial["qualitySteps"]
     assert initial["reflectionSamples"] == 8
     assert adapted["reflectionSamples"] == 4
+    assert page.locator("#renderQualityStatus").inner_text() == "預覽 · 平衡"
     assert adapted["最近取樣FPS"] is not None
     assert not errors, f"adaptive-quality page errors: {errors}"
     context.close()
@@ -112,6 +115,9 @@ def check_pointer_input(browser, base_url: str) -> dict[str, object]:
     mobile_report = page.evaluate("window.__bubbleDiagReport()")
     assert mobile_report["效能"]["reflectionSamples"] == 4
     assert mobile_report["shaderVariant"]["編譯期迴圈上限"]["反射環形取樣上限"] == 4
+    quality_status = page.locator("#renderQualityStatus")
+    assert quality_status.is_visible()
+    assert quality_status.get_attribute("aria-live") == "polite"
 
     stage = page.locator("#stage")
     before = float(page.locator("#cameraRotationY").input_value())

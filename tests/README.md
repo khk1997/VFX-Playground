@@ -4,9 +4,10 @@
 all effect pages.
 
 `bubble_baseline.py` captures a repeatable Bubble matrix at a fixed simulation
-time. It writes desktop and mobile screenshots plus FPS, shader, DPR, raymarch,
-and browser-error data to `report.json`. Keep its output outside the repository;
-WebGL pixels and throughput vary by GPU.
+time. It writes canvas-only and full-UI desktop/mobile screenshots plus FPS,
+shader, DPR, raymarch, and browser-error data to `report.json`. The canvas capture
+temporarily hides floating controls so its pixel metrics describe the glass itself.
+Keep its output outside the repository; WebGL pixels and throughput vary by GPU.
 
 Run it through the repository server helper:
 

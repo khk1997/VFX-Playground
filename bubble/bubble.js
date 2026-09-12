@@ -1,6 +1,6 @@
 'use strict';
 import * as THREE from 'three';
-import { buildInspector } from './inspector.js?v=dark-tint-1';
+import { buildInspector } from './inspector.js?v=quality-status-1';
 import { createAdaptiveQuality, QUALITY_TIER_NAMES } from './adaptive-quality.js?v=2';
 import { initQuickSlots } from './quick-slots.js?v=1';
 let inspector = null;
@@ -2518,6 +2518,7 @@ const adaptiveQuality = createAdaptiveQuality({
   minDpr: initialMinRenderDpr,
   onChange: state => {
     if (document.body) document.body.dataset.renderQuality = state.tier;
+    inspector?.setQualityStatus(state);
     refreshRenderQuality();
   },
 });
@@ -7971,7 +7972,10 @@ function frame(now) {
 }
 
 buildExtendedMotionControls();
-if (!PREVIEW) inspector = buildInspector({ defaults: { ...DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS } });
+if (!PREVIEW) {
+  inspector = buildInspector({ defaults: { ...DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS } });
+  inspector.setQualityStatus(adaptiveQuality.snapshot());
+}
 bindControls();
 bindTextControls();
 

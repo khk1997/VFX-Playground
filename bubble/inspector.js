@@ -85,13 +85,19 @@ export function buildInspector({ defaults }) {
     if (saved === 'concise' || saved === 'complete') controlDepth = saved;
   } catch (_) {}
   const depthWrap = element('div', 'inspectorDepth');
+  const depthMeta = element('div', 'inspectorDepthMeta');
   const depthHeading = element('span', 'inspectorDepthLabel', '控制深度');
+  const qualityStatus = element('output', 'inspectorQuality');
+  qualityStatus.id = 'renderQualityStatus';
+  qualityStatus.setAttribute('aria-live', 'polite');
+  qualityStatus.title = '預覽品質會依裝置效能自動調整，輸出不受影響';
+  depthMeta.append(depthHeading, qualityStatus);
   const depthHelp = element('span', 'inspectorDepthHelp', '常用保留主要調整；完整顯示所有參數');
   const depthPicker = segmented([['concise', '常用'], ['complete', '完整']], value => {
     setControlDepth(value);
   }, '控制深度');
   depthPicker.group.classList.add('inspectorDepthPicker');
-  depthWrap.append(depthHeading, depthPicker.group, depthHelp);
+  depthWrap.append(depthMeta, depthPicker.group, depthHelp);
   header.append(depthWrap);
 
   function setControlDepth(value, persist = true) {
@@ -105,6 +111,13 @@ export function buildInspector({ defaults }) {
     if (persist) {
       try { localStorage.setItem(DEPTH_KEY, controlDepth); } catch (_) {}
     }
+  }
+
+  function setQualityStatus(state = {}) {
+    const labels = { high: '高品質', balanced: '平衡', low: '效能' };
+    const tier = labels[state.tier] ? state.tier : 'high';
+    qualityStatus.dataset.tier = tier;
+    qualityStatus.textContent = `預覽 · ${labels[tier]}`;
   }
 
   const tabs = element('div', 'inspectorTabs');
@@ -451,7 +464,7 @@ export function buildInspector({ defaults }) {
   setControlDepth(controlDepth, false);
   selectPage(initialPage);
   refresh();
-  return { refresh };
+  return { refresh, setQualityStatus };
 }
 
 function buildPalette(prefix, applyValues) {

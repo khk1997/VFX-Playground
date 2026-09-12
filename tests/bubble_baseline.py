@@ -20,6 +20,11 @@ from playwright.sync_api import Page, sync_playwright
 
 
 DEFAULT_URL = "http://127.0.0.1:4173"
+STAGE_CAPTURE_STYLE = """
+#homeBtn, #toggleBtn, #exportBtn, #playCtl, #quickSlots, #panel {
+    visibility: hidden !important;
+}
+"""
 PROFILES = (
     {
         "name": "desktop",
@@ -259,7 +264,13 @@ def main() -> int:
 
                 stage_path = profile_dir / f"{case_name}-stage.png"
                 ui_path = profile_dir / f"{case_name}-ui.png"
-                page.locator("#stage").screenshot(path=str(stage_path))
+                # Locator screenshots include fixed elements painted above the canvas.
+                # Hide product chrome here so stage metrics describe only the glass;
+                # the following full-page screenshot separately validates the UI.
+                page.locator("#stage").screenshot(
+                    path=str(stage_path),
+                    style=STAGE_CAPTURE_STYLE,
+                )
                 page.screenshot(path=str(ui_path), full_page=True)
                 stage_info = image_metrics(stage_path)
                 ui_info = image_metrics(ui_path)
