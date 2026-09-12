@@ -1,0 +1,49 @@
+name: Bubble checks
+
+on:
+  pull_request:
+    paths:
+      - "bubble/**"
+      - "tests/**"
+      - "*.js"
+      - "*.css"
+      - ".github/workflows/bubble-checks.yml"
+  push:
+    branches: [main]
+    paths:
+      - "bubble/**"
+      - "tests/**"
+      - "*.js"
+      - "*.css"
+      - ".github/workflows/bubble-checks.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  browser-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install browser test dependencies
+        run: |
+          python -m pip install --disable-pip-version-check playwright pillow
+          python -m playwright install --with-deps chromium
+      - name: Run Bubble release checks
+        run: python tests/run_release_checks.py
+      - name: Upload visual diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bubble-check-diagnostics
+          path: /tmp/vfx-release-checks
+          if-no-files-found: ignore
+          retention-days: 7

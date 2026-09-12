@@ -54,3 +54,16 @@ the environment, geometry, and optics source modules exactly once and in the
 required order. The extraction preserved the assembled shader byte-for-byte;
 the structural test protects the module boundaries without freezing future GLSL
 changes to a permanent hash.
+
+`run_release_checks.py` is the single pre-publish entry point used locally and by
+GitHub Actions. It runs every Node unit test, starts the local preview server, and
+then checks Bubble's basic controls, adaptive runtime, inspector layout, and six
+Installing visual-preset renders:
+
+```sh
+python3 tests/run_release_checks.py
+```
+
+Hardware GPU timing and the installed-browser matrix remain manual release checks
+because CI does not provide representative Apple/Windows GPU hardware or system
+Safari.
