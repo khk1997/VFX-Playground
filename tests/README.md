@@ -34,3 +34,10 @@ keyboard tabs, A/B quick comparison, and the mobile sheet's sticky layout.
 
 `adaptive_quality.mjs` unit-tests the extracted quality state machine without a
 browser or WebGL context.
+
+`bubble_real_browser.py` opens the installed Google Chrome and macOS Safari,
+checks the Installing mode on dark/light backgrounds, records actual GPU renderer
+information, and writes screenshots plus an acceptance report outside the repo.
+It can also run Playwright WebKit as an engine-compatibility fallback; that result
+is labelled WebKit and is not treated as a system Safari run. Start both the project
+server and `safaridriver` when running the complete real-browser matrix.

@@ -267,11 +267,14 @@ def main() -> int:
                 # Locator screenshots include fixed elements painted above the canvas.
                 # Hide product chrome here so stage metrics describe only the glass;
                 # the following full-page screenshot separately validates the UI.
+                # The stage fills the viewport. Capturing its painted bounds keeps
+                # hardware WebGL layers that macOS page screenshots can omit, while
+                # still including the fixed product controls above the canvas.
+                page.locator("#stage").screenshot(path=str(ui_path))
                 page.locator("#stage").screenshot(
                     path=str(stage_path),
                     style=STAGE_CAPTURE_STYLE,
                 )
-                page.screenshot(path=str(ui_path), full_page=True)
                 stage_info = image_metrics(stage_path)
                 ui_info = image_metrics(ui_path)
                 if stage_info["width"] <= 1 or stage_info["height"] <= 1:
