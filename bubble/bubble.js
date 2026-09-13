@@ -34,7 +34,6 @@ import {
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 import { parseBubbleRuntimeOptions } from './diagnostics.js?v=1';
-import { buildStoredZip, downloadBlob, nextPaint, pixelsToPng } from './export-utils.js?v=1';
 import { createMaterialTextureController } from './material-textures.js?v=1';
 import { createEnvironmentLoader, selectMaterialEnvironment } from './environment-loader.js?v=1';
 import { describeShapeImport, loadShapeAsset } from './shape-loader.js?v=1';
@@ -61,6 +60,7 @@ import { createTypewriterRuntime } from './typewriter-runtime.js?v=1';
 import { buildExtendedMotionControls } from './panel-builder.js?v=1';
 import { createPanelStateController } from './panel-state.js?v=1';
 import { createPanelBindings } from './panel-bindings.js?v=1';
+import { createExportRuntime } from './export-runtime.js?v=1';
 
 // 提高 PMREM 高粗糙度的最低預過濾解析度，避免 16×16 tile 造成方格反射。
 patchEnvMapResolution();
@@ -3070,7 +3070,7 @@ if (!PREVIEW) {
 // requestAnimationFrame，兩套疊在一起只會互相干擾。
 function shouldSkipFrame(now) {
   powerSaveThrottled = false;
-  if (PREVIEW || exportJob || dragging) return false;
+  if (PREVIEW || isExporting() || dragging) return false;
   const idle = now - lastInteractionAt > IDLE_DELAY_MS;
   if (!idle && windowFocused) return false;
   powerSaveThrottled = true;
@@ -3118,7 +3118,7 @@ function sampleRenderQuality(now) {
   // 編譯、拖曳、離線輸出與省電節流都有刻意的停頓或品質調整，不能拿來推斷 GPU
   // 的持續算繪能力。尤其 shader 背景切換若混進樣本，會在剛切模式時錯降一級。
   adaptiveQuality.sample(now, {
-    blocked: powerSaveThrottled || dragging || exportJob || shapeConverting || variantSwapInFlight,
+    blocked: powerSaveThrottled || dragging || isExporting() || shapeConverting || variantSwapInFlight,
   });
 }
 
@@ -3619,9 +3619,6 @@ function ensureShapeForCurrentSource() {
 /* ===== 播放/暫停：面板按鈕、postMessage、分頁隱藏三者共同決定 ===== */
 let userPaused = false, extPaused = PREVIEW;
 let reducedMotionPaused = !PREVIEW && reducedMotionQuery.matches;
-let exportJob = null;
-let exportPreviewSettings = null;
-let exportPreviewContext = null;
 let rafId = 0, last = 0;
 let pausedRenderRaf = 0;
 const pauseBtn = document.getElementById('playCtl');
@@ -3630,7 +3627,7 @@ const pauseBtnLabel = document.getElementById('playCtlLabel');
 const PAUSE_ICON = '<rect x="5" y="4" width="3.2" height="12" rx="1" fill="currentColor"/><rect x="11.8" y="4" width="3.2" height="12" rx="1" fill="currentColor"/>';
 const PLAY_ICON = '<path d="M6 4.2v11.6a.9.9 0 0 0 1.37.76l9.2-5.8a.9.9 0 0 0 0-1.52l-9.2-5.8A.9.9 0 0 0 6 4.2Z" fill="currentColor"/>';
 function playbackPaused() { return userPaused || reducedMotionPaused; }
-function isPaused() { return playbackPaused() || extPaused || shapeConverting || exportJob || document.hidden; }
+function isPaused() { return playbackPaused() || extPaused || shapeConverting || isExporting() || document.hidden; }
 function updatePlayControl() {
   const paused = playbackPaused();
   pauseBtnIcon.innerHTML = paused ? PLAY_ICON : PAUSE_ICON;
@@ -3734,10 +3731,10 @@ function requestPausedRender() {
   // 暫停時 frame() 不跑，但循環秒數仍可能被改（拉時間軸、換模式、改文字），
   // 匯出對話框也常常是在暫停狀態下打開的，所以這條路也要廣播。
   broadcastLoopDuration();
-  if (!isPaused() || shapeConverting || exportJob || document.hidden || pausedRenderRaf) return;
+  if (!isPaused() || shapeConverting || isExporting() || document.hidden || pausedRenderRaf) return;
   pausedRenderRaf = requestAnimationFrame(() => {
     pausedRenderRaf = 0;
-    if (isPaused() && !shapeConverting && !exportJob && !document.hidden) {
+    if (isPaused() && !shapeConverting && !isExporting() && !document.hidden) {
       if (!inited) initGL();
       updatePausedCameraRotation();
       refreshRenderQuality();
@@ -4353,7 +4350,7 @@ function syncLoop() {
   if (isPaused()) {
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
     // 系統減少動態效果在首次進頁時就暫停，但仍先完成初始化並畫一張靜態預覽。
-    if (reducedMotionPaused && !document.hidden && !shapeConverting && !exportJob) {
+    if (reducedMotionPaused && !document.hidden && !shapeConverting && !isExporting()) {
       if (!inited) initGL();
       ensureInitialCompile().then(requestPausedRender);
     }
@@ -4458,260 +4455,19 @@ panel.addEventListener('scroll', () => {
   panelScrollRestoreTimer = setTimeout(() => panel.classList.remove('is-scrolling'), 160);
 }, { passive: true });
 
-/* ===== 高解析度 PNG / PNG 序列輸出 ===== */
-function exportEvent(name, detail = {}) {
-  window.dispatchEvent(new CustomEvent(name, { detail }));
-}
-
-function applyExportCamera(time, width, height, fov, scale, settings = null) {
-  updateDropUniforms(time);
-  const phase01 = time / Math.max(0.001, P.loopDuration);
-  const loopAngle = phase01 * Math.PI * 2;
-  const autoYaw = (Math.sin(loopAngle) * 0.85 + Math.sin(loopAngle * 2 + 0.6) * 0.15) * P.spin * 0.6;
-  const autoPitch = Math.sin(loopAngle + 1.1) * P.spin * 0.14;
-  // 兩段推軌都要跟即時預覽讀同一顆開關（見 render loop 裡的同名計算）。這裡原本
-  // 完全沒看 dollyEnabled，於是關掉前後拉伸之後，預覽不推、匯出的影片卻仍然推。
-  const dolly = !P.dollyEnabled ? 1 : 1
-    - 0.05 * Math.exp(-Math.pow((phase01 - 0.80) / 0.10, 2))
-    - 0.03 * Math.exp(-Math.pow((phase01 - 0.24) / 0.08, 2));
-  rotM4.makeRotationY(rot.y + autoYaw);
-  tmpX.makeRotationX(rot.x + autoPitch);
-  rotM4.multiply(tmpX);
-  tmpZ.makeRotationZ(-0.03);
-  rotM4.multiply(tmpZ);
-  uniforms.uRot.value.setFromMatrix4(rotM4);
-
-  const frameGatherEnd = Math.max(0.15, P.gatherDuration);
-  const frameHoldEnd = Math.min(0.94, frameGatherEnd + P.shapeHold);
-  const formationFocus = P.dollyEnabled && isFormationMotion(P.motion) && shapeField
-    ? (phase01 > frameHoldEnd)
-      ? formationFidelityAmount(phase01)
-      : smoothstepCPU(formationAmount(phase01), 0.42, 0.92)
-    : 0;
-  uniforms.uCameraDistance.value = P.cameraDistance * dolly * (1 - formationFocus * 0.30) / scale;
-  uniforms.uCompositionOffsetX.value = settingsCenter(settingsValue(settings, 'centerX'));
-  uniforms.uCompositionOffsetY.value = settingsCenter(settingsValue(settings, 'centerY'));
-  uniforms.uTanHalfFov.value = Math.tan(Math.max(10, Math.min(120, fov)) * Math.PI / 360);
-  uniforms.uResolution.value.set(width, height);
-  uniforms.uTime.value = time;
-  syncEdgeDropMotion(time);
-  uniforms.uMaxSteps.value = 88;
-}
-
-function settingsValue(settings, key) {
-  return settings && Number.isFinite(Number(settings[key])) ? Number(settings[key]) : 0;
-}
-
-function settingsCenter(value) {
-  return Math.max(-0.5, Math.min(0.5, value));
-}
-
-function applyExportDetailLOD(settings) {
-  const savedRadii = satelliteDrops.map(drop => drop.w);
-  const savedBlend = uniforms.uSatelliteBlend.value;
-  const pixelsPerWorldUnit = settings.height /
-    Math.max(0.001, 2 * uniforms.uCameraDistance.value * uniforms.uTanHalfFov.value);
-  let strongestSatellite = 0;
-
-  satelliteDrops.forEach((drop, index) => {
-    const projectedDiameter = savedRadii[index] * 2 * pixelsPerWorldUnit;
-    // 小於 1.25 個最終像素沒有穩定輪廓；在 1.25–2.75 px 間平滑淡出，
-    // 避免一幀突然消失，也避免 4× render 將不可辨識碎滴重新帶回 512 成品。
-    const visibility = smoothstepCPU(projectedDiameter, 1.25, 2.75);
-    drop.w = savedRadii[index] * visibility;
-    strongestSatellite = Math.max(strongestSatellite, visibility);
-  });
-  uniforms.uSatelliteBlend.value = savedBlend * strongestSatellite;
-
-  return () => {
-    satelliteDrops.forEach((drop, index) => { drop.w = savedRadii[index]; });
-    uniforms.uSatelliteBlend.value = savedBlend;
-  };
-}
-
-async function renderExportFrame(settings, time, target) {
-  applyExportCamera(time, settings.renderWidth, settings.renderHeight, settings.fov, settings.scale, settings);
-  const restoreDetail = applyExportDetailLOD(settings);
-  try {
-    renderComposite(target, settings.renderWidth / Math.max(1, settings.width));
-    const pixels = new Uint8Array(settings.renderWidth * settings.renderHeight * 4);
-    renderer.readRenderTargetPixels(target, 0, 0, settings.renderWidth, settings.renderHeight, pixels);
-    renderer.setRenderTarget(null);
-    return pixelsToPng(pixels, settings.renderWidth, settings.renderHeight, settings.width, settings.height);
-  } finally {
-    restoreDetail();
-  }
-}
-
-async function runExport(settings) {
-  if (exportJob) throw new Error('已有輸出工作正在進行');
-  if (!inited) initGL();
-  const width = Math.round(settings.width);
-  const height = Math.round(settings.height);
-  const antialias = 4;
-  const renderWidth = width * antialias;
-  const renderHeight = height * antialias;
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 64 || height < 64) {
-    throw new Error('輸出尺寸至少需要 64 × 64');
-  }
-  const maxTexture = renderer.capabilities.maxTextureSize;
-  if (renderWidth > maxTexture || renderHeight > maxTexture) {
-    throw new Error(`${antialias}× 抗鋸齒超過此裝置限制，請降低尺寸或品質`);
-  }
-  const frames = settings.type === 'sequence'
-    ? Math.max(1, Math.round(settings.fps * settings.duration)) : 1;
-  const totalPixels = renderWidth * renderHeight * frames;
-  const safePixelBudget = mobileRenderQuery.matches ? 140000000 : 900000000;
-  if (totalPixels > safePixelBudget) {
-    throw new Error(mobileRenderQuery.matches
-      ? '手機序列輸出量過大，請降低尺寸、幀率或秒數'
-      : '序列輸出量過大，請降低尺寸、幀率或秒數');
-  }
-
-  const job = { cancelled: false };
-  exportJob = job;
-  flushShatterCutAnchors();
-  syncLoop();
-  const saved = {
-    time: simT,
-    resolution: uniforms.uResolution.value.clone(),
-    cameraDistance: uniforms.uCameraDistance.value,
-    compositionX: uniforms.uCompositionOffsetX.value,
-    compositionY: uniforms.uCompositionOffsetY.value,
-    tanHalfFov: uniforms.uTanHalfFov.value,
-    maxSteps: uniforms.uMaxSteps.value,
-    bgMode: uniforms.uBgMode.value,
-    transparent: uniforms.uTransparentBackground.value,
-    membraneOverWhite: uniforms.uMembraneOverWhite.value,
-    bgColor: uniforms.uBgColor.value.clone(),
-  };
-  const target = new THREE.WebGLRenderTarget(renderWidth, renderHeight, {
-    format: THREE.RGBAFormat,
-    type: THREE.UnsignedByteType,
-    depthBuffer: false,
-    stencilBuffer: false,
-  });
-  target.texture.generateMipmaps = false;
-  const transparentExport = settings.background === 'transparent';
-  // 液態薄膜的膜身是「透過白底看到的顏色」，而且亮底顯色路徑是由背景亮度開的
-  // 閘 —— 把背景抽成黑的等於連材質模型一起換掉，成品會整片變淡、跟畫面對不上。
-  // 改成保留白底把顏色算完，再由 shader 對白底反乘出 straight alpha
-  //（uMembraneOverWhite 分支），背景照樣透得過來。通用玻璃維持原本的「黑場 +
-  // 反預乘」，它的顏色本來就不依附背景。
-  const membraneOverWhite = transparentExport && P.materialStyle === 'membrane';
-  uniforms.uTransparentBackground.value = transparentExport ? 1 : 0;
-  uniforms.uMembraneOverWhite.value = membraneOverWhite ? 1 : 0;
-  uniforms.uBgMode.value = settings.background === 'scene' ? SELECTS.bgMode.map[P.bgMode] : 0;
-  if (transparentExport && !membraneOverWhite) uniforms.uBgColor.value.setHex(0x000000, THREE.LinearSRGBColorSpace);
-
-  try {
-    previousDropT = null;
-    if (settings.type === 'still') {
-      exportEvent('prism-export-progress', { progress: 0.15, message: '正在渲染 PNG…' });
-      const png = await renderExportFrame({ ...settings, width, height, renderWidth, renderHeight }, saved.time, target);
-      if (job.cancelled) throw new DOMException('輸出已取消', 'AbortError');
-      downloadBlob(png, `prism-drops_${width}x${height}.png`);
-    } else {
-      const entries = [];
-      const digits = Math.max(4, String(frames).length);
-      for (let index = 0; index < frames; index++) {
-        if (job.cancelled) throw new DOMException('輸出已取消', 'AbortError');
-        // Sample the requested export duration; when it follows the panel this
-        // remains one complete loop, while a custom value controls the output
-        // playback length as advertised by the export UI.
-        const time = index / frames * settings.duration;
-        const png = await renderExportFrame({ ...settings, width, height, renderWidth, renderHeight }, time, target);
-        entries.push({
-          name: `prism-drops_${String(index + 1).padStart(digits, '0')}.png`,
-          bytes: new Uint8Array(await png.arrayBuffer()),
-        });
-        exportEvent('prism-export-progress', {
-          progress: (index + 1) / frames * 0.92,
-          message: `正在渲染 ${index + 1} / ${frames} 幀`,
-        });
-        await nextPaint();
-      }
-      if (job.cancelled) throw new DOMException('輸出已取消', 'AbortError');
-      exportEvent('prism-export-progress', { progress: 0.96, message: '正在封裝 ZIP…' });
-      const zip = buildStoredZip(entries);
-      downloadBlob(zip, `prism-drops_${width}x${height}_${settings.fps}fps.zip`);
-    }
-    exportEvent('prism-export-complete', { message: '輸出完成，檔案已開始下載' });
-  } catch (error) {
-    if (error.name === 'AbortError') exportEvent('prism-export-complete', { message: '已取消輸出' });
-    else throw error;
-  } finally {
-    target.dispose();
-    renderer.setRenderTarget(null);
-    uniforms.uResolution.value.copy(saved.resolution);
-    uniforms.uCameraDistance.value = saved.cameraDistance;
-    uniforms.uCompositionOffsetX.value = saved.compositionX;
-    uniforms.uCompositionOffsetY.value = saved.compositionY;
-    uniforms.uTanHalfFov.value = saved.tanHalfFov;
-    uniforms.uMaxSteps.value = saved.maxSteps;
-    uniforms.uBgMode.value = saved.bgMode;
-    uniforms.uTransparentBackground.value = saved.transparent;
-    uniforms.uMembraneOverWhite.value = saved.membraneOverWhite;
-    uniforms.uBgColor.value.copy(saved.bgColor);
-    previousDropT = null;
-    simT = saved.time;
-    exportJob = null;
-    syncLoop();
-  }
-}
-
-window.addEventListener('prism-export-request', event => {
-  runExport(event.detail).catch(error => {
-    console.error(error);
-    exportEvent('prism-export-error', { message: error.message || '輸出失敗' });
-    if (exportJob) {
-      exportJob = null;
-      syncLoop();
-    }
-  });
+const {
+  isExporting, getPreviewSettings: getExportPreviewSettings,
+  exportEvent, settingsValue, settingsCenter, updateExportCameraPreview,
+} = createExportRuntime({
+  THREE, params: P, selects: SELECTS, getUniforms: () => uniforms,
+  getRenderer: () => renderer, ensureInitialized: () => { if (!inited) initGL(); },
+  updateDropUniforms, rotation: rot, rotM4, tmpX, tmpZ, isFormationMotion,
+  getShapeField: () => shapeField, formationFidelityAmount, formationAmount, smoothstepCPU,
+  syncEdgeDropMotion, satelliteDrops, renderComposite,
+  isMobile: () => mobileRenderQuery.matches, flushShatterCutAnchors, syncLoop,
+  getSimTime: () => simT, setSimTime: value => { simT = value; },
+  resetPreviousDropT: () => { previousDropT = null; }, canvas, resize,
 });
-window.addEventListener('prism-export-cancel', () => {
-  if (exportJob) exportJob.cancelled = true;
-});
-window.addEventListener('prism-export-preview', event => {
-  exportPreviewSettings = event.detail || null;
-});
-window.addEventListener('prism-export-preview-clear', () => {
-  exportPreviewSettings = null;
-});
-window.addEventListener('prism-export-workspace-resize', resize);
-
-function updateExportCameraPreview() {
-  if (!exportPreviewSettings) return;
-  const preview = document.getElementById('exportPreviewCanvas');
-  if (!preview) return;
-  const targetAspect = Math.max(0.05,
-    Number(exportPreviewSettings.width) / Math.max(1, Number(exportPreviewSettings.height)));
-  const longEdge = 480;
-  const previewWidth = targetAspect >= 1 ? longEdge : Math.max(1, Math.round(longEdge * targetAspect));
-  const previewHeight = targetAspect >= 1 ? Math.max(1, Math.round(longEdge / targetAspect)) : longEdge;
-  if (preview.width !== previewWidth || preview.height !== previewHeight) {
-    preview.width = previewWidth;
-    preview.height = previewHeight;
-    exportPreviewContext = preview.getContext('2d', { alpha: false });
-  }
-  if (!exportPreviewContext || !canvas.width || !canvas.height) return;
-
-  const sourceAspect = canvas.width / canvas.height;
-  let sourceX = 0, sourceY = 0, sourceWidth = canvas.width, sourceHeight = canvas.height;
-  if (targetAspect < sourceAspect) {
-    sourceWidth = canvas.height * targetAspect;
-    sourceX = (canvas.width - sourceWidth) * 0.5;
-  } else if (targetAspect > sourceAspect) {
-    sourceHeight = canvas.width / targetAspect;
-    sourceY = (canvas.height - sourceHeight) * 0.5;
-  }
-  exportPreviewContext.drawImage(
-    canvas,
-    sourceX, sourceY, sourceWidth, sourceHeight,
-    0, 0, previewWidth, previewHeight,
-  );
-}
 
 /* ===== 主迴圈 ===== */
 let simT = 0;
@@ -4825,14 +4581,14 @@ function frame(now) {
   } else {
     compositionOffsetX = 0;
   }
-  if (exportPreviewSettings) cameraDistance /= Math.max(0.5, Math.min(1.6, Number(exportPreviewSettings.scale) || 1));
+  if (getExportPreviewSettings()) cameraDistance /= Math.max(0.5, Math.min(1.6, Number(getExportPreviewSettings().scale) || 1));
   uniforms.uCameraDistance.value = cameraDistance;
-  uniforms.uCompositionOffsetX.value = exportPreviewSettings
-    ? settingsCenter(settingsValue(exportPreviewSettings, 'centerX')) : compositionOffsetX;
-  uniforms.uCompositionOffsetY.value = exportPreviewSettings
-    ? settingsCenter(settingsValue(exportPreviewSettings, 'centerY')) : compositionOffsetY;
-  uniforms.uTanHalfFov.value = exportPreviewSettings
-    ? Math.tan(Math.max(10, Math.min(120, Number(exportPreviewSettings.fov) || 42)) * Math.PI / 360)
+  uniforms.uCompositionOffsetX.value = getExportPreviewSettings()
+    ? settingsCenter(settingsValue(getExportPreviewSettings(), 'centerX')) : compositionOffsetX;
+  uniforms.uCompositionOffsetY.value = getExportPreviewSettings()
+    ? settingsCenter(settingsValue(getExportPreviewSettings(), 'centerY')) : compositionOffsetY;
+  uniforms.uTanHalfFov.value = getExportPreviewSettings()
+    ? Math.tan(Math.max(10, Math.min(120, Number(getExportPreviewSettings().fov) || 42)) * Math.PI / 360)
     : 0.42;
   uniforms.uTime.value = simT;
   syncEdgeDropMotion(simT);
