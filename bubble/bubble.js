@@ -51,6 +51,10 @@ import {
   SATELLITE_COUNT, applySplitVolumeTransfer, clearSatelliteDrops,
   findClosestDropPair, splitTimeline, updateDropBounds, updateSatelliteDrops,
 } from './drop-physics.js?v=1';
+import {
+  distributeDetailedAnchors, distributeFormationAnchors, distributePrimaryAnchors,
+  formationEdgeScaleFor, scaleShapePoints as scalePoints,
+} from './shape-anchors.js?v=1';
 
 // 提高 PMREM 高粗糙度的最低預過濾解析度，避免 16×16 tile 造成方格反射。
 patchEnvMapResolution();
@@ -2138,18 +2142,6 @@ let shapeCavityBase = [];
 // 把候選點集合（THREE.Vector3，帶 radiusHint/thickness/surface 附加屬性）整體
 // 縮放 scale 倍。scale === 1 時直接回傳原陣列，拖桿停在預設值時不用多做一次
 // clone。
-function scalePoints(points, scale) {
-  if (!points.length || scale === 1) return points;
-  return points.map(p => {
-    const copy = p.clone();
-    copy.multiplyScalar(scale);
-    if (p.radiusHint != null) copy.radiusHint = p.radiusHint * scale;
-    if (p.thickness != null) copy.thickness = p.thickness * scale;
-    copy.surface = p.surface;
-    return copy;
-  });
-}
-
 // 依目前的 P.shapeAScale 從 shapeTargetsBase 重新縮放並重挑錨點。呼叫端負責
 // 視情況遞增 shapeFieldSerial（崩解切法／融化滴落點／變形配對都拿它當快取
 // key 的一部分，serial 一變就會自動重算，不必逐一手動清快取）。
@@ -2175,7 +2167,7 @@ function scheduleShapeBScaleRebuild() {
 function rebuildShapeAAnchors() {
   if (!shapeTargetsBase.length) return;
   shapeTargets = scalePoints(shapeTargetsBase, P.shapeAScale);
-  formationAnchors = distributePrimaryAnchors(shapeTargets);
+  formationAnchors = distributePrimaryAnchors(shapeTargets, MAX_DROPS);
   microFormationAnchors = distributeDetailedAnchors(shapeTargets, MAX_MICRO_DROPS);
   negativeFormationAnchors = distributeFormationAnchors(
     scalePoints(shapeCavityBase, P.shapeAScale), MAX_NEGATIVE_DROPS,
@@ -2199,14 +2191,11 @@ function rebuildShapeAAnchors() {
 // 0.58 這個除數是量出來的：內建問號的內部點比例是 0.582，星形 0.600、冰塊更高，
 // 三顆都因此落在 1.0（維持既有外觀，不動已經調好的手感）；只有比它們更薄的造型
 // 才會被縮下來——實測細筆畫文字外框只有 0.016，係數約 0.03。
-const EDGE_SCALE_REFERENCE = 0.58;
 let formationEdgeScale = 1;
 function rebuildFormationEdgeScale() {
   // 用完整的候選點集合，不是挑過的錨點：厚實度是這顆造型本身的性質，而挑錨點的
   // 最遠點取樣偏好邊界與極端位置，用它量會系統性地偏薄。
-  if (!shapeTargets.length) { formationEdgeScale = 1; return; }
-  const interior = shapeTargets.filter(p => !p.surface).length / shapeTargets.length;
-  formationEdgeScale = Math.max(0, Math.min(1, interior / EDGE_SCALE_REFERENCE));
+  formationEdgeScale = formationEdgeScaleFor(shapeTargets);
 }
 // 穿梭環繞的路徑點：只取 formationAnchors 裡標記為表面的錨點。每顆水滴分到
 // 一個表面點當「家」，在旁邊小幅度飄浮晃動，而不是精確衝向某個目標點——
@@ -2268,7 +2257,7 @@ let morphTargetBaseField = null;
 function rebuildShapeBAnchors() {
   if (!morphTargetBaseField || !morphTargetPoints) return;
   const scaled = scalePoints(morphTargetBaseField.targets, P.shapeBScale);
-  morphTargetPoints.primary = distributePrimaryAnchors(scaled);
+  morphTargetPoints.primary = distributePrimaryAnchors(scaled, MAX_DROPS);
   morphTargetPoints.micro = distributeDetailedAnchors(scaled, MAX_MICRO_DROPS);
   morphPairKey = null;
 }
@@ -2501,157 +2490,6 @@ const dropSeeds = Array.from({ length: MAX_DROPS }, (_, i) => ({
   h3: hash11CPU(i + 13),
   radius: 0.72 + 0.55 * hash11CPU(i * 3.17 + 5),
 }));
-
-// 切法種子：這幾個分佈函式本身完全是決定性的（最遠點取樣、貪婪評分），同一顆
-// 形狀永遠切出同一組錨點。要換一種切法，就替每個候選點配一個穩定的權重去擾動
-// 評分——名次一變，最遠點取樣的整條鏈就跟著換，Lloyd 收斂到的區塊也不同。
-// 種子 0 回傳 null，呼叫端會完全走原本的式子，因此既有模式一格都不會變。
-function cutWeights(candidates, seed, salt) {
-  if (!seed) return null;
-  const base = Math.round(seed) * 29.7 + salt;
-  return candidates.map((_, i) => 0.74 + 0.52 * hash11CPU(i * 1.37 + base));
-}
-
-function distributeFormationAnchors(candidates, count = MAX_DROPS, seed = 0) {
-  if (!candidates.length) return [];
-  const weights = cutWeights(candidates, seed, 3.1);
-  const center = candidates.reduce((sum, p) => sum.add(p), new THREE.Vector3())
-    .multiplyScalar(1 / candidates.length);
-  const chosen = [];
-  let first = candidates[0];
-  let farthest = -1;
-  for (let i = 0; i < candidates.length; i++) {
-    const p = candidates[i];
-    // 起點換了，後面整條最遠點取樣鏈就全部跟著換——這是切法差異最大的來源。
-    const d = p.distanceToSquared(center) * (weights ? weights[i] : 1);
-    if (d > farthest) { farthest = d; first = p; }
-  }
-  chosen.push(first);
-  while (chosen.length < Math.min(count, candidates.length)) {
-    let best = candidates[0], bestDistance = -1;
-    for (let i = 0; i < candidates.length; i++) {
-      const p = candidates[i];
-      let nearest = Infinity;
-      for (const q of chosen) nearest = Math.min(nearest, p.distanceToSquared(q));
-      if (weights) nearest *= weights[i];
-      if (nearest > bestDistance) { bestDistance = nearest; best = p; }
-    }
-    chosen.push(best);
-  }
-  return chosen.map((p, i) => {
-    const copy = p.clone();
-    let nearest = Infinity;
-    for (let j = 0; j < chosen.length; j++) {
-      if (i === j) continue;
-      nearest = Math.min(nearest, p.distanceTo(chosen[j]));
-    }
-    // Farthest-point sampling 保證覆蓋輪廓，但局部間距可能大於原始厚度提示。
-    // 半徑至少跨過一半鄰距，才能形成連續液橋；上限則保留耳、嘴等造型辨識度。
-    const bridgeRadius = Number.isFinite(nearest) ? nearest * 0.56 : 0.18;
-    copy.radiusHint = Math.min(0.27, Math.max(p.radiusHint || 0.1, bridgeRadius));
-    return copy;
-  });
-}
-
-function distributePrimaryAnchors(candidates, count = MAX_DROPS, seed = 0) {
-  if (!candidates.length) return [];
-  const chosen = [];
-  const remaining = candidates.slice();
-  // remaining 會被 splice，索引跟著位移，所以權重必須同步 splice，不能用索引
-  // 回頭查原陣列 —— 否則挑掉幾顆之後每個點拿到的都是別人的權重。
-  const remainingWeights = cutWeights(candidates, seed, 8.6);
-  while (chosen.length < Math.min(count, candidates.length)) {
-    let bestIndex = 0;
-    let bestScore = -Infinity;
-    for (let i = 0; i < remaining.length; i++) {
-      const p = remaining[i];
-      const thickness = p.radiusHint || 0.1;
-      const spacing = chosen.length
-        ? Math.min(...chosen.map(q => p.distanceTo(q)))
-        : thickness;
-      // 主滴服務於體積與重量，優先落在厚實內部；間距僅防止全部擠在同一區。
-      const score = (thickness * 3.2 + spacing * 0.42)
-        * (remainingWeights ? remainingWeights[i] : 1);
-      if (score > bestScore) {
-        bestScore = score;
-        bestIndex = i;
-      }
-    }
-    const source = remaining.splice(bestIndex, 1)[0];
-    if (remainingWeights) remainingWeights.splice(bestIndex, 1);
-    const copy = source.clone();
-    // 下面那個 0.14 下限是形狀匯聚要的：主滴在那裡負責撐體積、接液橋，寧可比
-    // 真實厚度粗。崩解噴濺剛好相反，碎片一旦比所在位置的造型厚就會撐破輪廓，
-    // 所以把沒有夾過的原始厚度另存一份給它用。
-    copy.thickness = source.radiusHint || 0.1;
-    copy.radiusHint = Math.min(0.24, Math.max(0.14, source.radiusHint || 0.14));
-    chosen.push(copy);
-  }
-  return chosen;
-}
-
-function distributeDetailedAnchors(candidates, count = MAX_MICRO_DROPS, seed = 0) {
-  if (!candidates.length) return [];
-  const weighted = [
-    ...candidates,
-    ...candidates.filter(p => p.surface),
-  ];
-  const centers = distributeFormationAnchors(weighted, count, seed);
-  const groups = Array.from({ length: centers.length }, () => []);
-  // 只把種子餵給初始中心點是不夠的：Lloyd iterations 會收斂到重心 Voronoi，
-  // 不管從哪裡起步都趨向同一組區塊，實測換種子後畫面幾乎沒變。真正要換切法，
-  // 得改變分割本身 —— 給每個中心一個固定權重、用加權距離指派，等於畫一張
-  // 乘法加權 Voronoi 圖：有的中心搶到大塊、有的只分到小塊，碎片大小與邊界
-  // 都跟著換。權重固定不隨 iteration 變，所以照樣會收斂。
-  const centerWeights = seed
-    ? centers.map((_, i) => 0.62 + 0.85 * hash11CPU(i * 4.19 + Math.round(seed) * 51.3))
-    : null;
-  // 少量 Lloyd iterations，把每顆橢球變成一塊模型區域的代表，而非單一體素。
-  for (let iteration = 0; iteration < 5; iteration++) {
-    groups.forEach(group => { group.length = 0; });
-    for (const point of weighted) {
-      let best = 0, bestD = Infinity;
-      for (let i = 0; i < centers.length; i++) {
-        let d = point.distanceToSquared(centers[i]);
-        if (centerWeights) d *= centerWeights[i];
-        if (d < bestD) { bestD = d; best = i; }
-      }
-      groups[best].push(point);
-    }
-    for (let i = 0; i < centers.length; i++) {
-      if (!groups[i].length) continue;
-      centers[i].set(0, 0, 0);
-      groups[i].forEach(point => centers[i].add(point));
-      centers[i].multiplyScalar(1 / groups[i].length);
-    }
-  }
-  for (let i = 0; i < centers.length; i++) {
-    const group = groups[i];
-    let vx = 0, vy = 0, vz = 0, radiusHint = 0.1;
-    for (const point of group) {
-      vx += (point.x - centers[i].x) ** 2;
-      vy += (point.y - centers[i].y) ** 2;
-      vz += (point.z - centers[i].z) ** 2;
-      radiusHint = Math.max(radiusHint, point.radiusHint || 0.1);
-    }
-    const denom = Math.max(1, group.length);
-    const variances = [vx / denom, vy / denom, vz / denom];
-    const major = variances.indexOf(Math.max(...variances));
-    centers[i].axis = new THREE.Vector3(
-      major === 0 ? 1 : 0,
-      major === 1 ? 1 : 0,
-      major === 2 ? 1 : 0,
-    );
-    const sorted = variances.slice().sort((a, b) => b - a);
-    centers[i].stretch = Math.min(1.42, Math.max(1.06,
-      Math.sqrt((sorted[0] + 1e-4) / (sorted[1] + 1e-4))));
-    centers[i].radiusHint = Math.min(0.28, Math.max(
-      radiusHint,
-      Math.sqrt(sorted[1] + sorted[2]) * 1.15,
-    ));
-  }
-  return centers;
-}
 
 // 崩解噴濺的時間軸與彈道數學搬到 motions/shatter.js。這裡只留一次繫結：
 // 那組函式只讀參數、不碰場景狀態，所以把 P 綁進去之後呼叫方式與拆檔前相同。

@@ -43,6 +43,9 @@ browser or WebGL context.
 `drop_physics.mjs` unit-tests the extracted split timeline, volume conservation,
 surface-pair selection, satellite-drop trajectories, and conservative ray bounds.
 
+`shape_anchors.mjs` unit-tests shape scaling, thin-edge normalization, and the
+deterministic primary/detail anchor partition used by formation and shatter modes.
+
 `bubble_real_browser.py` opens the installed Google Chrome and macOS Safari,
 checks the Installing mode on dark/light backgrounds, records actual GPU renderer
 information, and writes screenshots plus an acceptance report outside the repo.
