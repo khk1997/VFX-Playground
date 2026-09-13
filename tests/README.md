@@ -49,6 +49,9 @@ deterministic primary/detail anchor partition used by formation and shatter mode
 `runtime_defaults.mjs` verifies that numeric, toggle, color, select, and legacy
 defaults remain complete after moving the parameter schema out of the page runtime.
 
+`runtime_memory.mjs` verifies mode/backdrop slot addressing, per-mode defaults,
+light-backdrop overrides, and independent dark/light edge-tint memory.
+
 `bubble_real_browser.py` opens the installed Google Chrome and macOS Safari,
 checks the Installing mode on dark/light backgrounds, records actual GPU renderer
 information, and writes screenshots plus an acceptance report outside the repo.
