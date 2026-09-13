@@ -44,6 +44,8 @@ import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 import { parseBubbleRuntimeOptions } from './diagnostics.js?v=1';
 import { buildStoredZip, downloadBlob, nextPaint, pixelsToPng } from './export-utils.js?v=1';
 import { createMaterialTextureController } from './material-textures.js?v=1';
+import { createEnvironmentLoader, selectMaterialEnvironment } from './environment-loader.js?v=1';
+import { describeShapeImport, loadShapeAsset } from './shape-loader.js?v=1';
 
 // 提高 PMREM 高粗糙度的最低預過濾解析度，避免 16×16 tile 造成方格反射。
 patchEnvMapResolution();
@@ -5907,88 +5909,19 @@ window.addEventListener('pageshow', event => {
 });
 
 /* ===== HDRI 載入（動態 import，離線也不會弄壞主程式）===== */
-let RGBELoaderClass = null;
-async function ensureRGBE() {
-  if (!RGBELoaderClass) {
-    const m = await import('three/addons/loaders/RGBELoader.js');
-    RGBELoaderClass = m.RGBELoader;
-  }
-  return RGBELoaderClass;
-}
 const hdriInput = document.getElementById('hdriInput');
 const hdriState = document.getElementById('hdriState');
-let environmentRequestId = 0;
-
-function applyEnvironmentTexture(tex, label, requestId) {
-  if (requestId !== environmentRequestId) {
-    tex.dispose();
-    return;
-  }
-  tex.mapping = THREE.EquirectangularReflectionMapping;
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.ClampToEdgeWrapping;
-  tex.generateMipmaps = false;
-  tex.minFilter = THREE.LinearFilter;
-  tex.magFilter = THREE.LinearFilter;
-  tex.needsUpdate = true;
-
-  const nextPmremTarget = pmremGenerator.fromEquirectangular(tex);
-  const oldEnv = uniforms.uEnvMap.value;
-  const oldPmremTarget = pmremTarget;
-
-  uniforms.uEnvMap.value = tex;
-  uniforms.uPmremMap.value = nextPmremTarget.texture;
-  uniforms.uHasEnv.value = 1;
-  pmremTarget = nextPmremTarget;
-  // 快取裡每一支變體都吃同一張 PMREM，換 HDRI 時全部要更新，否則切回舊變體會用到
-  // 已經 dispose 的貼圖。
-  for (const mat of variantCache.values()) {
-    mat.envMap = nextPmremTarget.texture;
-    mat.needsUpdate = true;
-  }
-  // uHasEnv 從 0 變 1 會改變環境／PMREM 那一軸，需要切變體。
-  syncShaderVariant();
-
-  if (oldEnv && oldEnv.dispose) oldEnv.dispose();
-  if (oldPmremTarget) oldPmremTarget.dispose();
-  hdriState.textContent = 'HDRI 已載入：' + label;
-}
-
-function loadEnvironment(url, label, isHDR, revokeURL = false) {
-  const requestId = ++environmentRequestId;
-  hdriState.textContent = 'HDRI 載入中：' + label;
-  const finish = () => { if (revokeURL) URL.revokeObjectURL(url); };
-  const apply = tex => {
-    try {
-      applyEnvironmentTexture(tex, label, requestId);
-      // 成功：uHasEnv 已經是 1，首支 variant 可以定案了。
-      settleEnv('HDRI 載入完成');
-    } catch (_) {
-      if (requestId === environmentRequestId) hdriState.textContent = 'HDRI 載入失敗：' + label;
-      if (tex && tex.dispose) tex.dispose();
-      // 套用失敗也算確定：uHasEnv 維持 0，編無 env 的變體，不要卡著等。
-      settleEnv('HDRI 套用失敗');
-    }
-    finish();
-  };
-  const fail = () => {
-    if (requestId === environmentRequestId) hdriState.textContent = 'HDRI 載入失敗：' + label;
-    // 載入失敗同樣要放行，否則首幀會一直等到逾時才出現。
-    settleEnv('HDRI 載入失敗');
-    finish();
-  };
-
-  if (isHDR) {
-    ensureRGBE()
-      .then(RGBE => new RGBE().load(url, apply, undefined, fail))
-      .catch(fail);
-  } else {
-    new THREE.TextureLoader().load(url, tex => {
-      tex.colorSpace = THREE.SRGBColorSpace;
-      apply(tex);
-    }, undefined, fail);
-  }
-}
+const { loadEnvironment } = createEnvironmentLoader({
+  THREE,
+  getPmremGenerator: () => pmremGenerator,
+  getUniforms: () => uniforms,
+  getPmremTarget: () => pmremTarget,
+  setPmremTarget: target => { pmremTarget = target; },
+  getVariantMaterials: () => variantCache.values(),
+  onVariantChange: syncShaderVariant,
+  onSettled: settleEnv,
+  stateElement: hdriState,
+});
 
 function loadMaterialEnvironment(style = P.materialStyle) {
   // 優先序：使用者自己匯入的 > 這個動態模式指定的 > 材質類型的預設。
@@ -5997,13 +5930,13 @@ function loadMaterialEnvironment(style = P.materialStyle) {
   //
   // 「使用者匯入的」要看 file，不能只看 materialEnvironments[style] 有沒有值：
   // 那張表在 resetMaterialProfiles 就先填好了材質類型的預設，永遠是真的。
-  const stored = materialEnvironments[style];
-  const environment = (stored && stored.file)
-    ? stored
-    : (motionEnvironmentFor(P.motion)
-      || stored
-      || MATERIAL_ENVIRONMENT_DEFAULTS[style]
-      || MATERIAL_ENVIRONMENT_DEFAULTS.universal);
+  const environment = selectMaterialEnvironment({
+    style,
+    motion: P.motion,
+    materialEnvironments,
+    defaults: MATERIAL_ENVIRONMENT_DEFAULTS,
+    motionEnvironment: motionEnvironmentFor,
+  });
   if (environment.file) {
     const url = URL.createObjectURL(environment.file);
     loadEnvironment(url, environment.label, environment.isHDR, true);
@@ -6135,21 +6068,21 @@ function scheduleGLBRebuild() {
 async function importShapeFile(file, kind, { rebuilding = false } = {}) {
   if (!inited) initGL();
   const requestId = ++shapeImportRequestId;
-  const builtin = !file;
   // 每個模式各自預設的內建 SVG 展示形狀（見 motions/registry.js 的 svgDemo）。
   // 只在還沒匯入真正檔案時採用；GLB 沒有這個分歧，一律是內建環形。
   const svgVariant = MOTION_SVG_DEMO[P.motion] || 'question';
-  const label = builtin
-    ? (kind === 'svg'
-      ? (svgVariant === 'ice' ? MELT_DEFAULT_SVG_NAME : DEFAULT_SVG_NAME)
-      : DEFAULT_SOLID_NAME)
-    : file.name;
   const glbGridSize = SELECTS.shapeQuality.map[P.shapeQuality] || 80;
-  shapeState.textContent = kind === 'svg'
-    ? `正在分析 SVG：${label}`
-    : rebuilding
-      ? `正在重新生成：${label} → ${glbGridSize}³（可能需要幾秒）`
-      : `正在體素化模型：${label} → ${glbGridSize}³（可能需要幾秒）`;
+  const { builtin, label, status } = describeShapeImport({
+    file,
+    kind,
+    svgVariant,
+    gridSize: glbGridSize,
+    rebuilding,
+    defaultSvgName: DEFAULT_SVG_NAME,
+    meltSvgName: MELT_DEFAULT_SVG_NAME,
+    defaultSolidName: DEFAULT_SOLID_NAME,
+  });
+  shapeState.textContent = status;
   document.getElementById('shapeBtn').disabled = true;
   document.getElementById('shapeQuality').disabled = true;
   shapeConverting = true;
@@ -6157,16 +6090,19 @@ async function importShapeFile(file, kind, { rebuilding = false } = {}) {
   shapeImportingVariant = (builtin && kind === 'svg') ? svgVariant : null;
   syncLoop();
   try {
-    const next = kind === 'svg'
-      // 超取樣的距離場暫時佔用 (size*ss)² 個 float；桌面用 3（1536²，約 38MB
-      // 峰值），行動裝置降一級避免配置失敗。
-      ? await svgToField(
-        builtin ? (svgVariant === 'ice' ? makeMeltDemoSvgFile() : makeDefaultSvgFile()) : file,
-        { supersample: mobileRenderQuery.matches ? 2 : 3 },
-      )
-      : builtin
-        ? await objectToField(buildDefaultSolid(), glbGridSize)
-        : await gltfToField(file, glbGridSize);
+    const next = await loadShapeAsset({
+      file,
+      kind,
+      svgVariant,
+      gridSize: glbGridSize,
+      mobile: mobileRenderQuery.matches,
+      svgToField,
+      gltfToField,
+      objectToField,
+      makeDefaultSvgFile,
+      makeMeltDemoSvgFile,
+      buildDefaultSolid,
+    });
     if (requestId !== shapeImportRequestId) {
       next.texture?.dispose();
       return;
