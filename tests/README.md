@@ -40,6 +40,9 @@ keyboard tabs, A/B quick comparison, and the mobile sheet's sticky layout.
 `adaptive_quality.mjs` unit-tests the extracted quality state machine without a
 browser or WebGL context.
 
+`drop_physics.mjs` unit-tests the extracted split timeline, volume conservation,
+surface-pair selection, satellite-drop trajectories, and conservative ray bounds.
+
 `bubble_real_browser.py` opens the installed Google Chrome and macOS Safari,
 checks the Installing mode on dark/light backgrounds, records actual GPU renderer
 information, and writes screenshots plus an acceptance report outside the repo.

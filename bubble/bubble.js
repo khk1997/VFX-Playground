@@ -47,6 +47,10 @@ import { createMaterialTextureController } from './material-textures.js?v=1';
 import { createEnvironmentLoader, selectMaterialEnvironment } from './environment-loader.js?v=1';
 import { describeShapeImport, loadShapeAsset } from './shape-loader.js?v=1';
 import { createShaderVariantPlanner, VariantMaterialCache } from './shader-variants.js?v=1';
+import {
+  SATELLITE_COUNT, applySplitVolumeTransfer, clearSatelliteDrops,
+  findClosestDropPair, splitTimeline, updateDropBounds, updateSatelliteDrops,
+} from './drop-physics.js?v=1';
 
 // 提高 PMREM 高粗糙度的最低預過濾解析度，避免 16×16 tile 造成方格反射。
 patchEnvMapResolution();
@@ -2112,13 +2116,9 @@ const dropBounds = new THREE.Vector4(0, 0, 0, 1);
 const elasticEvent = new THREE.Vector2(0, 0);
 const elasticPair = new THREE.Vector2(0, 1);
 // 斷裂處的衛星滴串（Rayleigh–Plateau）：沿收頸軸形成，釋放後各自漂移並被主滴回收。
-const SAT_N = 3;
-const SAT_SPEC = [
-  { along: -0.55, size: 0.50, jitter:  0.05, seed: 0.7, drift: -0.22, absorbAt: 0.61 },
-  { along:  0.35, size: 0.30, jitter: -0.06, seed: 2.4, drift:  0.12, absorbAt: 0.58 },
-  { along:  1.05, size: 0.17, jitter:  0.05, seed: 4.9, drift:  0.28, absorbAt: 0.54 },
-];
-const satelliteDrops = Array.from({ length: SAT_N }, () => new THREE.Vector4(0, 0, 0, 0));
+const satelliteDrops = Array.from(
+  { length: SATELLITE_COUNT }, () => new THREE.Vector4(0, 0, 0, 0),
+);
 let previousDropT = null;
 let previousPairKey = '';
 let previousPairGap = 0;
@@ -2653,13 +2653,6 @@ function distributeDetailedAnchors(candidates, count = MAX_MICRO_DROPS, seed = 0
   return centers;
 }
 
-function cyclicPulse(phase, center, width) {
-  const d = Math.abs(((phase - center + 0.5) % 1 + 1) % 1 - 0.5);
-  if (d >= width) return 0;
-  const x = 1 - d / width;
-  return x * x * (3 - 2 * x);
-}
-
 // 崩解噴濺的時間軸與彈道數學搬到 motions/shatter.js。這裡只留一次繫結：
 // 那組函式只讀參數、不碰場景狀態，所以把 P 綁進去之後呼叫方式與拆檔前相同。
 const {
@@ -2996,55 +2989,6 @@ function updateNegativeDrops(phase, fidelityAbsorb = 0) {
   }
   if (negativeDropTexture) negativeDropTexture.needsUpdate = true;
   return Math.min(selected.length, MAX_NEGATIVE_DROPS);
-}
-
-function splitTimeline(phase) {
-  // 12 秒敘事，節奏配平：停留 → 蓄力 → 拉斷 → 漂浮 → 靠近 → 接觸融合 → 毛細平復 → 停留。
-  // 位置與體積分開控制：聚合時 approach 幾乎收滿距離，最後由表面接觸完成融合。
-  // 分裂與融合各自擁有一次守恆的毛細事件（recoil / coalesce），維持敘事對稱。
-  const anticipation = cyclicPulse(phase, 0.09, 0.05);
-  const pull = smoothstepCPU(phase, 0.10, 0.19);
-  const detach = smoothstepCPU(phase, 0.18, 0.26);
-  // 靠近提前到 0.50，把原本 ~4 秒的空拍漂浮段壓成與分裂段對稱的長度。
-  const approach = smoothstepCPU(phase, 0.50, 0.66);
-  const absorb = smoothstepCPU(phase, 0.66, 0.80);
-  const contact = smoothstepCPU(phase, 0.60, 0.70)
-    * (1 - smoothstepCPU(phase, 0.80, 0.88));
-
-  const volumeSeparation = smoothstepCPU(phase, 0.135, 0.26) * (1 - absorb);
-  const travelOut = smoothstepCPU(phase, 0.13, 0.27);
-  // approach 收到 0.92：保留真實接觸殘距（兩滴接觸時球心相距約 r1+r2，不重合），
-  // 剩餘閉合交給 absorb 期子滴收縮，讀起來是「表面貼合後排液」而非「原地被吸乾」。
-  const distanceSeparation = travelOut
-    * (1 - approach * 0.92)
-    * (1 - absorb);
-
-  const recoilProgress = Math.max(0, Math.min(1, (phase - 0.19) / 0.17));
-  // raised-cosine（Hann）脈衝取代半正弦：峰值與時機不變，但兩端斜率為 0。
-  // sin(π·x) 在 clamp 邊界（分離起點 phase 0.19）斜率從 0 突跳到 π/0.17，
-  // 是 C1 不連續 → 無限 jerk（加速度脈衝），視覺上就是分離瞬間那下不自然的猛晃。
-  const recoil = 0.5 * (1 - Math.cos(2 * Math.PI * recoilProgress));
-  const splitProgress = Math.max(0, Math.min(1, (phase - 0.11) / 0.18));
-  const splitShape = 0.5 * (1 - Math.cos(2 * Math.PI * splitProgress))
-    * (1 - smoothstepCPU(phase, 0.29, 0.36));
-
-  // 融合毛細震盪進度：接觸建立後（~0.62）發源，於 absorb 完成（0.80，接觸軸退化）前
-  // ring-down 歸零；尾段為 0 亦維持循環週期性。
-  const coalesce = Math.max(0, Math.min(1, (phase - 0.62) / 0.18));
-
-  return {
-    anticipation,
-    pull,
-    detach,
-    approach,
-    absorb,
-    contact,
-    volumeSeparation,
-    distanceSeparation,
-    recoil,
-    splitShape,
-    coalesce,
-  };
 }
 
 // 水滴動畫只在 CPU 每幀計算一次；shader 的每個 march step 僅讀取 vec4 array。
@@ -3386,37 +3330,14 @@ function updateDropUniforms(t) {
   // 多顆完整半徑的 SDF 重疊後再突然解鎖。以 q^3 轉移體積，子滴半徑會隨 q
   // 近似線性增長，同時嚴格維持總體積，輪廓便能自然經過鼓包、細頸、斷裂。
   if (P.motion === 'split' && count > 1) {
-    const childVolumeProgress = separation * separation * separation;
-    let transferredVolume = 0;
-    for (let i = 1; i < count; i++) {
-      const targetRadius = dropData[i].w;
-      const targetVolume = targetRadius ** 3;
-      transferredVolume += targetVolume * (1 - childVolumeProgress);
-      dropData[i].w = targetRadius * separation;
-    }
-    const primaryTargetRadius = dropData[0].w;
-    dropData[0].w = Math.cbrt(primaryTargetRadius ** 3 + transferredVolume);
+    applySplitVolumeTransfer(dropData, count, separation);
   }
 
   // 電影敘事期間鎖定主配對，避免多滴的最近距離交替造成形變軸跳動。
   // 其他模式仍使用即時最近配對。
-  let pairA = 0, pairB = Math.min(1, count - 1), pairDistance = Infinity, surfaceGap = Infinity;
-  if (count >= 2 && P.motion === 'split') {
-    const da = dropData[pairA], db = dropData[pairB];
-    pairDistance = Math.hypot(da.x - db.x, da.y - db.y, da.z - db.z);
-    surfaceGap = pairDistance - da.w - db.w;
-  } else {
-    for (let i = 0; i < count; i++) {
-      for (let j = i + 1; j < count; j++) {
-        const di = dropData[i], dj = dropData[j];
-        const distance = Math.hypot(di.x - dj.x, di.y - dj.y, di.z - dj.z);
-        const gap = distance - di.w - dj.w;
-        if (gap < surfaceGap) {
-          pairA = i; pairB = j; pairDistance = distance; surfaceGap = gap;
-        }
-      }
-    }
-  }
+  const { pairA, pairB, pairDistance, surfaceGap } = findClosestDropPair(
+    dropData, count, P.motion === 'split',
+  );
 
   const frameDt = previousDropT == null || t < previousDropT
     ? 0 : Math.min(0.05, Math.max(0.0001, t - previousDropT));
@@ -3811,66 +3732,21 @@ function updateDropUniforms(t) {
 
     // 衛星滴串：在液橋上形成，pinch-off 後保留為自由滴，最後分批被鄰近主滴吸收。
     // 全程由 phase 的解析軌跡驅動，因此播放、拖動時間與循環接縫都不會累積誤差。
-    const da = dropData[pairA], db = dropData[pairB];
-    const sdx = db.x - da.x, sdy = db.y - da.y, sdz = db.z - da.z;
-    const sInv = 1 / Math.max(0.0001, Math.hypot(sdx, sdy, sdz));
-    const ux = sdx * sInv, uy = sdy * sInv, uz = sdz * sInv;
-    const mx = (da.x + db.x) * 0.5, my = (da.y + db.y) * 0.5, mz = (da.z + db.z) * 0.5;
-    // 建立與收頸軸垂直的穩定基底，供二維低頻漂移使用。
-    let qx = -uy, qy = ux, qz = 0;
-    const qLen = Math.hypot(qx, qy, qz);
-    if (qLen < 0.1) { qx = 0; qy = -uz; qz = uy; }
-    else { qx /= qLen; qy /= qLen; qz /= qLen; }
-    const rx = uy * qz - uz * qy;
-    const ry = uz * qx - ux * qz;
-    const rz = ux * qy - uy * qx;
-    // 在頸部內快速成形；釋放後半徑鎖定，不再跟著仍在長大的子滴一起膨脹。
-    const satBirth = smoothstepCPU(phase, 0.18, 0.205);
-    const release = smoothstepCPU(phase, 0.235, 0.285);
-    const freeAge = Math.max(0, phase - 0.26);
-    if (uniforms) uniforms.uSatelliteBlend.value = 0.32 * satBirth * (1 - release);
-    const baseR = Math.min(da.w, db.w);
-    const satelliteBaseR = P.radius
-      * Math.min(dropSeeds[pairA].radius, dropSeeds[pairB].radius);
-    const activeSatelliteCount = Math.max(0, Math.min(SAT_N, Math.round(P.satelliteCount)));
-    for (let s = 0; s < SAT_N; s++) {
-      if (s >= activeSatelliteCount) {
-        satelliteDrops[s].set(0, 0, 0, 0);
-        continue;
-      }
-      const spec = SAT_SPEC[s];
-      const along = spec.along * baseR;
-      const neckJitter = spec.jitter * baseR * satBirth * (1 - release);
-
-      // 低頻連續 noise-like 軌跡；減去起始相位值，確保釋放瞬間位置不跳動。
-      const waveQ = Math.sin(spec.seed + freeAge * 16.0) - Math.sin(spec.seed);
-      const waveR = Math.sin(spec.seed * 1.73 + freeAge * 11.0)
-        - Math.sin(spec.seed * 1.73);
-      const driftScale = baseR * release;
-      const freeX = mx + ux * (along + spec.drift * baseR * freeAge * 2.2)
-        + qx * (neckJitter + waveQ * driftScale * 0.18)
-        + rx * waveR * driftScale * 0.12;
-      const freeY = my + uy * (along + spec.drift * baseR * freeAge * 2.2)
-        + qy * (neckJitter + waveQ * driftScale * 0.18)
-        + ry * waveR * driftScale * 0.12;
-      const freeZ = mz + uz * (along + spec.drift * baseR * freeAge * 2.2)
-        + qz * (neckJitter + waveQ * driftScale * 0.18)
-        + rz * waveR * driftScale * 0.12;
-
-      // 小滴先回收，主衛星最後回收；吸收目標依形成位置選擇較近的主滴。
-      const absorb = smoothstepCPU(phase, spec.absorbAt, spec.absorbAt + 0.10);
-      const target = spec.along < 0 ? da : db;
-      const sizeEnvelope = satBirth * (1 - absorb);
-      satelliteDrops[s].set(
-        freeX + (target.x - freeX) * absorb,
-        freeY + (target.y - freeY) * absorb,
-        freeZ + (target.z - freeZ) * absorb,
-        satelliteBaseR * spec.size * P.satelliteSize * sizeEnvelope,
-      );
-    }
+    const satelliteBlend = updateSatelliteDrops({
+      phase,
+      dropData,
+      pairA,
+      pairB,
+      radius: P.radius,
+      dropSeeds,
+      satelliteCount: P.satelliteCount,
+      satelliteSize: P.satelliteSize,
+      satelliteDrops,
+    });
+    if (uniforms) uniforms.uSatelliteBlend.value = satelliteBlend;
   } else {
     elasticEvent.set(0, 0);
-    for (let s = 0; s < SAT_N; s++) satelliteDrops[s].w = 0;
+    clearSatelliteDrops(satelliteDrops);
     if (uniforms) uniforms.uSatelliteBlend.value = 0;
   }
 
@@ -3879,74 +3755,18 @@ function updateDropUniforms(t) {
   previousPairKey = pairKey;
   previousPairGap = surfaceGap;
 
-  // smooth-min 與 wobble 都可能讓表面超出單顆球體，因此加入保守 padding。
-  const padding = P.viscosity * 1.15 * 0.25 * Math.max(0, count - 1)
-    + P.wobble * 0.25 + P.elasticStrength + 0.08;
-  let minX = Infinity, minY = Infinity, minZ = Infinity;
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-  for (let i = 0; i < count; i++) {
-    const d = dropData[i], r = d.w * Math.max(1, dropShapeData[i].w) + padding;
-    minX = Math.min(minX, d.x - r); maxX = Math.max(maxX, d.x + r);
-    minY = Math.min(minY, d.y - r); maxY = Math.max(maxY, d.y + r);
-    minZ = Math.min(minZ, d.z - r); maxZ = Math.max(maxZ, d.z + r);
-  }
-  // count=0 時上面的迴圈一次都沒跑，minX/maxX 還是 ±Infinity，相加會得到 NaN
-  // 並一路傳進 uDropBounds。沒有主滴就沒有需要涵蓋的範圍，直接退回原點。
-  const hasBounds = Number.isFinite(minX);
-  const cx = hasBounds ? (minX + maxX) * 0.5 : 0;
-  const cy = hasBounds ? (minY + maxY) * 0.5 : 0;
-  const cz = hasBounds ? (minZ + maxZ) * 0.5 : 0;
-  let boundRadius = 0;
-  for (let i = 0; i < count; i++) {
-    const d = dropData[i];
-    boundRadius = Math.max(boundRadius, Math.hypot(d.x - cx, d.y - cy, d.z - cz)
-      + d.w * Math.max(1, dropShapeData[i].w) + padding);
-  }
-  for (let s = 0; s < SAT_N; s++) {
-    const sd = satelliteDrops[s];
-    if (sd.w > 0) {
-      boundRadius = Math.max(boundRadius,
-        Math.hypot(sd.x - cx, sd.y - cy, sd.z - cz) + sd.w + padding);
-    }
-  }
-  dropBounds.set(cx, cy, cz, boundRadius);
-  // 穿梭環繞的形狀恆定顯示，射線邊界必須永遠涵蓋整個形狀範圍，不能只依水滴
-  // 目前分佈算——水滴群聚集中時，形狀本身仍完整存在，邊界縮小會讓外圍被裁掉。
-  // 一行字是橫向鋪開的，而 boundRadius 是從水滴分佈算出來的——預設沒有主滴時
-  // 那個半徑是 0，整行會被射線邊界整段裁掉。
-  if (typewriterReach > 0) dropBounds.set(0, 0, 0, Math.max(boundRadius, typewriterReach));
-  if (usesShapeField(P.motion) && shapeField) {
-    dropBounds.set(0, 0, 0, Math.max(boundRadius, 2.25));
-    for (let i = 0; i < microCount; i++) {
-      const o = i * 4;
-      dropBounds.w = Math.max(dropBounds.w,
-        Math.hypot(microDropData[o], microDropData[o + 1], microDropData[o + 2])
-          + microDropData[o + 3] + 0.12);
-    }
-  }
-  // 靜態模式選了內建幾何（staticShape 0-6）時完全不吃形狀場，也沒有水滴
-  // （count 0），上面兩條路徑給的邊界不會涵蓋程序化 SDF 的實際範圍——射線
-  // 邊界太小會讓造型被裁掉一角，甚至整顆漏在邊界外完全不會被 raymarch 走到。
-  // 選了「匯入」（staticShape 7）則完全交給上面 usesShapeField 那條路徑，
-  // 這裡不需要再疊加。半徑抓對應幾何的最大延伸再加安全 padding，用 Math.max
-  // 疊加（不是 .set 直接覆蓋），這樣才不會蓋掉上面已經算好的邊界。
-  if (P.motion === 'static' && P.staticShape !== 7) {
-    let staticRadius;
-    if (P.staticShape === 0) {
-      // 方體對角線（√2 倍半邊長，這裡再乘 1.5 留餘裕）加圓角。
-      staticRadius = P.boxSize * Math.SQRT2 * 1.5 + P.boxCornerRadius + 0.2;
-    } else if (P.staticShape === 6) {
-      // 圓環：外緣 = 主半徑 + 管半徑（管半徑 = 主半徑 × 比例）。
-      staticRadius = P.primitiveSize * (1 + P.primitiveTubeRatio) * 1.5 + 0.2;
-    } else if (P.staticShape === 4 || P.staticShape === 5) {
-      // 圓柱／圓錐：取半徑與（半）高兩者較大者，涵蓋躺著或立著的極端角度。
-      staticRadius = Math.max(P.primitiveSize, P.primitiveHeight) * 1.8 + 0.2;
-    } else {
-      // 平面、圓盤、球體都只由 primitiveSize 決定範圍。
-      staticRadius = P.primitiveSize * 1.8 + 0.2;
-    }
-    dropBounds.w = Math.max(dropBounds.w, staticRadius);
-  }
+  updateDropBounds({
+    params: P,
+    count,
+    dropData,
+    dropShapeData,
+    satelliteDrops,
+    dropBounds,
+    typewriterReach,
+    hasShapeField: usesShapeField(P.motion) && !!shapeField,
+    microCount,
+    microDropData,
+  });
 }
 
 function makeBlankEnv() {
