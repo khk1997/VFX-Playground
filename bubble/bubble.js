@@ -28,11 +28,6 @@ import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.
 import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
 import createHopMotion from './motions/hop.js?v=svg-shape-76';
 import createResearchMotion from './motions/research.js?v=whisper-shell-2';
-import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
-import {
-  bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
-  setCustomFont, useSystemFont, clearCustomFont, CUSTOM_FONT_FAMILY_NAME,
-} from './glyph-field.js?v=typewriter-3';
 import {
   createExtendedMotionRuntime, effectiveCapillaryHeight, isExtendedMotion,
 } from './motions/extended/index.js?v=extended-motions-4';
@@ -62,6 +57,7 @@ import {
 import {
   COLORS, SELECTS, createFormatters, createToggleBindings,
 } from './control-schema.js?v=1';
+import { createTypewriterRuntime } from './typewriter-runtime.js?v=1';
 
 // 提高 PMREM 高粗糙度的最低預過濾解析度，避免 16×16 tile 造成方格反射。
 patchEnvMapResolution();
@@ -1567,11 +1563,6 @@ const {
   dropPosition: researchDropPosition,
   shellEnvelope: researchShellEnvelope,
 } = createResearchMotion(P, { dropSeeds });
-const {
-  typeState: typewriterState,
-  segmentSeconds: typewriterSegmentSeconds,
-  cycleSeconds: typewriterCycleSeconds,
-} = createTypewriterMotion(P, { phrases: () => typewriterPhrases });
 let shapeRigidNow = null;
 const shapeRigidVec = new THREE.Vector3();
 // 旋轉現在是任意軸（XYZ 各自振幅），用歐拉角組出一個 3x3 旋轉矩陣，比逐軸
@@ -2645,342 +2636,19 @@ function makeBlankShape() {
   return tex;
 }
 
-/* ===== 打字模式：字形圖集與每幀的行狀態 ===== */
-
-// 每格字的資料：x 字形在圖集裡的索引、y 成形進度、zw 保留。走資料貼圖而不是
-// uniform 陣列的理由見 shaders.js 的 uTypeGlyphData 宣告。
-const glyphData = new Float32Array(MAX_TYPE_GLYPHS * 4);
-const glyphDataTexture = new THREE.DataTexture(
-  glyphData, MAX_TYPE_GLYPHS, 1, THREE.RGBAFormat, THREE.FloatType,
-);
-glyphDataTexture.minFilter = glyphDataTexture.magFilter = THREE.NearestFilter;
-glyphDataTexture.wrapS = glyphDataTexture.wrapT = THREE.ClampToEdgeWrapping;
-glyphDataTexture.generateMipmaps = false;
-glyphDataTexture.needsUpdate = true;
-
-let glyphAtlas = null;
-// 目前這份圖集是用哪段文字烘的。文字沒變就不重烘——切換模式、載入參數組合檔
-// 都會走到 ensureGlyphAtlas，但那些情況下文字通常沒動。
-let glyphAtlasText = null;
-let glyphRebuildTimer = null;
-let typewriterPhrases = [];
-// 上一次烘焙耗時。這是同步的主執行緒工作，所以它直接就是「打完字之後畫面卡多久」，
-// 放進面板讓它可見——中文會比拉丁字貴得多（解析度高一倍以上）。
-let glyphBakeMs = 0;
-
-// 烘焙是同步的 CPU 工作（EDT 那條路，跟 SVG 一樣），所以打字時每個 keystroke
-// 都重烘會卡住主執行緒。debounce 的長度沿用 GLB 品質切換那條（160ms）。
-function scheduleGlyphRebuild() {
-  clearTimeout(glyphRebuildTimer);
-  glyphRebuildTimer = setTimeout(() => {
-    glyphRebuildTimer = null;
-    ensureGlyphAtlas(true);
-    requestPausedRender();
-  }, 220);
-}
-
-function ensureGlyphAtlas(force = false) {
-  if (P.motion !== 'typewriter') return;
-  const text = String(P.typeText ?? '');
-  if (!force && glyphAtlasText === text && glyphAtlas) {
-    // 圖集沒變，不必重烘，但循環秒數還是得同步：切離打字模式又切回來時，
-    // MOTION_MEMORY_KEYS 那段會先把 loopDuration 滑桿還原成這個模式記憶的舊值
-    // （可能是還沒算過的占位值），這裡要蓋回真正由四段時間軸算出來的總和，
-    // 不能因為「圖集沒變」就連這件事也一起跳過。
-    refreshTypewriterReadouts();
-    return;
-  }
-  typewriterPhrases = parsePhrases(text);
-  const t0 = performance.now();
-  const next = typewriterPhrases.length ? bakeGlyphAtlas(typewriterPhrases) : null;
-  glyphBakeMs = Math.round(performance.now() - t0);
-  if (glyphAtlas && glyphAtlas.texture !== next?.texture) glyphAtlas.texture.dispose();
-  glyphAtlas = next;
-  glyphAtlasText = text;
-  if (glyphAtlas && !glyphAtlas.font.ok) console.warn('[打字] 字體驗證：' + glyphAtlas.font.note);
-  if (glyphAtlas && glyphAtlas.truncated) {
-    console.warn(`[打字] 不同字元數超過圖集上限，已忽略 ${glyphAtlas.truncated} 個`);
-  }
-  uploadGlyphAtlas();
-  refreshTypewriterReadouts();
-}
-
-// 把烘好的圖集綁上 uniform。單獨一支的理由：面板還原（載入自動保存的模式）發生在
-// initGL 之前，那時 uniforms 還是 null，圖集會烘好卻上不去，畫面只剩空白貼圖而
-// 完全沒有錯誤訊息。所以 initGL 建好 uniforms 之後要再套一次。
-function uploadGlyphAtlas() {
-  if (!uniforms || !glyphAtlas) return;
-  uniforms.uTypeAtlas.value = glyphAtlas.texture;
-  uniforms.uTypeAtlasInfo.value.set(
-    glyphAtlas.cols, glyphAtlas.rows, glyphAtlas.tile, glyphAtlas.range,
-  );
-}
-
-// 一行字能容納的格數。超過上限就從尾巴截斷——把「打到第幾個字」硬塞進 24 格
-// 會讓行首的字被吃掉，截尾至少讓讀者看得到句子的開頭。
-function typewriterLineLimit() {
-  return MAX_TYPE_GLYPHS;
-}
-
-/* ===== 打字模式：使用者匯入字體 ===== */
-// 只接受單一檔案的字體格式，不含需要授權伺服器的雲字體服務、也不含 .dfont／.fon
-// 這類冷門格式——那些不是單一二進位檔，FontFace 讀不到。
-const CUSTOM_FONT_ACCEPT = '.ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2';
-let customFontFace = null; // 目前註冊在 document.fonts 裡的那顆，換字體或還原時要先移除舊的
-let customFontRequestId = 0; // 使用者連續選了好幾個檔案時，只有最後一個請求的結果算數
-
-function setFontState(text) {
-  const el = document.getElementById('typeFontState');
-  if (el) el.textContent = text;
-}
-
-async function loadCustomFont(file) {
-  const requestId = ++customFontRequestId;
-  setFontState(`正在載入「${file.name}」…`);
-  try {
-    const buffer = await file.arrayBuffer();
-    const face = new FontFace(CUSTOM_FONT_FAMILY_NAME, buffer);
-    await face.load();
-    // 載入是非同步的：使用者可能在這段期間又選了別的檔案，或按了「還原內建字體」。
-    // 只有仍然是最後一個請求時才生效，否則這份載入結果已經過期，直接丟棄
-    // （包括把它從 document.fonts 移除，不留著佔記憶體）。
-    if (requestId !== customFontRequestId) { document.fonts.delete(face); return; }
-    if (customFontFace) document.fonts.delete(customFontFace);
-    document.fonts.add(face);
-    customFontFace = face;
-    setCustomFont(file.name);
-    ensureGlyphAtlas(true);
-    requestPausedRender();
-    setFontState(`已套用：${file.name}`);
-  } catch (err) {
-    if (requestId !== customFontRequestId) return;
-    // 常見失敗：選到的檔案不是字體（例如誤選了圖片）、或字體檔本身壞損——
-    // FontFace.load() 對這兩種情況都是 reject，不會拋出更細的原因，只能照瀏覽器
-    // 給的訊息原樣顯示。
-    setFontState(`載入失敗：${err.message || '檔案格式不支援'}`);
-  }
-}
-
-// 直接指名一個系統字體，不透過檔案——例如 Adobe Fonts 用「啟用桌面字體」同步裝好
-// 的字體，本來就已經是這台機器上一個真正的系統字體，Canvas 原生就找得到。這條路
-// 完全不牽涉抓取字體檔案，也就不會踩到雲字體服務的授權問題（見 glyph-field.js 的
-// useSystemFont 說明）。
-//
-// 不在這裡先用 document.fonts.check 擋掉「找不到」的名稱——找不到時 fontStack()
-// 本來就會落回 Menlo，而 verifyFont() 會在面板狀態列如實回報「讀不到」，比在這裡
-// 攔下來更準確：check() 只能問「瀏覽器認得這個名字嗎」，問不出「等一下 fillText
-// 實際畫出來是不是真的這個字體」，兩者在某些瀏覽器/字體組合下會不一致。
-function setSystemFontState(text) {
-  const el = document.getElementById('typeSystemFontState');
-  if (el) el.textContent = text;
-}
-
-// name 若剛好命中瀏覽出來的家族清單，weight 會由呼叫端從樣式下拉帶過來；否則
-// （使用者手動打的名字、或還沒按過「列出系統字體」）走原本固定 700 的行為。
-function applySystemFont(name, weight, label) {
-  const trimmed = name.trim();
-  if (!trimmed) return;
-  customFontRequestId++; // 讓任何還在進行中的檔案載入請求作廢
-  if (customFontFace) { document.fonts.delete(customFontFace); customFontFace = null; }
-  useSystemFont(trimmed, weight);
-  ensureGlyphAtlas(true);
-  requestPausedRender();
-  // 烘完之後 glyphAtlas.font.note 才是「這個名字瀏覽器實際讀不讀得到」的真實結果，
-  // 這裡先顯示「已套用」是樂觀的即時回饋；refreshTypewriterReadouts 已經會把
-  // font.note 顯示在 typeTextInfo，讀不到的話那邊會蓋過來寫「已 fallback 到 Menlo」。
-  setSystemFontState(`已套用系統字體：${label || trimmed}`);
-}
-
-// ===== 打字模式：瀏覽系統字體（Local Font Access API） =====
-// 只有 Chrome／Edge（且要 https 或 localhost）支援 window.queryLocalFonts；其他
-// 瀏覽器一律 fallback 到手動輸入名稱那條路，這裡的按鈕會照實回報不支援，不假裝
-// 有這個功能。搜尋框跟手動輸入是同一個 <input>：有清單時輸入框旁的原生
-// <datalist> 會提供自動完成建議（含中文子字串），沒清單（或清單沒收到那個字體）
-// 一樣可以直接手動打完整名稱送出，兩條路徑不再是分開的兩組控制項。
-let localFontsByFamily = null; // Map<family, FontData[]>，瀏覽完重建一次，僅用來組 datalist 建議清單
-
-async function browseLocalFonts() {
-  if (typeof window.queryLocalFonts !== 'function') {
-    setSystemFontState('此瀏覽器不支援系統字體清單（僅 Chrome／Edge 有 Local Font Access API），請直接在下面手動輸入完整名稱。');
-    return;
-  }
-  setSystemFontState('正在讀取系統字體清單…（可能會跳出瀏覽器授權詢問）');
-  try {
-    const list = await window.queryLocalFonts();
-    const map = new Map();
-    for (const f of list) {
-      if (!map.has(f.family)) map.set(f.family, []);
-      map.get(f.family).push(f);
-    }
-    localFontsByFamily = map;
-    const datalist = document.getElementById('typeLocalFontDatalist');
-    if (datalist) {
-      datalist.innerHTML = '';
-      const families = [...map.keys()].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
-      for (const fam of families) {
-        const opt = document.createElement('option');
-        opt.value = fam;
-        datalist.appendChild(opt);
-      }
-    }
-    setSystemFontState(
-      `已讀到 ${map.size} 個字體家族——下面打字會自動篩出符合的名稱。若系統裡確實有的字體沒出現在建議清單，`
-      + `通常是瀏覽器基於系統保護排除了那顆字體（常見於作業系統內建的介面字型），`
-      + `或它其實是網頁字型服務（例如 Adobe Fonts）還沒同步成系統字體，這兩種情況都可以直接手動打完整名稱送出試試。`
-    );
-  } catch (err) {
-    // 使用者拒絕授權、或非安全環境（http 非 localhost）時會 reject。
-    setSystemFontState(`無法讀取系統字體清單：${err.message || '使用者拒絕權限或環境不支援'}`);
-  }
-}
-
-// 粗細一律由旁邊那顆下拉直接決定，不再依賴瀏覽清單裡的樣式字串猜測——手動輸入
-// 名稱時本來就常常抓不到清單，猜測式的自動判斷只會讓「有沒有粗細可選」變得
-// 不可預期。使用者自己選，永遠有得選。
-function applyTypedSystemFont() {
-  const input = document.getElementById('typeSystemFontInput');
-  const weightSel = document.getElementById('typeSystemFontWeight');
-  if (!input) return;
-  const trimmed = input.value.trim();
-  if (!trimmed) return;
-  const weight = Number(weightSel?.value) || 700;
-  applySystemFont(trimmed, weight, `${trimmed}（${weightSel?.selectedOptions[0]?.textContent || weight}）`);
-}
-
-function resetCustomFont() {
-  customFontRequestId++; // 讓任何還在進行中的載入請求作廢
-  if (customFontFace) { document.fonts.delete(customFontFace); customFontFace = null; }
-  clearCustomFont();
-  ensureGlyphAtlas(true);
-  requestPausedRender();
-  setFontState('已還原成內建字體 Menlo');
-}
-
-// 每幀把行狀態打包成 uniform。時間軸整條都在 CPU 這邊算完，shader 只認
-// 「第幾格、是哪個字形、成形到幾成」。
-function updateTypewriterUniforms(phase) {
-  if (!uniforms) return 0;
-  const state = glyphAtlas ? typewriterState(phase) : null;
-  if (!state || !glyphAtlas) {
-    uniforms.uTypeLine.value.set(0.6, P.typeSize, 0.22, 0);
-    uniforms.uTypeCaret.value.set(0, 0, 0, 0);
-    return 0;
-  }
-  const limit = typewriterLineLimit();
-  const visible = Math.min(state.chars, limit);
-  // 置中基準用「這句話的總長」，不是目前打出來的字數。用可見字數置中的話，每打
-  // 一個字整行中心點都會跟著移動——兩三個字的短句尤其明顯，看起來是整行在抖，
-  // 不是在長。錨點只在換句時才變，同一句話從頭打到尾／刪到底都是同一個寬度。
-  // shaders.js 的 typeGlyphEdge／typewriterDistance 用同一個值置中，兩邊必須一致。
-  const anchor = Math.min(state.phrase.length, limit);
-  // 資料貼圖的格 i 對應這個字在句子裡的第 i 個位置——跟 shader 端置中用的 slot
-  // 是同一個索引，不能像第一版那樣「跳過查不到的字元再往前補位」，否則 CPU 這邊
-  // 緊縮過的順序會跟 shader 用位置算出來的 cx 對不上，字會全部錯位。查不到的字元
-  // （目前只有超出 MAX_ATLAS_GLYPHS 被截斷的情況）直接留空，那個位置上就是一段
-  // 空白，不是把後面的字往前推。
-  for (let i = 0; i < visible; i++) {
-    const idx = glyphAtlas.indexOf.get(state.phrase[i]);
-    const o = i * 4;
-    if (idx === undefined) { glyphData[o + 1] = 0; continue; }
-    // 最後一格是正在打（或正在刪）的那一個，成形進度來自時間軸；其餘都已就位。
-    const reveal = i === state.chars - 1 ? state.charFrac : 1;
-    glyphData[o] = idx;
-    glyphData[o + 1] = reveal;
-    glyphData[o + 2] = 0;
-    glyphData[o + 3] = 0;
-  }
-  // 空白字元在圖集裡確實有一格（全正距離），所以上面不會被 continue 掉；這裡把
-  // 錨點寬度以外的格子清乾淨，避免上一句換過來的殘值被 x 切片剔除誤讀。
-  for (let i = visible; i < MAX_TYPE_GLYPHS; i++) glyphData[i * 4 + 1] = 0;
-  glyphDataTexture.needsUpdate = true;
-
-  const advance = glyphAtlas.advance * Math.max(0.1, P.typeTracking);
-  const size = Math.max(0.01, P.typeSize);
-  uniforms.uTypeLine.value.set(advance, size, glyphAtlas.baseline, anchor);
-  uniforms.uTypeShape.value.set(P.typeDepth, P.typeBevel, P.typeGrow, glyphAtlas.feature);
-
-  // 游標：跟著「目前實際打出來的字數」走（不是錨點寬度），行尾往右半格。
-  // 閃爍相位鎖在循環上（每循環固定的整數次閃爍），這樣循環接回去時不會出現
-  // 半亮的一幀。
-  const caretWidth = Math.max(0, P.typeCaretWidth) * size * 0.5;
-  if (caretWidth > 0.001) {
-    const advWorld = advance * size;
-    const x0 = -(anchor - 1) * 0.5 * advWorld;
-    // slot 0 在最左，游標站在最後一格的右邊；一格都沒有時停在行中央。
-    const caretX = visible > 0 ? x0 + visible * advWorld : 0;
-    const blinks = Math.max(1, Math.round(P.loopDuration / 0.53));
-    const on = fract(phase * blinks) < 0.5 ? 1 : 0;
-    uniforms.uTypeCaret.value.set(caretX, size * 0.18, caretWidth, on);
-  } else uniforms.uTypeCaret.value.set(0, 0, 0, 0);
-
-  // 包圍球半徑。這個模式的形狀是橫向鋪開的一行字，不是聚在原點的水滴群，
-  // 所以邊界得自己算——沿用水滴分佈算出來的半徑會把行尾整段裁掉。用錨點寬度
-  // 而不是目前字數，這樣打字過程中邊界不會忽大忽小、跟著鏡頭一起抖。
-  return (anchor * advance * size) * 0.5 + size * 0.9;
-}
-
-// 四段時間軸是使用者調的絕對時間，循環秒數是它們的總和——跟其他模式反過來
-// （其他模式是循環秒數在前，各段時長是循環秒數的比例）。所以這個模式底下，
-// 循環秒數不是滑桿，是這個函式算出來直接寫進 P.loopDuration 與 uLoopDuration
-// 的結果。呼叫時機：切進打字模式、文字改變（換句數／句長）、四段時長任何一條
-// 被拖動。
-// 把「這個模式實際的循環秒數」廣播出去給匯出面板。
-//
-// 匯出面板原本是直接讀 #loopDuration 這根滑桿的 value，那在打字（與靜態）模式
-// 下是錯的：這兩個模式的循環秒數不是滑桿決定的（滑桿本身就被 data-gate 藏起來），
-// 打字是由四段時間軸加總推導出來、直接寫進 P.loopDuration 的。更糟的是那根 range
-// 的 min 是 4，bindControls 的 el.value = P[key] 把 2.47 寫進去時會被 DOM 夾成 4，
-// 於是面板顯示 2.47、匯出秒數卻顯示 4，匯出的序列就不是一個完整循環。
-//
-// 用「每幀比對、變了才發事件」而不是在每個會改動 P.loopDuration 的地方各補一次
-// 呼叫：改動路徑有好幾條（滑桿、切模式套用 registry 預設、打字的四段時間軸、
-// 文字內容改變），逐一補呼叫遲早會漏掉一條，而漏掉的那條就是下一個這種 bug。
-// 成本是一次浮點數比較。
-let lastBroadcastLoopDuration = null;
-function broadcastLoopDuration() {
-  const seconds = P.loopDuration;
-  if (!(seconds > 0) || seconds === lastBroadcastLoopDuration) return;
-  lastBroadcastLoopDuration = seconds;
-  window.dispatchEvent(new CustomEvent('prism-loop-duration', { detail: { seconds } }));
-}
-
-function syncTypewriterLoopDuration() {
-  if (P.motion !== 'typewriter') return;
-  const total = Math.max(0.5, typewriterCycleSeconds());
-  P.loopDuration = total;
-  if (uniforms && uniforms.uLoopDuration) uniforms.uLoopDuration.value = total;
-  const info = document.getElementById('typeLoopInfo');
-  if (info) info.textContent = total.toFixed(2) + ' s';
-}
-
-function refreshTypewriterReadouts() {
-  syncTypewriterLoopDuration();
-  const show = (key, value) => {
-    const el = document.getElementById(key + '_v');
-    if (el) el.textContent = value;
-  };
-  // 這四條現在就是使用者調的絕對值，讀數只是把滑桿的原始單位（毫秒/字級的
-  // typeCharTime、typeEraseTime；秒級的 typeHold、typeGap）換成好讀的字串，
-  // 不再需要拿循環秒數換算。
-  show('typeCharTime', P.typeCharTime > 0 ? Math.round(P.typeCharTime) + ' ms/字' : '瞬間');
-  show('typeHold', P.typeHold.toFixed(2) + ' s');
-  show('typeEraseTime', P.typeEraseTime > 0 ? Math.round(P.typeEraseTime) + ' ms/字' : '瞬間');
-  show('typeGap', P.typeGap.toFixed(2) + ' s');
-  show('typeDepth', fmt.typeDepth(P.typeDepth));
-  show('typeBevel', fmt.typeBevel(P.typeBevel));
-  show('typeSoftness', fmt.typeSoftness(P.typeSoftness));
-  const info = document.getElementById('typeTextInfo');
-  if (info) {
-    if (!glyphAtlas) info.textContent = '沒有文字';
-    else {
-      const longest = typewriterPhrases.reduce((m, x) => Math.max(m, x.length), 0);
-      const over = longest > MAX_TYPE_GLYPHS ? `，最長一句 ${longest} 字超過上限 ${MAX_TYPE_GLYPHS}` : '';
-      const font = glyphAtlas.cjk ? `${glyphAtlas.font.note} + 系統中文字` : glyphAtlas.font.note;
-      info.textContent = `${typewriterPhrases.length} 句／${glyphAtlas.count} 個字形`
-        + `／${glyphAtlas.tile}² 烘焙 ${glyphBakeMs}ms（${font}）${over}`;
-    }
-  }
-}
+/* ===== 打字模式 ===== */
+const {
+  glyphDataTexture, makeBlankGlyphAtlas, scheduleGlyphRebuild, ensureGlyphAtlas,
+  uploadGlyphAtlas, updateTypewriterUniforms, refreshTypewriterReadouts,
+  broadcastLoopDuration, loadCustomFont, resetCustomFont, browseLocalFonts,
+  applyTypedSystemFont,
+} = createTypewriterRuntime({
+  THREE,
+  params: P,
+  getUniforms: () => uniforms,
+  requestRender: requestPausedRender,
+  formatters: fmt,
+});
 
 function makeMicroDropTexture() {
   microDropTexture = new THREE.DataTexture(
