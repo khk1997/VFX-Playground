@@ -46,6 +46,7 @@ import { buildStoredZip, downloadBlob, nextPaint, pixelsToPng } from './export-u
 import { createMaterialTextureController } from './material-textures.js?v=1';
 import { createEnvironmentLoader, selectMaterialEnvironment } from './environment-loader.js?v=1';
 import { describeShapeImport, loadShapeAsset } from './shape-loader.js?v=1';
+import { createShaderVariantPlanner, VariantMaterialCache } from './shader-variants.js?v=1';
 
 // 提高 PMREM 高粗糙度的最低預過濾解析度，避免 16×16 tile 造成方格反射。
 patchEnvMapResolution();
@@ -1560,11 +1561,6 @@ function runDiagTiming(onDone) {
 // 這個函式就是唯一的決策點：把判斷條件從 DIAG.minshader 換成當前模式需要什麼。
 // 基線與所有 probe 都共用 FRAG_BASELINE 那支最小 shader，差別只在 PROBE_* 開關。
 // 這樣「baseline → +A → +B」每一步的差異就只有一個功能，不會混進別的變因。
-function usesBaselineShader() {
-  return DIAG.compilerbaseline || DIAG.probeNoise || DIAG.probeSnoise
-    || DIAG.probeFbm || DIAG.probeNoiseMapscene || DIAG.probeMarchBound > 0;
-}
-
 // ===== 變體快取 =====
 //
 // 一個 key 對應一支已經編好的 ShaderMaterial。切回用過的組合時直接取用，零編譯。
@@ -1572,27 +1568,19 @@ function usesBaselineShader() {
 // 上限存在的理由：每個 variant 是一支真的 WebGL program，佔 GPU 記憶體。12 個足夠
 // 覆蓋一般使用會碰到的組合，超過就以 LRU 淘汰並 dispose。
 const VARIANT_CACHE_LIMIT = 12;
-const variantCache = new Map();     // Map 的插入順序就是 LRU 順序
+const variantCache = new VariantMaterialCache(VARIANT_CACHE_LIMIT, key => {
+  console.info('[bubble variant] 淘汰 ' + key);
+});
 let activeVariantKey = null;
 let variantSwapInFlight = null;     // 正在背景預編譯的 key，避免重複發動
 const variantStats = { 命中: 0, 未命中: 0, 最後一次切換ms: null, 最後一次是命中: null };
 
 function touchVariant(key) {
-  // 重新插入 = 移到 LRU 尾端
-  const mat = variantCache.get(key);
-  if (mat) { variantCache.delete(key); variantCache.set(key, mat); }
-  return mat;
+  return variantCache.touch(key);
 }
 
 function evictVariantsIfNeeded() {
-  while (variantCache.size > VARIANT_CACHE_LIMIT) {
-    const oldest = variantCache.keys().next().value;
-    if (oldest === activeVariantKey) break;   // 絕不淘汰正在用的那一支
-    const mat = variantCache.get(oldest);
-    variantCache.delete(oldest);
-    try { mat.dispose(); } catch (_) {}
-    console.info('[bubble variant] 淘汰 ' + oldest);
-  }
+  variantCache.evict(activeVariantKey);
 }
 
 // ===== 環境貼圖就緒與否 =====
@@ -2031,282 +2019,23 @@ function updateShaderState() {
 // （0–6）時整條形狀場都不該存在：不只是不畫出來，連負形空腔、微滴、匯入 UI
 // 都要一起關掉，否則內建展示造型的空腔會被挖進程序化幾何裡，變成畫面上莫名
 // 其妙多出來的孔洞。
-function staticUsesImportedShape(motion = P.motion) {
-  return motion !== 'static' || P.staticShape === 7;
-}
-
-// motion 可以覆寫，用來問「如果切到某個模式，那一刻會需要哪一支變體」。背景預熱就是
-// 靠它算出還沒編過的那幾支的鍵與 defines（見 prewarmVariants）。
-function variantState(motion = P.motion) {
-  // 有幾個變體軸是「按模式各自記憶」的（見 motionMemory）：問別的模式時必須讀那個
-  // 模式記住的值，不是當下這個模式的值。少了這一層，預熱會編出永遠不會被命中的鍵
-  // —— 例如果凍記住的是「光譜焦散關閉」，拿當下的值去算就會編錯一支。
-  const scoped = key => (motion === P.motion ? P[key] : motionMemory[key][motion]);
-  const shapeField = usesShapeField(motion) && staticUsesImportedShape(motion);
-  // 造型型別：面板的「形狀來源」。SVG 的 6-tap 法線只有在造型場真的編進來、
-  // 而且型別是 SVG 時才可能被走到（uShapeType == 1 且 uShapeProgress > 0.001）。
-  // 只看型別不看進度是刻意的：uShapeProgress 是動畫值，收進鍵裡會讓造型成形過程中
-  // 不斷切換變體。所以 SVG 模式兩條法線路徑都編，維持原本的數學。
-  const svgNormals = shapeField && P.shapeSource === 'svg';
-  // 兩顆形狀交接（形狀變形）與成型波前（形狀匯聚）：mapScene 裡兩塊互斥的分支，
-  // 各自的 runtime 開關只有自己那個模式會設起來。兩者共用 dissolveField，所以
-  // 那個函式（含 3x3 Voronoi）只要有一邊要就得編。
-  //
-  // 這兩項必須進變體鍵：少了它們，形狀匯聚與形狀變形的其他旗標組合完全相同
-  // （都是造型場＋微滴＋負形），會在快取裡撞成同一個鍵卻對應兩份不同的 defines。
-  const shapeMorph = shapeField && motion === 'morph';
-  const formationCut = shapeField && isFormationMotion(motion) && P.formationFrontOn;
-  return {
-    // --- 幾何 ---
-    shapeField,
-    svgNormals,
-    // 造型距離場的來源。面板的「形狀來源」二選一，另一支在這個變體裡是死碼
-    // （見 shaders.js 的 shapeDistance）。svgNormals 與 shapeSvg 條件相同但意義
-    // 不同：一個決定法線路徑，一個決定距離場來源，所以分開列。
-    shapeSvg: svgNormals,
-    shapeVolume: shapeField && P.shapeSource !== 'svg',
-    shapeMorph,
-    formationCut,
-    dissolveField: shapeMorph || formationCut,
-    // 毛細波的程序紋理現在也服務靜態模式：兩者共用同一支 capillarySurfaceOffset，
-    // 只是分別套在形狀場（毛細波）與程序化 SDF（靜態的內建幾何）上。
-    // 私語(research)的外殼紋理跟毛細波共用同一份 Noise／Voronoi 等函式
-    // (見 shaders.js 的 researchProceduralTexture)，所以也要編進這個旗標。
-    capillaryTexture: motion === 'capillary' || motion === 'static'
-      || motion === 'research',
-    // 靜態模式選了內建幾何（staticShape 0-6）時才編譯程序化 SDF；選了「匯入」
-    // （staticShape 7）就完全交給上面的 shapeField 走形狀場，兩邊不同時混進 d。
-    staticShape: motion === 'static' && P.staticShape !== 7,
-    research: motion === 'research',
-    typewriter: motion === 'typewriter',
-    // 微滴的實際條件與 updateMicroDrops 的 activeCount 完全一致：四種模式之一，
-    // 而且造型場真的在（微滴的 anchors 也來自匯入的造型）。
-    microDrops: shapeField
-      && (isFormationMotion(motion) || motion === 'shatter'
-        || motion === 'melt' || motion === 'morph'),
-    // 衛星滴與毛細回彈波只在分裂的 pinch-off 產生（見 bubble.js 寫入 satelliteDrops
-    // 與 elasticEvent 的地方，其餘模式一律歸零）。
-    satellites: motion === 'split',
-    capillaryWave: motion === 'split',
-    // 負形（空腔）是造型的一部分：anchors 由 shapeCavityBase 產生，沒有匯入造型
-    // 就永遠是空陣列。
-    negativeField: shapeField,
-
-    // --- 光學 ---
-    // 薄膜干涉：面板預設關閉。關閉時整條 noise/干涉鏈的產物恆為 0（見 shaders.js
-    // 的 FEATURE_THIN_FILM 說明）。
-    thinFilm: !!P.filmEnabled,
-    // 液態薄膜材質：只有 uMaterialStyle === 1 才走那個分支。
-    liquidFilm: scoped('materialStyle') === 'membrane',
-    dispersion: !!P.dispersionEnabled,
-    prismBeam: !!P.rayDispersionEnabled,
-    spectralCaustics: !!scoped('spectralCausticEnabled'),
-    // 稜光的另外四種圖樣：只有選了非預設圖樣才需要。
-    beamPatterns: P.rayBeamPattern !== 'grid',
-    // 環境／PMREM 取樣。HDRI 載入前是 0，載入後變 1 —— 這是少數會在執行期改變的軸，
-    // 由 loadMaterialEnvironment 完成時觸發一次變體切換。
-    envPmrem: !!(uniforms && uniforms.uHasEnv.value === 1),
-  };
-}
-
-// 穩定且可預測的快取鍵。順序固定、只含布林，所以同一組狀態永遠產生同一個字串。
-//
-// 診斷覆寫必須進鍵裡：它們會改變 shaderFeatures() 產生的 defines，但不改變
-// variantState()。少了這一段，同一個鍵會對應到兩支不同的 shader，快取就會拿錯東西
-// （實測踩過：context 遺失後重建，拿到的是別組 defines 的材質）。
-//
-// dissolveField 刻意不佔一個字元：它恆等於 shapeMorph || formationCut，也就是
-// R 與 T 兩個字元的函數，不會有「鍵相同但 defines 不同」的情形。
-function variantKey(v = variantState()) {
-  const flag = (on, ch) => (on ? ch : '-');
-  const diagSalt = DIAG.any || FORCE_FEATURES.length
-    ? '.d[' + DIAG.list.join('+') + (FORCE_FEATURES.length ? '|' + FORCE_FEATURES.join('+') : '') + ']'
-    : '';
-  return [
-    'g' + flag(v.shapeField, 'S') + flag(v.svgNormals, 'V') + flag(v.shapeVolume, 'G')
-      + flag(v.capillaryTexture, 'C')
-      + flag(v.microDrops, 'M') + flag(v.satellites, 'A') + flag(v.capillaryWave, 'W')
-      + flag(v.negativeField, 'N') + flag(v.staticShape, 'X') + flag(v.research, 'H')
-      + flag(v.typewriter, 'Y') + flag(v.shapeMorph, 'R') + flag(v.formationCut, 'T'),
-    'o' + flag(v.thinFilm, 'F') + flag(v.liquidFilm, 'L') + flag(v.dispersion, 'D')
-      + flag(v.prismBeam, 'P') + flag(v.spectralCaustics, 'K') + flag(v.beamPatterns, 'B')
-      + flag(v.envPmrem, 'E'),
-  ].join('.') + diagSalt;
-}
-
-// V 可以傳入，用來為「別的模式」算 defines（背景預熱要用；見 prewarmVariants）。
-function shaderFeatures(V = variantState()) {
-  // minshader2 = minshader + 兩項編譯期收斂（見下方 slim2 的使用處）。
-  // minshader 在 Windows ANGLE 上還是跨不過編譯門檻（實測與 compileonly 體感相同），
-  // 所以再往下砍固定迴圈上限與分支數，但一樣不碰任何數學。
-  // shaderRun 兩條路都要注入，否則測不到正式 shader 變體的 cold compile。
-  const withRun = d => {
-    if (SHADER_RUN !== null) d.SHADER_RUN = SHADER_RUN;
-    return d;
-  };
-  // 基線與 probe 系列都用 FRAG_BASELINE，只吃這兩個上限加上各自的 PROBE_* 開關。
-  if (usesBaselineShader()) {
-    const d = { MAX_MARCH_COMPILE: 4, MAX_DROPS_COMPILE: 2 };
-    // 每個 probe 明確列出它要哪幾段 GLSL 與哪一個呼叫點，不依賴編譯器的
-    // dead-strip 行為來界定範圍。
-    if (DIAG.probeSnoise) {
-      d.NEED_SNOISE = '';
-      d.CALL_SNOISE_MAIN = '';        // 在 main 呼叫一次，不進 mapScene
-    }
-    if (DIAG.probeFbm) {
-      d.NEED_SNOISE = '';
-      d.NEED_FBM = '';                // 含那個 for (i < 4) 的 4 octave 迴圈
-      d.CALL_FBM_MAIN = '';           // 只在 main 呼叫一次，不進 mapScene
-    }
-    if (DIAG.probeNoiseMapscene || DIAG.probeMarchBound > 0) {
-      d.NEED_SNOISE = '';
-      d.NEED_FBMFAST = '';            // fbmFast 本身沒有迴圈，是兩次展開的 snoise
-      d.CALL_FBMFAST_MAPSCENE = '';   // 進 mapScene → 在 raymarch 呼叫鏈內
-      // 只有這一項不同：march 展開上限。其餘條件與 probe-noise-mapscene 完全一致。
-      if (DIAG.probeMarchBound > 0) d.MAX_MARCH_COMPILE = DIAG.probeMarchBound;
-    }
-    if (DIAG.probeNoise) {
-      d.NEED_SNOISE = '';
-      d.NEED_FBM = '';
-      d.NEED_FBMFAST = '';
-      d.CALL_FBMFAST_MAPSCENE = '';   // 進 mapScene（＝在 raymarch 呼叫鏈內）
-      d.CALL_FBM_MAIN = '';
-    }
-    return withRun(d);
-  }
-  // ===== 正式的變體特化 =====
-  //
-  // 這裡不再「一支 shader 包所有功能」。實際會編進去的東西由當下真正需要的模式、
-  // 材質與光學開關決定，其餘在編譯期就不存在。每一項的依據都是「該狀態下 runtime
-  // 條件恆為 false」，所以是行為等價的特化，不是降級。
-  //
-  // 為什麼要這樣做：Windows 的 ANGLE→HLSL→fxc 會把所有函式攤平成一個巨大的函式，
-  // 而優化器成本對函式大小是超線性的。實測把萬能 shader 拆成當下需要的最小組合，
-  // cold compile 從兩分鐘級一路降到個位數秒級。
-  const defines = {
-    // 行動裝置只需要四方向 PMREM 補樣，讓預處理器把另外四個龐大的
-    // textureCubeUV 展開從 shader 原始碼移除；桌面高品質仍使用完整八方向。
-    MAX_REFLECTION_SAMPLES: mobileRenderQuery.matches ? 4 : 8,
-    // --- 幾何：mapScene 的子系統，由 motion 決定 ---
-    FEATURE_SHAPE_FIELD: V.shapeField ? '' : false,
-    FEATURE_CAPILLARY: V.capillaryTexture ? '' : false,
-    FEATURE_STATIC_SHAPE: V.staticShape ? '' : false,
-    FEATURE_MICRO_DROPS: V.microDrops ? '' : false,
-    FEATURE_SATELLITES: V.satellites ? '' : false,
-    FEATURE_CAPILLARY_WAVE: V.capillaryWave ? '' : false,
-    FEATURE_NEGATIVE_FIELD: V.negativeField ? '' : false,
-    FEATURE_RESEARCH: V.research ? '' : false,
-    FEATURE_TYPEWRITER: V.typewriter ? '' : false,
-
-    // --- 造型場內部：只編這個模式真的走得到的那幾塊 ---
-    // 距離場來源二選一（SVG 擠出／GLB 體積）。體積那支是 8 次 atlasVoxel，
-    // 也就是 8 個 texture2D 加三線性插值，攤平後是造型模式最大的一塊。
-    FEATURE_SHAPE_SVG: V.shapeSvg ? '' : false,
-    FEATURE_SHAPE_VOLUME: V.shapeVolume ? '' : false,
-    // 兩顆形狀交接：只有形狀變形會設 uShapeMorph。它自己就帶兩份造型距離場。
-    FEATURE_SHAPE_MORPH: V.shapeMorph ? '' : false,
-    // 成型波前：只有形狀匯聚會設 uFormationCut。
-    FEATURE_FORMATION_CUT: V.formationCut ? '' : false,
-    // 上面兩者共用的消失場（含一個 3x3 Voronoi 迴圈），有一邊要就得編。
-    FEATURE_DISSOLVE_FIELD: V.dissolveField ? '' : false,
-
-    // --- 法線路徑：只編當下這個造型型別真正會走到的那一條 ---
-    // SVG 造型的 6-tap 分軸差分與四面體 4-tap 在原版是兩條 runtime 分支，兩條都會
-    // 被編譯（每個呼叫點 10 份 mapScene）。四面體是任何狀態都可能走到的，一律保留；
-    // SVG 那條只有在「造型場有編進來且造型型別是 SVG」時才可能成立。
-    NORMAL_TAPS_TETRA: '',
-    NORMAL_TAPS_SVG: V.svgNormals ? '' : false,
-
-    // --- 光學：只編當下真的開著的 ---
-    FEATURE_THIN_FILM: V.thinFilm ? '' : false,
-    FEATURE_LIQUID_FILM: V.liquidFilm ? '' : false,
-    FEATURE_LIQUID_FILM_DEPTH: V.liquidFilm ? '' : false,
-    FEATURE_DISPERSION: V.dispersion ? '' : false,
-    FEATURE_PRISM_BEAM: V.prismBeam ? '' : false,
-    FEATURE_PRISM_SATURATION: V.prismBeam ? '' : false,
-    FEATURE_SPECTRAL_CAUSTICS: V.spectralCaustics ? '' : false,
-    FEATURE_ENV_PMREM: V.envPmrem ? '' : false,
-    // 五種稜光圖樣裡只有預設的晶格是常用的；其餘四種各帶一個 3 次迴圈。
-    FEATURE_BEAM_PATTERNS: V.beamPatterns ? '' : false,
-  };
-
-  // ?diag=allfeatures —— 驗證用：把所有功能都編進去，等同變體特化之前那支「萬能
-  // shader」。存在的理由是逐像素驗證：特化的正確性主張是「該狀態下 runtime 條件恆為
-  // false，所以編不編都一樣」，而驗證這個主張最直接的方式，就是拿同一份程式碼的
-  // 全功能版與特化版在同一幀比對。兩者必須逐位元相同。
-  if (DIAG.allFeatures) {
-    for (const k of Object.keys(defines)) {
-      if (k.startsWith('FEATURE_') || k.startsWith('NORMAL_TAPS_')) defines[k] = '';
-    }
-  }
-  // 一次只強制加回一個功能，用來逐項證明「編了也不會改變畫面」。
-  for (const k of FORCE_FEATURES) defines[k] = '';
-
-  // ===== 以下是診斷探針的覆寫 =====
-  //
-  // 全部預設關閉，只有帶 ?diag= 時才生效。它們可以把上面任何一個正式旗標再關掉，
-  // 用來在 production 架構上做 A/B，而不是另外維護一套平行的 shader。
-  if (DIAG.minshader || DIAG.minshader2 || DIAG.lowcompileloops) {
-    defines.FEATURE_SHAPE_FIELD = false;
-    defines.FEATURE_CAPILLARY = false;
-    defines.FEATURE_MICRO_DROPS = false;
-    // dissolveField 的守衛是獨立的（它同時服務 morph 與成型波前兩塊），造型場整個
-    // 關掉時它就沒有呼叫者了，這裡跟著關掉才不會白編一個 Voronoi 迴圈。
-    defines.FEATURE_DISSOLVE_FIELD = false;
-  }
-  if (DIAG.minshader2 || DIAG.lowcompileloops) {
-    defines.FEATURE_BEAM_PATTERNS = false;
-    defines.MAX_DROPS_COMPILE = 4;
-  }
-  // 純診斷：步數不足畫面會破，只用來確認 ANGLE 是否卡在 loop expansion。
-  // 正式版一律使用 shaders.js 的預設 88 / 28。
-  if (DIAG.lowcompileloops) {
-    defines.MAX_MARCH_COMPILE = 16;
-    defines.MAX_INTERIOR_COMPILE = 8;
-  }
-  const late = DIAG.probeNoLateShading;
-  if (late || DIAG.probeNoPrismBeam) defines.FEATURE_PRISM_BEAM = false;
-  if (late || DIAG.probeNoPrismSaturation) defines.FEATURE_PRISM_SATURATION = false;
-  if (late || DIAG.probeNoLiquidFilmMaterial) defines.FEATURE_LIQUID_FILM = false;
-  if (late || DIAG.probeNoThinFilmDepth) defines.FEATURE_LIQUID_FILM_DEPTH = false;
-  if (late || DIAG.probeNoDispersionSpectral) defines.FEATURE_DISPERSION = false;
-  if (late || DIAG.probeNoSpectralCaustics) defines.FEATURE_SPECTRAL_CAUSTICS = false;
-  if (DIAG.probeNoEnvPmrem) defines.FEATURE_ENV_PMREM = false;
-  if (DIAG.probeNoThinFilm || DIAG.probeNoRefractionFilm) defines.FEATURE_THIN_FILM = false;
-  if (DIAG.probeMapscenePlain || DIAG.probeMapsceneSplit) {
-    defines.FEATURE_NEGATIVE_FIELD = false;
-    if (!DIAG.probeMapsceneSplit) {
-      defines.FEATURE_SATELLITES = false;
-      defines.FEATURE_CAPILLARY_WAVE = false;
-    } else {
-      defines.FEATURE_SATELLITES = '';
-      defines.FEATURE_CAPILLARY_WAVE = '';
-    }
-    defines.NORMAL_TAPS_SVG = false;
-  }
-  if (DIAG.probeModeSvg) { defines.NORMAL_TAPS_SVG = ''; defines.NORMAL_TAPS_TETRA = false; }
-  if (DIAG.probeModeNone || DIAG.probeModeVoxel) {
-    defines.NORMAL_TAPS_SVG = false;
-    defines.NORMAL_TAPS_TETRA = '';
-  }
-  if (DIAG.singleReflectionSample) defines.PROBE_SINGLE_REFLECTION_SAMPLE = '';
-  // 驗證用：把 calcNormal 的 SVG 分軸差分換回迴圈化之前那六個展開的 tap。
-  // 這一支只該在做逐像素 A/B 時開 —— 它會把 mapScene 的靜態展開份數從 2 拉回 7，
-  // 也就是回到這一輪要修掉的那個編譯規模。
-  if (DIAG.probeUnrolledSvgTaps) defines.PROBE_UNROLLED_SVG_TAPS = '';
-  if (DIAG.probeNoWobble) defines.PROBE_NO_GEOMETRY_WOBBLE = '';
-  if (DIAG.probeNoRefractionFilm || DIAG.probeNoTraceExit) defines.PROBE_NO_TRACE_EXIT = '';
-  if (DIAG.probeNoRefractionFilm || DIAG.probeNoArtDispersion) defines.PROBE_NO_ART_DISPERSION = '';
-  if (DIAG.probeNoTraceNormal) defines.PROBE_NO_TRACE_NORMAL = '';
-  if (DIAG.probeNoTraceMarch) defines.PROBE_NO_TRACE_MARCH = '';
-  if (DIAG.probeCheapTraceSdf) defines.PROBE_CHEAP_TRACE_SDF = '';
-  if (DIAG.probeLeanNormals) {
-    defines.PROBE_LEAN_NORMALS = '';
-    defines.TRACE_EXIT_NORMAL_FN = 'exitNormalTetra';
-  }
-
-  return withRun(defines);
-}
+const {
+  usesBaselineShader,
+  staticUsesImportedShape,
+  variantState,
+  variantKey,
+  shaderFeatures,
+} = createShaderVariantPlanner({
+  getParams: () => P,
+  getMotionMemory: () => motionMemory,
+  usesShapeField,
+  isFormationMotion,
+  getHasEnvironment: () => !!(uniforms && uniforms.uHasEnv.value === 1),
+  diagnostics: DIAG,
+  forceFeatures: FORCE_FEATURES,
+  shaderRun: SHADER_RUN,
+  isMobile: () => mobileRenderQuery.matches,
+});
 
 /* ===== WebGL 場景（延遲初始化，規避預覽時的 context 上限）===== */
 let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
