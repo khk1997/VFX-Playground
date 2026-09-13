@@ -5,7 +5,7 @@ import { createAdaptiveQuality, QUALITY_TIER_NAMES } from './adaptive-quality.js
 import { initQuickSlots } from './quick-slots.js?v=1';
 import { createGpuProfiler } from './gpu-profiler.js?v=1';
 let inspector = null;
-import { EDGE_TINT_TARGETS, edgeTintParams, edgeTintKeys, sanitizeEdgeTintValue, readEdgeTintStops, sampleEdgeTint } from './edge-tint.js?v=dark-tint-1';
+import { EDGE_TINT_TARGETS, edgeTintKeys, sanitizeEdgeTintValue, readEdgeTintStops, sampleEdgeTint } from './edge-tint.js?v=dark-tint-1';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
 } from './shape-field.js?v=typewriter-1';
@@ -17,7 +17,7 @@ import {
 } from './default-shapes.js?v=svg-shape-76';
 import {
   MOTION_UNIFORM_MAP, MOTION_SVG_DEMO,
-  MOTION_HDRI, MOTION_KEYS, MOTION_PARAMS, MOTION_TEXT_DEFAULTS, usesShapeField, motionGates,
+  MOTION_HDRI, MOTION_KEYS, MOTION_TEXT_DEFAULTS, usesShapeField,
 } from './motions/registry.js?v=edge-tint-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
@@ -59,6 +59,7 @@ import {
 } from './control-schema.js?v=1';
 import { createTypewriterRuntime } from './typewriter-runtime.js?v=1';
 import { buildExtendedMotionControls } from './panel-builder.js?v=1';
+import { createPanelStateController } from './panel-state.js?v=1';
 
 // 提高 PMREM 高粗糙度的最低預過濾解析度，避免 16×16 tile 造成方格反射。
 patchEnvMapResolution();
@@ -3548,245 +3549,13 @@ function resetRamp() {
   }
 }
 
-// 依模式反灰不適用的控制項
-// 面板閘門。哪條參數在哪些情況下有效，宣告在 HTML 的 data-gate 上（空白分隔＝
-// AND，前綴 ! ＝反相），這裡只負責把宣告翻成 disabled 與 .gated-off。
-//
-// 之所以不是把條件寫在 JS 裡逐個 getElementById：那份清單有四十幾條，每加一個
-// 模式專屬參數就要回來補一次，而且 row / note / 控制項三者要各補一次，漏掉一個
-// 不會報錯、只會安靜地讓某條滑桿在無效的模式下看起來可用。
-//
-// 巢狀是允許的：子孫只宣告自己額外的條件，祖先的條件由 applyGates 自動疊上。
-//
-// 每個動態模式自己的 gate 由 registry 產生（新增模式時不必回來補一行），
-// 形狀來源這種與模式無關的條件仍寫在這裡。
-const GATES = {
-  ...motionGates(() => P.motion),
-  // 覆寫 motionGates 產生的 shape：那一份只看「這個模式吃不吃形狀場」，但靜態
-  // 模式是吃不吃要看選了哪種幾何。選內建幾何時「形狀匯聚」與「造型動態」兩塊
-  // 匯入 UI 都跟這裡一起收起來（它們的 data-gate 都是 shape）。
-  shape:     () => usesShapeField(P.motion) && staticUsesImportedShape(),
-  svg:       () => P.shapeSource === 'svg',
-  glb:       () => P.shapeSource !== 'svg',
-  // 果凍的兩條分支。跟 motion 的 gate 一樣用巢狀疊加：這兩個只宣告分支條件，
-  // 「必須是果凍模式」那半由祖先的 data-gate="jelly" 自動疊上。
-  jellyPoke:   () => P.jellyStyle === 'poke',
-  jellyBounce: () => P.jellyStyle === 'bounce',
-  // 毛細波的程序紋理參數面板：毛細波與靜態方體共用同一組，見
-  // buildExtendedMotionControls 裡對 'capillary' 那份 block 的特例。
-  capillaryTextureUI: () => P.motion === 'capillary' || P.motion === 'static',
-  // 靜態模式的幾何選項（見 registry.js 的 staticShape 數字枚舉：
-  // 0 方體／1 平面／2 圓盤／3 球體／4 圓柱／5 圓錐／6 圓環／7 匯入）。
-  staticShapeBox:       () => P.staticShape === 0,
-  staticShapePrimitive: () => P.staticShape >= 1 && P.staticShape <= 6,
-  staticShapeCylOrCone: () => P.staticShape === 4 || P.staticShape === 5,
-  staticShapeTorus:     () => P.staticShape === 6,
-  staticShapeImport:    () => P.staticShape === 7,
-  // 程序紋理的總開關：選「無」（6）時整組波紋參數都沒有作用，一併收起來。
-  capillaryTextureOn:   () => Math.round(P.capillaryTexture) !== 6,
-  // 後處理各效果的附屬參數：效果關掉時那些滑桿沒有作用，一併收起來。
-  bloomOn:              () => P.bloomEnabled,
-  streaksOn:            () => P.streaksEnabled,
-  // 光譜焦散的「亮帶」參數。薄膜噪聲（filmNoise）在 mapping 分支裡把 bandWave
-  // 整個覆寫掉，所以曲面扭曲與內部反射對它完全沒有作用——面板照樣亮著給人調
-  // 卻毫無反應，比名字取錯更容易誤導。
-  //
-  // 只收這兩根。「尺度」與「光帶寬度」在薄膜噪聲下仍然有效（前者決定 3D Noise
-  // 的頻率，後者透過 focusExponent 影響明暗對比），收掉會拿走真的在動的控制項。
-  causticBandUI:        () => P.spectralCausticMapping !== 'filmNoise',
-  // 私語的兩組附屬參數，理由同上：關掉／選「無」之後那些滑桿沒有作用。
-  researchTextureOn:    () => Math.round(P.researchShellTexture) !== 6,
-  researchBubblesOn:    () => P.researchBubbles,
-};
-
-function gateOpen(spec) {
-  return spec.trim().split(/\s+/).every(token => {
-    const negated = token.startsWith('!');
-    const gate = GATES[negated ? token.slice(1) : token];
-    // 未知的條件名一律放行：打錯字的後果是「該藏的沒藏」，而不是把控制項鎖死。
-    if (!gate) return true;
-    return gate() !== negated;
-  });
-}
-
-// 閘門先跑，功能開關後跑。後者用 setDisabled 疊加，才不會把閘門關掉的控制項
-// 重新打開（`el.disabled = !enabled` 這種寫法會直接覆蓋掉前一段的結論）。
-const setDisabled = (el, disabled) => { el.disabled = el.gateOff || disabled; };
-
-function applyGates() {
-  const panel = document.getElementById('panel');
-  // querySelectorAll 是文件順序，所以處理到某個元素時它的祖先已經標好了 ——
-  // 巢狀的閘門因此只需要宣告「自己額外的條件」，不必把祖先的條件再抄一遍。
-  panel.querySelectorAll('[data-gate]').forEach(el => {
-    const open = gateOpen(el.dataset.gate) && !el.parentElement?.closest('.gated-off');
-    el.classList.toggle('gated-off', !open);
-  });
-  // 收起來的東西一律連同停用：display:none 的控制項雖然點不到，但仍可能被
-  // 程式或鍵盤觸及，狀態必須跟外觀一致。closest 包含元素自己，所以閘門直接
-  // 標在控制項上（例如隱藏的檔案輸入框）也涵蓋得到。
-  panel.querySelectorAll('input, select, button').forEach(el => {
-    el.gateOff = !!el.closest('.gated-off');
-    el.disabled = el.gateOff;
-  });
-}
-
-// 借來的控制項：key -> 借出前的原位與原本的標籤。原位記的是「後面第一個這次
-// 不會被借走的兄弟」而不是索引或 nextSibling：同一組裡連續好幾列一起被借走時，
-// 索引會隨著前面幾列被抽走而位移，nextSibling 又可能自己也不在原位；記一個
-// 「留在原地不動」的參考點，插回去才穩。order 只用來決定歸還的先後。
-const borrowedRows = new Map();
-
-// 把宣告了 type: 'borrow' 的控制項搬進當前模式的小節，離開時搬回原位。
-//
-// 為什麼是「搬」而不是「在模式面板裡再開一份」：那些參數（水滴大小、表面起伏…）
-// 在私語模式裡講的就是外殼本身，是同一個 P、同一顆 uniform、參數組合檔裡的同一
-// 個 id。再開一份等於把同一個狀態放兩個地方，遲早要處理兩邊同步。
-function syncBorrowedRows() {
-  const wanted = new Map();
-  document.querySelectorAll('#panel .borrowAnchor').forEach(anchor => {
-    const block = anchor.closest('.modeBlock');
-    if (block && block.dataset.gate && !gateOpen(block.dataset.gate)) return;
-    wanted.set(anchor.dataset.borrow, anchor);
-  });
-
-  // 先全部歸還，再借需要的。同一個參考點前面若要放回好幾列，照借出時的先後
-  // 插入，順序才會還原成原本的樣子。
-  const returning = [...borrowedRows.entries()]
-    .filter(([key]) => !wanted.has(key))
-    .sort((a, b) => a[1].order - b[1].order);
-  for (const [key, state] of returning) {
-    const before = state.next && state.next.parentElement === state.parent ? state.next : null;
-    state.parent.insertBefore(state.row, before);
-    state.labelEl.textContent = state.label;
-    borrowedRows.delete(key);
-  }
-
-  // 這一輪會被搬走的列，用來找出「留在原地」的參考點。
-  const leaving = new Set([...wanted.keys()].filter(key => !borrowedRows.has(key)));
-  let order = 0;
-  for (const [key, anchor] of wanted) {
-    if (borrowedRows.has(key)) continue;
-    const row = document.getElementById(key)?.closest('.row');
-    const labelEl = row?.querySelector('label');
-    if (!row || !labelEl) continue;
-    const parent = row.parentElement;
-    let next = row.nextElementSibling;
-    while (next && leaving.has(next.querySelector('input, select')?.id)) next = next.nextElementSibling;
-    borrowedRows.set(key, {
-      row,
-      parent,
-      next,
-      order: order++,
-      label: labelEl.textContent,
-      labelEl,
-    });
-    // 插在錨點後面，順序就跟 registry 裡宣告的一樣。
-    anchor.after(row);
-    if (anchor.dataset.borrowLabel) labelEl.textContent = anchor.dataset.borrowLabel;
-  }
-}
-
-function updateUIState() {
-  // 閘門之前跑：搬完之後那幾列的祖先變了，閘門要看的是搬完的位置。
-  syncBorrowedRows();
-  applyGates();
-  const setFeatureState = (id, enabled) => {
-    const group = document.getElementById(id);
-    if (!group) return;
-    group.classList.toggle('is-disabled', !enabled);
-    // 這裡管理的區塊都自帶主開關，一律套用「只反灰內容、開關保持清晰」的樣式
-    group.classList.add('featureGroup');
-    // .keepEnabled 的控制項不受主開關影響（見 bubble.css 的同名說明）
-    group.querySelectorAll(
-      '.row:not(.toggleRow):not(.keepEnabled) input,'
-      + ' .row:not(.toggleRow):not(.keepEnabled) select,'
-      + ' .row:not(.toggleRow):not(.keepEnabled) button')
-      .forEach(el => { setDisabled(el, !enabled); });
-    group.querySelectorAll('.effectBlock input, .effectBlock select, .effectBlock button')
-      .forEach(el => {
-        if (!el.closest('.toggleRow') && !el.closest('.summaryToggle')) setDisabled(el, !enabled);
-      });
-  };
-  setFeatureState('thinFilmGroup', P.filmEnabled);
-  // 色散總開關關閉時，ART／RAY／LIGHT 三個區塊一律顯示成停用，即使它們各自
-  // 的開關還是開著的（見 dispersionMasterOn 的說明）。
-  setFeatureState('artDispersionGroup', P.dispersionEnabled && dispersionMasterOn);
-  setFeatureState('rayDispersionGroup', P.rayDispersionEnabled && dispersionMasterOn);
-  setFeatureState('spectralCausticGroup', P.spectralCausticEnabled && dispersionMasterOn);
-  document.getElementById('dispersionMaster').checked = dispersionMasterOn;
-  document.getElementById('dispersionGroup').classList.toggle('is-disabled', !dispersionMasterOn);
-  const spectral = P.colorMode === 'spectral';
-  const rampGroup = document.getElementById('rampGroup');
-  const rampDisabled = spectral || !P.filmEnabled;
-  rampGroup.classList.toggle('is-disabled', rampDisabled);
-  rampGroup.querySelectorAll('input').forEach(el => {
-    setDisabled(el, rampDisabled);
-  });
-  const colorBackground = P.bgMode === 'color';
-  const bgc = document.getElementById('bgColor');
-  bgc.disabled = !colorBackground;
-  bgc.closest('.row').style.opacity = colorBackground ? 1 : 0.4;
-  // 已移除液態薄膜材質；相容節點固定隱藏，舊參數檔也會被 materialStyle 收斂為 universal。
-  document.getElementById('membraneDepth').disabled = true;
-  document.getElementById('membraneDepthRow').style.display = 'none';
-  for (const key of ['membraneBaseColor', 'membraneVeilColor', 'membraneReflectionColor', 'membraneCardColor', 'membraneShadeColor']) {
-    document.getElementById(key).disabled = true;
-    document.getElementById(key + 'Row').style.display = 'none';
-  }
-  const lightBackdrop = false;
-  const lightIcons = false;
-  for (const prefix of EDGE_TINT_TARGETS) {
-    const multi = P[`${prefix}MultiTint`];
-    for (const suffix of ['Tint', 'TintEdge', 'TintColor']) {
-      setDisabled(document.getElementById(`${prefix}${suffix}`), false);
-    }
-    for (const param of edgeTintParams(prefix)) {
-      setDisabled(document.getElementById(param.key), param.key !== `${prefix}MultiTint` && !multi);
-    }
-    document.getElementById(`${prefix}TintPalette`)?.classList.toggle('is-disabled', !multi);
-  }
-  document.getElementById('lightShowRow').style.display = 'none';
-  document.getElementById('lightLookDetails').style.display = 'none';
-  document.getElementById('lightIconDetails').style.display = 'none';
-  for (const key of ['lightShow', 'lightClarity', 'lightDepth', 'lightCardStrength', 'lightChroma',
-    'lightIconClarity', 'lightIconColor', 'lightIconTint', 'lightIconEdge', 'lightIconRimColor', 'lightIconRimStrength']) {
-    const shellControl = ['lightShow', 'lightClarity', 'lightDepth', 'lightCardStrength', 'lightChroma'].includes(key);
-    setDisabled(document.getElementById(key), shellControl ? !lightBackdrop : !lightIcons);
-  }
-  document.body.style.background = colorBackground ? pageBackgroundCss(P.bgColor) : '#000';
-  // 輪廓液滴的模式閘門（形狀場 + SVG 擠出）走 data-gate；這裡只剩它自己的主
-  // 開關。主開關關閉時只停掉會移動的液滴，「邊緣水滴」因為同時決定擠出邊緣的
-  // 圓角，標了 .keepEnabled 而保持可用 —— 這樣才做得出「圓角擠出但沒有液滴」。
-  const edgeDropGroup = document.getElementById('edgeDropGroup');
-  edgeDropGroup.classList.add('featureGroup');
-  edgeDropGroup.classList.toggle(
-    'is-disabled',
-    !edgeDropGroup.classList.contains('gated-off') && !P.edgeDropsEnabled,
-  );
-  edgeDropGroup.querySelectorAll('input').forEach(el => {
-    const row = el.closest('.row');
-    const survivesToggle = !!row && (row.classList.contains('keepEnabled')
-      || row.classList.contains('toggleRow'));
-    setDisabled(el, !P.edgeDropsEnabled && !survivesToggle);
-  });
-  const isSvg = P.shapeSource === 'svg';
-  const shapeBtn = document.getElementById('shapeBtn');
-  const shapeInput = document.getElementById('shapeInput');
-  const fileAccept = isSvg
-    ? '.svg,image/svg+xml'
-    : '.glb,.gltf,model/gltf-binary,model/gltf+json';
-  shapeBtn.textContent = isSvg ? '選擇 SVG…' : '選擇 GLB / GLTF…';
-  shapeInput.accept = fileAccept;
-  // 形狀 B 的匯入槽跟著同一個來源：兩顆形狀必須同種編碼才疊得進一張貼圖。
-  const morphTargetBtn = document.getElementById('morphTargetBtn');
-  if (morphTargetBtn) {
-    morphTargetBtn.textContent = isSvg ? '選擇變形目標 SVG…' : '選擇變形目標 GLB / GLTF…';
-    document.getElementById('morphTargetInput').accept = fileAccept;
-  }
-  // 模型品質（GLB 專用）、形狀厚度與邊緣圓角（都只作用於 SVG 擠出的
-  // svgShapeDistance，GLB 走 volumeShapeDistance 根本不讀）全部走 data-gate。
-  inspector?.refresh();
-}
+const { applyGates, updateUIState } = createPanelStateController({
+  params: P,
+  staticUsesImportedShape,
+  pageBackgroundCss,
+  getDispersionMaster: () => dispersionMasterOn,
+  refreshInspector: () => inspector?.refresh(),
+});
 
 document.getElementById('resetBtn').addEventListener('click', () => {
   // 重設不換動態模式：按重設是想把「現在這個模式」的參數歸零，不是想被丟回
