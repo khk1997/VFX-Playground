@@ -29,6 +29,11 @@ python3 tests/bubble_baseline.py \
 not cover: automatic desktop quality, OS reduced-motion pause/override, and
 single-pointer canvas dragging.
 
+`bubble_motion_matrix.py` switches every public motion through both dark and
+light backdrops, verifies its control block and shader variant settle, and fails
+on browser errors. It uses the baseline diagnostic shader so the test protects
+runtime routing without cold-compiling every production variant.
+
 `bubble_inspector_ux.py` verifies progressive common/full controls, persistent
 keyboard tabs, A/B quick comparison, and the mobile sheet's sticky layout.
 
