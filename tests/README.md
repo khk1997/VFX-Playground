@@ -52,6 +52,9 @@ defaults remain complete after moving the parameter schema out of the page runti
 `runtime_memory.mjs` verifies mode/backdrop slot addressing, per-mode defaults,
 light-backdrop overrides, and independent dark/light edge-tint memory.
 
+`control_schema.mjs` verifies select/uniform mappings, toggle side effects, tint
+control coverage, and value labels that depend on the live loop configuration.
+
 `bubble_real_browser.py` opens the installed Google Chrome and macOS Safari,
 checks the Installing mode on dark/light backgrounds, records actual GPU renderer
 information, and writes screenshots plus an acceptance report outside the repo.

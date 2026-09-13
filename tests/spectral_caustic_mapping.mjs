@@ -50,7 +50,7 @@ assert.match(
   'Film Noise must blend the fixed taps with noise weights',
 );
 assert.match(
-  readFileSync(new URL('../bubble/bubble.js', import.meta.url), 'utf8'),
+  readFileSync(new URL('../bubble/control-schema.js', import.meta.url), 'utf8'),
   /map: \{ wave: 0, objectNoise: 1, hybrid: 2, filmNoise: 3 \}/,
   'Film Noise must be wired to uSpectralCausticMapping == 3',
 );
