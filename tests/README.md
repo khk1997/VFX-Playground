@@ -46,6 +46,9 @@ surface-pair selection, satellite-drop trajectories, and conservative ray bounds
 `shape_anchors.mjs` unit-tests shape scaling, thin-edge normalization, and the
 deterministic primary/detail anchor partition used by formation and shatter modes.
 
+`runtime_defaults.mjs` verifies that numeric, toggle, color, select, and legacy
+defaults remain complete after moving the parameter schema out of the page runtime.
+
 `bubble_real_browser.py` opens the installed Google Chrome and macOS Safari,
 checks the Installing mode on dark/light backgrounds, records actual GPU renderer
 information, and writes screenshots plus an acceptance report outside the repo.
