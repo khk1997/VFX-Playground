@@ -241,9 +241,9 @@
     display: flex; align-items: center; justify-content: center; min-width: 0;
   }
   .spectralColorEditor input[type=color] {
-    display: block; width: 40px; min-width: 40px; height: 40px; padding: 0;
+    display: block; width: 40px; min-width: 40px; height: 40px; padding: 3px;
     appearance: none; -webkit-appearance: none;
-    border: 0; border-radius: 50%; background: transparent; cursor: pointer;
+    border: 1px solid rgba(255,255,255,.22); border-radius: 50%; background: transparent; cursor: pointer;
     transition: transform .16s ease, filter .16s ease, box-shadow .16s ease;
   }
   .spectralColorEditor input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
