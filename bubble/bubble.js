@@ -25,7 +25,6 @@ import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?
 import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-76';
 import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=post-mask-3';
 import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=post-mask-3';
-import createResearchMotion from './motions/research.js?v=whisper-shell-2';
 import {
   createExtendedMotionRuntime, effectiveCapillaryHeight, isExtendedMotion,
 } from './motions/extended/index.js?v=extended-motions-4';
@@ -57,6 +56,7 @@ import {
 import { createTypewriterRuntime } from './typewriter-runtime.js?v=1';
 import { createStaticCapillaryRuntime } from './motions/runtime/static-capillary.js?v=1';
 import { createJellyRuntime } from './motions/runtime/jelly.js?v=1';
+import { createResearchRuntime } from './motions/runtime/research.js?v=1';
 import { buildExtendedMotionControls } from './panel-builder.js?v=1';
 import { createPanelStateController } from './panel-state.js?v=1';
 import { createPanelBindings } from './panel-bindings.js?v=1';
@@ -1336,11 +1336,8 @@ const jellyRuntime = createJellyRuntime({
   surfaceAnchors: () => weaveSurfaceAnchors,
   fallbackAnchors: () => formationAnchors,
 });
-const {
-  shapeRigidMotion: researchShapeRigidMotion,
-  dropPosition: researchDropPosition,
-  shellEnvelope: researchShellEnvelope,
-} = createResearchMotion(P, { dropSeeds });
+// 私語：主殼與伴生殼週期性融合，水滴是模式本體而不是裝飾（見該模組）。
+const researchRuntime = createResearchRuntime({ params: P, dropSeeds });
 let shapeRigidNow = null;
 const shapeRigidVec = new THREE.Vector3();
 // 旋轉現在是任意軸（XYZ 各自振幅），用歐拉角組出一個 3x3 旋轉矩陣，比逐軸
@@ -1629,15 +1626,11 @@ function updateDropUniforms(t) {
   // 水滴數量可以是 0（例如崩解噴濺只想要微滴碎片、穿梭環繞只想留形狀本身）。
   // count 本身允許 0，交給 uCount 讓 shader 直接跳過主滴迴圈；但凡是拿它當
   // 除數或版面基準的地方一律改用 layoutCount，否則 0 會變成 Infinity／NaN。
-  // 毛細波是純形狀場模式，水滴數量由 static-capillary 模組覆寫成 0（見該模組）。
-  const staticCapillaryCount = staticCapillaryRuntime.dropCount();
-  const count = staticCapillaryCount !== null
-    ? staticCapillaryCount
-    // 私語的第二外殼是模式本體，不是通用的可增減水滴。這層是舊 preset 的保險：
-    // 即使檔案裡還存著改版前的 count=1，渲染端仍固定產生主殼與伴生殼兩顆。
-    : P.motion === 'research'
-      ? 2
-      : Math.max(0, Math.min(MAX_DROPS, Math.round(P.count)));
+  // 有些模式的水滴數量是模式本體的一部分，不是可增減的參數，由模組自己覆寫
+  // （毛細波固定 0、私語固定兩顆殼，各自的理由見各自的模組）。其餘模式才吃
+  // 面板上的數量。
+  const fixedCount = staticCapillaryRuntime.dropCount() ?? researchRuntime.dropCount();
+  const count = fixedCount ?? Math.max(0, Math.min(MAX_DROPS, Math.round(P.count)));
   const layoutCount = Math.max(1, count);
   const tau = Math.PI * 2;
   const phase = fract(t / Math.max(0.001, P.loopDuration));
@@ -1650,8 +1643,8 @@ function updateDropUniforms(t) {
   if (jellyRuntime.active()) {
     // 原地戳擊與落地彈跳兩條分支都在模組裡選（見 motions/runtime/jelly.js）。
     shapeRigidNow = jellyRuntime.shapeRigid(phase);
-  } else if (P.motion === 'research') {
-    shapeRigidNow = researchShapeRigidMotion(phase);
+  } else if (researchRuntime.active()) {
+    shapeRigidNow = researchRuntime.shapeRigid(phase);
   } else {
     shapeRigidNow = usesShapeField(P.motion) ? shapeRigidMotion(phase) : null;
   }
@@ -1835,12 +1828,11 @@ function updateDropUniforms(t) {
         y = formationPosNow.y;
         z = formationPosNow.z;
       }
-    } else if (P.motion === 'research') {
-      const research = researchDropPosition(i, phase, formationPosNow);
+    } else if (researchRuntime.active()) {
+      radiusFactor = researchRuntime.dropPosition(i, phase, formationPosNow);
       x = formationPosNow.x;
       y = formationPosNow.y;
       z = formationPosNow.z;
-      radiusFactor = research.reveal * research.pulse;
     } else if (extended) {
       const state = extendedMotions.sample(
         P.motion, i, phase, layoutCount, dropSeeds[i], extendedShapeContext, extendedMotionState[i],
@@ -1864,7 +1856,7 @@ function updateDropUniforms(t) {
     // 水滴自己排出來，大小不一的下沉量會讓靜止的形狀邊緣參差不齊。
     // 果凍同樣排除：它的水滴要正好貼在實體的表面錨點上，被推低一截就會在輪廓旁
     // 浮出一圈對不上的球。
-    if (!melting && !morphing && !jelly && !extended && P.motion !== 'research') {
+    if (!melting && !morphing && !jelly && !extended && !researchRuntime.active()) {
       y -= P.gravity * P.spread * 0.045 * Math.pow(radius, 1.35);
     }
     if (isFormationMotion(P.motion)) {
@@ -1960,7 +1952,7 @@ function updateDropUniforms(t) {
   // 非電影模式仍可依實際接觸做黏性融合；電影模式已在上方守恆轉移體積。
   // 融化排除在外：每一滴都是各自落下的獨立水滴，靠得近時互相脹大半徑會黏成
   // 一條斷不開的水柱，正好是這個模式最不該有的樣子。
-  if (!isFormationMotion(P.motion) && P.motion !== 'split' && P.motion !== 'research' && !melting
+  if (!isFormationMotion(P.motion) && P.motion !== 'split' && !researchRuntime.active() && !melting
     && count >= 2 && fusionAmount > 0) {
     const da = dropData[pairA], db = dropData[pairB];
     const axisX = db.x - da.x, axisY = db.y - da.y, axisZ = db.z - da.z;
@@ -2003,8 +1995,8 @@ function updateDropUniforms(t) {
   // 水滴是貼在表面的點綴，融成一坨就沒有點綴可言。
   const mergeScale = P.motion === 'weave'
     ? Math.max(0.02, P.weaveCling)
-    : P.motion === 'research'
-      ? Math.max(0.02, P.researchCompanionFusion)
+    : researchRuntime.active()
+      ? researchRuntime.mergeScale()
     : extended
       ? 0.34
     : jelly
@@ -2026,8 +2018,8 @@ function updateDropUniforms(t) {
       staticCapillaryRuntime.writeUniforms(uniforms);
     } else {
       uniforms.uEdgeDropCount.value = P.edgeDropsEnabled ? activeEdgeDrops.length : 0;
-      uniforms.uWobble.value = P.motion === 'research'
-        ? P.wobble * researchShellEnvelope(phase)
+      uniforms.uWobble.value = researchRuntime.active()
+        ? researchRuntime.wobble(phase)
         : P.wobble;
       uniforms.uExtendedMotion.value = extended ? MOTION_UNIFORM_MAP[P.motion] : 0;
       uniforms.uExtendedParams.value.set(0, 0, 0, 0);
