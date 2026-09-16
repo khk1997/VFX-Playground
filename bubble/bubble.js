@@ -3007,7 +3007,7 @@ function switchMaterialProfile(previousStyle, nextStyle) {
 }
 
 const {
-  bindTextControls, bindControls, resetSpectralCausticColors, resetRamp,
+  bindTextControls, bindControls, resetSpectralCausticColors, resetRamp, updateRampRows,
 } = createPanelBindings({
   THREE, params: P, preview: PREVIEW, selects: SELECTS, toggles: TOGGLES, colors: COLORS,
   formatters: fmt, getUniforms: () => uniforms, uniformNameFor, rotation: rot,
@@ -3836,7 +3836,7 @@ bindTextControls();
 
 // 參數組合匯出/匯入。預覽模式要呈現正規預設值，不套用個人的自動保存狀態。
 if (!PREVIEW && window.PresetIO) {
-  window.PresetIO.init({
+  const presetIO = window.PresetIO.init({
     effect: 'prism-drops',
     panel: '#panel',
     mount: '#presetIO',
@@ -3867,7 +3867,19 @@ if (!PREVIEW && window.PresetIO) {
       mirrorBackdropMemory();
       updateUIState();
     },
-  }).restore();
+  });
+  // 自動保存的快照是使用者資料，可能來自任何一個舊版本，也可能已經壞掉。它要是
+  // 丟出例外，這支 module script 就會就地中止 —— 底下的收尾（尤其是移除
+  // data-bubble-boot 這道遮罩）永遠跑不到，面板就此卡在開機狀態，使用者連把壞
+  // 掉的設定改回來的機會都沒有。所以還原失敗只能是「這次不還原」，不能是
+  // 「整個效果起不來」：接住它、留下訊息、照常用預設值開機。
+  // 手動貼上匯入那條路本來就有自己的錯誤提示（見 preset-io.js 的 applyText），
+  // 不走這裡。
+  try {
+    presetIO?.restore();
+  } catch (error) {
+    console.error('[bubble] 自動保存的參數組合還原失敗，改用預設值開機', error);
+  }
 }
 
 // 桌面版六格快速暫存：空格點一下儲存，已儲存的格子點一下載入。

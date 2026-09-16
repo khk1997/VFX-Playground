@@ -326,6 +326,10 @@ function resetRamp() {
 
 
   return {
-    bindTextControls, bindControls, resetSpectralCausticColors, resetRamp,
+    // updateRampRows 一併交出去：套用參數組合檔之後，bubble.js 的 afterApply 要把
+    // 色標列、兩張 LUT 與邊緣染色整組重刷一次，它是其中一步。這個函式讀的是
+    // STOP_MAX 這個 options 閉包變數，所以只能從這裡交出來，不能在呼叫端另寫
+    // 一份——兩份色標上限遲早會對不上。
+    bindTextControls, bindControls, resetSpectralCausticColors, resetRamp, updateRampRows,
   };
 }

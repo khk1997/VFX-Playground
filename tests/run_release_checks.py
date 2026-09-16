@@ -18,6 +18,7 @@ BROWSER_TESTS = (
     ("bubble_adaptive_runtime.py", ("--base-url",)),
     ("bubble_motion_matrix.py", ("--base-url",)),
     ("bubble_inspector_ux.py", ("--base-url",)),
+    ("bubble_preset_boot.py", ("--base-url",)),
     ("bubble_visual_presets.py", ("--base-url", "--output")),
 )
 
