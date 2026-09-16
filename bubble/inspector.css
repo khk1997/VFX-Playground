@@ -1,3 +1,5 @@
+#panel:not(.inspector) { visibility: hidden !important; opacity: 0 !important; }
+#panel.inspector { visibility: visible; opacity: 1; }
 #panel.inspector [hidden] { display: none !important; }
 #panel.inspector {
   --inspector-accent: #7957ff;
