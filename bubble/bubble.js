@@ -80,6 +80,12 @@ if (PREVIEW) document.documentElement.classList.add('preview-mode');
 if (DIAG.any) console.info('[bubble diag] 啟用:', DIAG.list.join(', '));
 
 const canvas = document.getElementById('stage');
+let stagePresented = false;
+function markStagePresented() {
+  if (stagePresented) return;
+  stagePresented = true;
+  document.body.dataset.stageReady = 'true';
+}
 const mobileRenderQuery = window.matchMedia('(max-width: 760px)');
 const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
 const GLASS_HDRI_URL = new URL('./assets/photo_studio2_london_hall_1k.hdr', import.meta.url).href;
@@ -3067,6 +3073,8 @@ const clearAutoSavedPreset = () => {
 homeButton?.addEventListener('click', clearAutoSavedPreset);
 window.addEventListener('pageshow', event => {
   if (event.persisted) {
+    stagePresented = false;
+    delete document.body.dataset.stageReady;
     clearAutoSavedPreset();
     document.getElementById('resetBtn')?.click();
   }
@@ -3430,6 +3438,7 @@ function renderComposite(target = null, superSample = 1) {
     renderer.setRenderTarget(target);
     renderer.render(scene, camera);
     renderer.setRenderTarget(null);
+    if (target === null) markStagePresented();
     return;
   }
   if (!postChain) postChain = createPostChain(renderer);
@@ -3472,6 +3481,7 @@ function renderComposite(target = null, superSample = 1) {
     // 預覽與成品上的光暈大小會差一個超採樣倍率。
     superSample,
   });
+  if (target === null) markStagePresented();
   } finally {
     gpuProfiler?.endFrame();
   }

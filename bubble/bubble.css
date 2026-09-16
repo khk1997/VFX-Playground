@@ -1,6 +1,9 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 100%; height: 100%; background: #000; overflow: hidden; font-family: "SF Pro", "PingFang TC", "Microsoft JhengHei", sans-serif; }
-  #stage { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+  /* A page restored from BFCache can contain the previous WebGL frame. Keep the
+     canvas out of the first paint until the current state has rendered once. */
+  #stage { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; visibility: hidden; opacity: 0; transition: opacity .12s ease-out; }
+  body[data-stage-ready="true"] #stage { visibility: visible; opacity: 1; }
   #stage[data-dragging="true"] { cursor: grabbing; }
   #exportStageGuide { display: none; }
 
