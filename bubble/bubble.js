@@ -81,10 +81,21 @@ if (DIAG.any) console.info('[bubble diag] 啟用:', DIAG.list.join(', '));
 
 const canvas = document.getElementById('stage');
 let stagePresented = false;
+let stagePresentTimer = 0;
+// 首頁 iframe 的第一個 draw 可能仍在完成環境反射／材質上傳；若立刻顯示，
+// 使用者會看到一個偏暗、偏小的中間影格，下一幀才跳成正式預覽。正式效果頁
+// 不需要這個窗口，只有 preview=1 延後一小段時間讓首輪畫面穩定。
+const PREVIEW_PRESENT_DELAY_MS = 260;
 function markStagePresented() {
-  if (stagePresented) return;
-  stagePresented = true;
-  document.body.dataset.stageReady = 'true';
+  if (stagePresented || stagePresentTimer) return;
+  const reveal = () => {
+    stagePresentTimer = 0;
+    if (stagePresented) return;
+    stagePresented = true;
+    document.body.dataset.stageReady = 'true';
+  };
+  if (PREVIEW) stagePresentTimer = window.setTimeout(reveal, PREVIEW_PRESENT_DELAY_MS);
+  else reveal();
 }
 const mobileRenderQuery = window.matchMedia('(max-width: 760px)');
 const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -3073,6 +3084,7 @@ const clearAutoSavedPreset = () => {
 homeButton?.addEventListener('click', clearAutoSavedPreset);
 window.addEventListener('pageshow', event => {
   if (event.persisted) {
+    if (stagePresentTimer) { clearTimeout(stagePresentTimer); stagePresentTimer = 0; }
     stagePresented = false;
     delete document.body.dataset.stageReady;
     clearAutoSavedPreset();
