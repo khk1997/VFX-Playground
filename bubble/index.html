@@ -54,12 +54,12 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
       <option value="morph">形狀變形 Morph</option>
       <option value="jelly">果凍 Jelly</option>
       <option value="capillary">毛細波 Capillary Wave</option>
-      <option value="split">分裂 Split</option>
       <option value="research">安裝中 Installing</option>
       <option value="typewriter">打字 Typewriter</option>
       <!-- 已改名或已移除的舊值。留成隱藏選項，舊的參數組合檔寫進來時 value 才不會
            被瀏覽器丟成空字串；bindControls 會立刻把它導向現有選項（LEGACY_SELECT_VALUES）。 -->
-      <option value="cinematic" hidden>分裂（舊值 cinematic）</option>
+      <option value="split" hidden>分裂（已移除）</option>
+      <option value="cinematic" hidden>分裂（已移除，舊值 cinematic）</option>
       <option value="pulse" hidden>脈動呼吸 Pulse（已移除）</option>
     </select><span class="val"></span></div>
     <!-- shader 準備狀態。在 Windows 的 ANGLE D3D11 後端上，切到造型類模式後 shader
@@ -204,7 +204,6 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
       </div>
       <div id="typeSystemFontState" class="note">名稱可以直接手動打完整名稱（適合已經用 Adobe Fonts「啟用桌面字體」之類方式裝成系統字體的字型），也可以先按「列出系統字體」讓輸入框打字時自動篩出建議名稱（支援中文，僅 Chrome／Edge）。粗細一律自己在旁邊選——擠出成玻璃後筆畫太細會變成一束鐵絲，中文字建議至少 Bold 以上。</div>
     </div>
-    <div data-gate="split" class="row" id="flowSpeedRow"><label>動態張力</label><input type="range" id="flowSpeed" min="0" max="1.5" step="0.01" value="0.47"><span class="val" id="flowSpeed_v"></span></div>
     <!-- 果凍排除：它的阻尼彈簧走的是同一份造型變換（見 bubble.js 的 shapeRigidNow），
          兩者疊起來會看不出哪一下是被戳的，所以那個模式底下這一組不開放。 -->
     <details class="subgroup" data-gate="shape !jelly" id="shapeMotionGroup">
@@ -294,15 +293,6 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
     <div class="row"><label>表面起伏</label><input type="range" id="wobble" min="0" max="0.4" step="0.005" value="0.305"><span class="val" id="wobble_v"></span></div>
     <div class="row"><label>起伏尺度</label><input type="range" id="wobbleScale" min="0.3" max="6" step="0.1" value="0.7"><span class="val" id="wobbleScale_v"></span></div>
     <div class="row"><label>起伏動畫</label><input type="range" id="wobbleSpeed" min="0" max="2" step="0.01" value="0.65"><span class="val" id="wobbleSpeed_v"></span></div>
-    <div data-gate="split" id="capillaryGroup">
-      <div class="effectSubhead">分離彈性 Capillary Wave</div>
-      <div class="row"><label>分離回彈</label><input type="range" id="elasticStrength" min="0" max="0.2" step="0.005" value="0.024"><span class="val" id="elasticStrength_v"></span></div>
-      <div class="row"><label>波紋密度</label><input type="range" id="elasticDensity" min="1" max="8" step="0.1" value="3.5"><span class="val" id="elasticDensity_v"></span></div>
-      <div class="row"><label>波紋衰減</label><input type="range" id="elasticDamping" min="0" max="1" step="0.01" value="0.55"><span class="val" id="elasticDamping_v"></span></div>
-      <div class="row"><label>傳播速度</label><input type="range" id="elasticSpeed" min="0.5" max="2" step="0.05" value="1.75"><span class="val" id="elasticSpeed_v"></span></div>
-      <div class="row"><label>衛星滴大小</label><input type="range" id="satelliteSize" min="0" max="1" step="0.01" value="0.22"><span class="val" id="satelliteSize_v"></span></div>
-      <div class="row"><label>衛星滴數量</label><input type="range" id="satelliteCount" min="0" max="3" step="1" value="3"><span class="val" id="satelliteCount_v"></span></div>
-    </div>
   </details>
 
   <details class="group" open>

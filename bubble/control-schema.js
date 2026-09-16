@@ -102,7 +102,6 @@ export function createFormatters(P, { effectiveCapillaryHeight, shatterSegmentSe
   radius: v => v.toFixed(2),
   viscosity: v => v.toFixed(2),
   spread: v => v.toFixed(2),
-  flowSpeed: v => 'x' + v.toFixed(2),
   spin: v => 'x' + v.toFixed(2),
   wobble: v => v.toFixed(3),
   wobbleScale: v => 'x' + v.toFixed(1),
@@ -218,12 +217,6 @@ export function createFormatters(P, { effectiveCapillaryHeight, shatterSegmentSe
   cameraRotationX: v => v.toFixed(1) + '°',
   cameraRotationY: v => v.toFixed(1) + '°',
   loopDuration: v => v.toFixed(1) + 's',
-  elasticStrength: v => v.toFixed(3),
-  elasticDensity: v => 'x' + v.toFixed(1),
-  elasticDamping: v => v.toFixed(2),
-  elasticSpeed: v => 'x' + v.toFixed(2),
-  satelliteSize: v => v.toFixed(2),
-  satelliteCount: v => v.toFixed(0),
   // 顯示成秒數而不是循環比例：匯集時間／完成停留描述的是「這段實際花多久」，
   // 但循環秒數是另一個獨立滑桿，同樣的百分比在 6 秒與 30 秒的循環裡代表天差
   // 地遠的時間長度。換算成秒數後兩個滑桿放在一起看才有直覺意義。

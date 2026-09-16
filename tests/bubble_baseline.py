@@ -33,7 +33,6 @@ PROFILES = (
         "is_mobile": False,
         "cases": (
             ("static-dark", "static", "dark"),
-            ("split-dark", "split", "dark"),
             ("installing-dark", "research", "dark"),
             ("installing-light", "research", "light"),
             ("capillary-dark", "capillary", "dark"),

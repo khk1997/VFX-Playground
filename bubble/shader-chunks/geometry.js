@@ -210,32 +210,6 @@ float shapeDistance(vec3 p, bool smoothShape, int ch){
 
 #endif // FEATURE_SHAPE_FIELD
 
-// 分離後由接觸極點向外傳播的局部毛細波；只處理主要水滴對 0/1。
-// 只有分裂模式會呼叫（見 mapScene 的 FEATURE_CAPILLARY_WAVE），所以函式本體也一起關。
-#ifdef FEATURE_CAPILLARY_WAVE
-float capillaryWave(vec3 p, int i){
-  vec3 center = uDrops[i].xyz;
-  int pairA = int(uElasticPair.x + 0.5);
-  int pairB = int(uElasticPair.y + 0.5);
-  vec3 other = (i == pairA) ? uDrops[pairB].xyz : uDrops[pairA].xyz;
-  vec3 local = p - center;
-  float localLen = length(local);
-  vec3 contactAxis = other - center;
-  float axisLen = length(contactAxis);
-  if (localLen < 0.0001 || axisLen < 0.0001) return 0.0;
-
-  float poleDistance = sqrt(max(0.0, 2.0 * (1.0 - dot(local / localLen, contactAxis / axisLen))));
-  float travel = uElasticEvent.y * uElasticSpeed * 2.2;
-  float behindFront = travel - poleDistance;
-  if (behindFront < 0.0) return 0.0;
-
-  float spatialDecay = 1.0 / (1.0 + behindFront * (2.0 + uElasticDamping * 10.0));
-  float hemisphereMask = 1.0 - smoothstep(1.65, 2.0, poleDistance);
-  float ripple = sin(behindFront * uElasticDensity * PI);
-  return ripple * spatialDecay * hemisphereMask * uElasticEvent.x * uElasticStrength;
-}
-#endif // FEATURE_CAPILLARY_WAVE
-
 // 形狀變形的「消失場」。整套切削的核心就是這個純量場：舊形狀留在場值大於
 // 消失波前的那一側、新形狀留在場值小於出現波前的那一側（見 mapScene 裡的
 // uShapeMorph 分支）。所以「換一種消失方式」= 換這條式子，兩道波前的推進、
@@ -1535,19 +1509,8 @@ float mapScene(vec3 p, bool smoothShape){
     // 微滴迴圈早就有同樣的 w > 0.0001 守衛，這裡補上。
     if (uDrops[i].w <= 0.0001) continue;
     float sphereD = dropletDistance(p, i);
-// 分裂 pinch-off 的彈性回彈波紋。只有 P.motion === 'split' 會把 elasticEvent 設成
-// 非零（見 bubble.js：其餘所有模式走 else 分支 elasticEvent.set(0, 0)），所以
-// 非分裂模式下這整段的 runtime 條件恆為 false —— 編譯期拿掉是行為等價的。
-#ifdef FEATURE_CAPILLARY_WAVE
-    int pairA = int(uElasticPair.x + 0.5);
-    int pairB = int(uElasticPair.y + 0.5);
-    // 僅在事件期間、活動配對且接近表面時付出波紋成本。
-    if (uElasticEvent.x > 0.0001 && (i == pairA || i == pairB) && abs(sphereD) < 0.3) {
-      sphereD -= capillaryWave(p, i);
-    }
-#endif // FEATURE_CAPILLARY_WAVE
-    // 每滴融合權重只在分裂模式的子滴出生／吸收尾端低於 1；其餘模式固定為 1。
-    // 讓 k 與子滴半徑一起平滑歸零，才能連續接上上方的零半徑守衛。
+    // 每滴融合權重目前所有模式都固定為 1；通道留著是因為 uDropPhysics 的
+    // 其餘三格（壓平／振盪／尖端）仍在用，而且 authored 的擴充模式可以寫它。
     float dropBlend = mainBlend * clamp(uDropPhysics[i].w, 0.0, 1.0);
     d = smin(d, sphereD, dropBlend);
     if (needsArrivalDistance) {
@@ -1564,19 +1527,6 @@ float mapScene(vec3 p, bool smoothShape){
 // 的身分是繞著行走的墨滴，不該跟字融成一團。
 #ifdef FEATURE_TYPEWRITER
   d = min(d, typewriterDistance(p, smoothShape));
-#endif
-  // 衛星滴以「會釋放的 smin」與頸部相連：成形期 blend 高（細絲上的鼓包），
-  // 掐斷時 blend→0，smin 退化為硬 min → 成為自由滴。
-  //
-  // 衛星滴串只在分裂的 pinch-off 產生：bubble.js 只有 P.motion === 'split' 那個分支
-  // 會寫入 satelliteDrops，其餘模式一律 satelliteDrops[s].w = 0 且 uSatelliteBlend = 0。
-  // 所以非分裂模式下 uSatellites[s].w > 0.001 恆為 false。
-#ifdef FEATURE_SATELLITES
-  for (int s = 0; s < 3; s++) {
-    if (uSatellites[s].w > 0.001) {
-      d = smin(d, length(p - uSatellites[s].xyz) - uSatellites[s].w, uSatelliteBlend);
-    }
-  }
 #endif
   // 大量形狀微滴由資料紋理提供，突破 uniform array 的數量限制。
   // 它們先真正填滿目標體積，模型 SDF 只在最後階段補足細節。

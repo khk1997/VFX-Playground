@@ -170,8 +170,7 @@ const DIAG = (() => {
     // 「生效中」是 variant 鍵的一部分：uShapeProgress 還在 0 附近時走的是四面體那條，
     // 所以造型成形過程要用 none 那支 variant，否則法線數學就不一致了。
     // mapScene 的模式特化探針：
-    //   probe-mapscene-plain  一般 Bubble（非分裂、無造型）
-    //   probe-mapscene-split  分裂（保留衛星滴與毛細回彈波）
+    //   probe-mapscene-plain  一般 Bubble（無造型）
     // 方案 A：把 calcNormal 的四個 tetrahedral tap 收進一個 uniform 守衛的迴圈。
     // 目標是靜態展開份數（15 → 6），runtime 仍然算四次，數學不變。
     // 驗證用：編進所有功能，等同變體特化之前的萬能 shader（見 shaderFeatures）。
@@ -181,7 +180,6 @@ const DIAG = (() => {
     // （見 shaders.js 的 PROBE_UNROLLED_SVG_TAPS）。
     probeUnrolledSvgTaps: set.has('probe-unrolled-svg-taps'),
     probeMapscenePlain: set.has('probe-mapscene-plain'),
-    probeMapsceneSplit: set.has('probe-mapscene-split'),
     probeModeNone: set.has('probe-mode-none'),
     probeModeVoxel: set.has('probe-mode-voxel'),
     probeModeSvg: set.has('probe-mode-svg'),

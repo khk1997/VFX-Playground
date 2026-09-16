@@ -50,7 +50,7 @@ function vec4() {
     P.motion = motion;
     assert.equal(runtime.active(), true, `${motion} must be handled by the static/capillary runtime`);
   }
-  for (const motion of ['formation', 'melt', 'jelly', 'research', 'split']) {
+  for (const motion of ['formation', 'melt', 'jelly', 'research', 'weave']) {
     P.motion = motion;
     assert.equal(runtime.active(), false, `${motion} must not be handled by the static/capillary runtime`);
   }

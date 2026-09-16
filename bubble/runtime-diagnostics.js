@@ -519,7 +519,6 @@ window.__bubbleDiagReport = function () {
         '薄膜 thinFilm': has('thinFilm'),
         '色散/OPD/光譜': has('Dispersion|artisticDispersionOPD|visibleSpectrum|sampleFilmInterference'),
         '稜光光芒 prismBeam': has('prismBeamField|prismBeamCoord'),
-        '衛星滴': has('uSatellites'),
         '負形場': has('uNegativeDrops'),
         '造型距離場': has('svgShapeDistance|volumeShapeDistance'),
         'geometry wobble': has('geometryWobble'),

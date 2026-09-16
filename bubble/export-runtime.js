@@ -7,7 +7,7 @@ export function createExportRuntime(options) {
     THREE, params: P, selects: SELECTS, getUniforms, getRenderer, ensureInitialized,
     updateDropUniforms, rotation: rot, rotM4, tmpX, tmpZ, isFormationMotion,
     getShapeField, formationFidelityAmount, formationAmount, smoothstepCPU, syncEdgeDropMotion,
-    satelliteDrops, renderComposite, isMobile, flushShatterCutAnchors, syncLoop,
+    renderComposite, isMobile, flushShatterCutAnchors, syncLoop,
     getSimTime, setSimTime, resetPreviousDropT, canvas, resize,
   } = options;
   let exportJob = null;
@@ -62,41 +62,13 @@ function settingsCenter(value) {
   return Math.max(-0.5, Math.min(0.5, value));
 }
 
-function applyExportDetailLOD(settings) {
-  const savedRadii = satelliteDrops.map(drop => drop.w);
-  const savedBlend = getUniforms().uSatelliteBlend.value;
-  const pixelsPerWorldUnit = settings.height /
-    Math.max(0.001, 2 * getUniforms().uCameraDistance.value * getUniforms().uTanHalfFov.value);
-  let strongestSatellite = 0;
-
-  satelliteDrops.forEach((drop, index) => {
-    const projectedDiameter = savedRadii[index] * 2 * pixelsPerWorldUnit;
-    // 小於 1.25 個最終像素沒有穩定輪廓；在 1.25–2.75 px 間平滑淡出，
-    // 避免一幀突然消失，也避免 4× render 將不可辨識碎滴重新帶回 512 成品。
-    const visibility = smoothstepCPU(projectedDiameter, 1.25, 2.75);
-    drop.w = savedRadii[index] * visibility;
-    strongestSatellite = Math.max(strongestSatellite, visibility);
-  });
-  getUniforms().uSatelliteBlend.value = savedBlend * strongestSatellite;
-
-  return () => {
-    satelliteDrops.forEach((drop, index) => { drop.w = savedRadii[index]; });
-    getUniforms().uSatelliteBlend.value = savedBlend;
-  };
-}
-
 async function renderExportFrame(settings, time, target) {
   applyExportCamera(time, settings.renderWidth, settings.renderHeight, settings.fov, settings.scale, settings);
-  const restoreDetail = applyExportDetailLOD(settings);
-  try {
-    renderComposite(target, settings.renderWidth / Math.max(1, settings.width));
-    const pixels = new Uint8Array(settings.renderWidth * settings.renderHeight * 4);
-    getRenderer().readRenderTargetPixels(target, 0, 0, settings.renderWidth, settings.renderHeight, pixels);
-    getRenderer().setRenderTarget(null);
-    return pixelsToPng(pixels, settings.renderWidth, settings.renderHeight, settings.width, settings.height);
-  } finally {
-    restoreDetail();
-  }
+  renderComposite(target, settings.renderWidth / Math.max(1, settings.width));
+  const pixels = new Uint8Array(settings.renderWidth * settings.renderHeight * 4);
+  getRenderer().readRenderTargetPixels(target, 0, 0, settings.renderWidth, settings.renderHeight, pixels);
+  getRenderer().setRenderTarget(null);
+  return pixelsToPng(pixels, settings.renderWidth, settings.renderHeight, settings.width, settings.height);
 }
 
 async function runExport(settings) {

@@ -110,16 +110,6 @@ export const MOTIONS = {
       },
     ],
   },
-  split: {
-    label: '分裂 Split',
-    uniform: 0,
-    usesShapeField: false,
-    gate: 'split',
-    count: 2,
-    radius: 0.4,
-    loopDuration: 12,
-    dolly: false,
-  },
   research: {
     label: '安裝中 Installing',
     uniform: 9,

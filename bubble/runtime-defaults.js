@@ -107,7 +107,6 @@ export const DEFAULTS = {              // 數值滑桿
   // transmissionSpread），0.26 產生的模糊比改動前明顯得多；設成 0 時所有計算
   // 都退化成原式，其餘動態模式的外觀因此跟這次改動之前完全一致。
   roughness: 0,
-  flowSpeed: 0.47,
   reflect: 1.6,
   transmission: 1.0,
   // 體積吸收的濃度。1 是這根滑桿出現以前寫死的值（見 shaders.js 的
@@ -168,12 +167,6 @@ export const DEFAULTS = {              // 數值滑桿
   wobble: 0.305,
   wobbleScale: 0.7,
   wobbleSpeed: 0.65,
-  elasticStrength: 0.024,
-  elasticDensity: 3.5,
-  elasticDamping: 0.55,
-  elasticSpeed: 1.75,
-  satelliteSize: 0.22,
-  satelliteCount: 3,
   spin: 0.08,
   // 較快匯聚 + 較長停留：成形後的定格時間由 2.6 秒拉到 5.4 秒（12 秒循環），
   // 讓形狀本身而不是散開過程佔據大部分畫面。
@@ -430,10 +423,10 @@ export const SELECT_DEFAULTS = {
 // 留在 <select> 裡（標成 hidden），否則瀏覽器會在寫入當下就把 value 丟成空字串，
 // 這裡根本讀不到原值。
 export const LEGACY_SELECT_VALUES = {
-  // cinematic 是「分裂」的舊鍵名。這個模式早期叫「電影感」，改名成「分裂」時只
-  // 換了顯示文字與 data-gate（index.html 裡一直是 data-gate="split"），鍵沒跟著
-  // 改，於是程式裡叫 cinematic、面板上寫分裂，看程式時得多繞一層。
-  motion: { cinematic: 'split', pulse: 'formation' },
+  // split（舊鍵名 cinematic）是已經移除的「分裂」模式。這裡不是改名而是退路：
+  // 舊的參數組合檔還打得開，只是會落在現存模式裡行為最接近的那個——安裝中同樣
+  // 是「兩顆殼靠近／融合／分開」，而不是把使用者丟回一顆靜止的方體。
+  motion: { cinematic: 'research', split: 'research', pulse: 'formation' },
   materialStyle: { glass: 'universal' },
 };
 export const TOGGLE_DEFAULTS = {

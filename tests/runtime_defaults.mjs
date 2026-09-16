@@ -30,7 +30,9 @@ assert.ok(Object.values(COLOR_DEFAULTS).every(value => /^#[0-9a-f]{6}$/i.test(va
 assert.equal(SPECTRAL_CAUSTIC_DEFAULTS.length, 7);
 assert.equal(SELECT_DEFAULTS.motion, 'static');
 assert.equal(SELECT_DEFAULTS.backdrop, 'dark');
-assert.equal(LEGACY_SELECT_VALUES.motion.cinematic, 'split');
+// 分裂已移除：舊值與舊鍵名都導向行為最接近的現存模式，舊參數檔才打得開。
+assert.equal(LEGACY_SELECT_VALUES.motion.split, 'research');
+assert.equal(LEGACY_SELECT_VALUES.motion.cinematic, 'research');
 assert.equal(LEGACY_SELECT_VALUES.motion.pulse, 'formation');
 assert.equal(isFormationMotion('formation'), true);
 assert.equal(isFormationMotion('morph'), false);

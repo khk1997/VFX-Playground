@@ -12,7 +12,7 @@ from bubble_baseline import wait_for_shader
 
 MOTIONS = (
     "static", "formation", "weave", "shatter", "melt", "morph",
-    "jelly", "capillary", "split", "research", "typewriter",
+    "jelly", "capillary", "research", "typewriter",
 )
 BACKDROPS = ("dark", "light")
 

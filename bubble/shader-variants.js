@@ -44,8 +44,6 @@ export function createShaderVariantPlanner({
       microDrops: shapeField
         && (isFormationMotion(motion) || motion === 'shatter'
           || motion === 'melt' || motion === 'morph'),
-      satellites: motion === 'split',
-      capillaryWave: motion === 'split',
       negativeField: shapeField,
       thinFilm: !!params.filmEnabled,
       liquidFilm: scoped('materialStyle') === 'membrane',
@@ -65,8 +63,7 @@ export function createShaderVariantPlanner({
     return [
       'g' + flag(state.shapeField, 'S') + flag(state.svgNormals, 'V')
         + flag(state.shapeVolume, 'G') + flag(state.capillaryTexture, 'C')
-        + flag(state.microDrops, 'M') + flag(state.satellites, 'A')
-        + flag(state.capillaryWave, 'W') + flag(state.negativeField, 'N')
+        + flag(state.microDrops, 'M') + flag(state.negativeField, 'N')
         + flag(state.staticShape, 'X') + flag(state.research, 'H')
         + flag(state.typewriter, 'Y') + flag(state.shapeMorph, 'R')
         + flag(state.formationCut, 'T'),
@@ -115,8 +112,6 @@ export function createShaderVariantPlanner({
       FEATURE_CAPILLARY: state.capillaryTexture ? '' : false,
       FEATURE_STATIC_SHAPE: state.staticShape ? '' : false,
       FEATURE_MICRO_DROPS: state.microDrops ? '' : false,
-      FEATURE_SATELLITES: state.satellites ? '' : false,
-      FEATURE_CAPILLARY_WAVE: state.capillaryWave ? '' : false,
       FEATURE_NEGATIVE_FIELD: state.negativeField ? '' : false,
       FEATURE_RESEARCH: state.research ? '' : false,
       FEATURE_TYPEWRITER: state.typewriter ? '' : false,
@@ -168,15 +163,8 @@ export function createShaderVariantPlanner({
     if (late || DIAG.probeNoSpectralCaustics) defines.FEATURE_SPECTRAL_CAUSTICS = false;
     if (DIAG.probeNoEnvPmrem) defines.FEATURE_ENV_PMREM = false;
     if (DIAG.probeNoThinFilm || DIAG.probeNoRefractionFilm) defines.FEATURE_THIN_FILM = false;
-    if (DIAG.probeMapscenePlain || DIAG.probeMapsceneSplit) {
+    if (DIAG.probeMapscenePlain) {
       defines.FEATURE_NEGATIVE_FIELD = false;
-      if (!DIAG.probeMapsceneSplit) {
-        defines.FEATURE_SATELLITES = false;
-        defines.FEATURE_CAPILLARY_WAVE = false;
-      } else {
-        defines.FEATURE_SATELLITES = '';
-        defines.FEATURE_CAPILLARY_WAVE = '';
-      }
       defines.NORMAL_TAPS_SVG = false;
     }
     if (DIAG.probeModeSvg) {

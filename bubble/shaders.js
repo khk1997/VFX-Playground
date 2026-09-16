@@ -178,17 +178,9 @@ uniform vec4  uTypeShape;      // x：擠出厚度，y：邊緣圓角，z：液�
 uniform vec4  uTypeCaret;      // xy：游標中心，z：半寬，w：>0.5 代表這一幀亮著
 uniform float uTypeCaretDepth;  // 游標自己的擠出厚度，跟字形的 uTypeShape.x 分開
 uniform float uTypeSoftness;    // 邊緣液化：把字形距離場整體外推，筆畫變粗、細節熔合
-uniform vec2  uElasticEvent;    // x：事件包絡，y：傳播進度
-uniform float uElasticStrength;
-uniform float uElasticDensity;
-uniform float uElasticDamping;
-uniform float uElasticSpeed;
 uniform vec4  uDrops[12];       // xyz：中心，w：半徑（CPU 每幀更新）
 uniform vec4  uDropShape[12];   // xyz：形變主軸，w：體積守恆的縱向伸縮
 uniform vec4  uDropPhysics[12]; // x：接觸壓平，y：形狀振盪，z：斷裂尖端，w：融合權重
-uniform vec2  uElasticPair;    // 正在接觸／斷裂的水滴索引
-uniform vec4  uSatellites[3];  // xyz：衛星滴中心，w：半徑（斷裂處的小滴串）
-uniform float uSatelliteBlend; // 衛星滴與頸部的融合度：成形時高（相連），掐斷時→0（分離）
 uniform vec4  uBounds;         // xyz：包圍球中心，w：半徑
 uniform int   uShapeType;      // 0 無, 1 SVG 擠出, 2 GLB/GLTF 體積
 uniform float uShapeProgress;

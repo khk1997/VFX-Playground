@@ -65,7 +65,7 @@ params.motion = 'formation';
 params.staticShape = 7;
 
 const key = planner.variantKey(formation);
-assert.equal(key, 'gSV--M--N----T.oFLDPKBE');
+assert.equal(key, 'gSV--MN----T.oFLDPKBE');
 assert.equal(planner.variantKey(formation), key, 'variant keys must be deterministic');
 
 const desktopDefines = planner.shaderFeatures(formation);
@@ -73,14 +73,13 @@ assert.equal(desktopDefines.MAX_REFLECTION_SAMPLES, 8);
 assert.equal(desktopDefines.FEATURE_SHAPE_FIELD, '');
 assert.equal(desktopDefines.FEATURE_SHAPE_VOLUME, false);
 assert.equal(desktopDefines.FEATURE_FORMATION_CUT, '');
-assert.equal(desktopDefines.FEATURE_SATELLITES, false);
 assert.equal(desktopDefines.FEATURE_LIQUID_FILM, '');
 assert.equal(makePlanner({ mobile: true }).shaderFeatures(formation).MAX_REFLECTION_SAMPLES, 4);
 
-const forcedPlanner = makePlanner({ forced: ['FEATURE_SATELLITES'], run: 23 });
-assert.equal(forcedPlanner.shaderFeatures(formation).FEATURE_SATELLITES, '');
+const forcedPlanner = makePlanner({ forced: ['FEATURE_SHAPE_VOLUME'], run: 23 });
+assert.equal(forcedPlanner.shaderFeatures(formation).FEATURE_SHAPE_VOLUME, '');
 assert.equal(forcedPlanner.shaderFeatures(formation).SHADER_RUN, 23);
-assert.match(forcedPlanner.variantKey(formation), /\.d\[\|FEATURE_SATELLITES\]$/);
+assert.match(forcedPlanner.variantKey(formation), /\.d\[\|FEATURE_SHAPE_VOLUME\]$/);
 
 const baselinePlanner = makePlanner({
   diag: { any: true, list: ['probe-snoise'], probeSnoise: true },

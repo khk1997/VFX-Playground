@@ -35,8 +35,7 @@ import { createEnvironmentLoader, selectMaterialEnvironment } from './environmen
 import { describeShapeImport, loadShapeAsset } from './shape-loader.js?v=1';
 import { createShaderVariantPlanner, VariantMaterialCache } from './shader-variants.js?v=1';
 import {
-  SATELLITE_COUNT, applySplitVolumeTransfer, clearSatelliteDrops,
-  findClosestDropPair, splitTimeline, updateDropBounds, updateSatelliteDrops,
+  contactMergeAmount, findClosestDropPair, updateDropBounds,
 } from './drop-physics.js?v=1';
 import {
   distributeDetailedAnchors, distributeFormationAnchors, distributePrimaryAnchors,
@@ -662,12 +661,12 @@ function syncShaderVariantNow() {
 //     在那裡會退回同步路徑 —— 預熱會把主執行緒一支一支地扣住，那比不預熱糟得多。
 // 所以兩個條件都要成立才做：擴充在（＝真的非阻塞），而且首編實測真的慢。這樣同一份
 // 程式碼在三種環境下都會做對的事，不必判斷平台，也不會在未來的新後端上猜錯。
-// research 與 typewriter／split 是各自獨立的 FEATURE_* 旗標，不像 formation／melt
+// research 與 typewriter 是各自獨立的 FEATURE_* 旗標，不像 formation／melt
 // 等造型模式那樣共用同一組 shapeField 組合鍵 —— 沒有任何一支既有目標會「順便」
 // 編到它們，所以要自己各佔一個名額，否則使用者切過去時永遠是冷編。
 const PREWARM_MOTIONS = [
   'formation', 'melt', 'morph', 'weave', 'shatter', 'jelly', 'capillary',
-  'research', 'typewriter', 'split',
+  'research', 'typewriter',
 ];
 // 首編超過這個時間才值得預熱。個位數秒的環境多編幾支只是浪費。
 const PREWARM_MIN_COMPILE_MS = 4000;
@@ -916,15 +915,7 @@ function syncExtendedShapeContext() {
 }
 const previousDropPositions = Array.from({ length: MAX_DROPS }, () => new THREE.Vector3());
 const dropBounds = new THREE.Vector4(0, 0, 0, 1);
-const elasticEvent = new THREE.Vector2(0, 0);
-const elasticPair = new THREE.Vector2(0, 1);
-// 斷裂處的衛星滴串（Rayleigh–Plateau）：沿收頸軸形成，釋放後各自漂移並被主滴回收。
-const satelliteDrops = Array.from(
-  { length: SATELLITE_COUNT }, () => new THREE.Vector4(0, 0, 0, 0),
-);
 let previousDropT = null;
-let previousPairKey = '';
-let previousPairGap = 0;
 let shapeField = null;
 // 每匯入一次形狀就 +1。崩解切法的錨點快取用它當 key 的一部分，換了形狀
 // 才不會拿上一顆造型算出來的碎片繼續用。
@@ -1618,7 +1609,7 @@ function updateDropUniforms(t) {
   const tau = Math.PI * 2;
   const phase = fract(t / Math.max(0.001, P.loopDuration));
   const a = phase * tau;
-  // 只有走 SDF 的模式才有造型可動；'split' 等不用形狀場的模式維持 null，
+  // 只有走 SDF 的模式才有造型可動；不用形狀場的模式維持 null，
   // applyShapeRigid 在那些模式底下自然是恆等變換。
   //
   // 果凍走自己那條阻尼彈簧，不疊「造型動態」那組週期性旋轉／呼吸（理由見
@@ -1656,7 +1647,6 @@ function updateDropUniforms(t) {
     shapeRigid2Rot.setFromMatrix4(shapeRigid2Mat4.makeRotationFromEuler(shapeRigid2Euler));
     shapeRigid2Now.rotation = shapeRigid2Rot;
   }
-  const energy = 0.55 + P.flowSpeed * 0.9;
   const amount = formationAmount(phase);
   const fidelityAbsorb = isFormationMotion(P.motion) && shapeField
     ? formationFidelityAmount(phase)
@@ -1715,33 +1705,16 @@ function updateDropUniforms(t) {
   const microCount = updateMicroDrops(phase, fidelityAbsorb, morphSolid);
   const negativeCount = updateNegativeDrops(phase, fidelityAbsorb);
 
-  const splitBeat = splitTimeline(phase);
-  const separation = splitBeat.volumeSeparation;
-  const merge = 1 - separation;
-  const tension = splitBeat.pull * (1 - splitBeat.detach);
-  const breakaway = splitBeat.recoil;
-  const bounceProgress = Math.max(0, Math.min(1, (phase - 0.19) / 0.17));
-  // 只保留一次小幅回彈；不再疊加多週正負振盪。
-  const followThrough = breakaway * Math.sin(bounceProgress * Math.PI * 2)
-    * Math.exp(-3.2 * bounceProgress);
-  // 滑桿值仍是基準黏度；電影模式依事件暫時改變融合半徑。
-  // 接觸時增黏，拉伸時開始收頸，斷裂時快速卸除 smooth-min 的連接。
-  let viscosityScale = P.motion === 'split'
-    ? Math.max(0.35, 1 + merge * 0.15 - tension * 0.25 - breakaway * 0.55)
-    // 崩解噴濺同樣是「一次出現很多顆」，需要同一套正規化，否則炸開那一瞬間
-    // 8 顆滿半徑的碎片會被 smooth-min 黏成一大團而不是各自剝離。
-    // 融化也是一次出現很多顆各自獨立的水滴，同樣需要這套正規化。
-    // 形狀變形同樣是「一次出現很多顆」：水滴群就是整個畫面，沒有正規化的話
-    // 排成形狀的那一刻整組會黏成一大團，輪廓完全糊掉。
-    : isFormationMotion(P.motion) || P.motion === 'shatter' || melting || morphing || extended
+  // 崩解噴濺、融化、形狀變形、形狀匯聚都是「一次出現很多顆」，需要同一套正規化
+  // ——否則炸開／排成形狀的那一瞬間，滿半徑的水滴會被 smooth-min 黏成一大團而不是
+  // 各自剝離，輪廓完全糊掉。
+  const viscosityScale =
+    isFormationMotion(P.motion) || P.motion === 'shatter' || melting || morphing || extended
       // smooth-min 連續合併很多顆時會累積膨脹；依數量正規化融合半徑，
       // 讓 12–16 顆仍只在真正接觸處形成液橋，不把整組擴成巨大距離場。
       ? Math.max(0.10, 0.42 / Math.sqrt(layoutCount))
       : 1;
-  let effectiveViscosity = P.viscosity * viscosityScale;
-  const groupX = Math.sin(a) * P.spread * 0.12 * energy;
-  const groupY = Math.sin(a * 2 + 0.4) * P.spread * 0.08 * energy;
-  const groupZ = Math.cos(a) * P.spread * 0.07 * energy;
+  const effectiveViscosity = P.viscosity * viscosityScale;
 
   for (let i = 0; i < MAX_DROPS; i++) {
     const { h1, h2, h3, radius } = dropSeeds[i];
@@ -1752,20 +1725,7 @@ function updateDropUniforms(t) {
     // 融化的半徑同樣自成一套（長出→墜落→縮到 0 的包絡），在這裡先接住。
     let meltState = null;
 
-    if (P.motion === 'split') {
-      // 所有水滴共用同一個緩慢旋轉的分離軸；不再各自沿亂數弧線交叉碰撞。
-      const anchor = i * tau / layoutCount + Math.sin(a) * 0.18;
-      const radial = P.spread * (1.04 + h2 * 0.06) * energy;
-      const recoil = 1 + breakaway * (0.11 + h2 * 0.018)
-        + followThrough * (0.035 + h3 * 0.012);
-      const actionScale = splitBeat.distanceSeparation * recoil;
-      x = groupX + Math.cos(anchor) * radial * actionScale;
-      y = groupY + Math.sin(anchor) * radial * 0.24 * actionScale;
-      z = groupZ + Math.sin(anchor) * radial * 0.52 * actionScale;
-      // 形變本身已近似守恆體積，避免再用半徑做一次「呼吸」而產生橫向縮放感。
-      radiusFactor = 1 + splitBeat.anticipation * 0.01
-        + breakaway * 0.006 + followThrough * 0.004;
-    } else if (P.motion === 'weave') {
+    if (P.motion === 'weave') {
       weaveDropPosition(i, phase, layoutCount, formationPosNow);
       x = formationPosNow.x;
       y = formationPosNow.y;
@@ -1849,7 +1809,7 @@ function updateDropUniforms(t) {
     }
     // weave/shatter/melt/morph/formation 這五種都是拿形狀本地空間的錨點算
     // 位置，造型的剛體動態要在這裡套進去，水滴才會跟著造型一起轉/浮/呼吸，
-    // 而不是各動各的。'split' 等不用形狀場的模式 shapeRigidNow 恆為 null。
+    // 而不是各動各的。不用形狀場的模式 shapeRigidNow 恆為 null。
     // 形狀變形用 blend 版本：非 morph 模式 morphBlend 恆為 0，退化成跟
     // applyShapeRigid 完全一樣（見該函式開頭 blend<=0 的 early return）。
     if (shapeRigidNow || shapeRigid2Now) {
@@ -1900,62 +1860,24 @@ function updateDropUniforms(t) {
     }
   }
 
-  // 電影模式的合體狀態是真正的一顆母滴：其餘水滴由零半徑連續長出，而不是讓
-  // 多顆完整半徑的 SDF 重疊後再突然解鎖。以 q^3 轉移體積，子滴半徑會隨 q
-  // 近似線性增長，同時嚴格維持總體積，輪廓便能自然經過鼓包、細頸、斷裂。
-  if (P.motion === 'split' && count > 1) {
-    applySplitVolumeTransfer(dropData, count, separation);
-  }
-
-  // 電影敘事期間鎖定主配對，避免多滴的最近距離交替造成形變軸跳動。
-  // 其他模式仍使用即時最近配對。
-  const { pairA, pairB, pairDistance, surfaceGap } = findClosestDropPair(
-    dropData, count, P.motion === 'split',
-  );
+  const { pairA, pairB, surfaceGap } = findClosestDropPair(dropData, count);
 
   const frameDt = previousDropT == null || t < previousDropT
     ? 0 : Math.min(0.05, Math.max(0.0001, t - previousDropT));
-  const pairKey = `${pairA}:${pairB}`;
-  const gapVelocity = frameDt > 0 && pairKey === previousPairKey
-    ? (surfaceGap - previousPairGap) / frameDt : 0;
   const contactRange = Math.max(0.12, P.viscosity * 0.55);
   const contactAmount = count >= 2
     ? 1 - smoothstepCPU(surfaceGap, 0.015, contactRange) : 0;
-  const drainageHold = contactAmount * merge;
-  const separationSpeed = Math.max(0, gapVelocity);
-  // 電影模式由體積轉移本身完成分裂／融合，不再額外鎖中心或複製合體半徑。
-  // 額外的 fusion lock 正是先縮放、再雙葉化的第二套互相衝突的形變來源。
-  const fusionLock = 0;
-  const fusionAmount = Math.max(drainageHold, fusionLock);
-  let pairAxisX = 1, pairAxisY = 0, pairAxisZ = 0;
-
-  // 非電影模式仍可依實際接觸做黏性融合；電影模式已在上方守恆轉移體積。
+  // 兩顆最近的水滴真的碰到時互相脹大半徑，形成液橋。什麼時候允許融合，由
+  // contactMergeAmount 那條週期性閘門決定（見 drop-physics.js）。
   // 融化排除在外：每一滴都是各自落下的獨立水滴，靠得近時互相脹大半徑會黏成
   // 一條斷不開的水柱，正好是這個模式最不該有的樣子。
-  if (!isFormationMotion(P.motion) && P.motion !== 'split' && !researchRuntime.active() && !melting
+  const fusionAmount = contactAmount * contactMergeAmount(phase);
+  if (!isFormationMotion(P.motion) && !researchRuntime.active() && !melting
     && count >= 2 && fusionAmount > 0) {
-    const da = dropData[pairA], db = dropData[pairB];
-    const axisX = db.x - da.x, axisY = db.y - da.y, axisZ = db.z - da.z;
-    const axisInv = 1 / Math.max(0.0001, Math.hypot(axisX, axisY, axisZ));
-    pairAxisX = axisX * axisInv; pairAxisY = axisY * axisInv; pairAxisZ = axisZ * axisInv;
-    const midX = (da.x + db.x) * 0.5;
-    const midY = (da.y + db.y) * 0.5;
-    const midZ = (da.z + db.z) * 0.5;
-    da.x += (midX - da.x) * fusionLock; db.x += (midX - db.x) * fusionLock;
-    da.y += (midY - da.y) * fusionLock; db.y += (midY - db.y) * fusionLock;
-    da.z += (midZ - da.z) * fusionLock; db.z += (midZ - db.z) * fusionLock;
     const radiusA = dropData[pairA].w, radiusB = dropData[pairB].w;
     const mergedRadius = Math.cbrt(radiusA ** 3 + radiusB ** 3);
     dropData[pairA].w += (mergedRadius - radiusA) * fusionAmount;
     dropData[pairB].w += (mergedRadius - radiusB) * fusionAmount;
-  }
-
-  // 實際接觸距離修正事件黏性：壓平時增黏，頸部拉伸與快速分離時卸黏。
-  if (P.motion === 'split' && count >= 2) {
-    viscosityScale = Math.max(0.35,
-      1 + splitBeat.contact * 0.2 - tension * 0.18
-      - breakaway * (0.42 + Math.min(0.1, separationSpeed * 0.035)));
-    effectiveViscosity = P.viscosity * viscosityScale;
   }
   // 穿梭環繞的物體要維持獨立完整、不是由水滴組成的材質——水滴是另外一批
   // 獨立球體，只在循環軌跡上貼著/穿過它的表面。融合半徑不能沿用形狀匯聚那種
@@ -2168,86 +2090,6 @@ function updateDropUniforms(t) {
         tip = deform.tip;
         shapeOscillation = deform.wobble;
       }
-    } else if (P.motion === 'split' && count >= 2 && (i === pairA || i === pairB)) {
-      const other = dropData[i === pairA ? pairB : pairA];
-      const dx = other.x - d.x, dy = other.y - d.y, dz = other.z - d.z;
-      const invDistance = 1 / Math.max(0.0001, Math.hypot(dx, dy, dz));
-      const contactAxisX = dx * invDistance;
-      const contactAxisY = dy * invDistance;
-      const contactAxisZ = dz * invDistance;
-      // 完全分離時沿速度方向形變；只有事件或接觸期間才轉向兩滴之間的軸線。
-      // 電影模式回彈期把形變軸完全鎖到 contactAxis（法線），確保斷裂尖端嚴格沿法線
-      // 回彈、不隨殘餘速度分量抖動；breakaway 為 C1 的 Hann，鎖定權重本身平滑。
-      const breakawayLock = P.motion === 'split' ? breakaway : breakaway * 0.85;
-      const pairInfluence = Math.min(1,
-        Math.max(contactAmount, fusionLock, tension, breakawayLock));
-      // 分離時速度軸 ≈ −contactAxis（往外飛，背向另一顆）；直接線性混向法線會在中途
-      // 抵消成零向量，使 normalize 病態、尖端指向翻面而抖動。先把速度軸翻到與法線
-      // 同半球再混合。尖端(physics.z)只在 +axis 極點，故軸的正負號需與法線一致；
-      // 拉伸(longScale)對稱、drift 期無尖端，翻號不影響外觀。
-      if (ax * contactAxisX + ay * contactAxisY + az * contactAxisZ < 0) {
-        ax = -ax; ay = -ay; az = -az;
-      }
-      ax += (contactAxisX - ax) * pairInfluence;
-      ay += (contactAxisY - ay) * pairInfluence;
-      az += (contactAxisZ - az) * pairInfluence;
-      const axisLength = Math.max(0.0001, Math.hypot(ax, ay, az));
-      ax /= axisLength; ay /= axisLength; az /= axisLength;
-      const physicalStretch = stretch
-        + tension * (0.12 + P.surfaceTension * 0.05)
-        + breakaway * 0.055;
-      if (P.motion === 'split') {
-        // 電影模式由單一包絡擁有長軸形變；速度只提供少量次級慣性。
-        const designedStretch = 1
-          + splitBeat.splitShape * (0.085 + P.surfaceTension * 0.025)
-          + splitBeat.contact * (0.025 + P.surfaceTension * 0.012);
-        stretch = designedStretch + (physicalStretch - 1) * 0.22;
-      } else {
-        stretch = physicalStretch;
-      }
-      // 壓平只在聚合接觸／排液期發生，不再於分裂與融合兩側各出現一次。
-      const drainageTransition = contactAmount * (P.motion === 'split'
-        ? splitBeat.contact
-        : Math.sin(Math.PI * merge));
-      flatten = drainageTransition * (0.55 + P.surfaceTension * 0.2);
-      // 電影模式用平滑解析包絡驅動尖端回彈，與逐幀量測的 separationSpeed 解耦，
-      // 避免量測噪聲讓尖頭幅度抖動；非電影模式仍依實際分離速度觸發。
-      tip = P.motion === 'split'
-        ? breakaway * Math.exp(-4.2 * bounceProgress)
-        : breakaway * Math.exp(-4.2 * bounceProgress)
-          * smoothstepCPU(separationSpeed, 0.02, 0.35);
-      // Q 彈：擾動後整顆果凍震盪，經 physics.y 調變長軸；shader 以
-      // transverseScale=1/√longScale 補償橫向 → 體積守恆的 prolate↔oblate 脈動。
-      // 振幅用 C1 的事件包絡（breakaway 的 Hann / 融合 settle 的 Hann），兩端斜率為 0，
-      // 事件內與循環接縫都無跳變；頻率隨滴徑 √(σ/R³) 提高，小滴抖得快、符合物理。
-      if (P.motion === 'split') {
-        const jellyFreq = Math.sqrt(0.54 / Math.max(0.2, d.w));
-        const wobbleGain = 0.45 + P.elasticStrength * 4.5;
-        // 分裂回彈：斷裂後盪約兩下收斂。
-        const sepWobble = breakaway
-          * Math.sin(2 * Math.PI * (2.3 * jellyFreq) * bounceProgress);
-        // 融合著陸：獨立於 coalesce，延伸到 absorb 完成後的 hold 段（0.74→0.98）平復，
-        // 於接縫前歸零。
-        const settleProg = Math.max(0, Math.min(1, (phase - 0.74) / 0.24));
-        const settleEnv = 0.5 * (1 - Math.cos(2 * Math.PI * settleProg));
-        const mergeWobble = settleEnv
-          * Math.sin(2 * Math.PI * (2.0 * jellyFreq) * settleProg);
-        shapeOscillation = Math.max(-1.2, Math.min(1.2,
-          (sepWobble + mergeWobble * 1.1) * wobbleGain));
-      }
-      // 鎖定合體後兩個 SDF 使用完全相同的主軸與伸縮，視覺上成為單一液滴。
-      ax += (pairAxisX - ax) * fusionLock;
-      ay += (pairAxisY - ay) * fusionLock;
-      az += (pairAxisZ - az) * fusionLock;
-      stretch += (1 - stretch) * fusionLock;
-      flatten *= 1 - fusionLock;
-    }
-    // 分裂模式的子滴在出生／吸收尾端半徑會趨近 0。若 smooth-min 融合半徑仍
-    // 維持滿值，極小子滴仍會留下約 k/6 的鼓包，直到半徑守衛下一幀把它整顆
-    // 跳過，輪廓便瞬間縮小。只讓子滴的融合權重隨體積交接平滑淡入／淡出；
-    // 其他模式固定為 1，崩解模式的零半徑守衛也維持原語意。
-    if (P.motion === 'split' && i > 0) {
-      blendWeight = separation;
     }
     dropShapeData[i].set(ax, ay, az, stretch);
     dropPhysicsData[i].set(flatten, shapeOscillation, tip, blendWeight);
@@ -2267,61 +2109,14 @@ function updateDropUniforms(t) {
     dropPhysicsData[i].set(0, 0, 0, 0);
   }
 
-  // 以實際 SDF 頸部是否斷裂觸發毛細波，並把活動配對傳給 shader。
-  if (P.motion === 'split' && count >= 2) {
-    elasticPair.set(pairA, pairB);
-    const neckGap = pairDistance - dropData[pairA].w - dropData[pairB].w
-      - effectiveViscosity * 0.5;
-    const detachGate = smoothstepCPU(neckGap, 0, 0.08);
-    const progress = Math.max(0, Math.min(1, (phase - 0.19) / 0.20));
-    const pulse = Math.sin(Math.PI * progress);
-    const sizeFrequency = Math.sqrt(0.54 / Math.max(0.2,
-      (dropData[pairA].w + dropData[pairB].w) * 0.5));
-    const detachEnvelope = detachGate * pulse * pulse * P.surfaceTension
-      * Math.pow(1 - progress, 0.25 + P.elasticDamping * 1.5);
-
-    // 毛細回彈波只在分裂（pinch-off）發生；融合為平順接合，不再產生回彈漣漪。
-    elasticEvent.set(detachEnvelope, Math.min(1, progress * sizeFrequency));
-    if (uniforms) {
-      uniforms.uElasticStrength.value = P.elasticStrength
-        * (0.62 + P.surfaceTension * 0.58) / (1 + P.viscosity * 0.32);
-      uniforms.uElasticDamping.value = Math.max(0, Math.min(1,
-        P.elasticDamping + P.viscosity * 0.12 - P.surfaceTension * 0.06));
-      uniforms.uElasticSpeed.value = P.elasticSpeed
-        * (0.74 + P.surfaceTension * 0.3) * sizeFrequency;
-    }
-
-    // 衛星滴串：在液橋上形成，pinch-off 後保留為自由滴，最後分批被鄰近主滴吸收。
-    // 全程由 phase 的解析軌跡驅動，因此播放、拖動時間與循環接縫都不會累積誤差。
-    const satelliteBlend = updateSatelliteDrops({
-      phase,
-      dropData,
-      pairA,
-      pairB,
-      radius: P.radius,
-      dropSeeds,
-      satelliteCount: P.satelliteCount,
-      satelliteSize: P.satelliteSize,
-      satelliteDrops,
-    });
-    if (uniforms) uniforms.uSatelliteBlend.value = satelliteBlend;
-  } else {
-    elasticEvent.set(0, 0);
-    clearSatelliteDrops(satelliteDrops);
-    if (uniforms) uniforms.uSatelliteBlend.value = 0;
-  }
-
   for (let i = 0; i < count; i++) previousDropPositions[i].set(dropData[i].x, dropData[i].y, dropData[i].z);
   previousDropT = t;
-  previousPairKey = pairKey;
-  previousPairGap = surfaceGap;
 
   updateDropBounds({
     params: P,
     count,
     dropData,
     dropShapeData,
-    satelliteDrops,
     dropBounds,
     typewriterReach,
     hasShapeField: usesShapeField(P.motion) && !!shapeField,
@@ -2484,17 +2279,9 @@ function initGL() {
     uTypeCaret: { value: new THREE.Vector4(0, 0, 0, 0) },
     uTypeCaretDepth: { value: P.typeCaretDepth },
     uTypeSoftness: { value: P.typeSoftness },
-    uElasticEvent: { value: elasticEvent },
-    uElasticStrength: { value: P.elasticStrength },
-    uElasticDensity: { value: P.elasticDensity },
-    uElasticDamping: { value: P.elasticDamping },
-    uElasticSpeed: { value: P.elasticSpeed },
     uDrops:      { value: dropData },
     uDropShape:  { value: dropShapeData },
     uDropPhysics: { value: dropPhysicsData },
-    uElasticPair: { value: elasticPair },
-    uSatellites: { value: satelliteDrops },
-    uSatelliteBlend: { value: 0 },
     uBounds:     { value: dropBounds },
     uThickness:  { value: P.thickness },
     uThickVar:   { value: P.thickVar },
@@ -3534,7 +3321,7 @@ function syncLoop() {
         // 完整走一次 frame()，而不是只呼叫 renderer.render()。
         // 理由：每幀的 uniform 更新（updateDropUniforms）就在 frame() 裡，跳過它
         // 算出來的那一幀帶著初始化殘值 —— 例如 uMicroCount 會停在面板滑桿同步進去
-        // 的 14，而 split 模式實際上該是 0（syncPanelToUniforms 在 initGL 裡跑在
+        // 的 14，而毛細波模式實際上該是 0（syncPanelToUniforms 在 initGL 裡跑在
         // updateDropUniforms 之後，兩者都寫同一顆 uniform）。那樣量到的成本不具代表性。
         // frame() 開頭會自己排下一次，這裡算完立刻取消，只留這一幀。
         // 跟正式路徑一樣先等 env 狀態確定＋背景編譯完成，否則擷取到的會是
@@ -3627,7 +3414,7 @@ const {
   getRenderer: () => renderer, ensureInitialized: () => { if (!inited) initGL(); },
   updateDropUniforms, rotation: rot, rotM4, tmpX, tmpZ, isFormationMotion,
   getShapeField: () => shapeField, formationFidelityAmount, formationAmount, smoothstepCPU,
-  syncEdgeDropMotion, satelliteDrops, renderComposite,
+  syncEdgeDropMotion, renderComposite,
   isMobile: () => mobileRenderQuery.matches, flushShatterCutAnchors, syncLoop,
   getSimTime: () => simT, setSimTime: value => { simT = value; },
   resetPreviousDropT: () => { previousDropT = null; }, canvas, resize,

@@ -277,7 +277,7 @@ export function buildInspector({ defaults }) {
     'morphHold', 'morphStagger', 'morphArc', 'morphSwell',
     'jellyStyle', 'jellyPokes', 'jellyAmount', 'jellyBounces', 'jellyDamping',
     'typeText', 'typeSize', 'typeTracking', 'typeDepth', 'typeBevel',
-    'flowSpeed', 'shapeMotionOn', 'shapeSpinY', 'shapeBreathe', 'shapeBob',
+    'shapeMotionOn', 'shapeSpinY', 'shapeBreathe', 'shapeBob',
     'shapeSource', 'shapeQuality', 'shapeAScale', 'shapeInput', 'gatherDuration',
     'shapeHold', 'microCount', 'shapeDepth', 'shapeEdgeBevel', 'shapeLiquid',
     'shapeLiquidPosition', 'shapeLiquidSize', 'shapeLiquidSpeed',
