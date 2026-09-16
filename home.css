@@ -95,7 +95,11 @@
     border: 0; pointer-events: none;
     transform-origin: top left;
     background: #000;
+    visibility: hidden;
+    opacity: 0;
+    transition: opacity .12s ease-out;
   }
+  .card-preview iframe.is-ready { visibility: visible; opacity: 1; }
 
   .card-body { padding: 12px 14px 14px; background: rgba(0,0,0,.35); }
   .card-title { font-size: 15px; font-weight: 600; letter-spacing: .5px; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

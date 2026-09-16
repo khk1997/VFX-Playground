@@ -30,6 +30,9 @@ const mobilePreviewQuery = window.matchMedia('(max-width: 760px)');
 const primedMobilePreviews = new WeakSet();
 const mobilePreviewPauseTimers = new WeakMap();
 let previewUseTick = 0;
+// 所有預覽都等 iframe 載入後再留一小段時間，讓 Canvas/WebGL 完成首輪
+// 編譯與繪製；否則卡片會先露出暗色、未完成的中間影格。
+const PREVIEW_REVEAL_DELAY_MS = 320;
 
 // 目前允許載入的距離。初次進站是 0 —— 只有正中央那張真的建立 iframe。
 //
@@ -240,7 +243,13 @@ function ensurePreviewLoaded(index) {
     frame.setAttribute('scrolling', 'no');
     frame.setAttribute('aria-hidden', 'true');
     frame.style.transform = `scale(${220 / PREVIEW_W})`;
-    frame.addEventListener('load', () => syncPreviewState(frame, index));
+    frame.addEventListener('load', () => {
+      syncPreviewState(frame, index);
+      window.setTimeout(() => {
+        // iframe 可能在等待期間被移除或重新掛載，只有仍在目前 host 的那個才揭示。
+        if (iframes[index] === frame && frame.isConnected) frame.classList.add('is-ready');
+      }, PREVIEW_REVEAL_DELAY_MS);
+    });
     iframes[index] = frame;
     host.appendChild(frame);
     frame.src = src;
