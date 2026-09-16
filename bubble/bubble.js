@@ -58,6 +58,7 @@ import { createMeltRuntime } from './motions/runtime/melt.js?v=1';
 import { createShatterRuntime } from './motions/runtime/shatter.js?v=1';
 import { createWeaveRuntime } from './motions/runtime/weave.js?v=1';
 import { createMorphRuntime } from './motions/runtime/morph.js?v=1';
+import { createFormationRuntime } from './motions/runtime/formation.js?v=1';
 import { buildExtendedMotionControls } from './panel-builder.js?v=1';
 import { createPanelStateController } from './panel-state.js?v=1';
 import { createPanelBindings } from './panel-bindings.js?v=1';
@@ -1264,6 +1265,23 @@ const {
   edgeScale: () => formationEdgeScale,
 });
 
+// 形狀匯聚：位置、半徑、造型進度與成型波前這四件事讀的是同一條體積交接時間軸，
+// 所以收在一起。時間軸本身留在這裡——微滴、鏡頭推軌與輸出流程也都在讀。
+const formationRuntime = createFormationRuntime({
+  params: P,
+  isFormationMotion,
+  hasShapeField: () => !!shapeField,
+  anchors: () => formationAnchors,
+  edgeScale: () => formationEdgeScale,
+  amount: formationAmount,
+  fidelityAmount: formationFidelityAmount,
+  releaseAmount: formationReleaseAmount,
+  dropPosition: formationDropPosition,
+  lead: formationLead,
+  localAmount: formationLocalAmount,
+  cutFront: formationCutFront,
+});
+
 // 穿梭環繞：飄浮位置跟形狀匯聚共用上面那支工廠（同一份錨點、同一組種子），所以
 // 把它交出來的 weaveDropPosition 接進模組，而不是另外再建一份。
 const weaveRuntime = createWeaveRuntime({ params: P, dropPosition: weaveDropPosition });
@@ -1389,7 +1407,7 @@ function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false) {
   const morphing = morphRuntime.active();
   // 果凍不列入：它的造型是完整靜止的實體，沒有「正在成形的細節」需要微滴去補，
   // 加上去只會變成貼在表面的一圈贅球。
-  const activeCount = (isFormationMotion(P.motion) || shattering || melting || morphing)
+  const activeCount = (formationRuntime.active() || shattering || melting || morphing)
     && shapeField
     ? Math.max(0, Math.min(MAX_MICRO_DROPS, Math.round(P.microCount)))
     : 0;
@@ -1618,12 +1636,9 @@ function updateDropUniforms(t) {
     shapeRigid2Now.rotation = shapeRigid2Rot;
   }
   const amount = formationAmount(phase);
-  const fidelityAbsorb = isFormationMotion(P.motion) && shapeField
-    ? formationFidelityAmount(phase)
-    : 0;
+  const fidelityAbsorb = formationRuntime.fidelityAbsorb(phase);
   const holdEnd = Math.min(0.94, Math.max(0.15, P.gatherDuration) + P.shapeHold);
   const releasingShape = phase > holdEnd;
-  const releaseTransfer = releasingShape ? formationReleaseAmount(phase) : 0;
   // 高密度細節場由可見主滴進入模型區域後才開始長出；它本身是預烘焙
   // Metaball union，而非原始 GLB SDF。
   // 穿梭環繞的形狀是恆定的背景主體，不走匯聚／散開的體積交接，永遠滿值顯示。
@@ -1653,20 +1668,8 @@ function updateDropUniforms(t) {
       ? 1
       : shatter
         ? shatterRuntime.shapeAmount(shatter)
-        : isFormationMotion(P.motion)
-          // 成型波前開啟時，「哪裡看得到形狀」整個交給波前（uShapeCut），這條
-          // 全域進度只剩兩個責任：把等距侵蝕在一開始就退場（否則會跟波前互相
-          // 蓋住，變成兩層各自的成形），以及維持兩端為 0——uShapeProgress 還
-          // 兼任 geometryWobble 的插值權重（見 shaders.js），突然跳成 1 會讓
-          // 自由飛行段的水滴晃動整片變樣。
-          ? P.formationFrontOn
-            ? smoothstepCPU(amount, 0.01, 0.22)
-            // 回程使用同一個體積交接進度：模型從第一幀開始退、水滴同步長回。
-            // 舊版先維持完整模型、再集中侵蝕，會形成「模型上冒球後突然塌掉」。
-            : releasingShape
-              // 在水滴完全散開前清掉最後的模型核心，避免循環尾端留下 SDF 碎片。
-              ? 1 - smoothstepCPU(releaseTransfer, 0.0, 0.84)
-              : smoothstepCPU(amount, 0.42, 0.96)
+        : formationRuntime.active()
+          ? formationRuntime.shapeProgress(phase, amount, releasingShape)
           : 0;
   // 模型已大致長成後，讓可見水滴在目標體積內連續被 SDF 吸收。
   // 最後輪廓只剩匯入模型場；吸收在模型完成前不啟動，避免「水滴先縮、模型才出現」。
@@ -1677,7 +1680,7 @@ function updateDropUniforms(t) {
   // ——否則炸開／排成形狀的那一瞬間，滿半徑的水滴會被 smooth-min 黏成一大團而不是
   // 各自剝離，輪廓完全糊掉。
   const viscosityScale =
-    isFormationMotion(P.motion) || shatterRuntime.active() || melting || morphing || extended
+    formationRuntime.active() || shatterRuntime.active() || melting || morphing || extended
       // smooth-min 連續合併很多顆時會累積膨脹；依數量正規化融合半徑，
       // 讓 12–16 顆仍只在真正接觸處形成液橋，不把整組擴成巨大距離場。
       ? Math.max(0.10, 0.42 / Math.sqrt(layoutCount))
@@ -1745,13 +1748,11 @@ function updateDropUniforms(t) {
         x = state.x; y = state.y; z = state.z;
         radiusFactor = state.radiusFactor;
       }
-    } else if (isFormationMotion(P.motion)) {
-      const formation = amount;
-      formationDropPosition(i, phase, layoutCount, formationPosNow);
+    } else if (formationRuntime.active()) {
+      radiusFactor = formationRuntime.dropPosition(i, phase, layoutCount, amount, formationPosNow);
       x = formationPosNow.x;
       y = formationPosNow.y;
       z = formationPosNow.z;
-      radiusFactor = 0.82 + formation * 0.18;
     }
     // 大滴受重力與慣性影響較明顯；常量位移不破壞循環接縫。
     // 融化不套這個：水滴必須正好從造型底部的滴落點長出來，先被推低一截就會
@@ -1763,10 +1764,8 @@ function updateDropUniforms(t) {
     if (!melting && !morphing && !jelly && !extended && !researchRuntime.active()) {
       y -= P.gravity * P.spread * 0.045 * Math.pow(radius, 1.35);
     }
-    if (isFormationMotion(P.motion)) {
-      // anchor 可能落在模型表層；吸收時稍微往模型中心推入，避免半徑縮小後
-      // 先失去液橋、在輪廓旁短暫留下孤立小球。
-      const insetScale = 1 - fidelityAbsorb * 0.20;
+    if (formationRuntime.active()) {
+      const insetScale = formationRuntime.insetScale(fidelityAbsorb);
       x *= insetScale;
       y *= insetScale;
       z *= insetScale;
@@ -1790,27 +1789,9 @@ function updateDropUniforms(t) {
       // 「水滴大小」乘一個亂數（見 motions/runtime/morph.js）。
       dropData[i].set(x, y, z,
         morphRuntime.dropRadius(morphPairs, i, phase, radiusFactor, P.radius * 0.58));
-    } else if (isFormationMotion(P.motion)) {
-      const anchorTarget = formationAnchors[i % Math.max(1, formationAnchors.length)];
-      const targetRadius = anchorTarget?.radiusHint || P.radius * 0.58;
-      // 主滴跟微滴讀同一套抵達順序與同一套吸收（見 updateMicroDrops）：波前開啟
-      // 時主滴若還照全域曲線走，就會用另一條時間軸浮在早已成形的區域上。
-      const localAmount = P.formationFrontOn && anchorTarget
-        ? formationLocalAmount(
-          formationAmount(phase),
-          formationLead(anchorTarget.x, anchorTarget.y, i),
-        )
-        : formationAmount(phase);
-      const settle = smoothstepCPU(localAmount, 0.12, 0.88);
-      const absorb = P.formationFrontOn && anchorTarget
-        ? Math.max(fidelityAbsorb, smoothstepCPU(localAmount, 0.74, 1))
-        : fidelityAbsorb;
-      dropData[i].set(
-        x,
-        y,
-        z,
-        (freeRadius + (targetRadius - freeRadius) * settle) * (1 - absorb),
-      );
+    } else if (formationRuntime.active()) {
+      dropData[i].set(x, y, z,
+        formationRuntime.dropRadius(i, phase, freeRadius, fidelityAbsorb));
     } else {
       dropData[i].set(x, y, z, freeRadius);
     }
@@ -1828,7 +1809,7 @@ function updateDropUniforms(t) {
   // 融化排除在外：每一滴都是各自落下的獨立水滴，靠得近時互相脹大半徑會黏成
   // 一條斷不開的水柱，正好是這個模式最不該有的樣子。
   const fusionAmount = contactAmount * contactMergeAmount(phase);
-  if (!isFormationMotion(P.motion) && !researchRuntime.active() && !melting
+  if (!formationRuntime.active() && !researchRuntime.active() && !melting
     && count >= 2 && fusionAmount > 0) {
     const radiusA = dropData[pairA].w, radiusB = dropData[pairB].w;
     const mergedRadius = Math.cbrt(radiusA ** 3 + radiusB ** 3);
@@ -1934,25 +1915,9 @@ function updateDropUniforms(t) {
     // uShapeCutBlend 這組 uniform，所以要在 morphSolid 那個分支之後才寫——同一
     // 幀不可能兩個模式都成立，但這幾顆 uniform 平時是被「滑桿 key → u+首字大寫」
     // 那條自動對應塞成 morph 的值的，這裡要蓋掉它們。
-    const formationCut = isFormationMotion(P.motion) && shapeField && P.formationFrontOn;
+    const formationCut = formationRuntime.cutActive();
     uniforms.uFormationCut.value = formationCut ? 1 : 0;
-    if (formationCut) {
-      const front = formationCutFront(amount);
-      // z 與 w 給同一個值：只有一道波前，而 dissolveField 的擾動加速帶是拿
-      // 「離 z 或 w 較近的那個」在算的（見 shaders.js），兩個都指同一條線，
-      // 帶子才會正好罩在這道波前上。
-      uniforms.uShapeCut.value.set(front.nx, front.ny, front.front, front.front);
-      uniforms.uShapeCutBlend.value = P.formationCutBlend;
-      uniforms.uMorphFront.value = P.formationFront;
-      uniforms.uMorphSpiral.value = P.formationSpiral;
-      // 三項邊緣擾動一律乘上 formationEdgeScale，跟 formation.js 的 breakAmount
-      // 讀同一個係數——實體的擾動幅度與水滴的出發參差必須同步縮，否則兩者脫鉤。
-      const es = formationEdgeScale;
-      uniforms.uMorphBreak.value.set(
-        P.formationNoise * es, P.formationNoiseScale, P.formationCell * es, P.formationCellScale,
-      );
-      uniforms.uMorphNecking.value.set(P.formationNeck * es, P.formationNeckWidth);
-    }
+    if (formationCut) formationRuntime.writeCutUniforms(uniforms, amount);
     // 半徑已連續收至零後才停止 shader 迴圈；切換當下幾何場完全相同。
     const fidelityComplete = fidelityAbsorb > 0.9999;
     // 形狀變形的定格段要明確把水滴數量歸零（理由見 motions/runtime/morph.js）。
@@ -1991,14 +1956,14 @@ function updateDropUniforms(t) {
     // 形狀變形跟形狀匯聚同樣用解析速度（前後各取一次位置做中央差分）而不是
     // 幀間差分：位置只是 phase 的純函式，取樣比追前一幀準，暫停／跳轉也不會
     // 因為 frameDt 亂掉而讓水滴突然被拉成一條。
-    if (isFormationMotion(P.motion) || morphing) {
+    if (formationRuntime.active() || morphing) {
       const epsilon = 1 / 2048;
       if (morphing) {
         morphRuntime.sampleAt(morphPairs, i, fract(phase - epsilon), formationPosBefore);
         morphRuntime.sampleAt(morphPairs, i, fract(phase + epsilon), formationPosAfter);
       } else {
-        formationDropPosition(i, fract(phase - epsilon), layoutCount, formationPosBefore);
-        formationDropPosition(i, fract(phase + epsilon), layoutCount, formationPosAfter);
+        formationRuntime.sampleAt(i, fract(phase - epsilon), layoutCount, formationPosBefore);
+        formationRuntime.sampleAt(i, fract(phase + epsilon), layoutCount, formationPosAfter);
       }
       const invDelta = 1 / (epsilon * 2 * Math.max(0.001, P.loopDuration));
       vx = (formationPosAfter.x - formationPosBefore.x) * invDelta;
@@ -3432,7 +3397,7 @@ function frame(now) {
   // 突然變大」——而且找不到地方關。上面那段敘事推軌只有 3~5%，這一段才是主因。
   const frameGatherEnd = Math.max(0.15, P.gatherDuration);
   const frameHoldEnd = Math.min(0.94, frameGatherEnd + P.shapeHold);
-  const formationFocus = P.dollyEnabled && isFormationMotion(P.motion) && shapeField
+  const formationFocus = P.dollyEnabled && formationRuntime.active() && shapeField
     ? (phase01 > frameHoldEnd)
       ? formationFidelityAmount(phase01)
       : smoothstepCPU(formationAmount(phase01), 0.42, 0.92)
