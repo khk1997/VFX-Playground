@@ -56,6 +56,7 @@ import { createJellyRuntime } from './motions/runtime/jelly.js?v=1';
 import { createResearchRuntime } from './motions/runtime/research.js?v=1';
 import { createMeltRuntime } from './motions/runtime/melt.js?v=1';
 import { createShatterRuntime } from './motions/runtime/shatter.js?v=1';
+import { createWeaveRuntime } from './motions/runtime/weave.js?v=1';
 import { buildExtendedMotionControls } from './panel-builder.js?v=1';
 import { createPanelStateController } from './panel-state.js?v=1';
 import { createPanelBindings } from './panel-bindings.js?v=1';
@@ -1262,6 +1263,10 @@ const {
   edgeScale: () => formationEdgeScale,
 });
 
+// 穿梭環繞：飄浮位置跟形狀匯聚共用上面那支工廠（同一份錨點、同一組種子），所以
+// 把它交出來的 weaveDropPosition 接進模組，而不是另外再建一份。
+const weaveRuntime = createWeaveRuntime({ params: P, dropPosition: weaveDropPosition });
+
 // 融化：底部滴落。滴落點、水滴包絡與形變都在模組裡；形狀與它的版本號用 getter
 // 傳進去，換形狀或調取樣範圍後下一幀才會重挑滴落點。
 const meltRuntime = createMeltRuntime({
@@ -1648,7 +1653,7 @@ function updateDropUniforms(t) {
     // 靜態模式的匯入造型同樣要一直是滿值：沒有匯聚時間軸這回事，選了「匯入」
     // 就整顆展示，不管選的是哪種內建幾何都跟這個進度值無關（那條走
     // FEATURE_STATIC_SHAPE 自己的 uStaticShape 分支，不受這個值影響）。
-    : P.motion === 'weave' || melting || morphSolid || jelly || extended
+    : weaveRuntime.keepsShapeFull() || melting || morphSolid || jelly || extended
       || staticCapillaryRuntime.keepsShapeFull()
       ? 1
       : shatter
@@ -1693,14 +1698,11 @@ function updateDropUniforms(t) {
     // 融化的半徑同樣自成一套（長出→墜落→縮到 0 的包絡），在這裡先接住。
     let meltState = null;
 
-    if (P.motion === 'weave') {
-      weaveDropPosition(i, phase, layoutCount, formationPosNow);
+    if (weaveRuntime.active()) {
+      radiusFactor = weaveRuntime.dropPosition(i, phase, layoutCount, h3, formationPosNow);
       x = formationPosNow.x;
       y = formationPosNow.y;
       z = formationPosNow.z;
-      // 「好幾顆大小不一的水滴」——每顆水滴的大小落在使用者設定的上下限之間，
-      // 半徑固定不隨 phase 變化，只是「這顆水滴本來就比較大/小」。
-      radiusFactor = P.weaveSizeMin + h3 * (P.weaveSizeMax - P.weaveSizeMin);
     } else if (shatter) {
       const target = shatterPrimary.length
         ? shatterPrimary[i % shatterPrimary.length]
@@ -1860,8 +1862,8 @@ function updateDropUniforms(t) {
   // 穿梭環繞的沾黏程度改由滑桿決定（原本跟果凍共用寫死的 0.15）：這個模式的
   // 水滴要能貼上玻璃、拉出液橋，就不能永遠把融合關到底。果凍維持 0.15——它的
   // 水滴是貼在表面的點綴，融成一坨就沒有點綴可言。
-  const mergeScale = P.motion === 'weave'
-    ? Math.max(0.02, P.weaveCling)
+  const mergeScale = weaveRuntime.active()
+    ? weaveRuntime.mergeScale()
     : researchRuntime.active()
       ? researchRuntime.mergeScale()
     : extended
