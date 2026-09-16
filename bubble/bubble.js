@@ -21,7 +21,7 @@ import {
 } from './motions/registry.js?v=edge-tint-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
-import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=post-mask-3';
+import { buildMorphPairs } from './motions/morph.js?v=post-mask-3';
 import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=post-mask-3';
 import {
   createExtendedMotionRuntime, effectiveCapillaryHeight, isExtendedMotion,
@@ -57,6 +57,7 @@ import { createResearchRuntime } from './motions/runtime/research.js?v=1';
 import { createMeltRuntime } from './motions/runtime/melt.js?v=1';
 import { createShatterRuntime } from './motions/runtime/shatter.js?v=1';
 import { createWeaveRuntime } from './motions/runtime/weave.js?v=1';
+import { createMorphRuntime } from './motions/runtime/morph.js?v=1';
 import { buildExtendedMotionControls } from './panel-builder.js?v=1';
 import { createPanelStateController } from './panel-state.js?v=1';
 import { createPanelBindings } from './panel-bindings.js?v=1';
@@ -1059,7 +1060,7 @@ function morphTargetKey() {
 }
 
 function rebuildMorphPairs() {
-  if (P.motion !== 'morph' || !morphTargetPoints) return;
+  if (!morphRuntime.active() || !morphTargetPoints) return;
   // 兩顆形狀任一邊換了才要重配。配對是 O(A × B) 的最近點搜尋，不能每幀跑。
   const key = `${shapeFieldSerial}:${morphTargetPoints.key}`;
   if (key === morphPairKey) return;
@@ -1093,7 +1094,7 @@ function rebuildMorphPackedTexture(key) {
 // 形狀 A 正在烘的時候不併行開第二份：兩者都是純 CPU 的重活，同時跑只會互相
 // 拖慢，而且 B 要用 A 的 grid 去對齊，A 還沒定案就烘等於白烘。
 function ensureMorphTarget() {
-  if (P.motion !== 'morph' || shapeConverting) return;
+  if (!morphRuntime.active() || shapeConverting) return;
   const key = morphTargetKey();
   if (morphTargetPoints?.key === key || morphTargetPending === key) return;
   morphTargetPending = key;
@@ -1275,11 +1276,14 @@ const meltRuntime = createMeltRuntime({
   shapeTargets: () => shapeTargets,
   shapeSerial: () => shapeFieldSerial,
 });
-// 配對表由 bubble.js 這邊持有（它才知道形狀什麼時候換），morph.js 只負責讀。
-const {
-  morphTimeline: morphTimelineOf, morphFronts, morphDropPosition, morphRadiusFactor,
-  morphShapeBlend,
-} = createMorphMotion(P);
+// 形狀變形：時間軸、波前與水滴規則都在模組裡。配對表與雙通道貼圖仍由 bubble.js
+// 持有（它們跟形狀匯入管線同一條生命週期，這裡才知道形狀什麼時候換），以 getter
+// 傳進去。
+const morphRuntime = createMorphRuntime({
+  params: P,
+  packedTexture: () => morphPackedTexture,
+  mainPairs: () => morphPairs,
+});
 
 // 造型本身的剛體動態（見 motions/shapeRigid.js）。每幀在 updateDropUniforms
 // 頂端算一次存進 shapeRigidNow，本模組其餘地方（updateMicroDrops／
@@ -1382,7 +1386,7 @@ function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false) {
   const melting = meltRuntime.active();
   // 形狀變形的微滴不是「細節補強」而是主力之一：整個畫面只有水滴，主滴 12 顆
   // 撐不出兩顆形狀的輪廓，微滴那 20 顆負責把輪廓填細。
-  const morphing = P.motion === 'morph';
+  const morphing = morphRuntime.active();
   // 果凍不列入：它的造型是完整靜止的實體，沒有「正在成形的細節」需要微滴去補，
   // 加上去只會變成貼在表面的一圈贅球。
   const activeCount = (isFormationMotion(P.motion) || shattering || melting || morphing)
@@ -1440,26 +1444,19 @@ function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false) {
       continue;
     }
     if (morphing) {
-      morphDropPosition(morphMicroPairs, i, phase, formationPosNow);
       // 微滴跟主滴用同一份分組邏輯——沒有這個的話，微滴會全部套第一組（形狀 A）
       // 的動態，跟主滴各轉各的，輪廓細節看起來會跟主體錯開。
-      const microBlend = morphShapeBlend(morphMicroPairs, i, phase);
+      const microBlend = morphRuntime.dropPosition(morphMicroPairs, i, phase, formationPosNow);
       applyShapeRigidBlend(
         formationPosNow.x, formationPosNow.y, formationPosNow.z, microBlend, formationPosNow,
       );
       microDropData[o] = formationPosNow.x;
       microDropData[o + 1] = formationPosNow.y;
       microDropData[o + 2] = formationPosNow.z;
-      // 錨點自帶的 radiusHint 是「這個位置的造型有多厚」，用它輪廓的粗細才會
-      // 跟著形狀走（星形的角細、問號的桿粗）。兩端厚度不同，所以跟著一起插值；
-      // 缺就退回一個依 h2 分散的尺寸。
-      const pair = morphMicroPairs[i % morphMicroPairs.length];
-      const { t, back } = morphTimelineOf(phase);
-      const fallback = P.radius * (0.28 + h2 * 0.16);
-      const fromHint = (back ? pair.b : pair.a).radiusHint || fallback;
-      const toHint = (back ? pair.a : pair.b).radiusHint || fallback;
-      microDropData[o + 3] = (fromHint + (toHint - fromHint) * t) * 0.72
-        * morphRadiusFactor(morphMicroPairs, i, phase, morphSolid);
+      // 缺 radiusHint 時退回一個依 h2 分散的尺寸。
+      microDropData[o + 3] = morphRuntime.microRadius(
+        morphMicroPairs, i, phase, P.radius * (0.28 + h2 * 0.16),
+      );
       microShapeData[o] = 1;
       microShapeData[o + 1] = 0;
       microShapeData[o + 2] = 0;
@@ -1544,7 +1541,7 @@ function updateNegativeDrops(phase, fidelityAbsorb = 0) {
     ? 1
     // 形狀變形不顯示距離場實體（uShapeProgress 為 0），空腔沒有母體可挖，留著
     // 只會變成幾顆漂在水滴群裡的隱形挖洞球，把輪廓咬掉幾塊。
-    : P.motion === 'morph'
+    : morphRuntime.active()
       ? 0
       : shatterRuntime.active()
         ? shatterRuntime.shapeAmount(shatterRuntime.beat(phase))
@@ -1603,7 +1600,7 @@ function updateDropUniforms(t) {
   // 第二組（形狀 B）只在形狀變形模式底下才有意義——其餘模式只有一顆形狀，
   // 沒有「另一顆」可以套第二組參數。跟第一組共用同一個「造型動態」總開關：
   // 開關本身不分組，分的是開了之後兩組各自的數值。
-  shapeRigid2Now = (P.motion === 'morph' && P.shapeMotionOn)
+  shapeRigid2Now = (morphRuntime.active() && P.shapeMotionOn)
     ? computeShapeRigid({
       cycles: P.shape2MotionCycles,
       ease: P.shape2MotionEase,
@@ -1633,16 +1630,14 @@ function updateDropUniforms(t) {
   const shatter = shatterRuntime.beat(phase);
   const shatterPrimary = shatter ? shatterRuntime.anchorSets().primary : null;
   const melting = meltRuntime.active();
-  const morphing = P.motion === 'morph';
+  const morphing = morphRuntime.active();
   const jelly = jellyRuntime.active();
   const extended = isExtendedMotion(P.motion);
   if (extended) syncExtendedShapeContext();
   if (melting) meltRuntime.rebuildAnchors();
   if (morphing) { ensureMorphTarget(); rebuildMorphPairs(); }
-  // 實體變形要有雙通道貼圖才成立；沒有就只剩水滴（見 rebuildMorphPackedTexture）。
-  const morphSolid = morphing && !!morphPackedTexture && morphPairs.length > 0;
-  const morphCut = morphSolid ? morphFronts(morphPairs, phase) : null;
-  const morphCutT = morphSolid ? morphTimelineOf(phase).t : 0;
+  const morphSolid = morphRuntime.isSolid();
+  const morphCut = morphSolid ? morphRuntime.fronts(morphPairs, phase) : null;
   const formationShapeProgress = !shapeField
     ? 0
     // 融化的形狀從頭到尾完整不變：滴下去的是額外長出來的水滴，不是造型被削掉的
@@ -1722,14 +1717,13 @@ function updateDropUniforms(t) {
         z = formationPosNow.z;
       }
     } else if (morphing) {
-      morphDropPosition(morphPairs, i, phase, formationPosNow);
+      // 回傳值是這顆水滴此刻偏向形狀 A 還是形狀 B，餵給下面的
+      // applyShapeRigidBlend，讓它在飛行途中混合兩組造型動態。
+      morphBlend = morphRuntime.dropPosition(morphPairs, i, phase, formationPosNow);
       x = formationPosNow.x;
       y = formationPosNow.y;
       z = formationPosNow.z;
-      radiusFactor = morphRadiusFactor(morphPairs, i, phase, morphSolid);
-      // 這顆水滴此刻偏向形狀 A 還是形狀 B，餵給下面的 applyShapeRigidBlend，
-      // 讓它在飛行途中混合兩組造型動態，而不是整場套同一份。
-      morphBlend = morphShapeBlend(morphPairs, i, phase);
+      radiusFactor = morphRuntime.radiusFactor(morphPairs, i, phase);
     } else if (jelly) {
       // 果凍的水滴貼在造型表面的錨點上（見 motions/runtime/jelly.js）。下面的
       // applyShapeRigid 會把果凍的形變一併套上去，水滴因此跟著一起晃。
@@ -1793,14 +1787,9 @@ function updateDropUniforms(t) {
       dropData[i].set(x, y, z, meltState ? meltState.radius : 0);
     } else if (morphing) {
       // 跟形狀匯聚成形後同一套：半徑由錨點所在位置的造型厚度決定，而不是
-      // 「水滴大小」乘一個亂數。輪廓完全靠水滴排出來的模式，這件事更要緊——
-      // 大小一致的球排出來的是一串珠子，粗細跟著形狀走才看得出是那個形狀。
-      // 兩顆形狀的厚度不同，所以出發端與抵達端的 hint 也要跟著插值。
-      const pair = morphPairs.length ? morphPairs[i % morphPairs.length] : null;
-      const { t, back } = morphTimelineOf(phase);
-      const fromHint = (back ? pair?.b : pair?.a)?.radiusHint || P.radius * 0.58;
-      const toHint = (back ? pair?.a : pair?.b)?.radiusHint || P.radius * 0.58;
-      dropData[i].set(x, y, z, (fromHint + (toHint - fromHint) * t) * radiusFactor);
+      // 「水滴大小」乘一個亂數（見 motions/runtime/morph.js）。
+      dropData[i].set(x, y, z,
+        morphRuntime.dropRadius(morphPairs, i, phase, radiusFactor, P.radius * 0.58));
     } else if (isFormationMotion(P.motion)) {
       const anchorTarget = formationAnchors[i % Math.max(1, formationAnchors.length)];
       const targetRadius = anchorTarget?.radiusHint || P.radius * 0.58;
@@ -1934,20 +1923,7 @@ function updateDropUniforms(t) {
     // 果凍同理：它的實體恆為滿值，沒有「正在成形」可言。
     uniforms.uContactLead.value = (shatter || melting || morphSolid || jelly || extended) ? 0 : 1;
     if (morphSolid) {
-      uniforms.uShapeTex.value = morphPackedTexture;
-      uniforms.uShapeMorph.value = morphCut.mode;
-      uniforms.uShapeCut.value.set(
-        morphCut.nx, morphCut.ny, morphCut.fromFront, morphCut.toFront,
-      );
-      // 這幾個是打包型 uniform，不走「滑桿 key → u+首字大寫」那條自動對應，
-      // 所以在這裡跟著波前一起送。
-      uniforms.uMorphBreak.value.set(
-        P.morphNoise, P.morphNoiseScale, P.morphCell, P.morphCellScale,
-      );
-      uniforms.uMorphNecking.value.set(P.morphNeck, P.morphNeckWidth);
-      uniforms.uMorphActive.value.set(
-        morphCut.fromActive ? 1 : 0, morphCut.toActive ? 1 : 0,
-      );
+      morphRuntime.writeUniforms(uniforms, morphCut);
     } else {
       // 離開變形模式（或還沒備妥雙通道貼圖）就把貼圖交還給形狀本身那張，
       // 否則其餘模式會繼續讀到打包過的圖。
@@ -1979,12 +1955,8 @@ function updateDropUniforms(t) {
     }
     // 半徑已連續收至零後才停止 shader 迴圈；切換當下幾何場完全相同。
     const fidelityComplete = fidelityAbsorb > 0.9999;
-    // 形狀變形的定格段：所有水滴的存在包絡都是 0（它們此刻就是形狀的一部分），
-    // 半徑全歸零，但 shader 每個 march step 仍會把 32 顆空球跑一遍——實測定格
-    // 因此比整顆形狀常駐的穿梭環繞貴了兩倍多。定格佔循環三成，而且正是使用者
-    // 盯著形狀看的時候，所以這裡明確把數量歸零。
-    const morphIdle = morphSolid && (morphCutT <= 0 || morphCutT >= 1);
-    const dropsHidden = fidelityComplete || morphIdle;
+    // 形狀變形的定格段要明確把水滴數量歸零（理由見 motions/runtime/morph.js）。
+    const dropsHidden = fidelityComplete || morphRuntime.isIdle(phase);
     uniforms.uCount.value = dropsHidden ? 0 : count;
     uniforms.uMicroCount.value = dropsHidden ? 0 : microCount;
     uniforms.uNegativeCount.value = dropsHidden ? 0 : negativeCount;
@@ -2022,8 +1994,8 @@ function updateDropUniforms(t) {
     if (isFormationMotion(P.motion) || morphing) {
       const epsilon = 1 / 2048;
       if (morphing) {
-        morphDropPosition(morphPairs, i, fract(phase - epsilon), formationPosBefore);
-        morphDropPosition(morphPairs, i, fract(phase + epsilon), formationPosAfter);
+        morphRuntime.sampleAt(morphPairs, i, fract(phase - epsilon), formationPosBefore);
+        morphRuntime.sampleAt(morphPairs, i, fract(phase + epsilon), formationPosAfter);
       } else {
         formationDropPosition(i, fract(phase - epsilon), layoutCount, formationPosBefore);
         formationDropPosition(i, fract(phase + epsilon), layoutCount, formationPosAfter);
