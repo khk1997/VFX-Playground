@@ -57,6 +57,7 @@ import {
   COLORS, SELECTS, createFormatters, createToggleBindings,
 } from './control-schema.js?v=1';
 import { createTypewriterRuntime } from './typewriter-runtime.js?v=1';
+import { createStaticCapillaryRuntime } from './motions/runtime/static-capillary.js?v=1';
 import { buildExtendedMotionControls } from './panel-builder.js?v=1';
 import { createPanelStateController } from './panel-state.js?v=1';
 import { createPanelBindings } from './panel-bindings.js?v=1';
@@ -287,6 +288,14 @@ function uniformNameFor(key) {
 const fmt = createFormatters(P, {
   effectiveCapillaryHeight,
   shatterSegmentSeconds: (...args) => shatterSegmentSeconds(...args),
+});
+
+// 靜態方體與毛細波的執行期模組。這兩個模式共用同一組程序化表面紋理 uniform，
+// 由模組自己負責寫入；bubble.js 只在 updateDropUniforms 裡依 active() 決定
+// 要走這條還是其餘模式的通用分支。
+const staticCapillaryRuntime = createStaticCapillaryRuntime({
+  params: P,
+  motionUniformMap: MOTION_UNIFORM_MAP,
 });
 
 function refreshCapillaryHeightReadout() {
@@ -1620,9 +1629,10 @@ function updateDropUniforms(t) {
   // 水滴數量可以是 0（例如崩解噴濺只想要微滴碎片、穿梭環繞只想留形狀本身）。
   // count 本身允許 0，交給 uCount 讓 shader 直接跳過主滴迴圈；但凡是拿它當
   // 除數或版面基準的地方一律改用 layoutCount，否則 0 會變成 Infinity／NaN。
-  // 毛細波是純形狀場模式。即使舊參數檔還保存著 count > 0，也不允許主滴重新出現。
-  const count = P.motion === 'capillary'
-    ? 0
+  // 毛細波是純形狀場模式，水滴數量由 static-capillary 模組覆寫成 0（見該模組）。
+  const staticCapillaryCount = staticCapillaryRuntime.dropCount();
+  const count = staticCapillaryCount !== null
+    ? staticCapillaryCount
     // 私語的第二外殼是模式本體，不是通用的可增減水滴。這層是舊 preset 的保險：
     // 即使檔案裡還存著改版前的 count=1，渲染端仍固定產生主殼與伴生殼兩顆。
     : P.motion === 'research'
@@ -1738,7 +1748,8 @@ function updateDropUniforms(t) {
     // 靜態模式的匯入造型同樣要一直是滿值：沒有匯聚時間軸這回事，選了「匯入」
     // 就整顆展示，不管選的是哪種內建幾何都跟這個進度值無關（那條走
     // FEATURE_STATIC_SHAPE 自己的 uStaticShape 分支，不受這個值影響）。
-    : P.motion === 'weave' || melting || morphSolid || jelly || extended || P.motion === 'static'
+    : P.motion === 'weave' || melting || morphSolid || jelly || extended
+      || staticCapillaryRuntime.keepsShapeFull()
       ? 1
       : shatter
         ? shatterShapeAmount(shatter)
@@ -2037,36 +2048,23 @@ function updateDropUniforms(t) {
           ? 1 + (0.15 - 1) * shatter.flight
           : 1;
   if (uniforms) uniforms.uViscosity.value = effectiveViscosity * mergeScale;
-  // 毛細波的程序紋理現在同時服務兩個模式：毛細波本身（作用在匯入的形狀場）與
-  // 靜態方體（作用在程序化方體 SDF）。兩者共用同一組 uniform 與同一支
-  // capillarySurfaceOffset，差別只在呼叫端喂進去的是哪顆 SDF 的座標。
-  const capillaryFamily = P.motion === 'capillary' || P.motion === 'static';
+  // 毛細波的程序紋理同時服務兩個模式：毛細波本身（作用在匯入的形狀場）與靜態
+  // 方體（作用在程序化方體 SDF）。那一整組 uniform 由 static-capillary 模組寫，
+  // 這裡只決定這一幀是不是交給它。
+  const capillaryFamily = staticCapillaryRuntime.active();
   // 打字模式的排版與行狀態。回傳值是這一行需要的包圍球半徑（見下面 dropBounds）。
   const typewriterReach = P.motion === 'typewriter' ? updateTypewriterUniforms(phase) : 0;
   if (uniforms) {
-    // 同樣封住舊參數檔可能保存的輪廓液滴與一般水滴噪聲；切離毛細波後會立即
-    // 從 P 恢復原模式各自記憶的值。
-    uniforms.uEdgeDropCount.value = capillaryFamily
-      ? 0 : (P.edgeDropsEnabled ? activeEdgeDrops.length : 0);
-    // 靜態方體沒有水滴系統，「表面起伏」這段通用 fbm 噪聲不該波及它——用戶
-    // 明確要求靜態模式不吃任何水滴形態參數，波紋只能來自下面這組毛細波參數。
-    uniforms.uWobble.value = capillaryFamily
-      ? 0
-      : P.motion === 'research'
+    if (capillaryFamily) {
+      staticCapillaryRuntime.writeUniforms(uniforms);
+    } else {
+      uniforms.uEdgeDropCount.value = P.edgeDropsEnabled ? activeEdgeDrops.length : 0;
+      uniforms.uWobble.value = P.motion === 'research'
         ? P.wobble * researchShellEnvelope(phase)
         : P.wobble;
-    uniforms.uExtendedMotion.value = (extended || capillaryFamily) ? MOTION_UNIFORM_MAP[P.motion] : 0;
-    const extendedParams = uniforms.uExtendedParams.value;
-    if (capillaryFamily) {
-      extendedParams.set(P.capillaryHeight, P.capillaryRings, P.capillarySpeed, P.capillaryWarp);
-      uniforms.uCapillaryStyle.value.set(
-        Math.round(P.capillaryField), Math.round(P.capillaryTexture), P.capillaryCrestSoftness, 0,
-      );
-      uniforms.uCapillaryDirection.value.set(
-        P.capillaryDirectionX, P.capillaryDirectionY, P.capillaryDirectionZ,
-      );
+      uniforms.uExtendedMotion.value = extended ? MOTION_UNIFORM_MAP[P.motion] : 0;
+      uniforms.uExtendedParams.value.set(0, 0, 0, 0);
     }
-    else extendedParams.set(0, 0, 0, 0);
     uniforms.uShapeProgress.value = formationShapeProgress;
     uniforms.uFidelityAbsorb.value = fidelityAbsorb;
     uniforms.uShapeSwell.value = shatter ? shatter.swell : 0;
