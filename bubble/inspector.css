@@ -21,6 +21,8 @@
 #panel .inspectorHeader h2 { font-size: 19px; letter-spacing: -.035em !important; margin: 0; }
 #panel .inspectorHeader .sub { font-size: 8px; letter-spacing: .12em; margin: 0; color: #77777d !important; white-space: nowrap; }
 .inspectorContext { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+/* 常用深度只剩「預覽底色」一項，讓它佔滿整列而不是留一個空欄。 */
+#panel.inspector[data-control-depth="concise"] .inspectorContext { grid-template-columns: 1fr; }
 #panel.inspector .inspectorContext .row { display: grid; gap: 5px; min-height: 0; margin-bottom: 8px; }
 #panel.inspector .inspectorContext .row label { font-size: 10px; line-height: 1.2; color: #8e8e93 !important; }
 #panel.inspector .inspectorContext .row select { width: 100%; height: 34px; }

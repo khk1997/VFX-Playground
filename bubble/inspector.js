@@ -82,6 +82,11 @@ export function buildInspector({ defaults }) {
   header.append(identity, context);
   context.append(rowOf('motion'), rowOf('backdrop'));
   rowOf('motion').querySelector('label').textContent = '動態模式';
+  // 動態模式收進「完整」深度。首頁的每張卡片就是一個模式（見 effect-registry），
+  // 從那裡進來的人要看的就是那一個，頭上不需要一個會把頁面變成另一個效果的下拉。
+  // 要互相比較時切到完整就有，而且深度選擇是記住的，所以只要切一次。
+  // 這一列在頭部，不會被下面那個 .row 分類迴圈掃到，得自己標。
+  rowOf('motion').classList.add('inspectorExpert');
   rowOf('backdrop').querySelector('label').textContent = '預覽底色';
 
   let controlDepth = 'concise';

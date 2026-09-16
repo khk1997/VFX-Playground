@@ -73,6 +73,7 @@ def check_desktop(browser, base_url: str) -> dict[str, object]:
     assert page.locator(".inspectorUtilities #resetBtn").count() == 1
     assert panel.get_attribute("data-control-depth") == "concise"
     assert page.locator("#inspectorPage-look details:has(#postExposure)").is_hidden()
+    assert page.locator("#motion").is_hidden(), "the motion row must be hidden at concise depth"
     expert_count = page.locator("#panel .inspectorExpert").count()
     assert expert_count > 40, "too few controls were classified for progressive disclosure"
 
@@ -86,6 +87,10 @@ def check_desktop(browser, base_url: str) -> dict[str, object]:
     page.locator("#inspectorTab-shape").click()
     page.locator("#inspectorTab-shape").press("ArrowRight")
     assert page.locator("#inspectorTab-motion").get_attribute("aria-selected") == "true", "ArrowRight did not select motion"
+
+    # 動態模式那一列收在「完整」深度裡：從首頁卡片進來的人看到的是那一個模式，
+    # 不需要一個會把頁面變成另一個效果的下拉。上面已經切到完整了，所以這裡看得到。
+    assert page.locator("#motion").is_visible(), "the motion row should be back at complete depth"
 
     # 快速暫存／A/B 比較那一排已經移除，畫面上不該再留下任何殘骸。
     assert page.locator("#quickSlots").count() == 0, "the removed quick-slot bar is still in the page"

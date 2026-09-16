@@ -7,7 +7,7 @@ import sys
 
 from playwright.sync_api import sync_playwright
 
-from bubble_baseline import wait_for_shader
+from bubble_baseline import set_select, wait_for_shader
 
 
 MOTIONS = (
@@ -45,9 +45,11 @@ def main() -> int:
 
         checked: list[str] = []
         for backdrop in BACKDROPS:
-            page.locator("#backdrop").select_option(backdrop)
+            set_select(page, "#backdrop", backdrop)
             for motion in MOTIONS:
-                page.locator("#motion").select_option(motion)
+                # 動態模式那一列只在「完整」控制深度顯示，所以走跟其他測試同一支
+                # JS helper，而不是 Playwright 的可見性感知點選。
+                set_select(page, "#motion", motion)
                 page.wait_for_function(
                     "motion => window.__bubbleDiagReport().模式.motion === motion",
                     arg=motion,
