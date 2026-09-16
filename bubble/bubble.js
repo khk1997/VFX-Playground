@@ -71,6 +71,7 @@ patchEnvMapResolution();
 
 const {
   preview: PREVIEW,
+  launchMode: LAUNCH_MODE,
   shaderRun: SHADER_RUN,
   diagTiming: DIAG_TIMING,
   diagTime: DIAG_TIME,
@@ -126,6 +127,10 @@ const MAX_EDGE_DROPS = 8;
 const MAX_NEGATIVE_DROPS = 4;
 
 const P = { ...DEFAULTS, ...MOTION_TEXT_DEFAULTS, ...SELECT_DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS };
+// 首頁的每個液態玻璃效果都是同一份頁面加 ?mode=（見 bubble/effect-registry.js）。
+// 認不得的值一律當作沒帶——網址是使用者能亂改的東西，不該讓它把 P.motion 寫成
+// 一個下拉選單裡不存在的字串。
+const LAUNCH_MOTION = MOTION_KEYS.includes(LAUNCH_MODE) ? LAUNCH_MODE : null;
 const extendedMotions = createExtendedMotionRuntime(P);
 
 // 材質目前統一為通用玻璃。保留單一 profile，供 HDRI 匯入與重設共用。
@@ -3461,8 +3466,27 @@ if (!PREVIEW) {
   } });
   inspector.setQualityStatus(adaptiveQuality.snapshot());
 }
+// 網址指定的模式要在 bindControls 之前就位，控制項的第一次同步才會直接建立在
+// 那個模式上——不是先照預設模式建一次再切過去。順序上這是刻意的：切換模式那條
+// 路（panel-bindings 的 motion 分支）是靠派發事件驅動的，而預覽嵌入模式根本沒有
+// 掛監聽器，所以這裡改成跟「重設」按鈕同一個作法：把該模式記憶的每一格直接寫進
+// P，等一下 bindControls 的第一次 update() 就會照它們建立 DOM、uniform 與讀數。
+if (LAUNCH_MOTION) {
+  P.motion = LAUNCH_MOTION;
+  const motionSelect = document.getElementById('motion');
+  if (motionSelect) motionSelect.value = LAUNCH_MOTION;
+  // 毛細波只允許形狀場本體（跟切換模式那條路同一個理由，見 panel-bindings）。
+  if (LAUNCH_MOTION === 'capillary') motionMemory.count.capillary = 0;
+  for (const key of MOTION_MEMORY_KEYS) P[key] = motionMemory[key][memorySlot(key)];
+}
 bindControls();
 bindTextControls();
+// 模式切換平常會順手做的兩件事：備妥這個模式要用的形狀場（每個模式的內建展示
+// 造型不一樣），以及打字模式的字形圖集。上面那條路沒有派發事件，所以自己補。
+if (LAUNCH_MOTION) {
+  ensureShapeForCurrentSource();
+  ensureGlyphAtlas();
+}
 
 // 參數組合匯出/匯入。預覽模式要呈現正規預設值，不套用個人的自動保存狀態。
 if (!PREVIEW && window.PresetIO) {
@@ -3509,6 +3533,14 @@ if (!PREVIEW && window.PresetIO) {
     presetIO?.restore();
   } catch (error) {
     console.error('[bubble] 自動保存的參數組合還原失敗，改用預設值開機', error);
+  }
+  // 自動保存的快照可能記著另一個模式，但使用者是點了指定模式的連結進來的，
+  // 網址優先。這裡走跟面板切換完全同一條路（面板有監聽器，PresetIO 也只在
+  // 非預覽時才初始化），而且仍在開機遮罩撤掉之前，所以畫面不會先跳一次。
+  if (LAUNCH_MOTION && P.motion !== LAUNCH_MOTION) {
+    const motionSelect = document.getElementById('motion');
+    motionSelect.value = LAUNCH_MOTION;
+    motionSelect.dispatchEvent(new Event('change', { bubbles: true }));
   }
 }
 

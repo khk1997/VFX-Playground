@@ -1,8 +1,14 @@
 /* ===== 特效清單 =====
    href 為 null 代表尚未開放（顯示 敬請期待）。
    previewSrc 用 iframe 嵌入實際特效頁（?preview=1 隱藏 UI）。
-   為了效能，只有 active 卡片附近的 iframe 會播放，其餘會收到 'vfx-pause' postMessage。 */
-const EFFECTS = [
+   為了效能，只有 active 卡片附近的 iframe 會播放，其餘會收到 'vfx-pause' postMessage。
+
+   液態玻璃那一族的十個模式不寫在這裡：它們共用同一份頁面、只差 ?mode= 參數，
+   卡片資料由 bubble/effect-registry.js 從動態模式的 registry 產生，標題直接讀
+   面板下拉選單用的同一份 label。加一個新模式不必動這個檔。 */
+import { BUBBLE_EFFECTS } from './bubble/effect-registry.js?v=home-registry-1';
+
+const STANDALONE_EFFECTS = [
   {
     title: '櫻花飄落 Sakura Storm',
     category: 'PARTICLE SYSTEM',
@@ -30,15 +36,8 @@ const EFFECTS = [
     tags: ['HTML5 Canvas', 'Web Audio API', 'JavaScript'],
     previewSrc: 'aurora/index.html?preview=1',
   },
-  {
-    title: '液態玻璃水滴 Liquid Glass Drops',
-    category: 'RAYMARCHING',
-    description: '具有薄膜干涉色彩的融合水滴',
-    theme: ['91, 181, 255', '238, 117, 204'],
-    href: 'bubble/index.html',
-    tags: ['Three.js', 'Raymarching', 'Metaballs'],
-    previewSrc: 'bubble/index.html?preview=1',
-  },
 ];
+
+export const EFFECTS = [...STANDALONE_EFFECTS, ...BUBBLE_EFFECTS];
 
 // iframe 內部渲染解析度（與卡片預覽框同比例 220:190，放大 3 倍後縮小顯示以求清晰）

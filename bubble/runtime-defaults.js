@@ -423,10 +423,7 @@ export const SELECT_DEFAULTS = {
 // 留在 <select> 裡（標成 hidden），否則瀏覽器會在寫入當下就把 value 丟成空字串，
 // 這裡根本讀不到原值。
 export const LEGACY_SELECT_VALUES = {
-  // split（舊鍵名 cinematic）是已經移除的「分裂」模式。這裡不是改名而是退路：
-  // 舊的參數組合檔還打得開，只是會落在現存模式裡行為最接近的那個——安裝中同樣
-  // 是「兩顆殼靠近／融合／分開」，而不是把使用者丟回一顆靜止的方體。
-  motion: { cinematic: 'research', split: 'research', pulse: 'formation' },
+  motion: { pulse: 'formation' },
   materialStyle: { glass: 'universal' },
 };
 export const TOGGLE_DEFAULTS = {

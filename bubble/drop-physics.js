@@ -36,11 +36,9 @@ export function findClosestDropPair(dropData, count) {
   return { pairA, pairB, pairDistance, surfaceGap };
 }
 
-// 包圍球在水滴半徑之外還要留的餘裕。0.08 是基礎值，另外那 0.025 原本是跟著
-// 「分離回彈」滑桿（uElasticStrength）走的——彈性波紋會把表面往外推多少。那根
-// 滑桿隨著分裂模式一起移除了，但這段餘裕並不是只有波紋在用：拿掉之後穿梭環繞、
-// 融化、私語的輪廓最外緣會被切掉一圈（實測深底私語最大 94/255 的色差），所以
-// 原封不動留成常數。
+// 包圍球在水滴半徑之外還要留的餘裕。這個值是量出來的，不是湊的：少 0.025，
+// 穿梭環繞、融化、安裝中的輪廓最外緣就會被切掉一圈（實測深底安裝中最大有
+// 94/255 的色差，約 0.4% 的像素）。改小之前請先跑一次逐像素比對。
 const SURFACE_MARGIN = 0.105;
 
 export function staticShapeBoundsRadius(params) {

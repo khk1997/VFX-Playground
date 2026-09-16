@@ -1,5 +1,7 @@
 'use strict';
 
+import { EFFECTS } from './effects.js?v=home-registry-1';
+
 const PREVIEW_W = 660, PREVIEW_H = 570;
 
 const cardsEl = document.getElementById('cards');

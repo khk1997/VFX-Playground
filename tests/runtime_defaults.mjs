@@ -30,9 +30,9 @@ assert.ok(Object.values(COLOR_DEFAULTS).every(value => /^#[0-9a-f]{6}$/i.test(va
 assert.equal(SPECTRAL_CAUSTIC_DEFAULTS.length, 7);
 assert.equal(SELECT_DEFAULTS.motion, 'static');
 assert.equal(SELECT_DEFAULTS.backdrop, 'dark');
-// 分裂已移除：舊值與舊鍵名都導向行為最接近的現存模式，舊參數檔才打得開。
-assert.equal(LEGACY_SELECT_VALUES.motion.split, 'research');
-assert.equal(LEGACY_SELECT_VALUES.motion.cinematic, 'research');
+// 已移除的選項不留任何轉址；面板讀到認不得的值會直接退回預設（見 panel-bindings）。
+assert.equal(LEGACY_SELECT_VALUES.motion.split, undefined);
+assert.equal(LEGACY_SELECT_VALUES.motion.cinematic, undefined);
 assert.equal(LEGACY_SELECT_VALUES.motion.pulse, 'formation');
 assert.equal(isFormationMotion('formation'), true);
 assert.equal(isFormationMotion('morph'), false);

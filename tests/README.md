@@ -40,8 +40,8 @@ keyboard tabs, A/B quick comparison, and the mobile sheet's sticky layout.
 `adaptive_quality.mjs` unit-tests the extracted quality state machine without a
 browser or WebGL context.
 
-`drop_physics.mjs` unit-tests the extracted split timeline, volume conservation,
-surface-pair selection, satellite-drop trajectories, and conservative ray bounds.
+`drop_physics.mjs` unit-tests the contact-merge gate, closest-surface-pair
+selection, and the conservative ray bounds shared by every motion.
 
 `shape_anchors.mjs` unit-tests shape scaling, thin-edge normalization, and the
 deterministic primary/detail anchor partition used by formation and shatter modes.

@@ -3,6 +3,12 @@ export function parseBubbleRuntimeOptions(search = '') {
 /* ===== 預覽嵌入模式（?preview=1）===== */
 const PREVIEW = params.has('preview');
 
+/* ===== 指定動態模式（?mode=jelly）=====
+   首頁每個液態玻璃效果都是同一份頁面加這個參數（見 bubble/effect-registry.js）。
+   這裡只負責把字串取出來，是不是現存的模式交給 bubble.js 對 MOTION_KEYS 驗證——
+   那份名單在那邊，搬到這裡等於讓診斷模組去認識動態模式。 */
+const LAUNCH_MODE = params.get('mode') || null;
+
 // ===== 診斷開關（?diag=…，可用逗號組合，例如 ?diag=lowres,lowsteps）=====
 // 純粹為了在 Windows Chrome 上逐項 A/B 找出 bubble 卡頓的來源。沒有帶 diag
 // 參數時每一個旗標都是 false，正常行為完全不變 —— 下面所有使用處都是
@@ -202,6 +208,7 @@ const DIAG = (() => {
 })();
 return {
     preview: PREVIEW,
+    launchMode: LAUNCH_MODE,
     shaderRun: SHADER_RUN,
     diagTiming: DIAG_TIMING,
     diagTime: DIAG_TIME,

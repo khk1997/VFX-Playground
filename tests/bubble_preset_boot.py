@@ -159,7 +159,7 @@ def main() -> int:
         assert not errors, f"importing a parameter file raised: {errors}"
         context.close()
 
-        # 4. 存著已移除模式的舊檔：導向現存模式，不能變成空字串或整個起不來。
+        # 4. 存著已移除模式的舊檔：退回預設，不能變成空字串或整個起不來。
         context, page, errors = fresh_page({
             "effect": "prism-drops", "version": 1,
             "values": {"motion": "split", "capillaryHeight": "0.18"},
@@ -168,18 +168,14 @@ def main() -> int:
         legacy = page.evaluate(READ_CONTROLS)
         assert not errors, f"restoring a removed motion raised: {errors}"
         assert not legacy["booting"], "a removed motion left the data-bubble-boot mask in place"
-        assert legacy["motion"] == "research", (
-            f"a saved split preset landed on {legacy['motion']!r} instead of the redirect target"
+        assert legacy["motion"] == "static", (
+            f"a saved split preset landed on {legacy['motion']!r} instead of the default"
         )
-        # 已移除的選項本身必須還留在 <select> 裡（標成 hidden），否則瀏覽器會在寫入
-        # 當下就把 value 丟成空字串，LEGACY_SELECT_VALUES 根本讀不到原值。
+        # 已移除的模式不該在選單裡留下任何痕跡，連隱藏選項都不留。
         assert page.evaluate(
-            "() => !!document.querySelector('#motion option[value=\"split\"][hidden]')"
-        ), "the removed split option must stay in the menu as a hidden legacy value"
-        assert page.evaluate(
-            "() => [...document.querySelectorAll('#motion option:not([hidden])')]"
-            ".every(node => node.value !== 'split')"
-        ), "split must not be offered in the motion menu any more"
+            "() => !document.querySelector('#motion option[value=\"split\"]')"
+            " && !document.querySelector('#motion option[value=\"cinematic\"]')"
+        ), "the removed split option must be gone from the motion menu"
         context.close()
 
         # 5. 還原整個炸掉：面板仍然要開得起來，使用者才有機會把設定改回去。
