@@ -118,12 +118,22 @@ body[data-control-depth="concise"] #quickSlots [data-slot="5"] { display: none; 
 .inspectorActions { display: flex; gap: 8px; margin: 16px 0 8px; flex-wrap: wrap; }
 .inspectorUtilities > .group { margin-left: 0; margin-right: 0; }
 .inspectorUtilities > .btns { margin: 12px 0 2px; }
+.inspectorSectionReset { display: block; margin: 4px 0 2px auto; color: #9a9aa1 !important; background: transparent !important; border-color: transparent !important; }
+#panel .inspectorSectionReset:hover { color: #fff !important; background: #ffffff0d !important; }
 .inspectorStatus { display: block; font-size: 12px; line-height: 1.6; color: #abc8f1; margin: 8px 0; }
 .inspectorStatus:empty { display: none; }
 .inspectorNotice { color: #bfc6d2; font-size: 13px; line-height: 1.8; padding-bottom: 12px; }
-#panel.inspector .row.is-modified > label::after { content: ' ·'; color: #a38aff; }
-#panel.inspector .val[role=button] { cursor: text; border-radius: 4px; position: relative; }
-#panel.inspector .val[role=button]:hover { background: #ffffff12; }
+#panel.inspector .row.is-modified > label::after {
+  content: '已調整'; display: inline-block; margin-left: 6px; padding: 1px 5px;
+  border-radius: 99px; color: #c9bcff; background: #7957ff22; font-size: 8px; line-height: 1.5;
+  vertical-align: 1px;
+}
+#panel.inspector .val[role=button] {
+  min-width: 46px; padding: 3px 7px; cursor: text; border: 1px solid #ffffff14;
+  border-radius: 99px; position: relative; background: #ffffff08; text-align: center;
+}
+#panel.inspector .val[role=button]:hover { color: #fff !important; background: #ffffff14; border-color: #ffffff2b; }
+#panel.inspector .row.is-modified > .val[role=button] { color: #d7ceff !important; border-color: #8f75ff55; background: #7957ff16; }
 #panel .inspectorValueInput { position: absolute; right: 0; top: -8px; z-index: 4; width: 88px; padding: 6px; font: inherit; color: #fff; background: #171a21; border: 1px solid #9fc2ff; border-radius: 4px; }
 #panel.inspector :is(button,input,select,summary,[role=button]):focus-visible { outline: 2px solid #a38aff; outline-offset: 3px; }
 #panel.inspector .group button:not(.inspectorStop):not(.mobile-select-trigger) { border-radius: 99px !important; }

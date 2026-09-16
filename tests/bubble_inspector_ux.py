@@ -114,6 +114,42 @@ def check_desktop(browser, base_url: str) -> dict[str, object]:
     # Coordinated visual presets tune shell/icons separately for each backdrop,
     # while continuing to use the existing per-backdrop memory.
     page.locator("#motion").select_option("research")
+    page.locator("#inspectorTab-motion").click()
+    assert panel.get_attribute("role") == "region"
+    assert page.locator(".inspectorTabs").get_attribute("aria-orientation") == "horizontal"
+
+    # Readouts expose direct numeric entry and changed values are visibly
+    # identified. A section reset restores only that section through the
+    # normal control event path.
+    breath = page.locator("#researchBreath")
+    breath_readout = page.locator("#researchBreath_v")
+    assert breath_readout.is_visible()
+    readout_style = breath_readout.evaluate(
+        "node => ({ background: getComputedStyle(node).backgroundColor, radius: getComputedStyle(node).borderRadius })"
+    )
+    assert readout_style["background"] != "rgba(0, 0, 0, 0)"
+    assert float(readout_style["radius"].replace("px", "")) >= 10
+    breath_readout.click()
+    assert breath_readout.locator("input[type=number]").is_visible()
+    breath_readout.locator("input[type=number]").press("Escape")
+    breath_default = breath.input_value()
+    breath.evaluate(
+        """node => {
+            node.value = String(Math.min(Number(node.max), Number(node.value) + 0.1));
+            node.dispatchEvent(new Event('input', { bubbles: true }));
+        }"""
+    )
+    breath_row = page.locator("#researchBreath").locator("xpath=ancestor::*[contains(@class, 'row')][1]")
+    page.wait_for_function("document.querySelector('#researchBreath').closest('.row').classList.contains('is-modified')")
+    assert "is-modified" in (breath_row.get_attribute("class") or "")
+    timing_group = page.locator("#inspectorPage-motion > details.group:has(#researchBreath)")
+    timing_group.get_by_role("button", name="重設呼吸與圖示時序").click()
+    page.wait_for_function(
+        "expected => document.querySelector('#researchBreath').value === expected",
+        arg=breath_default,
+    )
+    assert "is-modified" not in (breath_row.get_attribute("class") or "")
+
     page.locator("#inspectorTab-look").click()
     prism = page.locator('[data-visual-preset="prism"]')
     assert prism.is_visible(), "Prism preset is not visible in Installing/look"
@@ -173,6 +209,13 @@ def check_mobile(browser, base_url: str) -> dict[str, object]:
     page.wait_for_timeout(100)
     after_top = page.locator(".inspectorHeader").bounding_box()["y"]
     assert abs(before_top - after_top) <= 2, "mobile inspector header did not remain sticky"
+    handle = page.locator(".mobile-sheet-handle")
+    assert handle.get_attribute("role") == "button"
+    assert page.locator("body").get_attribute("data-mobile-sheet") == "half"
+    handle.press("Enter")
+    assert page.locator("body").get_attribute("data-mobile-sheet") == "full"
+    handle.press("Space")
+    assert page.locator("body").get_attribute("data-mobile-sheet") == "peek"
     assert not errors, f"mobile inspector page errors: {errors}"
     context.close()
     return {"noHorizontalOverflow": True, "stickyHeader": True, "touchTabs": True}

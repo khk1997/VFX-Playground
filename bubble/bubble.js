@@ -1,6 +1,6 @@
 'use strict';
 import * as THREE from 'three';
-import { buildInspector } from './inspector.js?v=panel-ux-2';
+import { buildInspector } from './inspector.js?v=panel-ux-3';
 import { createAdaptiveQuality, QUALITY_TIER_NAMES } from './adaptive-quality.js?v=2';
 import { initQuickSlots } from './quick-slots.js?v=1';
 import { createGpuProfiler } from './gpu-profiler.js?v=1';
@@ -3382,6 +3382,7 @@ function updatePlayControl() {
   pauseBtnIcon.innerHTML = paused ? PLAY_ICON : PAUSE_ICON;
   pauseBtnLabel.textContent = paused ? '播放' : '暫停';
   pauseBtn.setAttribute('aria-label', paused ? '播放動畫' : '暫停動畫');
+  pauseBtn.setAttribute('aria-pressed', String(paused));
   pauseBtn.title = paused ? '播放動畫' : '暫停動畫';
 }
 // 後處理鏈。第一次真的要用到時才建立 —— 全部關閉時連 render target 都不該配置。
@@ -3805,7 +3806,9 @@ function frame(now) {
 
 buildExtendedMotionControls();
 if (!PREVIEW) {
-  inspector = buildInspector({ defaults: { ...DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS } });
+  inspector = buildInspector({ defaults: {
+    ...DEFAULTS, ...MOTION_TEXT_DEFAULTS, ...SELECT_DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS,
+  } });
   inspector.setQualityStatus(adaptiveQuality.snapshot());
 }
 bindControls();

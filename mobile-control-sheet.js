@@ -336,7 +336,10 @@
     });
 
     handle.addEventListener('keydown', event => {
-      if (event.key === 'ArrowUp') {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        cycleSheet();
+      } else if (event.key === 'ArrowUp') {
         event.preventDefault();
         applyState(state === 'peek' ? 'half' : 'full');
       } else if (event.key === 'ArrowDown') {

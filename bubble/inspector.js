@@ -130,6 +130,7 @@ export function buildInspector({ defaults }) {
   const tabs = element('div', 'inspectorTabs');
   tabs.setAttribute('role', 'tablist');
   tabs.setAttribute('aria-label', '參數分類');
+  tabs.setAttribute('aria-orientation', 'horizontal');
   header.append(tabs);
   const panes = {};
   const tabButtons = [];
@@ -422,6 +423,28 @@ export function buildInspector({ defaults }) {
     if (label && input) label.htmlFor = input.id;
   });
   installNumberEditing(panel);
+
+  // Restore one main section through the existing input/change handlers so
+  // shader state, mode memory and the visible controls remain in sync.
+  panel.querySelectorAll('.inspectorPage > details.group').forEach(group => {
+    if (group.classList.contains('inspectorColors')) return;
+    const controls = [...group.querySelectorAll('input[id], select[id], textarea[id]')]
+      .filter(control => Object.hasOwn(defaults, control.id));
+    if (!controls.length) return;
+    const sectionName = group.querySelector(':scope > summary h3')?.textContent || '此區';
+    const resetSection = button('重設此區', () => {
+      controls.forEach(control => writeControl(control.id, colorDefault(control.id)));
+      resetSection.textContent = '已重設';
+      resetSection.setAttribute('aria-label', `${sectionName}已重設`);
+      window.setTimeout(() => {
+        resetSection.textContent = '重設此區';
+        resetSection.setAttribute('aria-label', `重設${sectionName}`);
+      }, 1200);
+    });
+    resetSection.classList.add('inspectorSectionReset');
+    resetSection.setAttribute('aria-label', `重設${sectionName}`);
+    group.append(resetSection);
+  });
   let pending = false;
   function scheduleRefresh(event) {
     if (event?.target?.dataset?.presetIgnore !== undefined) return;
@@ -458,6 +481,16 @@ export function buildInspector({ defaults }) {
     panel.querySelectorAll('.val[role="button"]').forEach(readout => {
       const label = readout.closest('.row')?.querySelector('label')?.textContent;
       if (label) readout.setAttribute('aria-label', `輸入${label}數值`);
+    });
+    panel.querySelectorAll('.inspectorPage .row').forEach(row => {
+      const control = row.querySelector('input[id], select[id], textarea[id]');
+      if (!control || !Object.hasOwn(defaults, control.id)) return;
+      const current = readControl(control.id);
+      const baseline = colorDefault(control.id);
+      const changed = typeof baseline === 'number'
+        ? Math.abs(Number(current) - baseline) > 1e-9
+        : current !== baseline;
+      row.classList.toggle('is-modified', changed);
     });
     for (const [prefix, state] of cards) {
       state.card.hidden = prefix !== target;
