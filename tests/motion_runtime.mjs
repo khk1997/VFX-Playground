@@ -12,9 +12,11 @@ import { MOTION_UNIFORM_MAP } from '../bubble/motions/registry.js';
 import createJellyMotion from '../bubble/motions/jelly.js';
 import createHopMotion from '../bubble/motions/hop.js';
 import createResearchMotion from '../bubble/motions/research.js';
+import createMeltMotion, { selectBottomAnchors } from '../bubble/motions/melt.js';
 import { createStaticCapillaryRuntime } from '../bubble/motions/runtime/static-capillary.js';
 import { createJellyRuntime } from '../bubble/motions/runtime/jelly.js';
 import { createResearchRuntime } from '../bubble/motions/runtime/research.js';
+import { createMeltRuntime } from '../bubble/motions/runtime/melt.js';
 
 const PHASES = [0, 0.07, 0.19, 0.33, 0.5, 0.64, 0.78, 0.91, 0.999];
 
@@ -205,6 +207,94 @@ function vec4() {
   assert.equal(runtime.mergeScale(), Math.max(0.02, P.researchCompanionFusion));
   P.researchCompanionFusion = 0;
   assert.equal(runtime.mergeScale(), 0.02, 'fully closing the fusion would harden the contact seam');
+}
+
+/* ===== 融化 ===== */
+{
+  const MAX_DROPS = 12;
+  const P = makeParams({ motion: 'melt' });
+  // 形狀底部散開的取樣點；只要有 y 就足以讓 selectBottomAnchors 挑得出滴落點。
+  const targets = Array.from({ length: 64 }, (_, i) => ({
+    x: Math.sin(i * 1.7) * 0.5, y: -0.9 + (i % 8) * 0.12, z: Math.cos(i * 2.3) * 0.5,
+    radiusHint: 0.05 + (i % 5) * 0.01,
+  }));
+  let serial = 0;
+  const runtime = createMeltRuntime({
+    params: P, maxDrops: MAX_DROPS,
+    shapeTargets: () => targets, shapeSerial: () => serial,
+  });
+
+  assert.equal(runtime.active(), true);
+  P.motion = 'morph';
+  assert.equal(runtime.active(), false);
+  P.motion = 'melt';
+
+  // 滴落點：跟改動前同一條 selectBottomAnchors，同一組參數。
+  runtime.rebuildAnchors();
+  const expected = selectBottomAnchors(targets, MAX_DROPS, P.meltBand, Math.round(P.meltSeed));
+  assert.deepEqual(runtime.anchors(), expected);
+  assert.ok(expected.length, 'the melt drip points must not be empty');
+
+  // key 快取：同一個形狀版本與同一組滑桿值不重挑（回傳的是同一個陣列實例）。
+  const first = runtime.anchors();
+  runtime.rebuildAnchors();
+  assert.equal(runtime.anchors(), first, 'the drip points were reselected without a reason to');
+  // 換形狀（版本號跳號）要重挑。
+  serial += 1;
+  runtime.rebuildAnchors();
+  assert.notEqual(runtime.anchors(), first, 'a new shape must reselect the drip points');
+  // 取樣範圍是滑桿，改了也要重挑。
+  const beforeBand = runtime.anchors();
+  P.meltBand = P.meltBand * 0.5 + 0.05;
+  runtime.rebuildAnchors();
+  assert.notEqual(runtime.anchors(), beforeBand, 'a new sampling band must reselect the drip points');
+  // resetAnchors 是換形狀時的雙保險：不改任何滑桿也要重挑。
+  const beforeReset = runtime.anchors();
+  runtime.resetAnchors();
+  runtime.rebuildAnchors();
+  assert.notEqual(runtime.anchors(), beforeReset, 'resetAnchors must force a reselect');
+  assert.deepEqual(runtime.anchors(),
+    selectBottomAnchors(targets, MAX_DROPS, P.meltBand, Math.round(P.meltSeed)));
+
+  // 參考實作：改動前 updateDropUniforms／updateMicroDrops 裡的那兩段。
+  const { meltDrop } = createMeltMotion(P, { bottomAnchors: () => runtime.anchors() });
+  const mine = vec();
+  const theirs = vec();
+  for (const phase of PHASES) {
+    for (let i = 0; i < MAX_DROPS; i++) {
+      const state = runtime.mainDrop(i, phase, mine);
+      const reference = meltDrop(i, phase, i * 7.13, theirs);
+      assert.deepEqual(state ? state.radius : null, reference ? reference.radius : null,
+        `melt drop ${i} radius drifted at phase ${phase}`);
+      if (reference) {
+        assert.deepEqual([mine.x, mine.y, mine.z], [theirs.x, theirs.y, theirs.z],
+          `melt drop ${i} moved at phase ${phase}`);
+      }
+      // 形變由 mainDrop 記下、由 deform() 讀回，兩者必須是同一幀的同一份。
+      assert.deepEqual(runtime.deform(i), reference ? reference.deform : null,
+        `melt drop ${i} deform drifted at phase ${phase}`);
+
+      const micro = runtime.microDrop(i, phase, mine);
+      const microReference = meltDrop(i, phase, i * 3.41 + 101.7, theirs);
+      assert.equal(micro.radius, microReference ? microReference.radius * 0.62 : 0,
+        `melt micro drop ${i} radius drifted at phase ${phase}`);
+      assert.equal(micro.stretch, microReference ? microReference.deform.stretch : 1,
+        `melt micro drop ${i} stretch drifted at phase ${phase}`);
+      if (microReference) {
+        assert.deepEqual([mine.x, mine.y, mine.z], [theirs.x, theirs.y, theirs.z],
+          `melt micro drop ${i} moved at phase ${phase}`);
+      }
+    }
+  }
+  // 主滴與微滴的種子基底必須錯開，否則同一個滴落點的兩顆會同步落下疊成一顆。
+  const sameSeed = PHASES.every(phase => {
+    const a = meltDrop(3, phase, 3 * 7.13, theirs);
+    const b = meltDrop(3, phase, 3 * 3.41 + 101.7, mine);
+    return (a ? a.radius : 0) === (b ? b.radius : 0);
+  });
+  assert.equal(sameSeed, false, 'the main and micro drops fell on the same schedule');
+
+  assert.equal(runtime.mergeScale(), 0.4);
 }
 
 console.log('Motion runtime modules match the inline code they replaced');

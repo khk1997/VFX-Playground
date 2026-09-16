@@ -22,7 +22,6 @@ import {
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
-import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-76';
 import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=post-mask-3';
 import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=post-mask-3';
 import {
@@ -57,6 +56,7 @@ import { createTypewriterRuntime } from './typewriter-runtime.js?v=1';
 import { createStaticCapillaryRuntime } from './motions/runtime/static-capillary.js?v=1';
 import { createJellyRuntime } from './motions/runtime/jelly.js?v=1';
 import { createResearchRuntime } from './motions/runtime/research.js?v=1';
+import { createMeltRuntime } from './motions/runtime/melt.js?v=1';
 import { buildExtendedMotionControls } from './panel-builder.js?v=1';
 import { createPanelStateController } from './panel-state.js?v=1';
 import { createPanelBindings } from './panel-bindings.js?v=1';
@@ -1005,19 +1005,6 @@ function rebuildWeaveAnchorSets() {
   if (!weaveSurfaceAnchors.length) weaveSurfaceAnchors = formationAnchors;
 }
 
-// 融化的滴落點：形狀底部散開的幾個位置（見 motions/melt.js 的 selectBottomAnchors）。
-// 取樣範圍與種子是滑桿，改了要重挑，所以跟崩解切法一樣用 key 快取，不是每幀重算。
-let meltBottomAnchors = [];
-let meltAnchorKey = null;
-function rebuildMeltAnchors() {
-  const key = `${shapeFieldSerial}:${P.meltBand.toFixed(3)}:${Math.round(P.meltSeed)}`;
-  if (key === meltAnchorKey) return;
-  meltAnchorKey = key;
-  meltBottomAnchors = selectBottomAnchors(
-    shapeTargets, MAX_DROPS, P.meltBand, Math.round(P.meltSeed),
-  );
-}
-
 // 造型底部的 Y（本地座標）。起跳彈跳的擠壓拉伸要以「腳踩的那條地面」為支點，
 // 不是以造型中心——中心支點會讓壓扁時整顆往上縮、底部離地，看起來是懸空的球
 // 在自己變形，而不是撞在地上被壓扁。取樣點是烘焙好的，換形狀才需要重算，所以
@@ -1313,8 +1300,14 @@ const {
   edgeScale: () => formationEdgeScale,
 });
 
-// 融化：底部滴落。錨點同樣用 getter，換形狀或調取樣範圍後才拿得到新的那組。
-const { meltDrop } = createMeltMotion(P, { bottomAnchors: () => meltBottomAnchors });
+// 融化：底部滴落。滴落點、水滴包絡與形變都在模組裡；形狀與它的版本號用 getter
+// 傳進去，換形狀或調取樣範圍後下一幀才會重挑滴落點。
+const meltRuntime = createMeltRuntime({
+  params: P,
+  maxDrops: MAX_DROPS,
+  shapeTargets: () => shapeTargets,
+  shapeSerial: () => shapeFieldSerial,
+});
 // 配對表由 bubble.js 這邊持有（它才知道形狀什麼時候換），morph.js 只負責讀。
 const {
   morphTimeline: morphTimelineOf, morphFronts, morphDropPosition, morphRadiusFactor,
@@ -1409,10 +1402,6 @@ const freeOrbitVec = new THREE.Vector3();
 // 同一顆在巢狀呼叫時會互相覆寫。
 const microArcVec = new THREE.Vector3();
 
-// 融化每顆水滴這一幀的形狀（拉長／頸／彈動）。主滴迴圈算出來，下面的形變迴圈
-// 讀取——那個迴圈拿不到位置迴圈的區域變數，所以在這裡接一手。
-const meltDeformNow = Array.from({ length: MAX_DROPS }, () => null);
-
 const formationPosNow = new THREE.Vector3();
 const formationPosBefore = new THREE.Vector3();
 const formationPosAfter = new THREE.Vector3();
@@ -1423,7 +1412,7 @@ function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false) {
   const shattering = P.motion === 'shatter';
   // 融化也要微滴：滴落點就那幾個，只靠 12 顆主滴撐不出「不停在滴」的密度，
   // 微滴補上去之後同一個位置才會有前後好幾滴同時在不同高度。
-  const melting = P.motion === 'melt';
+  const melting = meltRuntime.active();
   // 形狀變形的微滴不是「細節補強」而是主力之一：整個畫面只有水滴，主滴 12 顆
   // 撐不出兩顆形狀的輪廓，微滴那 20 顆負責把輪廓填細。
   const morphing = P.motion === 'morph';
@@ -1440,7 +1429,7 @@ function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false) {
   for (let i = 0; i < MAX_MICRO_DROPS; i++) {
     const o = i * 4;
     const pool = shattering ? shatterAnchors
-      : melting ? meltBottomAnchors
+      : melting ? meltRuntime.anchors()
       // 變形模式的微滴走配對表，不走單一錨點組；配對表還沒建好（形狀 B 還在
       // 烘）就當成沒有錨點，這一幀不畫。
       : morphing ? morphMicroPairs
@@ -1473,23 +1462,17 @@ function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false) {
       continue;
     }
     if (melting) {
-      // 種子基底刻意跟主滴那條（i * 7.13）錯開，同一個滴落點的主滴與微滴才不會
-      // 同步落下、疊成一顆。
-      const state = meltDrop(i, phase, i * 3.41 + 101.7, formationPosNow);
+      const melt = meltRuntime.microDrop(i, phase, formationPosNow);
       applyShapeRigid(formationPosNow.x, formationPosNow.y, formationPosNow.z, formationPosNow);
       microDropData[o] = formationPosNow.x;
       microDropData[o + 1] = formationPosNow.y;
       microDropData[o + 2] = formationPosNow.z;
-      // 微滴是主滴的縮小版，撐體積的是主滴，這裡只負責補密度。
-      microDropData[o + 3] = state ? state.radius * 0.62 : 0;
-      // 微滴的 SDF（microDropletDistance）只吃主軸與拉長，沒有尖端與彈動那兩個
-      // 通道，所以這裡只套得上垂直拉長；而且它把 stretch 夾在 [1, 1.65]，墜落期
-      // 的壓扁（<1）會被夾成 1，等於微滴只在懸掛時被拉長。以微滴的尺寸來說看不
-      // 出差別，不值得為它擴一組 uniform。
+      microDropData[o + 3] = melt.radius;
+      // 微滴只套得上垂直拉長（理由見 motions/runtime/melt.js 的 microDrop）。
       microShapeData[o] = 0;
       microShapeData[o + 1] = 1;
       microShapeData[o + 2] = 0;
-      microShapeData[o + 3] = state ? state.deform.stretch : 1;
+      microShapeData[o + 3] = melt.stretch;
       continue;
     }
     if (morphing) {
@@ -1593,7 +1576,7 @@ function updateNegativeDrops(phase, fidelityAbsorb = 0) {
   // 融化的形狀始終完整，空腔自然也要一直在，不隨任何包絡消長。
   // 果凍的實體同樣全程都在（uShapeProgress 恆為 1），空腔要一直在，否則有真
   // 孔洞的模型（例如環形 GLB）會被填實。
-  const amount = P.motion === 'melt' || jellyRuntime.active() || isExtendedMotion(P.motion)
+  const amount = meltRuntime.active() || jellyRuntime.active() || isExtendedMotion(P.motion)
     ? 1
     // 形狀變形不顯示距離場實體（uShapeProgress 為 0），空腔沒有母體可挖，留著
     // 只會變成幾顆漂在水滴群裡的隱形挖洞球，把輪廓咬掉幾塊。
@@ -1686,12 +1669,12 @@ function updateDropUniforms(t) {
   // 穿梭環繞的形狀是恆定的背景主體，不走匯聚／散開的體積交接，永遠滿值顯示。
   const shatter = P.motion === 'shatter' ? shatterTimeline(phase) : null;
   const shatterPrimary = shatter ? shatterAnchorSets().primary : null;
-  const melting = P.motion === 'melt';
+  const melting = meltRuntime.active();
   const morphing = P.motion === 'morph';
   const jelly = jellyRuntime.active();
   const extended = isExtendedMotion(P.motion);
   if (extended) syncExtendedShapeContext();
-  if (melting) rebuildMeltAnchors();
+  if (melting) meltRuntime.rebuildAnchors();
   if (morphing) { ensureMorphTarget(); rebuildMorphPairs(); }
   // 實體變形要有雙通道貼圖才成立；沒有就只剩水滴（見 rebuildMorphPackedTexture）。
   const morphSolid = morphing && !!morphPackedTexture && morphPairs.length > 0;
@@ -1802,15 +1785,12 @@ function updateDropUniforms(t) {
       }
       shatterTarget = target;
     } else if (melting) {
-      // 主滴與微滴餵不同的種子基底，同一個滴落點才會有大小、時機都不同的水滴
-      // 輪流落下，看起來是連續的水流而不是整齊的節拍器。
-      meltState = meltDrop(i, phase, i * 7.13, formationPosNow);
+      meltState = meltRuntime.mainDrop(i, phase, formationPosNow);
       if (meltState) {
         x = formationPosNow.x;
         y = formationPosNow.y;
         z = formationPosNow.z;
       }
-      meltDeformNow[i] = meltState ? meltState.deform : null;
     } else if (morphing) {
       morphDropPosition(morphPairs, i, phase, formationPosNow);
       x = formationPosNow.x;
@@ -2002,7 +1982,7 @@ function updateDropUniforms(t) {
     : jelly
       ? 0.15
       : melting
-        ? 0.4
+        ? meltRuntime.mergeScale()
         : shatter
           ? 1 + (0.15 - 1) * shatter.flight
           : 1;
@@ -2182,7 +2162,7 @@ function updateDropUniforms(t) {
       // 朝上（而不是朝著墜落方向）是因為 shader 的尖端長在 +軸端，而真實懸掛水滴
       // 的頸在上方、連著造型那一側。
       ax = 0; ay = 1; az = 0;
-      const deform = meltDeformNow[i];
+      const deform = meltRuntime.deform(i);
       if (deform) {
         stretch = deform.stretch;
         tip = deform.tip;
@@ -3255,7 +3235,7 @@ async function importShapeFile(file, kind, { rebuilding = false } = {}) {
     shapeCavityBase = next.cavityTargets || [];
     rebuildShapeAAnchors();
     // key 帶著 shapeFieldSerial，換形狀後下一幀就會重挑滴落點／重配變形配對。
-    meltAnchorKey = null;
+    meltRuntime.resetAnchors();
     morphPairKey = null;
     applyEdgeDropDistribution(P.shapeLiquidPosition);
     uniforms.uShapeTex.value = next.texture;
