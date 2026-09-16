@@ -2641,6 +2641,25 @@ function switchMaterialProfile(previousStyle, nextStyle) {
   if (inited) loadMaterialEnvironment(nextStyle);
 }
 
+// 切換模式之後把網址的 ?mode= 換成當下這個。
+//
+// 為什麼要有：首頁的每張卡片就是一個 ?mode=，網址與畫面不一致的話，重新整理會
+// 跳回卡片帶進來的那個模式，複製連結給別人看到的也是舊的那個。
+//
+// 用 replaceState 而不是 pushState：切模式不是「上一頁」該回去的那種導覽，使用者
+// 按上一頁要回的是首頁。一開始就停在預設模式時不動網址——那時候乾淨的網址本來
+// 就等於畫面，沒有不一致可修。
+// 預覽嵌入不碰：它是巢狀在首頁卡片裡的 iframe，網址由 effect-registry 決定。
+function syncMotionUrl() {
+  if (PREVIEW) return;
+  try {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('mode') === P.motion) return;
+    url.searchParams.set('mode', P.motion);
+    history.replaceState(history.state, '', url);
+  } catch (_) { /* 沒有 history API 的情境（例如 file://）靜默略過 */ }
+}
+
 const {
   bindTextControls, bindControls, resetSpectralCausticColors, resetRamp, updateRampRows,
 } = createPanelBindings({
@@ -2660,6 +2679,7 @@ const {
   setDispersionMaster: value => { dispersionMasterOn = value; },
   dispersionToggleKeys: DISPERSION_TOGGLE_KEYS, setBgColorUniform, pageBackgroundCss,
   scheduleGlyphRebuild, buildRampLUT, stopMax: STOP_MAX, rampDefault: RAMP_DEFAULT,
+  syncMotionUrl,
 });
 
 const { applyGates, updateUIState } = createPanelStateController({

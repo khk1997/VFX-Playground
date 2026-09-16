@@ -182,6 +182,22 @@ def main() -> int:
         assert page.evaluate("() => document.getElementById('motion').value") == "melt", (
             "the liquid-glass page can no longer switch motions from its own menu"
         )
+        # 網址要跟著模式走，否則重新整理會跳回卡片帶進來的那個模式。
+        assert "mode=melt" in page.url, (
+            f"switching motions left the url at {page.url!r}"
+        )
+        page.reload(wait_until="networkidle", timeout=60_000)
+        wait_for_shader(page)
+        assert page.evaluate("() => document.getElementById('motion').value") == "melt", (
+            "reloading after a motion switch did not stay on the switched motion"
+        )
+        # 乾淨的網址一開始就等於畫面（預設模式），不該被動到。
+        page.goto(f"{args.base_url}/bubble/index.html?diag=baseline",
+                  wait_until="networkidle", timeout=60_000)
+        wait_for_shader(page)
+        assert "mode=" not in page.url, (
+            f"a default-motion visit rewrote its own url to {page.url!r}"
+        )
         menu = page.evaluate(
             "() => [...document.querySelectorAll('#motion option')].map(n => n.value)")
         assert "split" not in menu and "cinematic" not in menu, (

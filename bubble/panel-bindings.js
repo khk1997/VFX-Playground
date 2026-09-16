@@ -19,7 +19,7 @@ export function createPanelBindings(options) {
     updateUIState, scheduleGLBRebuild, applyAntialiasLevel, ensureGlyphAtlas, applyToggle,
     getDispersionMaster, setDispersionMaster, dispersionToggleKeys: DISPERSION_TOGGLE_KEYS,
     setBgColorUniform, pageBackgroundCss, scheduleGlyphRebuild, buildRampLUT,
-    stopMax: STOP_MAX, rampDefault: RAMP_DEFAULT,
+    stopMax: STOP_MAX, rampDefault: RAMP_DEFAULT, syncMotionUrl,
   } = options;
 
 // 文字型控制項。單獨一支而不是塞進下面那個數值迴圈：那個迴圈對每個 key 一律
@@ -144,6 +144,8 @@ function bindControls() {
         if (isInited() && (MOTION_HDRI[previousMotion] || MOTION_HDRI[P.motion])) {
           loadMaterialEnvironment(P.materialStyle);
         }
+        // 網址跟著模式走，重新整理與複製連結才會停在正在看的這個模式。
+        syncMotionUrl();
       }
       if (getUniforms() && getUniforms()[uniform]) getUniforms()[uniform].value = map[el.value];
       if (key === 'backdrop' && getUniforms()) {
