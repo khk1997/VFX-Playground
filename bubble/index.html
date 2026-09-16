@@ -542,8 +542,8 @@
   <div class="hint" data-gate="static">靜態模式可在方體、平面、圓盤、球體、圓柱、圓錐、圓環之間切換，或選「匯入」自行載入 SVG／GLB；材質沿用毛細波的通用玻璃設定，也共用同一組程序波紋（同心、定向或螺旋波場，Wave、Noise、Voronoi、Gabor、Gradient、Magic 程序紋理）直接作用在物體表面。<br>拖曳可旋轉視角；滾輪可縮放。</div>
   <div class="hint" data-gate="typewriter">打字模式的玻璃主體就是文字本身，不生成周圍水滴。<br>拖曳可旋轉視角；滾輪可縮放。</div>
 </div>
-<button id="exportBtn" type="button" aria-haspopup="dialog" aria-controls="exportDialog">輸出</button>
-<button id="toggleBtn"><svg class="btnIcon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" stroke="currentColor" stroke-width="1.4"/><path d="M16.4 12.3c.1-.3.1-.6.1-.9V9.6c0-.3 0-.6-.1-.9l1.4-1.1a.6.6 0 0 0 .1-.8l-1.3-2.2a.6.6 0 0 0-.7-.3l-1.6.6a5.9 5.9 0 0 0-1.5-.9L12.4 2a.6.6 0 0 0-.6-.5H8.2a.6.6 0 0 0-.6.5l-.3 1.7a5.9 5.9 0 0 0-1.5.9l-1.6-.6a.6.6 0 0 0-.7.3L2.2 6.5a.6.6 0 0 0 .1.8l1.4 1.1c-.1.3-.1.6-.1.9v1.8c0 .3 0 .6.1.9l-1.4 1.1a.6.6 0 0 0-.1.8l1.3 2.2c.1.2.4.3.7.3l1.6-.6c.4.4.9.7 1.5.9l.3 1.7c0 .3.3.5.6.5h3.6c.3 0 .6-.2.6-.5l.3-1.7c.6-.2 1.1-.5 1.5-.9l1.6.6c.3.1.6 0 .7-.3l1.3-2.2a.6.6 0 0 0-.1-.8l-1.4-1.1Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg><span>面板</span></button>
+<button id="exportBtn" type="button" aria-haspopup="dialog" aria-controls="exportDialog" aria-expanded="false">輸出</button>
+<button id="toggleBtn" type="button" aria-controls="panel" aria-expanded="true" aria-pressed="true"><svg class="btnIcon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" stroke="currentColor" stroke-width="1.4"/><path d="M16.4 12.3c.1-.3.1-.6.1-.9V9.6c0-.3 0-.6-.1-.9l1.4-1.1a.6.6 0 0 0 .1-.8l-1.3-2.2a.6.6 0 0 0-.7-.3l-1.6.6a5.9 5.9 0 0 0-1.5-.9L12.4 2a.6.6 0 0 0-.6-.5H8.2a.6.6 0 0 0-.6.5l-.3 1.7a5.9 5.9 0 0 0-1.5.9l-1.6-.6a.6.6 0 0 0-.7.3L2.2 6.5a.6.6 0 0 0 .1.8l1.4 1.1c-.1.3-.1.6-.1.9v1.8c0 .3 0 .6.1.9l-1.4 1.1a.6.6 0 0 0-.1.8l1.3 2.2c.1.2.4.3.7.3l1.6-.6c.4.4.9.7 1.5.9l.3 1.7c0 .3.3.5.6.5h3.6c.3 0 .6-.2.6-.5l.3-1.7c.6-.2 1.1-.5 1.5-.9l1.6.6c.3.1.6 0 .7-.3l1.3-2.2a.6.6 0 0 0-.1-.8l-1.4-1.1Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg><span>面板</span></button>
 <button id="playCtl"><svg id="playCtlIcon" class="btnIcon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="5" y="4" width="3.2" height="12" rx="1" fill="currentColor"/><rect x="11.8" y="4" width="3.2" height="12" rx="1" fill="currentColor"/></svg><span id="playCtlLabel">暫停</span></button>
 
 <dialog id="exportDialog" class="exportDialog" aria-labelledby="exportTitle">
@@ -633,7 +633,7 @@
   </form>
 </dialog>
 
-<script src="./bubble-export-ui.js?v=8"></script>
+<script src="./bubble-export-ui.js?v=9"></script>
 
 <script type="importmap">
 { "imports": {

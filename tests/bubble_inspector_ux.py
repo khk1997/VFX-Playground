@@ -40,6 +40,35 @@ def check_desktop(browser, base_url: str) -> dict[str, object]:
     open_inspector(page, base_url)
 
     panel = page.locator("#panel")
+    panel_toggle = page.locator("#toggleBtn")
+    export_button = page.locator("#exportBtn")
+    export_dialog = page.locator("#exportDialog")
+    assert panel_toggle.get_attribute("aria-expanded") == "true", "panel toggle did not start expanded"
+
+    # Parameter editing and export are mutually exclusive desktop workspaces.
+    export_button.click()
+    assert export_dialog.get_attribute("open") is not None, "export dialog did not open"
+    assert panel.get_attribute("class") and "collapsed" in panel.get_attribute("class"), "export did not collapse panel"
+    assert export_button.get_attribute("aria-expanded") == "true", "export button did not expose open state"
+    assert panel_toggle.get_attribute("aria-expanded") == "false", "panel toggle did not expose collapsed state"
+    panel_toggle.click()
+    page.wait_for_function(
+        "!document.querySelector('#exportDialog').open && !document.querySelector('#panel').classList.contains('collapsed')"
+    )
+    assert "collapsed" not in (panel.get_attribute("class") or ""), "panel request did not expand panel"
+    assert export_button.get_attribute("aria-expanded") == "false", "export button stayed expanded after switching"
+    assert panel_toggle.get_attribute("aria-expanded") == "true", "panel toggle stayed collapsed after switching"
+
+    # Closing export restores the state that preceded it, including a closed panel.
+    panel_toggle.click()
+    assert "collapsed" in (panel.get_attribute("class") or ""), "panel toggle did not collapse panel"
+    export_button.click()
+    page.locator(".exportClose").click()
+    page.wait_for_function(
+        "!document.querySelector('#exportDialog').open && document.querySelector('#panel').classList.contains('collapsed')"
+    )
+    assert "collapsed" in (panel.get_attribute("class") or ""), "closing export unexpectedly restored a closed panel"
+    panel_toggle.click()
     assert panel.get_attribute("data-control-depth") == "concise"
     assert page.locator("#inspectorPage-look details:has(#postExposure)").is_hidden()
     assert page.locator("[data-slot=\"2\"]").is_hidden()

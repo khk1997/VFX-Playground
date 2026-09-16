@@ -3629,7 +3629,23 @@ document.addEventListener('visibilitychange', syncLoop);
 
 /* ===== 面板開合 ===== */
 const panel = document.getElementById('panel');
-document.getElementById('toggleBtn').addEventListener('click', () => panel.classList.toggle('collapsed'));
+const panelToggle = document.getElementById('toggleBtn');
+function syncPanelToggleState() {
+  const expanded = !panel.classList.contains('collapsed');
+  panelToggle.setAttribute('aria-expanded', String(expanded));
+  panelToggle.setAttribute('aria-pressed', String(expanded));
+}
+panelToggle.addEventListener('click', () => {
+  const exportDialog = document.getElementById('exportDialog');
+  if (exportDialog?.open) {
+    window.dispatchEvent(new CustomEvent('prism-workspace-panel-request'));
+    return;
+  }
+  panel.classList.toggle('collapsed');
+  syncPanelToggleState();
+});
+new MutationObserver(syncPanelToggleState).observe(panel, { attributes: true, attributeFilter: ['class'] });
+syncPanelToggleState();
 
 // 面板毛玻璃（backdrop-filter）是瀏覽器合成層自己的成本，跟畫布的節流是兩條
 // 獨立路徑——捲動面板時雖然不會喚醒畫布（見 markInteraction 的判準），但每一

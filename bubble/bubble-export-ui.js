@@ -39,7 +39,9 @@
   const stageSize = document.getElementById('exportStageSize');
   const desktopQuery = window.matchMedia('(min-width: 761px)');
   const parameterPanel = document.getElementById('panel');
+  const parameterPanelTrigger = document.getElementById('toggleBtn');
   let restoreParameterPanel = false;
+  let switchToParameterPanel = false;
   let engineReady = false;
   let exporting = false;
 
@@ -124,6 +126,7 @@
 
   function openWorkspace() {
     restoreParameterPanel = !parameterPanel.classList.contains('collapsed');
+    switchToParameterPanel = false;
     if (desktopQuery.matches) {
       parameterPanel.classList.add('collapsed');
       dialog.show();
@@ -133,6 +136,7 @@
     followLoopDuration();
     syncSequence();
     document.body.classList.add('export-workspace-open');
+    trigger.setAttribute('aria-expanded', 'true');
     syncWorkspaceLayout();
     requestAnimationFrame(syncPreview);
   }
@@ -141,17 +145,27 @@
     if (dialog.open) dialog.close();
     else openWorkspace();
   });
+  window.addEventListener('prism-workspace-panel-request', () => {
+    if (!dialog.open) return;
+    switchToParameterPanel = true;
+    dialog.close();
+  });
   dialog.addEventListener('click', event => {
     if (event.target === dialog) dialog.close();
   });
   dialog.addEventListener('close', () => {
     document.body.classList.remove('export-workspace-open');
-    if (desktopQuery.matches && restoreParameterPanel) parameterPanel.classList.remove('collapsed');
+    trigger.setAttribute('aria-expanded', 'false');
+    if (desktopQuery.matches && (restoreParameterPanel || switchToParameterPanel)) {
+      parameterPanel.classList.remove('collapsed');
+    }
     ['--export-stage-width', '--export-stage-height', '--export-stage-left', '--export-stage-top']
       .forEach(property => document.body.style.removeProperty(property));
     window.dispatchEvent(new CustomEvent('prism-export-preview-clear'));
     requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('prism-export-workspace-resize')));
-    trigger.focus({ preventScroll: true });
+    const focusTarget = switchToParameterPanel ? parameterPanelTrigger : trigger;
+    switchToParameterPanel = false;
+    focusTarget?.focus({ preventScroll: true });
   });
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && dialog.open && !dialog.matches(':modal')) dialog.close();
