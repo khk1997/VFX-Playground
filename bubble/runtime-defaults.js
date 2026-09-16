@@ -459,9 +459,28 @@ export const TOGGLE_DEFAULTS = {
 export const SPECTRAL_CAUSTIC_DEFAULTS = [
   '#52e6fc', '#40b3f9', '#3aa3e3', '#3fabf9', '#4dd8fb', '#3ba6f9', '#52e6fc',
 ];
+// 「底色本身是什麼顏色」。深底就是背景顏色那根選色器的預設；淺底沒有選色器，
+// 它是固定的棚拍背景紙漸層，取上緣（最亮那端、也就是紙的本色）當代表色。
+const DARK_BACKDROP_COLOR = '#000000';
+const LIGHT_BACKDROP_COLOR = '#ffffff';
+
+// 基底色（多色配色底下那顆 researchShellTintColor / researchIconTintColor）預設
+// 就等於當下的底色。基底色的作用是保留中央與過渡色（見面板裡的說明），跟底色
+// 同色，物體中央才不會硬生生浮出一塊跟背景不一樣的顏色——要染色是邊緣那幾個
+// 色標的事。外殼與圖示同一條規則。
+export const EDGE_TINT_BASE_BY_BACKDROP = {
+  dark: DARK_BACKDROP_COLOR,
+  light: LIGHT_BACKDROP_COLOR,
+};
+
 export const COLOR_DEFAULTS  = {
   ...MOTION_COLOR_DEFAULTS,
-  bgColor: '#000000',
+  // 這兩顆蓋掉 registry 裡的藍色：那個藍色留給多色調色盤的第一個色標，基底色
+  // 本身跟著底色走（見上面）。深底是預設底色，淺底由記憶格另外給（見
+  // runtime-memory 的 motionDefaultsFor）。
+  researchShellTintColor: DARK_BACKDROP_COLOR,
+  researchIconTintColor: DARK_BACKDROP_COLOR,
+  bgColor: DARK_BACKDROP_COLOR,
   // 光暈的顏色。白 = 不染色。
   bloomTint: '#ffffff',
   // 液體本身的顏色（穿過參考厚度之後剩下的光，見 shaders.js 的
@@ -474,7 +493,7 @@ export const COLOR_DEFAULTS  = {
   // 淺底專屬的棚拍無縫背景紙漸層（見 shaders.js 的 backgroundSample）。只在
   // uLightBackdrop 為 1 時取代 bgColor，不受 bgMode/bgColor 影響，選淺底就是
   // 這個漸層。頂到底：近白 → 冷調柔灰，是常見的攝影棚無縫背景紙配色。
-  lightBgGradientTop: '#ffffff',
+  lightBgGradientTop: LIGHT_BACKDROP_COLOR,
   lightBgGradientBottom: '#c9ccd1',
   // 液態薄膜原本各自寫死一個偏藍紫色常數的 5 處，現在各自開一個選色器直接
   // 取代常數，選色器選什麼顏色，畫面上那一處就是那個顏色。預設值都是原本

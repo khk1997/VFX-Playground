@@ -1,4 +1,5 @@
 import { EDGE_TINT_TARGETS, EDGE_TINT_STOPS, edgeTintParams } from './edge-tint.js';
+import { EDGE_TINT_BASE_BY_BACKDROP } from './runtime-defaults.js?v=1';
 import { INSTALLING_VISUAL_PRESETS, installingVisualPresetValues } from './visual-presets.js';
 
 const $ = id => document.getElementById(id);
@@ -337,8 +338,18 @@ export function buildInspector({ defaults }) {
   status.setAttribute('aria-live', 'polite');
   let undo = null;
   let colorContext = `${$('motion').value}|${$('backdrop').value}`;
-  const colorDefault = key => $('backdrop').value === 'dark'
-    && EDGE_TINT_TARGETS.some(prefix => key === `${prefix}Tint`) ? 0 : defaults[key];
+  // 「這一格算不算被調過」與「重設這組配色」讀的是同一個基準。基底色的基準是
+  // 當下的底色本身，所以要看 backdrop，不能只讀一份固定的 defaults。
+  const colorDefault = key => {
+    const backdrop = $('backdrop').value;
+    if (EDGE_TINT_TARGETS.some(prefix => key === `${prefix}Tint`)) {
+      return backdrop === 'dark' ? 0 : defaults[key];
+    }
+    if (EDGE_TINT_TARGETS.some(prefix => key === `${prefix}TintColor`)) {
+      return EDGE_TINT_BASE_BY_BACKDROP[backdrop] ?? defaults[key];
+    }
+    return defaults[key];
+  };
   function applyValues(values, message) {
     undo = Object.fromEntries(Object.keys(values).map(key => [key, readControl(key)]));
     for (const [key, value] of Object.entries(values)) writeControl(key, value);
@@ -387,7 +398,9 @@ export function buildInspector({ defaults }) {
     edgeHint.append(element('span', '', '向內擴散'), element('span', '', '集中邊緣'));
     const rotation = rowOf(`${prefix}MultiTintRotation`);
     rotation.querySelector('label').textContent = '色彩旋轉';
-    const advanced = section('進階配色', null, false);
+    // 進階配色預設展開：基底色與多色比例是決定整體感的兩項，收起來會讓人以為
+    // 只有上面那排色標可調。
+    const advanced = section('進階配色', null, true);
     advanced.className = 'subgroup inspectorAdvanced';
     const baseSlot = element('div');
     const mix = rowOf(`${prefix}MultiTintStrength`);

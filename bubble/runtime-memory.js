@@ -4,7 +4,8 @@ import {
   MOTION_DEFAULT_RADIUS, MOTION_KEYS, MOTION_OVERRIDES,
 } from './motions/registry.js?v=edge-tint-1';
 import {
-  COLOR_DEFAULTS, DEFAULTS, SELECT_DEFAULTS, SPECTRAL_CAUSTIC_DEFAULTS, TOGGLE_DEFAULTS,
+  COLOR_DEFAULTS, DEFAULTS, EDGE_TINT_BASE_BY_BACKDROP, SELECT_DEFAULTS,
+  SPECTRAL_CAUSTIC_DEFAULTS, TOGGLE_DEFAULTS,
 } from './runtime-defaults.js?v=1';
 
 // 按動態模式各自記憶的參數：使用者在某個模式下調過的值會被保留，切回來時
@@ -147,7 +148,11 @@ export function motionDefaultsFor(key) {
     `${motion}|${backdrop}`,
     backdrop === 'dark' && EDGE_TINT_TARGETS.some(prefix => key === `${prefix}Tint`)
       ? 0
-      : darkValue(motion),
+      // 基底色跟著底色走（見 runtime-defaults 的 EDGE_TINT_BASE_BY_BACKDROP）。
+      // COLOR_DEFAULTS 那邊給的是深底的值，淺底在這裡補上自己的。
+      : EDGE_TINT_TARGETS.some(prefix => key === `${prefix}TintColor`)
+        ? EDGE_TINT_BASE_BY_BACKDROP[backdrop]
+        : darkValue(motion),
   ])));
 }
 

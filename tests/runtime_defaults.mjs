@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   COLOR_DEFAULTS,
+  EDGE_TINT_BASE_BY_BACKDROP,
   DEFAULTS,
   LEGACY_SELECT_VALUES,
   SELECT_DEFAULTS,
@@ -22,9 +23,18 @@ for (const [key, value] of Object.entries(MOTION_PARAM_DEFAULTS)) {
 for (const [key, value] of Object.entries(MOTION_TOGGLE_DEFAULTS)) {
   assert.equal(TOGGLE_DEFAULTS[key], value, `motion toggle default ${key}`);
 }
+// 基底色那兩顆是刻意蓋掉 registry 的：它們跟著底色走，不是調色盤的第一個色標。
+const BACKDROP_TINTED = new Set(['researchShellTintColor', 'researchIconTintColor']);
 for (const [key, value] of Object.entries(MOTION_COLOR_DEFAULTS)) {
+  if (BACKDROP_TINTED.has(key)) continue;
   assert.equal(COLOR_DEFAULTS[key], value, `motion color default ${key}`);
 }
+for (const key of BACKDROP_TINTED) {
+  assert.equal(COLOR_DEFAULTS[key], EDGE_TINT_BASE_BY_BACKDROP.dark,
+    `${key} must default to the dark backdrop colour`);
+}
+assert.equal(EDGE_TINT_BASE_BY_BACKDROP.dark, COLOR_DEFAULTS.bgColor);
+assert.equal(EDGE_TINT_BASE_BY_BACKDROP.light, COLOR_DEFAULTS.lightBgGradientTop);
 assert.ok(Object.values(TOGGLE_DEFAULTS).every(value => typeof value === 'boolean'));
 assert.ok(Object.values(COLOR_DEFAULTS).every(value => /^#[0-9a-f]{6}$/i.test(value)));
 assert.equal(SPECTRAL_CAUSTIC_DEFAULTS.length, 7);
