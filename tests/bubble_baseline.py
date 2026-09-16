@@ -21,7 +21,7 @@ from playwright.sync_api import Page, sync_playwright
 
 DEFAULT_URL = "http://127.0.0.1:4173"
 STAGE_CAPTURE_STYLE = """
-#homeBtn, #toggleBtn, #exportBtn, #playCtl, #quickSlots, #panel {
+#homeBtn, #toggleBtn, #exportBtn, #playCtl, #panel {
     visibility: hidden !important;
 }
 """

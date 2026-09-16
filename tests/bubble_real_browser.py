@@ -23,7 +23,7 @@ from bubble_baseline import compact_diag, image_metrics, sample_fps, set_select,
 
 CASES = (("installing-dark", "dark"), ("installing-light", "light"))
 STAGE_CAPTURE_STYLE = """
-#homeBtn, #toggleBtn, #exportBtn, #playCtl, #quickSlots, #panel {
+#homeBtn, #toggleBtn, #exportBtn, #playCtl, #panel {
   visibility: hidden !important;
 }
 """

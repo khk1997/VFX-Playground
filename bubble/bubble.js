@@ -2,7 +2,6 @@
 import * as THREE from 'three';
 import { buildInspector } from './inspector.js?v=panel-ux-3';
 import { createAdaptiveQuality, QUALITY_TIER_NAMES } from './adaptive-quality.js?v=2';
-import { initQuickSlots } from './quick-slots.js?v=1';
 import { createGpuProfiler } from './gpu-profiler.js?v=1';
 let inspector = null;
 import { EDGE_TINT_TARGETS, edgeTintKeys, sanitizeEdgeTintValue, readEdgeTintStops, sampleEdgeTint } from './edge-tint.js?v=dark-tint-1';
@@ -3562,14 +3561,6 @@ if (!PREVIEW && window.PresetIO) {
     motionSelect.value = LAUNCH_MOTION;
     motionSelect.dispatchEvent(new Event('change', { bubbles: true }));
   }
-}
-
-// 桌面版六格快速暫存：空格點一下儲存，已儲存的格子點一下載入。
-if (!PREVIEW) {
-  const quickSlots = document.getElementById('quickSlots');
-  const quickStatus = document.getElementById('quickSlotsStatus');
-  const preset = window.PresetIO?.of('prism-drops');
-  initQuickSlots({ root: quickSlots, status: quickStatus, preset });
 }
 
 document.body.dataset.reducedMotion = reducedMotionPaused ? 'paused' : 'allowed';

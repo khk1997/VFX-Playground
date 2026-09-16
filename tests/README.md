@@ -35,7 +35,7 @@ on browser errors. It uses the baseline diagnostic shader so the test protects
 runtime routing without cold-compiling every production variant.
 
 `bubble_inspector_ux.py` verifies progressive common/full controls, persistent
-keyboard tabs, A/B quick comparison, and the mobile sheet's sticky layout.
+keyboard tabs, and the mobile sheet's sticky layout.
 
 `adaptive_quality.mjs` unit-tests the extracted quality state machine without a
 browser or WebGL context.
