@@ -25,8 +25,6 @@ import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?
 import createMeltMotion, { selectBottomAnchors } from './motions/melt.js?v=svg-shape-76';
 import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=post-mask-3';
 import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=post-mask-3';
-import createJellyMotion from './motions/jelly.js?v=svg-shape-76';
-import createHopMotion from './motions/hop.js?v=svg-shape-76';
 import createResearchMotion from './motions/research.js?v=whisper-shell-2';
 import {
   createExtendedMotionRuntime, effectiveCapillaryHeight, isExtendedMotion,
@@ -58,6 +56,7 @@ import {
 } from './control-schema.js?v=1';
 import { createTypewriterRuntime } from './typewriter-runtime.js?v=1';
 import { createStaticCapillaryRuntime } from './motions/runtime/static-capillary.js?v=1';
+import { createJellyRuntime } from './motions/runtime/jelly.js?v=1';
 import { buildExtendedMotionControls } from './panel-builder.js?v=1';
 import { createPanelStateController } from './panel-state.js?v=1';
 import { createPanelBindings } from './panel-bindings.js?v=1';
@@ -1327,15 +1326,16 @@ const {
 // updateNegativeDrops／主滴迴圈）都直接讀這個共用狀態，不必個別重算。
 const { shapeRigidMotion } = createShapeRigidMotion(P);
 
-// 果凍：造型完整靜止，週期性被戳一下做阻尼彈簧回彈。它產出的是跟
-// shapeRigidMotion 同一種形狀的變換物件，所以下面那條「歐拉角 → 旋轉矩陣」的
-// 通用轉換兩者共用。
-const { jellyTransform } = createJellyMotion(P);
-// 落地彈跳：果凍的另一條分支（jellyStyle === 'bounce'），走自己的蓄力／拋物線／
-// 速度拉伸。它跟果凍不是疊加而是「驅動」——每次落地把撞擊的時機與力道交給
-// jellyTransform（見 hop.js 的 driveIndex/driveE/driveStrength），果凍在這條路上
-// 不跑自己的戳擊節奏。兩條分支互斥，見 updateDropUniforms 的 jelly 分支。
-const { hopTransform } = createHopMotion(P);
+// 果凍：兩條互斥的分支（原地戳擊／落地彈跳）都收在這個執行期模組裡。它產出的是
+// 跟 shapeRigidMotion 同一種形狀的變換物件，所以下面那條「歐拉角 → 旋轉矩陣」的
+// 通用轉換兩者共用。形狀底部與表面錨點以 getter 傳進去：那是這裡才知道何時失效
+// 的形狀場狀態。
+const jellyRuntime = createJellyRuntime({
+  params: P,
+  shapeBottom,
+  surfaceAnchors: () => weaveSurfaceAnchors,
+  fallbackAnchors: () => formationAnchors,
+});
 const {
   shapeRigidMotion: researchShapeRigidMotion,
   dropPosition: researchDropPosition,
@@ -1596,7 +1596,7 @@ function updateNegativeDrops(phase, fidelityAbsorb = 0) {
   // 融化的形狀始終完整，空腔自然也要一直在，不隨任何包絡消長。
   // 果凍的實體同樣全程都在（uShapeProgress 恆為 1），空腔要一直在，否則有真
   // 孔洞的模型（例如環形 GLB）會被填實。
-  const amount = P.motion === 'melt' || P.motion === 'jelly' || isExtendedMotion(P.motion)
+  const amount = P.motion === 'melt' || jellyRuntime.active() || isExtendedMotion(P.motion)
     ? 1
     // 形狀變形不顯示距離場實體（uShapeProgress 為 0），空腔沒有母體可挖，留著
     // 只會變成幾顆漂在水滴群裡的隱形挖洞球，把輪廓咬掉幾塊。
@@ -1645,45 +1645,11 @@ function updateDropUniforms(t) {
   // 只有走 SDF 的模式才有造型可動；'split' 等不用形狀場的模式維持 null，
   // applyShapeRigid 在那些模式底下自然是恆等變換。
   //
-  // 果凍走自己那條阻尼彈簧，不疊「造型動態」那組週期性旋轉／呼吸：兩者都在改
-  // 同一份變換，疊起來會看不出哪一下是被戳的。果凍的形變本身就是這個模式的
-  // 全部內容，讓它獨佔這個通道。
-  if (P.motion === 'jelly' && P.jellyStyle === 'bounce') {
-    // 落地彈跳：起跳的拋物線負責位移與速度拉伸，果凍只在每次落地被撞出餘震
-    // （見 hop.js 的 driveIndex／driveE／driveStrength）。這條路上果凍不跑自己
-    // 的戳擊節奏，「戳擊次數」在面板上是關掉的。
-    const hop = hopTransform(phase);
-    const jelly = hop && jellyTransform(phase, {
-      index: hop.driveIndex, e: hop.driveE, strength: hop.driveStrength,
-    });
-    if (!hop) {
-      shapeRigidNow = null;
-    } else {
-      const scaleY = (jelly ? jelly.scaleY : 1) * hop.scaleY;
-      // 支點補正：applyShapeRigid（跟 shader 的 shapeP）是以原點為支點縮放的，
-      // 所以壓扁時底部會跟著往上縮、離地。把底部縮掉的那段補回來，腳底就黏在
-      // 同一條地面上，看起來才是「撞到地面被壓扁」而不是「懸空自己變形」。
-      //   縮放後底部落在 B·scaleY，要回到 B，需要平移 B·(1 - scaleY)。
-      // groundAnchor 控制補多少：貼地時全補、騰空時不補（見 hop.js）。
-      //
-      // 果凍自己那段手調的下沉（jelly.js 的 offsetY）在這條路上不用——那是原地
-      // 戳擊沒有地面概念時的近似值，這裡有真正的幾何支點補正，兩者不該疊加。
-      const anchored = shapeBottom() * (1 - scaleY) * hop.groundAnchor;
-      shapeRigidNow = {
-        angleX: jelly ? jelly.angleX : 0,
-        angleY: jelly ? jelly.angleY : 0,
-        angleZ: jelly ? jelly.angleZ : 0,
-        offsetX: hop.offsetX,
-        offsetY: hop.offsetY + anchored,
-        scaleX: (jelly ? jelly.scaleX : 1) * hop.scaleX,
-        scaleY,
-        scaleZ: (jelly ? jelly.scaleZ : 1) * hop.scaleZ,
-      };
-    }
-  } else if (P.motion === 'jelly') {
-    // 原地戳擊：完全是改動前的那條路，一個字都沒動——既有的參數組合檔載進來
-    // 外觀必須一模一樣。
-    shapeRigidNow = jellyTransform(phase);
+  // 果凍走自己那條阻尼彈簧，不疊「造型動態」那組週期性旋轉／呼吸（理由見
+  // motions/runtime/jelly.js）。
+  if (jellyRuntime.active()) {
+    // 原地戳擊與落地彈跳兩條分支都在模組裡選（見 motions/runtime/jelly.js）。
+    shapeRigidNow = jellyRuntime.shapeRigid(phase);
   } else if (P.motion === 'research') {
     shapeRigidNow = researchShapeRigidMotion(phase);
   } else {
@@ -1729,7 +1695,7 @@ function updateDropUniforms(t) {
   const shatterPrimary = shatter ? shatterAnchorSets().primary : null;
   const melting = P.motion === 'melt';
   const morphing = P.motion === 'morph';
-  const jelly = P.motion === 'jelly';
+  const jelly = jellyRuntime.active();
   const extended = isExtendedMotion(P.motion);
   if (extended) syncExtendedShapeContext();
   if (melting) rebuildMeltAnchors();
@@ -1862,12 +1828,13 @@ function updateDropUniforms(t) {
       // 讓它在飛行途中混合兩組造型動態，而不是整場套同一份。
       morphBlend = morphShapeBlend(morphPairs, i, phase);
     } else if (jelly) {
-      // 果凍預設沒有水滴（count 0）。使用者調高的話讓它們貼在表面錨點上，
-      // 下面的 applyShapeRigid 會把果凍的形變一併套上去，水滴因此跟著一起
-      // 晃，而不是浮在旁邊各動各的。
-      const pool = weaveSurfaceAnchors.length ? weaveSurfaceAnchors : formationAnchors;
-      const home = pool.length ? pool[Math.floor(h2 * pool.length) % pool.length] : null;
-      if (home) { x = home.x; y = home.y; z = home.z; }
+      // 果凍的水滴貼在造型表面的錨點上（見 motions/runtime/jelly.js）。下面的
+      // applyShapeRigid 會把果凍的形變一併套上去，水滴因此跟著一起晃。
+      if (jellyRuntime.dropPosition(h2, formationPosNow)) {
+        x = formationPosNow.x;
+        y = formationPosNow.y;
+        z = formationPosNow.z;
+      }
     } else if (P.motion === 'research') {
       const research = researchDropPosition(i, phase, formationPosNow);
       x = formationPosNow.x;
