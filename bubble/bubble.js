@@ -3872,5 +3872,9 @@ document.body.dataset.reducedMotion = reducedMotionPaused ? 'paused' : 'allowed'
 if (reducedMotionPaused) setQualityTier(QUALITY_TIER_NAMES.length - 1);
 else setQualityTier(adaptiveQuality.snapshot().tierIndex);
 updatePlayControl();
+// Reveal the final inspector only after controls, saved parameters, and all
+// initial UI state have been applied. The critical HTML boot gate prevents a
+// cached/raw panel from flashing before this point.
+document.body.removeAttribute('data-bubble-boot');
 syncLoop();
 if (!PREVIEW) exportEvent('prism-export-ready', { loopDuration: P.loopDuration });
