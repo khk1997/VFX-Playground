@@ -1,6 +1,6 @@
 'use strict';
 import * as THREE from 'three';
-import { buildInspector } from './inspector.js?v=visual-presets-1';
+import { buildInspector } from './inspector.js?v=panel-ux-2';
 import { createAdaptiveQuality, QUALITY_TIER_NAMES } from './adaptive-quality.js?v=2';
 import { initQuickSlots } from './quick-slots.js?v=1';
 import { createGpuProfiler } from './gpu-profiler.js?v=1';

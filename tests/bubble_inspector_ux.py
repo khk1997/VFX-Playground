@@ -69,6 +69,11 @@ def check_desktop(browser, base_url: str) -> dict[str, object]:
     )
     assert "collapsed" in (panel.get_attribute("class") or ""), "closing export unexpectedly restored a closed panel"
     panel_toggle.click()
+    header_height = page.locator(".inspectorHeader").bounding_box()["height"]
+    assert header_height < 210, f"desktop inspector header is still too tall: {header_height}"
+    assert page.locator(".inspectorContext").count() == 1
+    assert page.locator(".inspectorUtilities #presetIO").count() == 1
+    assert page.locator(".inspectorUtilities #resetBtn").count() == 1
     assert panel.get_attribute("data-control-depth") == "concise"
     assert page.locator("#inspectorPage-look details:has(#postExposure)").is_hidden()
     assert page.locator("[data-slot=\"2\"]").is_hidden()
@@ -161,7 +166,9 @@ def check_mobile(browser, base_url: str) -> dict[str, object]:
     for index in range(tabs.count()):
         assert tabs.nth(index).bounding_box()["height"] >= 40
 
-    before_top = page.locator(".inspectorHeader").bounding_box()["y"]
+    header_box = page.locator(".inspectorHeader").bounding_box()
+    before_top = header_box["y"]
+    assert header_box["height"] < 190, f"mobile inspector header is still too tall: {header_box['height']}"
     panel.evaluate("node => { node.scrollTop = 360; }")
     page.wait_for_timeout(100)
     after_top = page.locator(".inspectorHeader").bounding_box()["y"]

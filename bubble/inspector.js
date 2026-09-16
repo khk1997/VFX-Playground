@@ -75,8 +75,12 @@ export function buildInspector({ defaults }) {
   heading.textContent = '液態玻璃';
   const sub = panel.querySelector(':scope > .sub');
   sub.textContent = 'LIQUID GLASS · 即時預覽';
+  const identity = element('div', 'inspectorIdentity');
+  identity.append(heading, sub);
+  const context = element('div', 'inspectorContext');
   panel.prepend(header);
-  header.append(sub, heading, rowOf('motion'), rowOf('backdrop'));
+  header.append(identity, context);
+  context.append(rowOf('motion'), rowOf('backdrop'));
   rowOf('motion').querySelector('label').textContent = '動態模式';
   rowOf('backdrop').querySelector('label').textContent = '預覽底色';
 
@@ -94,6 +98,8 @@ export function buildInspector({ defaults }) {
   qualityStatus.title = '預覽品質會依裝置效能自動調整，輸出不受影響';
   depthMeta.append(depthHeading, qualityStatus);
   const depthHelp = element('span', 'inspectorDepthHelp', '常用保留主要調整；完整顯示所有參數');
+  depthHelp.setAttribute('role', 'status');
+  depthHelp.setAttribute('aria-live', 'polite');
   const depthPicker = segmented([['concise', '常用'], ['complete', '完整']], value => {
     setControlDepth(value);
   }, '控制深度');
@@ -188,10 +194,12 @@ export function buildInspector({ defaults }) {
   }
   const tips = section('操作提示', null, false);
   panel.querySelectorAll(':scope > .hint').forEach(el => tips.append(el));
-  panes.scene.append(tips);
   const reset = panel.querySelector(':scope > .btns');
   $('resetBtn').textContent = '重設目前模式';
-  panes.scene.append(reset);
+  const utilities = section('更多與管理', null, false);
+  utilities.classList.add('inspectorUtilities');
+  utilities.append(share, tips, reset);
+  panes.scene.append(utilities);
 
   // Installing-specific controls are separated by purpose, with their original
   // research gate copied to each destination. Borrow anchors remain live.
@@ -206,14 +214,14 @@ export function buildInspector({ defaults }) {
     group.classList.add('modeBlock');
   }
   title(shell, '外殼造型');
-  title(icons, 'Icons 造型與排列');
-  title(companion, '外殼融合');
+  title(icons, '圖示造型與排列');
+  title(companion, '融合與第二外殼');
   title(texture, '表面紋理');
   title(bubbles, '內部氣泡');
   panes.shape.prepend(shell, icons, bubbles);
   panes.motion.append(companion);
   panes.look.append(texture);
-  const timing = section('呼吸與 Icons 時序', 'research');
+  const timing = section('呼吸與圖示時序', 'research');
   timing.append(rowOf('researchBreath'), rowOf('researchIconPhaseOffset'), rowOf('researchIconBirthStagger'));
   panes.motion.append(timing);
   const companionSize = rowOf('researchCompanionSize');
@@ -315,7 +323,7 @@ export function buildInspector({ defaults }) {
   colors.append(notice, colorBody);
   let target = 'researchShell';
   const cards = new Map();
-  const objectPicker = segmented([['researchShell', '外殼'], ['researchIcon', 'Icons']], value => {
+  const objectPicker = segmented([['researchShell', '外殼'], ['researchIcon', '圖示']], value => {
     target = value; refresh();
   }, '配色對象');
   colorBody.append(objectPicker.group);
@@ -355,7 +363,7 @@ export function buildInspector({ defaults }) {
   for (const prefix of EDGE_TINT_TARGETS) {
     const card = element('div', 'inspectorColorCard');
     card.dataset.tintTarget = prefix;
-    const name = prefix === 'researchShell' ? '外殼' : 'Icons';
+    const name = prefix === 'researchShell' ? '外殼' : '圖示';
     const other = prefix === 'researchShell' ? 'researchIcon' : 'researchShell';
     const keys = [`${prefix}Tint`, `${prefix}TintEdge`, `${prefix}TintColor`, ...edgeTintParams(prefix).map(p => p.key)];
     const modeRow = rowOf(`${prefix}MultiTint`);
@@ -382,7 +390,7 @@ export function buildInspector({ defaults }) {
       element('p', 'inspectorNote', '基底色保留中央與過渡色。多色比例越高，邊界越偏向漸層；折射聚色強化光線轉折處的色彩。'));
     const singleSlot = element('div');
     const actions = element('div', 'inspectorActions');
-    const copy = button(other === 'researchShell' ? '從外殼複製' : '從 Icons 複製', () => {
+    const copy = button(other === 'researchShell' ? '從外殼複製' : '從圖示複製', () => {
       applyValues(Object.fromEntries(keys.map(key => [key, readControl(key.replace(prefix, other))])), `已複製到${name}，之後仍可獨立調整。`);
     });
     const resetColor = button('重設這組配色', () => {
@@ -391,7 +399,7 @@ export function buildInspector({ defaults }) {
     actions.append(copy, resetColor);
     card.append(picker.group, modeRow, singleSlot, palette.root, strength, edge, edgeHint, rotation, advanced, actions);
     if (prefix === 'researchIcon') {
-      const optics = section('Icons 折射', null, false);
+      const optics = section('圖示折射', null, false);
       optics.className = 'subgroup inspectorAdvanced';
       optics.append(rowOf('researchIconIOR'));
       card.append(optics);
@@ -493,7 +501,7 @@ function buildPalette(prefix, applyValues) {
   const old = $(`${prefix}TintPalette`);
   const root = element('section', 'inspectorPalette');
   root.id = old.id;
-  const name = prefix === 'researchShell' ? '外殼' : 'Icons';
+  const name = prefix === 'researchShell' ? '外殼' : '圖示';
   root.append(element('p', 'inspectorNote', '拖曳色標調整分布，點選色標更換顏色。'));
   const rail = element('div', 'inspectorRamp');
   const preview = $(`${prefix}TintPreview`);
