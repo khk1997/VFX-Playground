@@ -20,7 +20,6 @@ import {
   MOTION_HDRI, MOTION_KEYS, MOTION_TEXT_DEFAULTS, usesShapeField,
 } from './motions/registry.js?v=edge-tint-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
-import createShatterMotion from './motions/shatter.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import createMorphMotion, { buildMorphPairs } from './motions/morph.js?v=post-mask-3';
 import createShapeRigidMotion, { computeShapeRigid } from './motions/shapeRigid.js?v=post-mask-3';
@@ -56,6 +55,7 @@ import { createStaticCapillaryRuntime } from './motions/runtime/static-capillary
 import { createJellyRuntime } from './motions/runtime/jelly.js?v=1';
 import { createResearchRuntime } from './motions/runtime/research.js?v=1';
 import { createMeltRuntime } from './motions/runtime/melt.js?v=1';
+import { createShatterRuntime } from './motions/runtime/shatter.js?v=1';
 import { buildExtendedMotionControls } from './panel-builder.js?v=1';
 import { createPanelStateController } from './panel-state.js?v=1';
 import { createPanelBindings } from './panel-bindings.js?v=1';
@@ -285,7 +285,7 @@ function uniformNameFor(key) {
 
 const fmt = createFormatters(P, {
   effectiveCapillaryHeight,
-  shatterSegmentSeconds: (...args) => shatterSegmentSeconds(...args),
+  shatterSegmentSeconds: (...args) => shatterRuntime.segmentSeconds(...args),
 });
 
 // 靜態方體與毛細波的執行期模組。這兩個模式共用同一組程序化表面紋理 uniform，
@@ -1151,43 +1151,6 @@ function setMorphTargetState(text) {
 // 重算是 O(候選點 × 錨點數) 的貪婪取樣，不便宜，所以用 key 快取：切法種子沒變
 // 就直接沿用上一份。種子 0 連算都不算，直接指回共用的那兩組（也就保證切法 0
 // 與加這個參數之前完全相同）。
-let shatterCutAnchors = null;
-let shatterCutMicroAnchors = null;
-let shatterCutKey = null;
-let shatterCutPending = null;
-let shatterCutTimer = 0;
-
-function buildShatterCutAnchors(seed, key) {
-  shatterCutKey = key;
-  shatterCutPending = null;
-  shatterCutAnchors = distributePrimaryAnchors(shapeTargets, MAX_DROPS, seed);
-  shatterCutMicroAnchors = distributeDetailedAnchors(shapeTargets, MAX_MICRO_DROPS, seed);
-}
-
-function shatterAnchorSets() {
-  const seed = Math.round(P.shatterCut);
-  if (!seed) return { primary: formationAnchors, micro: microFormationAnchors };
-  const key = `${seed}:${shapeFieldSerial}`;
-  if (key !== shatterCutKey && shatterCutPending !== key) {
-    // 重算的量級跟候選點數成正比：SVG 只有上百個點（實測 3.8ms），但 GLB 在
-    // 128³ 下可以到近萬個，直接在幀迴圈裡算會讓拖動滑桿變成一格一頓。改成等
-    // 滑桿停下來才算，拖動期間先沿用上一組錨點。
-    shatterCutPending = key;
-    clearTimeout(shatterCutTimer);
-    shatterCutTimer = setTimeout(() => buildShatterCutAnchors(seed, key), 140);
-  }
-  // 還沒算出第一組之前先用共用錨點頂著，不要回傳 null 讓呼叫端炸掉。
-  return shatterCutAnchors && shatterCutMicroAnchors
-    ? { primary: shatterCutAnchors, micro: shatterCutMicroAnchors }
-    : { primary: formationAnchors, micro: microFormationAnchors };
-}
-
-// 輸出時不能等 debounce：整段序列必須用同一組錨點，否則前幾幀會是舊切法。
-function flushShatterCutAnchors() {
-  if (!shatterCutPending) return;
-  clearTimeout(shatterCutTimer);
-  buildShatterCutAnchors(Math.round(P.shatterCut), shatterCutPending);
-}
 const TAU = Math.PI * 2;
 // shader 用的兩組 uniform 每幀重算（syncEdgeDropMotion）；activeEdgeDrops 保存
 // 它們的靜態來源資料（輪廓位置、切線、相位），切換分佈時才更新。
@@ -1268,12 +1231,20 @@ const dropSeeds = Array.from({ length: MAX_DROPS }, (_, i) => ({
   radius: 0.72 + 0.55 * hash11CPU(i * 3.17 + 5),
 }));
 
-// 崩解噴濺的時間軸與彈道數學搬到 motions/shatter.js。這裡只留一次繫結：
-// 那組函式只讀參數、不碰場景狀態，所以把 P 綁進去之後呼叫方式與拆檔前相同。
-const {
-  shatterSegmentSeconds, shatterTimeline, shatterSeed, shatterOffset,
-  shatterShapeAmount, shatterFragmentRadius, shatterRadius,
-} = createShatterMotion(P);
+// 崩解噴濺：時間軸、彈道與它專屬的那組切法錨點都在模組裡。形狀、版本號與共用
+// 錨點以 getter 傳進去；錨點分佈函式由這裡注入，模組不自己去認識 shape-anchors。
+const shatterRuntime = createShatterRuntime({
+  params: P,
+  maxDrops: MAX_DROPS,
+  maxMicroDrops: MAX_MICRO_DROPS,
+  shapeTargets: () => shapeTargets,
+  shapeSerial: () => shapeFieldSerial,
+  sharedAnchors: () => formationAnchors,
+  sharedMicroAnchors: () => microFormationAnchors,
+  distributePrimaryAnchors,
+  distributeDetailedAnchors,
+});
+const flushShatterCutAnchors = () => shatterRuntime.flushCutAnchors();
 
 // 形狀匯聚的時間軸與自由軌道、穿梭環繞的飄浮位置都搬到 motions/formation.js。
 // 錨點陣列在匯入新形狀時會整個換掉，所以用 getter 傳入而不是傳陣列本身。
@@ -1400,7 +1371,7 @@ const formationPosAfter = new THREE.Vector3();
 function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false) {
   // 崩解噴濺不走匯聚管線，但微滴群正好是最好用的碎片來源（20 顆，是主滴的
   // 近兩倍），所以它也要把微滴開起來，只是位置改由彈道決定。
-  const shattering = P.motion === 'shatter';
+  const shattering = shatterRuntime.active();
   // 融化也要微滴：滴落點就那幾個，只靠 12 顆主滴撐不出「不停在滴」的密度，
   // 微滴補上去之後同一個位置才會有前後好幾滴同時在不同高度。
   const melting = meltRuntime.active();
@@ -1414,8 +1385,8 @@ function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false) {
     ? Math.max(0, Math.min(MAX_MICRO_DROPS, Math.round(P.microCount)))
     : 0;
   const amount = formationAmount(phase);
-  const shatter = shattering ? shatterTimeline(phase) : null;
-  const shatterAnchors = shattering ? shatterAnchorSets().micro : null;
+  const shatter = shatterRuntime.beat(phase);
+  const shatterAnchors = shattering ? shatterRuntime.anchorSets().micro : null;
   const a = phase * Math.PI * 2;
   for (let i = 0; i < MAX_MICRO_DROPS; i++) {
     const o = i * 4;
@@ -1434,17 +1405,14 @@ function updateMicroDrops(phase, fidelityAbsorb = 0, morphSolid = false) {
     const h3 = hash11CPU(i * 5.13 + 61);
     if (shattering) {
       const target = shatterAnchors[i % shatterAnchors.length];
-      shatterOffset(
-        target,
-        shatterSeed(i * 2.31 + 31, i * 3.77 + 47, i * 5.13 + 61),
-        shatter,
-        formationPosNow,
+      shatterRuntime.offset(
+        target, i * 2.31 + 31, i * 3.77 + 47, i * 5.13 + 61, shatter, formationPosNow,
       );
       applyShapeRigid(formationPosNow.x, formationPosNow.y, formationPosNow.z, formationPosNow);
       microDropData[o] = formationPosNow.x;
       microDropData[o + 1] = formationPosNow.y;
       microDropData[o + 2] = formationPosNow.z;
-      microDropData[o + 3] = shatterRadius(shatterFragmentRadius(target, h2), shatter);
+      microDropData[o + 3] = shatterRuntime.fragmentRadius(target, h2, shatter);
       // 碎片是自由飛散的獨立液滴，不該保留「貼在造型上被拉長」的橢球形變。
       microShapeData[o] = 1;
       microShapeData[o + 1] = 0;
@@ -1573,8 +1541,8 @@ function updateNegativeDrops(phase, fidelityAbsorb = 0) {
     // 只會變成幾顆漂在水滴群裡的隱形挖洞球，把輪廓咬掉幾塊。
     : P.motion === 'morph'
       ? 0
-      : P.motion === 'shatter'
-        ? shatterShapeAmount(shatterTimeline(phase))
+      : shatterRuntime.active()
+        ? shatterRuntime.shapeAmount(shatterRuntime.beat(phase))
         : smoothstepCPU(formationAmount(phase), 0.58, 0.96);
   const selected = negativeFormationAnchors;
   for (let i = 0; i < MAX_NEGATIVE_DROPS; i++) {
@@ -1657,8 +1625,8 @@ function updateDropUniforms(t) {
   // 高密度細節場由可見主滴進入模型區域後才開始長出；它本身是預烘焙
   // Metaball union，而非原始 GLB SDF。
   // 穿梭環繞的形狀是恆定的背景主體，不走匯聚／散開的體積交接，永遠滿值顯示。
-  const shatter = P.motion === 'shatter' ? shatterTimeline(phase) : null;
-  const shatterPrimary = shatter ? shatterAnchorSets().primary : null;
+  const shatter = shatterRuntime.beat(phase);
+  const shatterPrimary = shatter ? shatterRuntime.anchorSets().primary : null;
   const melting = meltRuntime.active();
   const morphing = P.motion === 'morph';
   const jelly = jellyRuntime.active();
@@ -1684,7 +1652,7 @@ function updateDropUniforms(t) {
       || staticCapillaryRuntime.keepsShapeFull()
       ? 1
       : shatter
-        ? shatterShapeAmount(shatter)
+        ? shatterRuntime.shapeAmount(shatter)
         : isFormationMotion(P.motion)
           // 成型波前開啟時，「哪裡看得到形狀」整個交給波前（uShapeCut），這條
           // 全域進度只剩兩個責任：把等距侵蝕在一開始就退場（否則會跟波前互相
@@ -1709,7 +1677,7 @@ function updateDropUniforms(t) {
   // ——否則炸開／排成形狀的那一瞬間，滿半徑的水滴會被 smooth-min 黏成一大團而不是
   // 各自剝離，輪廓完全糊掉。
   const viscosityScale =
-    isFormationMotion(P.motion) || P.motion === 'shatter' || melting || morphing || extended
+    isFormationMotion(P.motion) || shatterRuntime.active() || melting || morphing || extended
       // smooth-min 連續合併很多顆時會累積膨脹；依數量正規化融合半徑，
       // 讓 12–16 顆仍只在真正接觸處形成液橋，不把整組擴成巨大距離場。
       ? Math.max(0.10, 0.42 / Math.sqrt(layoutCount))
@@ -1738,7 +1706,7 @@ function updateDropUniforms(t) {
         ? shatterPrimary[i % shatterPrimary.length]
         : null;
       if (target) {
-        shatterOffset(target, shatterSeed(i + 1, i + 7, i + 13), shatter, formationPosNow);
+        shatterRuntime.offset(target, i + 1, i + 7, i + 13, shatter, formationPosNow);
         x = formationPosNow.x;
         y = formationPosNow.y;
         z = formationPosNow.z;
@@ -1818,10 +1786,7 @@ function updateDropUniforms(t) {
     }
     const freeRadius = P.radius * radius * radiusFactor;
     if (shatter) {
-      const fragment = shatterTarget
-        ? shatterFragmentRadius(shatterTarget, h3)
-        : 0;
-      dropData[i].set(x, y, z, shatterRadius(fragment, shatter));
+      dropData[i].set(x, y, z, shatterRuntime.fragmentRadius(shatterTarget, h3, shatter));
     } else if (melting) {
       dropData[i].set(x, y, z, meltState ? meltState.radius : 0);
     } else if (morphing) {
@@ -1906,7 +1871,7 @@ function updateDropUniforms(t) {
       : melting
         ? meltRuntime.mergeScale()
         : shatter
-          ? 1 + (0.15 - 1) * shatter.flight
+          ? shatterRuntime.mergeScale(shatter)
           : 1;
   if (uniforms) uniforms.uViscosity.value = effectiveViscosity * mergeScale;
   // 毛細波的程序紋理同時服務兩個模式：毛細波本身（作用在匯入的形狀場）與靜態
