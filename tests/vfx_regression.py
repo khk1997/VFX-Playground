@@ -171,16 +171,15 @@ def main():
                     }
                     metrics["rangeInputChanged"] = new_value != old_value
             else:
-                next_button = page.locator("#nextBtn")
-                if next_button.count():
-                    before = page.locator("#selectionIndex").inner_text()
-                    if next_button.is_visible():
-                        next_button.click()
-                    else:
-                        page.keyboard.press("ArrowRight")
-                    page.wait_for_timeout(200)
-                    after = page.locator("#selectionIndex").inner_text()
-                    metrics["carouselChanged"] = before != after
+                cards = page.locator("#cards .card")
+                metrics["galleryCardCount"] = cards.count()
+                metrics["galleryDescriptions"] = page.locator(".card-description").count()
+                metrics["galleryTags"] = page.locator(".card-tags .tag").count()
+                page.locator('[data-filter="liquid"]').click()
+                page.wait_for_timeout(200)
+                metrics["galleryFilterChanged"] = (
+                    page.locator("#cards .card:visible").count() < metrics["galleryCardCount"]
+                )
 
             page.screenshot(path=str(output / f"{name}.png"), timeout=90_000)
             results[name] = {
@@ -233,8 +232,16 @@ def main():
                 failures.append(f"{name}: play control did not change state")
             if not metrics.get("rangeInputChanged"):
                 failures.append(f"{name}: range input did not accept updates")
-        elif not result["metrics"].get("carouselChanged"):
-            failures.append("home: carousel did not change selection")
+        else:
+            metrics = result["metrics"]
+            if metrics.get("galleryCardCount") != 13:
+                failures.append(f"home: expected 13 gallery cards, got {metrics.get('galleryCardCount')}")
+            if metrics.get("galleryDescriptions") != metrics.get("galleryCardCount"):
+                failures.append("home: some gallery cards have no description")
+            if metrics.get("galleryTags", 0) < metrics.get("galleryCardCount", 0):
+                failures.append("home: some gallery cards have no technology tags")
+            if not metrics.get("galleryFilterChanged"):
+                failures.append("home: gallery filter did not change the visible collection")
 
     if failures:
         print("\n".join(failures))

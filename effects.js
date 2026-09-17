@@ -10,34 +10,40 @@ import { BUBBLE_EFFECTS } from './bubble/effect-registry.js?v=home-registry-1';
 
 const STANDALONE_EFFECTS = [
   {
+    id: 'sakura',
     title: '櫻花飄落 Sakura Storm',
     category: 'PARTICLE SYSTEM',
     description: '風場驅動的櫻花粒子場景',
     theme: ['239, 105, 143', '119, 171, 255'],
     href: 'sakura-blizzard/index.html',
-    tags: ['Canvas 2D', 'Particles', 'Wind Field'],
+    tags: ['HTML', 'CSS', 'JavaScript', 'Canvas 2D', 'Particles'],
     previewSrc: 'sakura-blizzard/index.html?preview=1',
   },
   {
+    id: 'energy-ring',
     title: '動態光環 Energy Ring',
     category: 'ENERGY SIMULATION',
     description: '多層電弧構成的旋轉能量核心',
     theme: ['85, 255, 121', '36, 178, 107'],
     href: 'energy-ring/index.html',
-    tags: ['HTML5 Canvas', 'CSS', 'JavaScript'],
+    tags: ['HTML', 'CSS', 'JavaScript', 'Canvas 2D'],
     previewSrc: 'energy-ring/index.html?preview=1',
   },
   {
+    id: 'aurora',
     title: '極光 Aurora',
     category: 'AUDIO REACTIVE',
     description: '隨音訊頻率起伏的極光簾幕',
     theme: ['63, 233, 179', '80, 138, 255'],
     href: 'aurora/index.html',
-    tags: ['HTML5 Canvas', 'Web Audio API', 'JavaScript'],
+    tags: ['HTML', 'CSS', 'JavaScript', 'Canvas 2D', 'Web Audio API'],
     previewSrc: 'aurora/index.html?preview=1',
   },
 ];
 
-export const EFFECTS = [...STANDALONE_EFFECTS, ...BUBBLE_EFFECTS];
+export const EFFECTS = [...STANDALONE_EFFECTS, ...BUBBLE_EFFECTS].map(effect => ({
+  ...effect,
+  posterSrc: `image/previews/${effect.id}.webp`,
+}));
 
 // iframe 內部渲染解析度（與卡片預覽框同比例 220:190，放大 3 倍後縮小顯示以求清晰）

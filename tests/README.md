@@ -37,6 +37,14 @@ runtime routing without cold-compiling every production variant.
 `bubble_inspector_ux.py` verifies progressive common/full controls, persistent
 keyboard tabs, and the mobile sheet's sticky layout.
 
+`home_gallery_ux.py` verifies the multi-card home gallery on desktop and mobile:
+all poster assets load, filters expose the expected collections, mobile stays on
+lightweight images, and desktop hover never mounts more than one live iframe.
+
+`generate_home_posters.py` rebuilds the lightweight WebP card posters from the
+real effect pages. Run it against the local project server after a visual change;
+`--only research` can refresh one card without recompiling every Bubble mode.
+
 `adaptive_quality.mjs` unit-tests the extracted quality state machine without a
 browser or WebGL context.
 

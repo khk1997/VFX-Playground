@@ -1,6 +1,13 @@
 /* ===== 主迴圈 ===== */
 let last = performance.now(), noiseT = 0, lastDraw = 0, exporting = false, rafId = 0;
 
+// 預覽矩陣會讀這份狀態來區分「宿主沒送播放」、「RAF 沒再排」與「時間有走但
+// 畫面不變」。只暴露數值，不改變執行期行為。
+window.__energyRingDiag = () => ({
+  rafId, last, lastDraw, noiseT, exporting, paused, msgPaused,
+  previewPaused: previewPaused(), hidden: document.hidden,
+});
+
 function syncLoop() {
   const insetSettled = Math.abs(panelInsetTarget - panelInsetX) < 0.05;
   const shouldRun = !exporting && (!(paused || previewPaused()) || !insetSettled || paramsDirty);

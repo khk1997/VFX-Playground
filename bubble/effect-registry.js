@@ -108,7 +108,7 @@ export const BUBBLE_EFFECTS = ORDER.map(id => {
     title: motion.label,
     category: presentation.category,
     description: presentation.description,
-    tags: presentation.tags,
+    tags: [...new Set(['HTML', 'CSS', 'JavaScript', 'Three.js', ...presentation.tags])],
     theme: presentation.theme,
     href: `${PAGE}?mode=${id}`,
     previewSrc: `${PAGE}?mode=${id}&preview=1`,

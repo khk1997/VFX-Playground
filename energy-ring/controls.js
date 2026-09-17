@@ -1,7 +1,8 @@
 'use strict';
 
 // 預覽嵌入模式（?preview=1）：供首頁卡片用 iframe 嵌入，隱藏面板與導覽按鈕，只留純畫面
-if (new URLSearchParams(location.search).has('preview')) {
+const IS_PREVIEW = new URLSearchParams(location.search).has('preview');
+if (IS_PREVIEW) {
   document.documentElement.classList.add('preview-mode');
 }
 
@@ -21,16 +22,19 @@ resize();
 
 /* ===== 參數 ===== */
 const DEFAULTS = {
-  speed: 0.2, pulse: 0, loopSec: 5,
+  // 完整頁維持原本沉穩的轉速；首頁縮圖裡圓環高度對稱，0.2 圈/秒幾乎看不出
+  // 有在移動，因此預覽使用整數循環對齊的 0.6 圈/秒，讓 hover 的 Live 狀態
+  // 能被肉眼辨識，又不改變使用者進入作品後的預設值。
+  speed: IS_PREVIEW ? 0.6 : 0.2, pulse: IS_PREVIEW ? 0.18 : 0, loopSec: 5,
   radius: 0.26, ringCount: 7, ringGap: 2, thickness: 1.0, wobble: 0.79, warp: 0.5, widthVar: 1, filaments: 1, fray: 0, crackle: 0,
   spikeAmount: 0, spikeLength: 0.5, spikeWidth: 1, spikeBlur: 0.5,
-  glow: 0.5, hotspots: 2, hotspotSize: 2, flicker: 0.26, trail: 0.34,
+  glow: 0.5, hotspots: 2, hotspotSize: 2, flicker: IS_PREVIEW ? 0.55 : 0.26, trail: 0.34,
   bloomAmount: 0, bloomThreshold: 0.5, bloomRadius: 1,
   granule: 0, granuleSize: 0.5, granuleSpeed: 1,
   smoke: 0, smokeScale: 1, smokeSpeed: 1, smokeReach: 1,
   fps: 30, exportSec: 3,
   hue: 116, hueShift: -33, sat: 100,
-  sparkAmount: 0, sparkSpeed: 0.2, sparkArc: 25, sparkReach: 0.25, turbulence: 1,
+  sparkAmount: IS_PREVIEW ? 0.28 : 0, sparkSpeed: IS_PREVIEW ? 0.7 : 0.2, sparkArc: 25, sparkReach: 0.25, turbulence: 1,
   accAmount: 0, accStart: 0.6, accSpeed: 1, accSpiral: 0.5, accFlash: 0.6,
   arcAmount: 0.85, arcSpan: 0.45, arcJag: 0.6, arcThickness: 2.65,
   waveAmount: 1.4, waveCount: 2, waveSpeed: 0.45, waveReach: 0.4, waveWidth: 2,

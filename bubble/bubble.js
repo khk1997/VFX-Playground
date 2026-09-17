@@ -3349,7 +3349,17 @@ const {
 });
 
 /* ===== 主迴圈 ===== */
-let simT = 0;
+// 首頁縮圖從循環前段的動作區開始，而不是每次都從完全靜止的第 0 幀起跑；完整
+// 作品頁仍從 0 開始，時間軸與匯出結果都不受影響。
+let simT = PREVIEW && LAUNCH_MOTION && LAUNCH_MOTION !== 'static'
+  ? P.loopDuration * 0.08
+  : 0;
+// 首頁預覽矩陣用：確認訊息確實解除外部暫停，而且動畫時間有持續前進。
+// 只回報狀態，不改變 runtime 行為。
+window.__bubblePreviewDiag = () => ({
+  simT, rafId, extPaused, userPaused, reducedMotionPaused,
+  shapeConverting, hidden: document.hidden, paused: isPaused(),
+});
 function frame(now) {
   rafId = requestAnimationFrame(frame);
   broadcastLoopDuration();
@@ -3360,7 +3370,10 @@ function frame(now) {
   sampleRenderQuality(now);
   const dt = Math.min((now - last) / 1000, 0.05);
   last = now;
-  simT = (simT + dt) % Math.max(0.001, P.loopDuration);
+  // 卡片只會被短暫 hover，預覽用稍快節奏把長達 12 秒的敘事循環壓進可感知的
+  // 時間窗；正式頁面與匯出維持原速。
+  const previewTimeScale = PREVIEW ? 1.8 : 1;
+  simT = (simT + dt * previewTimeScale) % Math.max(0.001, P.loopDuration);
   // 診斷：釘死動畫時間，讓兩個 shader 變體能在同一幀上做逐像素比對。
   if (DIAG_TIME !== null) simT = DIAG_TIME;
   updateDropUniforms(simT);
@@ -3497,6 +3510,10 @@ if (LAUNCH_MOTION) {
   // 毛細波只允許形狀場本體（跟切換模式那條路同一個理由，見 panel-bindings）。
   if (LAUNCH_MOTION === 'capillary') motionMemory.count.capillary = 0;
   for (const key of MOTION_MEMORY_KEYS) P[key] = motionMemory[key][memorySlot(key)];
+  // 首頁縮圖尺寸小，某些模式的主要動作要等到循環中後段才看得出來；同時不少
+  // 模式刻意把完整作品頁的鏡頭自轉設為 0。預覽只加一點慢速環繞，讓使用者一
+  // hover 就能確認這是即時畫面，不改動進入作品後的正式預設。
+  if (PREVIEW && LAUNCH_MOTION !== 'static' && Math.abs(P.spin) < 0.12) P.spin = 0.55;
 }
 bindControls();
 bindTextControls();

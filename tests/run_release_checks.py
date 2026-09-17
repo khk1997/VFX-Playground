@@ -19,6 +19,7 @@ BROWSER_TESTS = (
     ("bubble_motion_matrix.py", ("--base-url",)),
     ("bubble_inspector_ux.py", ("--base-url",)),
     ("bubble_preset_boot.py", ("--base-url",)),
+    ("home_gallery_ux.py", ("--base-url", "--output")),
     ("home_effect_registry.py", ("--base-url",)),
     ("bubble_visual_presets.py", ("--base-url", "--output")),
 )
@@ -92,7 +93,8 @@ def main() -> int:
             if "--base-url" in options:
                 command.extend(("--base-url", base_url))
             if "--output" in options:
-                command.extend(("--output", str(args.output / "visual-presets")))
+                output_name = Path(filename).stem
+                command.extend(("--output", str(args.output / output_name)))
             run(command, common_env)
     finally:
         server.terminate()

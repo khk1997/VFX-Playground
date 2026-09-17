@@ -42,14 +42,18 @@ READ_CARDS = """() => {
   return cards.map(c => ({
     href: c.getAttribute('href'),
     title: c.querySelector('.card-title')?.textContent,
+    description: c.querySelector('.card-description')?.textContent,
+    tags: [...c.querySelectorAll('.tag')].map(tag => tag.textContent),
+    poster: c.querySelector('.card-poster')?.getAttribute('src'),
   }));
 }"""
 
 READ_REGISTRY = """async () => {
   const { EFFECTS } = await import('./effects.js?v=home-registry-1');
   return EFFECTS.map(fx => ({
-    id: fx.id ?? null, title: fx.title, href: fx.href,
-    previewSrc: fx.previewSrc, runtime: fx.runtime ?? null,
+    id: fx.id ?? null, title: fx.title, description: fx.description, tags: fx.tags,
+    href: fx.href, previewSrc: fx.previewSrc, posterSrc: fx.posterSrc,
+    runtime: fx.runtime ?? null,
   }));
 }"""
 
@@ -89,6 +93,22 @@ def main() -> int:
             assert card["title"] == entry["title"], (
                 f"card title {card['title']!r} drifted from the registry's {entry['title']!r}"
             )
+            assert card["description"] == entry["description"], (
+                f"{card['title']}: description drifted from the registry"
+            )
+            assert card["tags"] == entry["tags"], (
+                f"{card['title']}: technology tags drifted from the registry"
+            )
+            assert card["poster"] == entry["posterSrc"], (
+                f"{card['title']}: lightweight poster drifted from the registry"
+            )
+            assert {"HTML", "CSS", "JavaScript"}.issubset(card["tags"]), (
+                f"{card['title']}: foundational technology tags are incomplete"
+            )
+            if entry["runtime"]:
+                assert "Three.js" in card["tags"], (
+                    f"{card['title']}: Three.js runtime is not labelled"
+                )
             if "mode=" not in card["href"]:
                 continue
             mode = card["href"].split("mode=")[1]

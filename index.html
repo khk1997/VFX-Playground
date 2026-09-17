@@ -3,45 +3,57 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>VFX Playground</title>
-<link rel="stylesheet" href="./home.css?v=diag-single-preview">
-<link rel="stylesheet" href="switch2-theme.css?v=banner-webp-1">
+<meta name="theme-color" content="#05070b">
+<meta name="description" content="VFX Playground — 以光、材質與動態構成的互動視覺實驗集。">
+<title>VFX Playground — Optical Experiments</title>
+<link rel="stylesheet" href="./home.css?v=ios27-gallery-1">
 </head>
 <body>
+<a class="skip-link" href="#gallery">跳至作品列表</a>
+
 <div id="bg" aria-hidden="true">
-  <div class="bg-banner-image"></div>
-  <div class="bg-theme-layer active"></div>
-  <div class="bg-theme-layer"></div>
+  <div class="bg-grid"></div>
+  <div class="bg-noise"></div>
 </div>
 
-<button id="sndBtn" aria-label="音效開關">🔊 音效</button>
+<div class="site-shell">
+  <nav class="topbar" aria-label="主要導覽">
+    <a class="brand" href="./" aria-label="VFX Playground 首頁">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-copy">
+        <strong>VFX / PLAYGROUND</strong>
+        <span>Optical archive · 2026</span>
+      </span>
+    </a>
+    <div class="topbar-meta">
+      <span class="work-count"><span id="visibleCount">13</span> / 13 EXPERIMENTS</span>
+      <button id="sndBtn" type="button" aria-label="切換介面音效" aria-pressed="true">
+        <span class="sound-dot" aria-hidden="true"></span>
+        <span>SOUND</span>
+      </button>
+    </div>
+  </nav>
 
-<header>
-  <h1>VFX PLAYGROUND</h1>
-  <p>Interactive Visual Effects Collection</p>
-</header>
+  <main id="gallery">
+    <div class="gallery-head">
+      <div class="filters" role="group" aria-label="作品分類">
+        <button class="filter-btn" type="button" data-filter="all" aria-pressed="true">All</button>
+        <button class="filter-btn" type="button" data-filter="liquid" aria-pressed="false">Liquid</button>
+        <button class="filter-btn" type="button" data-filter="canvas" aria-pressed="false">Canvas</button>
+        <button class="filter-btn" type="button" data-filter="audio" aria-pressed="false">Audio</button>
+        <button class="filter-btn" type="button" data-filter="typography" aria-pressed="false">Type</button>
+      </div>
+    </div>
 
-<div id="rail">
-  <button class="navBtn" id="prevBtn" aria-label="上一個"><span class="navGlyph">‹</span><span class="navLabel">L</span></button>
-  <div id="viewport"><div id="cards"></div></div>
-  <button class="navBtn" id="nextBtn" aria-label="下一個"><span class="navGlyph">›</span><span class="navLabel">R</span></button>
+    <section id="cards" aria-live="polite" aria-label="視覺特效作品"></section>
+  </main>
+
+  <footer class="site-footer">
+    <span><strong>VFX Playground</strong> — real-time visual studies</span>
+    <span>Canvas · WebGL · Three.js · GLSL</span>
+  </footer>
 </div>
 
-<div id="selectionInfo" aria-live="polite">
-  <span id="selectionIndex"></span>
-  <span id="selectionCategory"></span>
-  <span id="selectionDescription"></span>
-  <span id="selectionAction"><span class="actionKey">A</span> OPEN</span>
-</div>
-
-<div id="dots"></div>
-
-<footer>
-  <span class="controlItem"><kbd>←</kbd><kbd>→</kbd><span>SELECT</span></span>
-  <span class="controlItem"><kbd class="keyA">A</kbd><kbd>Enter</kbd><span>OPEN</span></span>
-  <span class="controlItem"><kbd>S</kbd><span>SOUND</span></span>
-</footer>
-
-<script type="module" src="./home.js?v=home-registry-1"></script>
+<script type="module" src="./home.js?v=ios27-gallery-1"></script>
 </body>
 </html>
