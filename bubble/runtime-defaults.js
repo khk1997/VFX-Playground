@@ -167,7 +167,7 @@ export const DEFAULTS = {              // 數值滑桿
   wobble: 0.305,
   wobbleScale: 0.7,
   wobbleSpeed: 0.65,
-  spin: 0.08,
+  spin: 0,
   // 較快匯聚 + 較長停留：成形後的定格時間由 2.6 秒拉到 5.4 秒（12 秒循環），
   // 讓形狀本身而不是散開過程佔據大部分畫面。
   gatherDuration: 0.25,

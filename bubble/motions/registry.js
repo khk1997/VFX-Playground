@@ -133,7 +133,6 @@ export const MOTIONS = {
       cameraDistance: 3.85,
       cameraRotationX: 7.8,
       cameraRotationY: 28.5,
-      spin: 0.08,
       wobble: 0.05,
       // 外殼起伏定格。這個模式的主角是內部那兩顆 icon，外殼再自己流動會搶掉
       // 注意力；wobble 保留（起伏的「形狀」還在），只把時間項關掉。

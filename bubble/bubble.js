@@ -3514,10 +3514,6 @@ if (LAUNCH_MOTION) {
   // 毛細波只允許形狀場本體（跟切換模式那條路同一個理由，見 panel-bindings）。
   if (LAUNCH_MOTION === 'capillary') motionMemory.count.capillary = 0;
   for (const key of MOTION_MEMORY_KEYS) P[key] = motionMemory[key][memorySlot(key)];
-  // 首頁縮圖尺寸小，某些模式的主要動作要等到循環中後段才看得出來；同時不少
-  // 模式刻意把完整作品頁的鏡頭自轉設為 0。預覽只加一點慢速環繞，讓使用者一
-  // hover 就能確認這是即時畫面，不改動進入作品後的正式預設。
-  if (PREVIEW && LAUNCH_MOTION !== 'static' && Math.abs(P.spin) < 0.12) P.spin = 0.55;
 }
 bindControls();
 bindTextControls();

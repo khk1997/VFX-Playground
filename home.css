@@ -11,6 +11,14 @@
   --muted: #a7adba;
   --quiet: #727987;
   --line: rgba(255, 255, 255, .14);
+  /* ===== 玻璃材質 =====
+     一片真的玻璃需要三件事同時成立：底下的東西看得見（半透明）、看見的東西被
+     折散（backdrop blur + 提高飽和度），以及邊緣比中央亮（鏡緣的全反射）。
+     少了任何一件都只會變成一塊深色壓克力板。 */
+  --glass-tint: rgba(18, 24, 37, .26);
+  --glass-blur: 26px;
+  --glass-sat: 185%;
+  --glass-rim: rgba(255, 255, 255, .5);
   --font-display: "VFX Display", "Avenir Next", "Helvetica Neue", sans-serif;
   --font-ui: "Avenir Next", "Helvetica Neue", "PingFang TC", sans-serif;
   --font-mono: "SFMono-Regular", "IBM Plex Mono", "Roboto Mono", monospace;
@@ -85,10 +93,12 @@ a { color: inherit; }
 .topbar-meta { display: flex; align-items: center; gap: 9px; }
 .work-count, #sndBtn {
   min-height: 37px; padding: 0 14px; color: #d9deea; border: 1px solid var(--line); border-radius: 999px;
-  background: linear-gradient(180deg, rgba(255,255,255,.1), transparent 58%), rgba(14,18,26,.7);
-  box-shadow: inset 0 1px rgba(255,255,255,.08), 0 8px 24px rgba(0,0,0,.22);
+  background: linear-gradient(180deg, rgba(0,0,0,.08), rgba(255,255,255,.03) 62%, rgba(255,255,255,.07)), var(--glass-tint);
+  box-shadow: inset 0 1px rgba(255,255,255,.2), inset 0 -1px rgba(255,255,255,.34),
+    inset 0 -6px 8px -7px rgba(255,255,255,.4), 0 8px 24px rgba(0,0,0,.22);
   font: 600 10px/1 var(--font-mono); letter-spacing: .12em;
-  backdrop-filter: blur(18px) saturate(135%); -webkit-backdrop-filter: blur(18px) saturate(135%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
 }
 .work-count { display: inline-flex; align-items: center; justify-content: center; }
 #sndBtn {
@@ -103,8 +113,13 @@ a { color: inherit; }
 .gallery-head { display: flex; justify-content: flex-end; padding: 24px 0 18px; }
 .filters {
   display: flex; gap: 4px; padding: 5px; overflow-x: auto; border: 1px solid rgba(255,255,255,.13);
-  border-radius: 999px; background: rgba(16,20,29,.68); box-shadow: inset 0 1px rgba(255,255,255,.1), 0 14px 38px rgba(0,0,0,.22);
-  scrollbar-width: none; backdrop-filter: blur(20px) saturate(135%); -webkit-backdrop-filter: blur(20px) saturate(135%);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(0,0,0,.08), rgba(255,255,255,.02) 64%, rgba(255,255,255,.06)), var(--glass-tint);
+  box-shadow: inset 0 1px rgba(255,255,255,.2), inset 0 -1px rgba(255,255,255,.3),
+    inset 0 -7px 9px -8px rgba(255,255,255,.35), 0 14px 38px rgba(0,0,0,.22);
+  scrollbar-width: none;
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
 }
 .filters::-webkit-scrollbar { display: none; }
 .filter-btn {
@@ -122,41 +137,90 @@ a { color: inherit; }
   grid-auto-rows: 8px; align-items: start;
   gap: clamp(12px,1.25vw,20px); padding-bottom: 68px;
 }
+/* 整張卡片只能有一條輪廓。媒體不內縮、也不自己設圓角，直接由卡片的 overflow
+   裁切 —— 這樣它的外形就「是」卡片的外形，不是另一個對得很準的形狀；兩條同心
+   輪廓再怎麼對齊，看起來都還是疊了兩層。 */
 .card {
   --mx: 50%; --my: 30%; --theme-left: 90,210,255; --theme-right: 255,112,205;
   position: relative; grid-column: span 2; min-width: 0; overflow: hidden; color: var(--ink);
-  border: 1px solid rgba(255,255,255,.14); border-radius: 22px;
-  background: linear-gradient(145deg, rgba(255,255,255,.11), transparent 24%),
-    linear-gradient(165deg, rgba(24,29,42,.88), rgba(9,12,18,.9));
-  box-shadow: 0 22px 58px rgba(0,0,0,.28), inset 0 1px rgba(255,255,255,.16), inset 0 -1px rgba(255,255,255,.035);
+  border: 0; border-radius: 24px;
+  /* 表面本身幾乎是平的。玻璃感全部交給邊緣去講——一道斜向的擦光會把整塊卡片
+     變成一片有紋路的壓克力，真正的厚玻璃中央是乾淨的，只有邊緣在折光。 */
+  background:
+    linear-gradient(180deg, rgba(0,0,0,.1), rgba(0,0,0,.02) 26%,
+      rgba(255,255,255,.012) 62%, rgba(255,255,255,.07)),
+    radial-gradient(130% 96% at 10% -12%, rgba(var(--theme-left),.15), transparent 48%),
+    radial-gradient(130% 96% at 94% 112%, rgba(var(--theme-right),.12), transparent 46%),
+    var(--glass-tint);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat)) brightness(1.08);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat)) brightness(1.08);
+  /* 邊緣的三層結構，缺一層就不像玻璃：
+     1. 外面一條暗線 —— 玻璃把背景壓縮進邊界，跟底色分開；
+     2. 上緣內側的聚光 —— 打下來的光在斜邊聚起來；
+     3. 下緣內側更強的聚光 —— 光穿過整塊玻璃之後堆在底部，這道通常比上面亮。 */
+  box-shadow:
+    inset 0 7px 9px -8px rgba(255,255,255,.3),
+    inset 0 -10px 12px -10px rgba(255,255,255,.42),
+    0 0 0 1px rgba(0,0,0,.34),
+    0 18px 44px -16px rgba(0,0,0,.6), 0 4px 10px -5px rgba(0,0,0,.45);
   text-decoration: none; transform: translateZ(0); isolation: isolate; opacity: 0;
   animation: card-in 620ms cubic-bezier(.22,.75,.22,1) forwards; animation-delay: calc(var(--order) * 48ms);
-  transition: transform 380ms cubic-bezier(.2,.8,.2,1), border-color 240ms ease, box-shadow 380ms ease, opacity 240ms ease;
+  transition: transform 380ms cubic-bezier(.2,.8,.2,1), box-shadow 380ms ease,
+    background-color 240ms ease, opacity 240ms ease;
+}
+/* iOS 的圓角是連續曲率，不是正圓弧；支援的瀏覽器直接用，其餘退回一般圓角。 */
+/* iOS 的圓角是連續曲率，不是正圓弧；支援的瀏覽器直接用，其餘退回一般圓角。
+   媒體不需要跟著設 —— 它是被卡片裁出來的，形狀自動一致。 */
+@supports (corner-shape: squircle) {
+  .card { corner-shape: squircle; border-radius: 30px; }
 }
 .card--featured { grid-column: span 4; }
+/* 唯一留在表面上的光是跟著游標走的那一點，而且很淡。它會動，所以讀起來是反射，
+   不是印在卡片上的花紋。 */
 .card::before {
   content: ""; position: absolute; z-index: 4; inset: 0; border-radius: inherit; pointer-events: none;
-  background: radial-gradient(circle at var(--mx) var(--my), rgba(255,255,255,.2), transparent 22%),
-    linear-gradient(115deg, rgba(255,255,255,.18), transparent 18% 68%, rgba(255,255,255,.06));
-  mix-blend-mode: screen; opacity: .36; transition: opacity 240ms ease;
+  background: radial-gradient(44% 58% at var(--mx) var(--my), rgba(255,255,255,.2), transparent 64%);
+  mix-blend-mode: screen; opacity: .5; transition: opacity 240ms ease;
 }
+/* 鏡緣：1px 的漸層描邊，用 mask-composite 挖掉中間只留一圈。
+   漸層是上到下（不是斜的）：上緣亮、兩側中段最暗、下緣最亮。左右兩段邊因為
+   縱跨整個漸層，自然就是「兩頭亮、中間暗」，這正是圓角玻璃邊緣該有的樣子。
+   斜向漸層做出來的是一條擦痕，不是一圈邊。 */
 .card::after {
   content: ""; position: absolute; z-index: 5; inset: 0; border-radius: inherit; pointer-events: none;
-  box-shadow: inset 1px 0 rgba(var(--theme-left),.32), inset -1px 0 rgba(var(--theme-right),.32), inset 0 1px rgba(255,255,255,.22);
+  padding: 1px;
+  background: linear-gradient(180deg,
+    var(--glass-rim) 0%, rgba(255,255,255,.14) 20%, rgba(255,255,255,.06) 52%,
+    rgba(255,255,255,.3) 86%, rgba(255,255,255,.88) 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  transition: opacity 240ms ease, filter 240ms ease;
 }
 .card:hover, .card:focus-visible {
-  transform: translateY(-7px) scale(1.006); border-color: rgba(255,255,255,.34); outline: none;
-  box-shadow: -2px 0 rgba(var(--theme-left),.28), 2px 0 rgba(var(--theme-right),.28),
-    0 32px 80px rgba(0,0,0,.48), inset 0 1px rgba(255,255,255,.22);
+  transform: translateY(-7px) scale(1.006); outline: none;
+  background-color: rgba(22, 28, 42, .42);
+  box-shadow: 0 34px 78px -18px rgba(0,0,0,.72), 0 8px 20px -8px rgba(0,0,0,.55),
+    0 0 42px -14px rgba(var(--theme-left),.35), 0 0 42px -14px rgba(var(--theme-right),.3);
 }
-.card:hover::before, .card:focus-visible::before { opacity: .72; }
+.card:hover::before, .card:focus-visible::before { opacity: .78; }
+.card:hover::after, .card:focus-visible::after { filter: brightness(1.45); }
+/* 沒有 backdrop-filter 就沒有玻璃可言，退回不透明面板，可讀性優先。hover 也要蓋，
+   否則 .card:hover 的權重較高，游標一移上去又變回半透明。 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .card, .card:hover, .card:focus-visible { background-color: rgba(14,18,28,.93); }
+}
 .card[hidden] { display: none; }
 @keyframes card-in { from { opacity: 0; transform: translateY(28px); } to { opacity: 1; transform: translateY(0); } }
 
+/* 沒有自己的圓角，也沒有自己的邊。上緣交給卡片的鏡緣，下緣只用一道很淡的暗影
+   跟底下的玻璃分界 —— 給它一條實線就等於又畫了第二條輪廓。 */
 .card-preview {
   position: relative; aspect-ratio: 4/3; overflow: hidden;
   background: radial-gradient(circle at 28% 20%, rgba(var(--theme-left),.48), transparent 30%),
     radial-gradient(circle at 73% 76%, rgba(var(--theme-right),.36), transparent 34%), #090c12;
+  box-shadow: 0 6px 14px -8px rgba(0,0,0,.7);
 }
 .card--featured .card-preview { aspect-ratio: 16/8.9; }
 .card-poster, .card-preview iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
@@ -177,7 +241,7 @@ a { color: inherit; }
 }
 .card-preview iframe.is-ready { visibility: visible; opacity: 1; }
 .preview-prism {
-  position: absolute; z-index: 2; inset: 0; pointer-events: none;
+  position: absolute; z-index: 2; inset: 0; border-radius: inherit; pointer-events: none;
   background: linear-gradient(112deg, rgba(255,255,255,.12), transparent 18% 74%, rgba(255,255,255,.05)),
     linear-gradient(180deg, transparent 52%, rgba(3,5,9,.3)); box-shadow: inset 0 -1px rgba(255,255,255,.1);
 }
@@ -199,9 +263,12 @@ a { color: inherit; }
 .preview-state {
   position: absolute; z-index: 3; top: 15px; right: 15px; display: inline-flex; align-items: center; gap: 7px;
   height: 28px; padding: 0 10px; color: rgba(255,255,255,.82); border: 1px solid rgba(255,255,255,.18);
-  border-radius: 999px; background: rgba(8,11,17,.48); font: 600 8px/1 var(--font-mono);
-  letter-spacing: .13em; text-transform: uppercase; backdrop-filter: blur(12px) saturate(140%);
-  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(0,0,0,.1), rgba(255,255,255,.03) 62%, rgba(255,255,255,.08)), rgba(8,11,17,.42);
+  box-shadow: inset 0 1px rgba(255,255,255,.2), inset 0 -1px rgba(255,255,255,.34);
+  font: 600 8px/1 var(--font-mono);
+  letter-spacing: .13em; text-transform: uppercase; backdrop-filter: blur(14px) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(14px) saturate(var(--glass-sat));
 }
 .preview-state::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: rgba(255,255,255,.42); }
 .card.is-loading-preview .preview-state::before { background: #ffd67a; box-shadow: 0 0 10px rgba(255,214,122,.62); }
@@ -211,11 +278,9 @@ a { color: inherit; }
 .card.is-previewing .preview-state span { font-size: 0; }
 .card.is-previewing .preview-state span::after { content: "Live"; font-size: 8px; }
 
-.card-body {
-  position: relative; z-index: 2; padding: 18px 18px 20px;
-  background: radial-gradient(circle at 14% 0, rgba(var(--theme-left),.09), transparent 34%),
-    linear-gradient(150deg, rgba(255,255,255,.055), transparent 36%), rgba(12,15,22,.82);
-}
+/* 文字直接躺在玻璃上，不再自己鋪一層不透明底 —— 底一補上去，整塊卡片就又變回
+   壓克力板了。背景的漸層與模糊由 .card 一次負責。 */
+.card-body { position: relative; z-index: 2; padding: 17px 18px 19px; background: none; }
 .card-meta {
   display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 12px;
   color: #8d94a2; font: 600 9px/1 var(--font-mono); letter-spacing: .12em; text-transform: uppercase;
@@ -224,18 +289,22 @@ a { color: inherit; }
 .card-title-row { display: flex; align-items: start; justify-content: space-between; gap: 18px; }
 .card-title { margin: 0; font: 560 clamp(17px,1.4vw,23px)/1.12 var(--font-display); letter-spacing: -.025em; text-wrap: balance; }
 .card-arrow {
-  display: grid; flex: 0 0 auto; place-items: center; width: 31px; height: 31px; color: #d9dce5;
-  border: 1px solid rgba(255,255,255,.14); border-radius: 50%; background: rgba(255,255,255,.055);
-  font-size: 15px; transition: transform 240ms ease, background-color 240ms ease, color 240ms ease;
+  display: grid; flex: 0 0 auto; place-items: center; width: 31px; height: 31px; color: #e4e7ef;
+  border: 1px solid rgba(255,255,255,.2); border-radius: 50%;
+  background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.1));
+  box-shadow: inset 0 1px rgba(255,255,255,.26), inset 0 -1px rgba(255,255,255,.42), 0 2px 8px rgba(0,0,0,.28);
+  font-size: 15px; transition: transform 240ms ease, background 240ms ease, color 240ms ease;
 }
 .card:hover .card-arrow, .card:focus-visible .card-arrow {
   color: #10131a; background: rgba(255,255,255,.9); transform: translate(2px,-2px);
 }
-.card-description { min-height: 3.1em; margin: 9px 0 15px; color: #9fa6b3; font-size: 11px; line-height: 1.55; letter-spacing: .025em; }
+.card-description { min-height: 3.1em; margin: 9px 0 15px; color: #b4bbc9; font-size: 11px; line-height: 1.55; letter-spacing: .025em; }
 .card-tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .tag {
-  padding: 5px 7px 4px; color: #aeb5c2; border: 1px solid rgba(255,255,255,.105); border-radius: 7px;
-  background: rgba(255,255,255,.035); font: 570 8px/1 var(--font-mono); letter-spacing: .07em; text-transform: uppercase;
+  padding: 5px 7px 4px; color: #bcc3d0; border: 1px solid rgba(255,255,255,.13); border-radius: 8px;
+  background: linear-gradient(180deg, rgba(0,0,0,.08), rgba(255,255,255,.025) 60%, rgba(255,255,255,.07));
+  box-shadow: inset 0 1px rgba(255,255,255,.14), inset 0 -1px rgba(255,255,255,.26);
+  font: 570 8px/1 var(--font-mono); letter-spacing: .07em; text-transform: uppercase;
 }
 .tag[data-tech="Three.js"] { color: #f0f3f8; border-color: rgba(var(--theme-left),.28); background: rgba(var(--theme-left),.075); }
 
@@ -268,20 +337,21 @@ body.leaving .site-footer, body.leaving .card:not(.launching) { opacity: 0; tran
   .filters { width: 100%; }
   .filter-btn { flex: 1 0 auto; }
   #cards { gap: 15px; padding-bottom: 54px; }
-  .card, .card--featured { grid-column: span 12; border-radius: 22px; }
+  .card, .card--featured { grid-column: span 12; }
   .card-preview, .card--featured .card-preview { aspect-ratio: 16/10; }
-  .card-body { padding: 18px 18px 20px; }
+  .card-body { padding: 17px 18px 19px; }
   .card-title { font-size: 21px; }
   .site-footer { flex-direction: column; padding-bottom: 30px; }
-}
-@media (hover: hover) and (pointer: fine) {
-  .card:hover { backdrop-filter: blur(18px) saturate(135%); -webkit-backdrop-filter: blur(18px) saturate(135%); }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
 @media (prefers-contrast: more) {
-  .card { background: rgba(9,12,18,.96); border-color: rgba(255,255,255,.42); }
+  .card, .card:hover, .card:focus-visible {
+    background: rgba(9,12,18,.96); backdrop-filter: none; -webkit-backdrop-filter: none;
+  }
+  .card::before { opacity: 0; }
+  .card::after { background: rgba(255,255,255,.46); }
   .card-description { color: #d5dae4; }
 }
