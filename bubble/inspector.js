@@ -348,6 +348,11 @@ export function buildInspector({ defaults }) {
     if (EDGE_TINT_TARGETS.some(prefix => key === `${prefix}TintColor`)) {
       return EDGE_TINT_BASE_BY_BACKDROP[backdrop] ?? defaults[key];
     }
+    // 吸收色只有淺底跟著背景走；深底維持它原本手調的水藍色（見
+    // runtime-memory 的同一段說明）。
+    if (key === 'absorbColor' && backdrop === 'light') {
+      return EDGE_TINT_BASE_BY_BACKDROP.light;
+    }
     return defaults[key];
   };
   function applyValues(values, message) {

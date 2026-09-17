@@ -8,6 +8,7 @@ import {
   createMotionMemory,
   motionDefaultsFor,
 } from '../bubble/runtime-memory.js';
+import { EDGE_TINT_BASE_BY_BACKDROP } from '../bubble/runtime-defaults.js';
 
 assert.equal(new Set(MOTION_SCOPED_KEYS).size, MOTION_SCOPED_KEYS.length,
   'motion-scoped parameter keys must be unique');
@@ -46,6 +47,12 @@ for (const motion of MOTION_KEYS) {
     assert.equal(memory[`${prefix}Tint`][`${motion}|dark`], 0);
     assert.ok(memory[`${prefix}Tint`][`${motion}|light`] >= 0);
   }
+  // 吸收色是液體本身的顏色。深底維持它原本手調的水藍色（見 runtime-memory
+  // 的說明：那個值就是改動前寫死的吸收係數，預設外觀不變），但淺底沒有這層
+  // 歷史包袱，預設就該跟淺底背景同色——不然一開箱就是一顆藍色的球浮在白色
+  // 背景上。兩個底色各自記一格，調淺底不會污染已經定案的深底外觀。
+  assert.equal(memory.absorbColor[`${motion}|dark`], '#68b2e7');
+  assert.equal(memory.absorbColor[`${motion}|light`], EDGE_TINT_BASE_BY_BACKDROP.light);
 }
 
 console.log('Motion and backdrop memory slots, defaults, and tint isolation passed');

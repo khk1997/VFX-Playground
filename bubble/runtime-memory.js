@@ -152,7 +152,13 @@ export function motionDefaultsFor(key) {
       // COLOR_DEFAULTS 那邊給的是深底的值，淺底在這裡補上自己的。
       : EDGE_TINT_TARGETS.some(prefix => key === `${prefix}TintColor`)
         ? EDGE_TINT_BASE_BY_BACKDROP[backdrop]
-        : darkValue(motion),
+        // 吸收色是液體本身的顏色，深底那個手調的水藍色維持原樣（見
+        // runtime-defaults 的說明：這個值就是改動前寫死的吸收係數，預設外觀
+        // 不變）。淺底沒有這層歷史包袱，預設就該跟淺底背景同色——不然一開箱
+        // 就是一顆藍色的球浮在白色背景上，看起來像沒調好。
+        : key === 'absorbColor' && backdrop === 'light'
+          ? EDGE_TINT_BASE_BY_BACKDROP.light
+          : darkValue(motion),
   ])));
 }
 
