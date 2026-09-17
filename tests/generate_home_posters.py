@@ -9,6 +9,13 @@ from PIL import Image
 from playwright.sync_api import sync_playwright
 
 
+# 與 bubble.js 主迴圈裡預覽的起始 simT 相同（loopDuration 的 8%）。
+PREVIEW_START_PHASE = 0.08
+# 卡片不是在第一幀就把海報換成 iframe：bubble.js 畫出第一幀後還會等
+# PREVIEW_PRESENT_DELAY_MS（260ms）才標記 stageReady，而預覽的時間流速是 1.8 倍。
+# 海報要對上的是「亮出來的那一幀」，所以要把這段時間也加進相位。
+PREVIEW_REVEAL_LEAD_S = 0.26 * 1.8
+
 POSTERS = {
     "sakura": "sakura-blizzard/index.html?preview=1",
     "energy-ring": "energy-ring/index.html?preview=1",
@@ -24,6 +31,16 @@ POSTERS = {
     "typewriter": "bubble/index.html?mode=typewriter&preview=1",
     "static": "bubble/index.html?mode=static&preview=1",
 }
+
+
+def boot(page, settle_ms: int) -> None:
+    """Wait until the bubble page has finished booting and drawn a settled frame."""
+    page.evaluate("() => window.postMessage('vfx-play', '*')")
+    page.wait_for_function(
+        "() => window.__bubbleDiagReport && !document.body.hasAttribute('data-bubble-boot')",
+        timeout=90_000,
+    )
+    page.wait_for_timeout(settle_ms)
 
 
 def main() -> int:
@@ -46,12 +63,16 @@ def main() -> int:
         for name, route in posters:
             page.goto(f"{args.base_url}/{route}", wait_until="domcontentloaded", timeout=90_000)
             if route.startswith("bubble/"):
-                page.evaluate("() => window.postMessage('vfx-play', '*')")
-                page.wait_for_function(
-                    "() => window.__bubbleDiagReport && !document.body.hasAttribute('data-bubble-boot')",
-                    timeout=90_000,
-                )
-                page.wait_for_timeout(args.settle_ms)
+                boot(page, args.settle_ms)
+                # 海報必須是「hover 後亮出來的第一幀」，否則卡片從海報切到 iframe
+                # 的瞬間，主體與水滴會憑空跳一段。bubble.js 的預覽從 loopDuration
+                # 的 8% 起跑，所以把時間釘在同一個相位再重拍一次。
+                loop = page.evaluate("() => window.__bubblePreviewDiag?.()?.loopDuration ?? null")
+                if loop:
+                    phase = loop * PREVIEW_START_PHASE + PREVIEW_REVEAL_LEAD_S
+                    pinned = f"{args.base_url}/{route}&diagTime={round(phase % loop, 4)}"
+                    page.goto(pinned, wait_until="domcontentloaded", timeout=90_000)
+                    boot(page, args.settle_ms)
             else:
                 page.wait_for_timeout(1_800)
 

@@ -167,9 +167,13 @@ a { color: inherit; }
 .card:hover .card-poster, .card:focus-visible .card-poster {
   transform: scale(1.045); filter: saturate(1.03) contrast(1.04) brightness(.92);
 }
+/* fitPreview() 用 left/top 50% + translate(-50%,-50%) 置中，縮放必須繞著元素中心
+   算。原本這裡是 transform-origin: left top，縮放會從左上角起算，整個 iframe 被
+   往左上推掉半個未縮放的尺寸（660×570 的一半）——小卡片幾乎只剩一角落在框內，
+   看起來就像「hover 了卻不播放」，大卡片則是主體位置跟海報對不上。 */
 .card-preview iframe {
   z-index: 1; width: 660px; height: 570px; visibility: hidden; opacity: 0; pointer-events: none;
-  transform-origin: left top; transition: opacity 260ms ease;
+  transform-origin: 50% 50%; transition: opacity 260ms ease;
 }
 .card-preview iframe.is-ready { visibility: visible; opacity: 1; }
 .preview-prism {

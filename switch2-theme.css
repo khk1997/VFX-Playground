@@ -494,7 +494,10 @@ body.leaving #rail { z-index: 10; }
   backdrop-filter: blur(18px) !important;
   transition: transform 160ms cubic-bezier(.2,.8,.2,1), background-color 160ms ease, border-color 160ms ease !important;
 }
-#exportBtn {
+/* 只有掛在 body 底下的那顆才是頂欄的全域動作。面板內部的匯出按鈕（例如動態光環
+   的「匯出去背 PNG 序列」）是一般的區塊按鈕，被這條規則抓到就會變成 fixed，而
+   面板的 backdrop-filter 又讓它成為定位基準，結果整顆跑到面板標題上面去。 */
+body > #exportBtn {
   position: fixed;
   z-index: 12;
   top: 12px;
@@ -516,19 +519,19 @@ body.leaving #rail { z-index: 10; }
   cursor: pointer;
   transition: transform 160ms cubic-bezier(.2,.8,.2,1), filter 160ms ease, box-shadow 160ms ease;
 }
-#exportBtn::before {
+body > #exportBtn::before {
   content: "";
   width: 10px;
   height: 10px;
   background: currentColor;
   clip-path: polygon(43% 0, 57% 0, 57% 56%, 76% 37%, 86% 47%, 50% 83%, 14% 47%, 24% 37%, 43% 56%);
 }
-#exportBtn:hover {
+body > #exportBtn:hover {
   filter: brightness(1.12);
   transform: translateY(-1px);
   box-shadow: 0 10px 30px rgba(12,116,226,.44), inset 0 1px rgba(255,255,255,.28);
 }
-#exportBtn:active { transform: scale(.97); }
+body > #exportBtn:active { transform: scale(.97); }
 #homeBtn::before, .home::before {
   content: "";
   width: 7px;
@@ -568,16 +571,22 @@ body.leaving #rail { z-index: 10; }
   right: 106px !important;
   bottom: auto !important;
   left: auto !important;
-  width: 40px !important;
-  min-width: 40px !important;
   height: 34px !important;
   min-height: 34px !important;
-  padding: 0 !important;
-  overflow: hidden;
-  font-size: 0 !important;
+  padding: 0 14px !important;
   line-height: 1 !important;
   transform: none !important;
   gap: 0 !important;
+}
+/* 收成 40px 的純圖示膠囊，只適用於按鈕裡真的有 .btnIcon 那顆（液態玻璃頁）。
+   極光、櫻花、動態光環的播放鍵是純文字「⏸ 暫停」，無條件套上 font-size: 0 會
+   變成右上角一顆什麼都沒有的空膠囊。 */
+#playCtl:has(.btnIcon) {
+  width: 40px !important;
+  min-width: 40px !important;
+  padding: 0 !important;
+  overflow: hidden;
+  font-size: 0 !important;
 }
 #playCtl #playCtlLabel { display: none; }
 /* Icon is rendered by the inline SVG in the button markup, not by this pseudo-element. */

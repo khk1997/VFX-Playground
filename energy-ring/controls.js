@@ -42,7 +42,7 @@ const DEFAULTS = {
 };
 const P = { ...DEFAULTS, ccw: false };
 // Q 是渲染程式碼實際讀取的參數來源：即時預覽時等於 P；匯出時暫時指向一份快照，
-// 這樣使用者在匯出途中調整滑桿只會改到 P，不會污染正在進行中的那次匯出（見 exportBtn 的處理）。
+// 這樣使用者在匯出途中調整滑桿只會改到 P，不會污染正在進行中的那次匯出（見 ringExportBtn 的處理）。
 let Q = P;
 // 暫停中調整參數時標記為 true，讓主迴圈用同一個凍結的時間點重畫一張反映新參數的靜態畫面
 let paramsDirty = false;

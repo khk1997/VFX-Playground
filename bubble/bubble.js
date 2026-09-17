@@ -3356,9 +3356,13 @@ let simT = PREVIEW && LAUNCH_MOTION && LAUNCH_MOTION !== 'static'
   : 0;
 // 首頁預覽矩陣用：確認訊息確實解除外部暫停，而且動畫時間有持續前進。
 // 只回報狀態，不改變 runtime 行為。
+// loopDuration 也一起報出來：海報產生器要靠它算出「預覽開播的那一幀」是第幾秒
+// （見 tests/generate_home_posters.py 的 PREVIEW_START_PHASE），才能把海報釘在
+// 跟 hover 後第一幀相同的相位上。
 window.__bubblePreviewDiag = () => ({
   simT, rafId, extPaused, userPaused, reducedMotionPaused,
   shapeConverting, hidden: document.hidden, paused: isPaused(),
+  loopDuration: P.loopDuration,
 });
 function frame(now) {
   rafId = requestAnimationFrame(frame);

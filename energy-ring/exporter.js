@@ -62,9 +62,9 @@ document.getElementById('syncLoopBtn').addEventListener('click', () => {
   document.getElementById('exportSec').value = P.loopSec.toFixed(1);
 });
 
-document.getElementById('exportBtn').addEventListener('click', async () => {
+document.getElementById('ringExportBtn').addEventListener('click', async () => {
   if (exporting) return;
-  const btn = document.getElementById('exportBtn');
+  const btn = document.getElementById('ringExportBtn');
   const status = document.getElementById('exportStatus');
   exporting = true;
   btn.disabled = true;

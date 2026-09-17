@@ -17,6 +17,7 @@ const cardEls = [];
 
 let activePreview = null;
 let previewTimer = 0;
+let pendingCard = null;
 let launching = false;
 let audioCtx = null;
 let soundOn = (localStorage.getItem('vfx-sound') ?? '1') === '1';
@@ -106,6 +107,7 @@ function fitPreview(frame, host) {
 function stopLivePreview() {
   window.clearTimeout(previewTimer);
   previewTimer = 0;
+  pendingCard = null;
   if (!activePreview) return;
   const { card, frame } = activePreview;
   try { frame.contentWindow?.postMessage('vfx-pause', '*'); } catch (_) {}
@@ -169,13 +171,23 @@ function startLivePreview(card, effect) {
 
 function queueLivePreview(card, effect) {
   window.clearTimeout(previewTimer);
-  if (activePreview?.card === card) return;
-  previewTimer = window.setTimeout(() => startLivePreview(card, effect), PREVIEW_DELAY_MS);
+  if (activePreview?.card === card) { pendingCard = null; return; }
+  pendingCard = card;
+  previewTimer = window.setTimeout(() => {
+    pendingCard = null;
+    startLivePreview(card, effect);
+  }, PREVIEW_DELAY_MS);
 }
 
+// 只取消「這張卡自己排的」那個計時器。捲動會讓游標底下換一張卡，瀏覽器補發的
+// pointerleave 可能晚於新卡的 pointerenter；無條件清掉計時器就會把剛排好的預覽
+// 一起取消，那張卡從此停在海報上。
 function leaveCard(card) {
-  window.clearTimeout(previewTimer);
-  previewTimer = 0;
+  if (pendingCard === card) {
+    window.clearTimeout(previewTimer);
+    previewTimer = 0;
+    pendingCard = null;
+  }
   if (activePreview?.card === card) stopLivePreview();
 }
 
