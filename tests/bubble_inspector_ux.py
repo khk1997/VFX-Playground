@@ -127,13 +127,22 @@ def check_desktop(browser, base_url: str) -> dict[str, object]:
     breath_row = page.locator("#researchBreath").locator("xpath=ancestor::*[contains(@class, 'row')][1]")
     page.wait_for_function("document.querySelector('#researchBreath').closest('.row').classList.contains('is-modified')")
     assert "is-modified" in (breath_row.get_attribute("class") or "")
-    timing_group = page.locator("#inspectorPage-motion > details.group:has(#researchBreath)")
-    timing_group.get_by_role("button", name="重設呼吸與圖示時序").click()
+    # 重設是以分頁為單位的：一頁一顆，而且只動這一頁的參數（見 inspector.js 的
+    # PAGES 迴圈）。這裡順便確認它沒有越界——外觀分頁的染色強度必須原封不動。
+    shell_tint = page.locator("#researchShellTint")
+    shell_tint.evaluate(
+        """node => {
+            node.value = '0.33';
+            node.dispatchEvent(new Event('input', { bubbles: true }));
+        }"""
+    )
+    page.locator("#inspectorPage-motion .inspectorPageReset").click()
     page.wait_for_function(
         "expected => document.querySelector('#researchBreath').value === expected",
         arg=breath_default,
     )
     assert "is-modified" not in (breath_row.get_attribute("class") or "")
+    assert shell_tint.input_value() == "0.33", "the motion reset reached into the look page"
 
     page.locator("#inspectorTab-look").click()
     prism = page.locator('[data-visual-preset="prism"]')
@@ -151,6 +160,34 @@ def check_desktop(browser, base_url: str) -> dict[str, object]:
     page.locator("#backdrop").select_option("dark")
     page.wait_for_timeout(100)
     assert page.locator("#researchShellTint").input_value() == dark_shell, "dark preset memory was not restored"
+
+    # 常用深度會藏掉大部分參數，區塊很容易剩下一個打開沒東西的空殼。凡是還看得到
+    # 展開箭頭的區塊，裡面就必須有東西可以調（見 inspector.js 的 pruneEmptySections）。
+    for depth in ("concise", "complete"):
+        page.evaluate(
+            """depth => [...document.querySelectorAll('.inspectorDepthPicker button')]
+                 .find(b => b.dataset.value === depth).click()""",
+            depth,
+        )
+        page.wait_for_timeout(200)
+        for tab in ("shape", "motion", "look", "scene"):
+            page.locator(f"#inspectorTab-{tab}").click()
+            page.wait_for_timeout(150)
+            empty = page.evaluate(
+                """() => [...document.querySelectorAll('#panel .inspectorPage details')]
+                     .filter(node => node.offsetParent !== null || node.getClientRects().length)
+                     .filter(node => !node.classList.contains('is-bodyEmpty'))
+                     .filter(node => ![...node.querySelectorAll('input, select, textarea, button')]
+                       .some(el => !el.closest('summary')
+                         && (el.offsetParent !== null || el.getClientRects().length)))
+                     .map(node => node.querySelector(':scope > summary h3, :scope > summary h4')?.textContent)"""
+            )
+            assert not empty, f"{depth}/{tab} still shows sections that open onto nothing: {empty}"
+    page.evaluate(
+        """() => [...document.querySelectorAll('.inspectorDepthPicker button')]
+             .find(b => b.dataset.value === 'complete').click()"""
+    )
+    page.locator("#inspectorTab-look").click()
 
     page.reload(wait_until="networkidle")
     page.wait_for_selector("#panel.inspector[data-control-depth=\"complete\"]")

@@ -1,6 +1,8 @@
 import { EDGE_TINT_TARGETS, EDGE_TINT_STOPS, edgeTintParams } from './edge-tint.js';
-import { EDGE_TINT_BASE_BY_BACKDROP } from './runtime-defaults.js?v=1';
-import { INSTALLING_VISUAL_PRESETS, installingVisualPresetValues } from './visual-presets.js';
+import { EDGE_TINT_BASE_BY_BACKDROP, EDGE_TINT_STRENGTH_BY_BACKDROP } from './runtime-defaults.js?v=tint-light-1';
+import { INSTALLING_VISUAL_PRESETS, installingVisualPresetValues } from './visual-presets.js?v=tint-light-1';
+
+const PAGES = [['shape', '造型'], ['motion', '動態'], ['look', '外觀'], ['scene', '場景']];
 
 const $ = id => document.getElementById(id);
 const rowOf = id => $(id)?.closest('.row');
@@ -25,6 +27,16 @@ function writeControl(id, value) {
 function readControl(id) {
   const el = $(id);
   return el.type === 'checkbox' ? el.checked : el.value;
+}
+// 滑桿只停在 step 的整數倍上，而預設值不保證落在格子上：邊緣光的淺底預設是
+// 0.12，滑桿的間距是 0.05，瀏覽器會把它吸到 0.1。差這半格不是使用者調的，
+// 照嚴格相等去比會讓一堆參數一進頁面就掛上「已調整」。
+function differsFromDefault(control, baseline) {
+  const current = control.type === 'checkbox' ? control.checked : control.value;
+  if (typeof baseline !== 'number') return current !== baseline;
+  const step = Number.parseFloat(control.step);
+  const tolerance = Number.isFinite(step) && step > 0 ? step / 2 : 1e-9;
+  return Math.abs(Number(current) - baseline) > tolerance;
 }
 function title(group, text) {
   group.querySelector(':scope > summary h3, :scope > summary h4').textContent = text;
@@ -55,7 +67,7 @@ function segmented(labels, onSelect, name) {
 }
 
 // Move the original controls, preserving IDs, handlers, gates and preset state.
-export function buildInspector({ defaults }) {
+export function buildInspector({ defaults, modeDefault = () => undefined }) {
   const panel = $('panel');
   panel.classList.add('inspector');
   const DEPTH_KEY = 'vfx:bubble:control-depth';
@@ -91,6 +103,8 @@ export function buildInspector({ defaults }) {
   rowOf('backdrop').querySelector('label').textContent = '預覽底色';
 
   let controlDepth = 'concise';
+  // 面板還在組裝時不要跑 refresh：它會去讀配色卡片那些還沒建立的狀態。
+  let built = false;
   try {
     const saved = localStorage.getItem(DEPTH_KEY);
     if (saved === 'concise' || saved === 'complete') controlDepth = saved;
@@ -124,6 +138,8 @@ export function buildInspector({ defaults }) {
     if (persist) {
       try { localStorage.setItem(DEPTH_KEY, controlDepth); } catch (_) {}
     }
+    // 切換深度會讓整批進階控制出現或消失，空區塊的名單跟著變。
+    if (built) refresh();
   }
 
   function setQualityStatus(state = {}) {
@@ -151,7 +167,7 @@ export function buildInspector({ defaults }) {
     panel.scrollTop = 0;
     try { localStorage.setItem(PAGE_KEY, key); } catch (_) {}
   }
-  for (const [key, text] of [['shape', '造型'], ['motion', '動態'], ['look', '外觀'], ['scene', '場景']]) {
+  for (const [key, text] of PAGES) {
     const tab = button(text, () => selectPage(key));
     tab.id = `inspectorTab-${key}`;
     tab.dataset.page = key;
@@ -341,9 +357,13 @@ export function buildInspector({ defaults }) {
   // 「這一格算不算被調過」與「重設這組配色」讀的是同一個基準。基底色的基準是
   // 當下的底色本身，所以要看 backdrop，不能只讀一份固定的 defaults。
   const colorDefault = key => {
+    // 有模式記憶的參數以那一格為準（它已經含深／淺底的差異，見
+    // runtime-memory 的 motionDefaultsFor）。其餘才走下面的全域規則。
+    const scoped = modeDefault(key);
+    if (scoped !== undefined) return scoped;
     const backdrop = $('backdrop').value;
     if (EDGE_TINT_TARGETS.some(prefix => key === `${prefix}Tint`)) {
-      return backdrop === 'dark' ? 0 : defaults[key];
+      return EDGE_TINT_STRENGTH_BY_BACKDROP[backdrop] ?? defaults[key];
     }
     if (EDGE_TINT_TARGETS.some(prefix => key === `${prefix}TintColor`)) {
       return EDGE_TINT_BASE_BY_BACKDROP[backdrop] ?? defaults[key];
@@ -439,6 +459,21 @@ export function buildInspector({ defaults }) {
   });
   colorBody.append(status, undoButton);
 
+  // 標題只分三級：分頁裡的區塊、區塊裡的子區塊，以及子區塊裡的小標。
+  //
+  // 原本的層級是各自從來源帶過來的：作品頁的 .group 是 16px、動態模式 registry
+  // 產生的 .subgroup 是 13px、面板內建的 .inspectorAdvanced 是 12px。搬進分頁
+  // 之後，位階相同的東西會因為出身不同而有三種大小——「表面紋理」跟「局部配色」
+  // 在外觀分頁裡是同一級，卻一個 13px 一個 16px。這裡照「在分頁裡的實際深度」
+  // 重新標一次，CSS 只認這兩個 class，不再看 .group / .subgroup。
+  for (const pane of Object.values(panes)) {
+    for (const node of pane.querySelectorAll('details')) {
+      const top = node.parentElement === pane;
+      node.classList.toggle('inspectorSection', top);
+      node.classList.toggle('inspectorSubsection', !top);
+    }
+  }
+
   // Labels also serve keyboard/screen-reader users, including older HTML rows.
   panel.querySelectorAll('.row').forEach(row => {
     const label = row.querySelector('label');
@@ -447,27 +482,91 @@ export function buildInspector({ defaults }) {
   });
   installNumberEditing(panel);
 
-  // Restore one main section through the existing input/change handlers so
-  // shader state, mode memory and the visible controls remain in sync.
-  panel.querySelectorAll('.inspectorPage > details.group').forEach(group => {
-    if (group.classList.contains('inspectorColors')) return;
-    const controls = [...group.querySelectorAll('input[id], select[id], textarea[id]')]
-      .filter(control => Object.hasOwn(defaults, control.id));
-    if (!controls.length) return;
-    const sectionName = group.querySelector(':scope > summary h3')?.textContent || '此區';
-    const resetSection = button('重設此區', () => {
-      controls.forEach(control => writeControl(control.id, colorDefault(control.id)));
-      resetSection.textContent = '已重設';
-      resetSection.setAttribute('aria-label', `${sectionName}已重設`);
-      window.setTimeout(() => {
-        resetSection.textContent = '重設此區';
-        resetSection.setAttribute('aria-label', `重設${sectionName}`);
-      }, 1200);
+  // 重設的顆粒度跟分頁一致。原本每個區塊底下各掛一顆「重設此區」，光是「場景」
+  // 一頁就有四顆，而且「此區」指的是哪一區要往上找標題才知道；分頁本身已經是
+  // 使用者心裡的分類，一頁一顆說得清楚，也對得上「重設目前模式」的層級。
+  //
+  // 做法是「整個模式重設一次，再把這一頁以外的值寫回去」，而不是自己算這一頁
+  // 每一根的預設值。一根參數的預設其實有三層——全域、模式／底色記憶格、材質
+  // 類型的 profile——自己重算一定會跟真正的重設對不起來（例如體積吸收在融化
+  // 模式下是材質 profile 給的，跟全域預設不同）。借用那條唯一正確的路徑，就不
+  // 會有第二份規則要維護。
+  for (const [key, label] of PAGES) {
+    const pane = panes[key];
+    const resetPage = button(`重設「${label}」`, () => {
+      const keep = panel.querySelectorAll('.inspectorPage input[id], .inspectorPage select[id], .inspectorPage textarea[id]');
+      const outside = [...keep]
+        .filter(control => Object.hasOwn(defaults, control.id) && !pane.contains(control))
+        .map(control => [control.id, readControl(control.id)]);
+      $('resetBtn').click();
+      for (const [id, value] of outside) writeControl(id, value);
+      undo = null;
+      status.textContent = '';
+      resetPage.textContent = `已重設「${label}」`;
+      window.setTimeout(() => { resetPage.textContent = `重設「${label}」`; }, 1400);
+      refresh();
     });
-    resetSection.classList.add('inspectorSectionReset');
-    resetSection.setAttribute('aria-label', `重設${sectionName}`);
-    group.append(resetSection);
+    resetPage.classList.add('inspectorPageReset');
+    resetPage.setAttribute('aria-label', `重設${label}分頁的所有參數`);
+    // 「更多與管理」放的是存檔、提示與整個模式的重設，不屬於這一頁的參數，
+    // 所以分頁重設排在它前面，也不會把它一起清掉（見 pageControls）。
+    pane.insertBefore(resetPage, pane.querySelector(':scope > .inspectorUtilities'));
+  }
+  // 「這個東西現在看得到嗎」——刻意不用 offsetParent 之類的版面查詢：沒被選到的
+  // 分頁整頁是 hidden，量出來會是全部都看不到。這裡讀的是面板自己那四條隱藏
+  // 規則，跟哪一頁在前面無關。
+  function isHiddenNode(node) {
+    return node.hidden
+      || node.classList.contains('gated-off')
+      || node.classList.contains('is-emptyHidden')
+      || (controlDepth === 'concise' && node.classList.contains('inspectorExpert'))
+      || node.style.display === 'none';
+  }
+  function hasVisibleControl(node) {
+    for (const child of node.children) {
+      if (child.tagName === 'SUMMARY' || isHiddenNode(child)) continue;
+      if (child.matches('input, select, textarea, button')) return true;
+      if (hasVisibleControl(child)) return true;
+    }
+    return false;
+  }
+  // 點開之後是一片空白的區塊，比沒有那個區塊還糟：使用者會以為東西壞了。
+  // 常用深度會藏掉大部分參數，「進階紋理方向」「色散」「薄膜外觀」這幾個區塊
+  // 的內容剛好整組都是進階項，剩下一個打不開的空殼。
+  //
+  // 內容全空又沒有開關 → 整塊收起來。摘要列上有開關的（色散、薄膜這種整組
+  // 開關）留著，但拿掉展開箭頭、也擋掉展開，讓它讀起來就是一列開關。
+  function pruneEmptySections() {
+    // 由深到淺：子區塊先定案，外層才數得到「裡面其實沒東西」。
+    // 用自己的 class 而不是 hidden —— hidden 是 refresh 拿來開關配色卡片與
+    // 進階區塊的，寫進去會把那些刻意的隱藏一起蓋掉。
+    const sections = [...panel.querySelectorAll('.inspectorPage details')].reverse();
+    for (const node of sections) {
+      const body = hasVisibleControl(node);
+      const summaryControl = !!node.querySelector(':scope > summary input, :scope > summary button');
+      node.classList.toggle('is-bodyEmpty', !body);
+      node.classList.toggle('is-emptyHidden', !body && !summaryControl);
+      if (!body) node.open = false;
+    }
+    // 小標不是容器，是一排兄弟節點的分隔線，所以得往後看到下一個小標為止。
+    // 色散那一組在常用深度只剩下開關，九個小標之間全是空的。
+    for (const subhead of panel.querySelectorAll('.inspectorPage .effectSubhead')) {
+      let covers = false;
+      for (let node = subhead.nextElementSibling; node; node = node.nextElementSibling) {
+        if (node.classList.contains('effectSubhead')) break;
+        if (!isHiddenNode(node) && (node.matches('input, select, textarea, button') || hasVisibleControl(node))) {
+          covers = true;
+          break;
+        }
+      }
+      subhead.classList.toggle('is-emptyHidden', !covers);
+    }
+  }
+  panel.addEventListener('click', event => {
+    const summary = event.target.closest('.inspectorPage details.is-bodyEmpty > summary');
+    if (summary && !event.target.closest('input, button, .summaryToggle')) event.preventDefault();
   });
+
   let pending = false;
   function scheduleRefresh(event) {
     if (event?.target?.dataset?.presetIgnore !== undefined) return;
@@ -508,12 +607,7 @@ export function buildInspector({ defaults }) {
     panel.querySelectorAll('.inspectorPage .row').forEach(row => {
       const control = row.querySelector('input[id], select[id], textarea[id]');
       if (!control || !Object.hasOwn(defaults, control.id)) return;
-      const current = readControl(control.id);
-      const baseline = colorDefault(control.id);
-      const changed = typeof baseline === 'number'
-        ? Math.abs(Number(current) - baseline) > 1e-9
-        : current !== baseline;
-      row.classList.toggle('is-modified', changed);
+      row.classList.toggle('is-modified', differsFromDefault(control, colorDefault(control.id)));
     });
     for (const [prefix, state] of cards) {
       state.card.hidden = prefix !== target;
@@ -531,9 +625,7 @@ export function buildInspector({ defaults }) {
       });
       for (const key of state.keys) {
         const el = $(key);
-        const current = readControl(key), baseline = colorDefault(key);
-        const changed = typeof baseline === 'number' ? Number(current) !== baseline : current !== baseline;
-        el.closest('.row')?.classList.toggle('is-modified', changed);
+        el.closest('.row')?.classList.toggle('is-modified', differsFromDefault(el, colorDefault(key)));
       }
       for (const suffix of ['Tint', 'TintEdge', 'MultiTintStrength']) {
         const readout = $(`${prefix}${suffix}_v`);
@@ -541,12 +633,15 @@ export function buildInspector({ defaults }) {
       }
       $(`${prefix}MultiTintRotation_v`).textContent = `${$(`${prefix}MultiTintRotation`).value}°`;
     }
+    // 最後才跑：閘門、深度與上面那些 hidden 都定案之後，空區塊才數得準。
+    pruneEmptySections();
   }
   let initialPage = 'look';
   try {
     const saved = localStorage.getItem(PAGE_KEY);
     if (saved && panes[saved]) initialPage = saved;
   } catch (_) {}
+  built = true;
   setControlDepth(controlDepth, false);
   selectPage(initialPage);
   refresh();

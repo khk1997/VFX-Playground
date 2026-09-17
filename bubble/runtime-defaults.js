@@ -473,6 +473,19 @@ export const EDGE_TINT_BASE_BY_BACKDROP = {
   light: LIGHT_BACKDROP_COLOR,
 };
 
+// 染色強度（researchShellTint / researchIconTint）的底色預設。
+//
+// 深底從 0 起跳：黑底上的玻璃靠背景對比就讀得出形狀與厚度，一開箱先染色反而
+// 蓋掉那層光學。淺底沒有那個對比——白底上的透明玻璃本來就幾乎看不見，染色是
+// 讓它「有東西在那裡」的唯一手段，所以直接給滿，使用者要淡再自己拉下來。
+//
+// 這個常數有三個讀者（記憶格的初值、面板的「已調整」基準、重設這組配色），
+// 三邊不同步的話，一開箱就會被標成已調整、或是重設之後跟預設對不起來。
+export const EDGE_TINT_STRENGTH_BY_BACKDROP = {
+  dark: 0,
+  light: 1,
+};
+
 export const COLOR_DEFAULTS  = {
   ...MOTION_COLOR_DEFAULTS,
   // 這兩顆蓋掉 registry 裡的藍色：那個藍色留給多色調色盤的第一個色標，基底色

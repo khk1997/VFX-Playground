@@ -1,6 +1,6 @@
 'use strict';
 import * as THREE from 'three';
-import { buildInspector } from './inspector.js?v=panel-ux-3';
+import { buildInspector } from './inspector.js?v=panel-ux-4';
 import { createAdaptiveQuality, QUALITY_TIER_NAMES } from './adaptive-quality.js?v=2';
 import { createGpuProfiler } from './gpu-profiler.js?v=1';
 let inspector = null;
@@ -42,10 +42,10 @@ import {
 import {
   COLOR_DEFAULTS, DEFAULTS, LEGACY_SELECT_VALUES, SELECT_DEFAULTS,
   SPECTRAL_CAUSTIC_DEFAULTS, TOGGLE_DEFAULTS, isFormationMotion,
-} from './runtime-defaults.js?v=1';
+} from './runtime-defaults.js?v=tint-light-1';
 import {
   BACKDROP_SCOPED_KEYS, createMemorySlot, createMotionMemory, motionDefaultsFor,
-} from './runtime-memory.js?v=1';
+} from './runtime-memory.js?v=tint-light-1';
 import {
   COLORS, SELECTS, createFormatters, createToggleBindings,
 } from './control-schema.js?v=1';
@@ -2699,18 +2699,11 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   P.backdrop = backdrop;
   resetMaterialProfiles();
   if (mobileRenderQuery.matches && !PREVIEW) P.cameraDistance = MOBILE_CAMERA_DISTANCE_DEFAULT;
-  motionMemory = buildMotionMemory();
-  for (const mode of MOTION_KEYS) {
-    if (motionMemory.spectralCausticFocus) motionMemory.spectralCausticFocus[`${mode}|dark`] = 1.0;
-    if (motionMemory.spectralCausticSeparation) motionMemory.spectralCausticSeparation[`${mode}|dark`] = 1.0;
-    if (motionMemory.transmission) motionMemory.transmission[`${mode}|light`] = 0.97;
-    if (motionMemory.absorb) motionMemory.absorb[`${mode}|light`] = 1.35;
-    if (motionMemory.envRefraction) motionMemory.envRefraction[`${mode}|light`] = 0.025;
-    if (motionMemory.fresnel) motionMemory.fresnel[`${mode}|light`] = 0.12;
-    if (motionMemory.rayDispersionEnabled) motionMemory.rayDispersionEnabled[`${mode}|light`] = false;
-    if (motionMemory.bloomEnabled) motionMemory.bloomEnabled[`${mode}|light`] = false;
-    if (motionMemory.streaksEnabled) motionMemory.streaksEnabled[`${mode}|light`] = false;
-  }
+  // 這裡本來寫的是 buildMotionMemory()，但那個名字從來不存在，重設按到一半就會
+  // 丟 ReferenceError，後面的還原全部不會跑——按下去只會把面板留在半舊半新的
+  // 狀態。底下那一輪逐格覆寫的底色預設也一起刪掉了：那張表現在只有一份，在
+  // runtime-memory 的 BACKDROP_OVERRIDES，createMotionMemory 已經套好。
+  motionMemory = createMotionMemory();
   // 每個模式各自記憶的那幾項（顆數／滴徑／循環秒數／前後拉伸／擠出外觀）要套用
   // 「這個模式」的預設，不能停在共用預設上。共用預設是給分裂模式用的數字——
   // 例如循環 12 秒、顆數 2，留在形狀變形上就完全不對。
@@ -3497,9 +3490,18 @@ function frame(now) {
 
 buildExtendedMotionControls();
 if (!PREVIEW) {
-  inspector = buildInspector({ defaults: {
-    ...DEFAULTS, ...MOTION_TEXT_DEFAULTS, ...SELECT_DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS,
-  } });
+  // 「預設值」有兩層：全域那一份，以及每個模式（部分還分深／淺底）自己的那一格。
+  // 面板的「已調整」標記與各分頁的重設都要用後者，不然一進私語模式，那些由模式
+  // 覆寫的參數會被標成已調整，按下重設還會把它們拉回跟這個模式無關的全域值。
+  const motionDefaultSlots = Object.fromEntries(
+    MOTION_MEMORY_KEYS.map(key => [key, motionDefaultsFor(key)]),
+  );
+  inspector = buildInspector({
+    defaults: {
+      ...DEFAULTS, ...MOTION_TEXT_DEFAULTS, ...SELECT_DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS,
+    },
+    modeDefault: key => motionDefaultSlots[key]?.[memorySlot(key)],
+  });
   inspector.setQualityStatus(adaptiveQuality.snapshot());
 }
 // 網址指定的模式要在 bindControls 之前就位，控制項的第一次同步才會直接建立在

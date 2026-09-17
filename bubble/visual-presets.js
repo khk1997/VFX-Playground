@@ -1,9 +1,14 @@
-import { EDGE_TINT_BASE_BY_BACKDROP } from './runtime-defaults.js?v=1';
+import { EDGE_TINT_BASE_BY_BACKDROP } from './runtime-defaults.js?v=tint-light-1';
 
 const POSITIONS = [0, 0.16, 0.29, 0.39, 0.62, 0.82];
 
 // Each style owns separate dark/light tuning and separate shell/icon palettes.
 // Applying one is only a starting point: the normal controls remain independent.
+//
+// 淺底那組的染色強度比深底高、邊緣集中比深底低，看起來反直覺但這是對的：染色
+// 是吸收（見 shaders.js 的 shellTintAbsorption），黑底上少少的吸收就看得出來，
+// 白底上的透射光很亮，同樣的吸收量會被洗掉。所以淺底要染滿、而且要讓顏色從邊
+// 緣往內攤開，否則三個風格在白底上會長得一模一樣。
 //
 // 風格不帶基底色。基底色的規則只有一條、而且不分風格：它就是當下的底色本身
 // （見 runtime-defaults 的 EDGE_TINT_BASE_BY_BACKDROP）。風格要決定的是邊緣那
@@ -17,8 +22,8 @@ export const INSTALLING_VISUAL_PRESETS = [
       icon: { tint: 0.76, edge: 0.91, mix: 1, rotation: 338, focus: 0.68, colors: ['#176ff2','#54ddf2','#ff9bd5','#ffe6a0','#c8f4f7','#9e83e8'] },
     },
     light: {
-      shell: { tint: 0.34, edge: 0.84, mix: 0.88, rotation: 10, focus: 0.48, colors: ['#2f7ee7','#61d8ef','#efa7d3','#f7d993','#bdebf2','#a995dc'] },
-      icon: { tint: 0.58, edge: 0.9, mix: 0.96, rotation: 342, focus: 0.6, colors: ['#2678e8','#64dff2','#f2a7d4','#ffe2a0','#c8f1f5','#a38de1'] },
+      shell: { tint: 1, edge: 0.46, mix: 1, rotation: 10, focus: 0.55, colors: ['#2f7ee7','#61d8ef','#efa7d3','#f7d993','#bdebf2','#a995dc'] },
+      icon: { tint: 1, edge: 0.58, mix: 1, rotation: 342, focus: 0.66, colors: ['#2678e8','#64dff2','#f2a7d4','#ffe2a0','#c8f1f5','#a38de1'] },
     },
   },
   {
@@ -28,8 +33,8 @@ export const INSTALLING_VISUAL_PRESETS = [
       icon: { tint: 0.72, edge: 0.93, mix: 0.96, rotation: 350, focus: 0.72, colors: ['#155ce4','#20a8e7','#66e3f0','#d8fbfa','#8cdcf1','#5d79df'] },
     },
     light: {
-      shell: { tint: 0.3, edge: 0.86, mix: 0.82, rotation: 18, focus: 0.52, colors: ['#327ed7','#43b8df','#83dfe9','#dcf7f5','#a8deeb','#7995dc'] },
-      icon: { tint: 0.54, edge: 0.92, mix: 0.92, rotation: 346, focus: 0.65, colors: ['#287ad8','#43bde4','#8de8ef','#effdfb','#b4e5ef','#758edb'] },
+      shell: { tint: 1, edge: 0.48, mix: 1, rotation: 18, focus: 0.58, colors: ['#327ed7','#43b8df','#83dfe9','#dcf7f5','#a8deeb','#7995dc'] },
+      icon: { tint: 1, edge: 0.6, mix: 1, rotation: 346, focus: 0.7, colors: ['#287ad8','#43bde4','#8de8ef','#effdfb','#b4e5ef','#758edb'] },
     },
   },
   {
@@ -39,8 +44,8 @@ export const INSTALLING_VISUAL_PRESETS = [
       icon: { tint: 0.7, edge: 0.9, mix: 0.98, rotation: 316, focus: 0.66, colors: ['#977bde','#ec91be','#ffb49c','#ffe6a2','#b5eceb','#769cdf'] },
     },
     light: {
-      shell: { tint: 0.3, edge: 0.82, mix: 0.84, rotation: 328, focus: 0.46, colors: ['#a28bd0','#dfa1bd','#edb5a4','#ead99e','#b6dfe2','#8fa6d2'] },
-      icon: { tint: 0.52, edge: 0.9, mix: 0.94, rotation: 312, focus: 0.58, colors: ['#9c82d3','#e19abb','#f0b09e','#f4dda0','#b5e5e6','#879fd7'] },
+      shell: { tint: 1, edge: 0.44, mix: 1, rotation: 328, focus: 0.52, colors: ['#a28bd0','#dfa1bd','#edb5a4','#ead99e','#b6dfe2','#8fa6d2'] },
+      icon: { tint: 1, edge: 0.56, mix: 1, rotation: 312, focus: 0.64, colors: ['#9c82d3','#e19abb','#f0b09e','#f4dda0','#b5e5e6','#879fd7'] },
     },
   },
 ];

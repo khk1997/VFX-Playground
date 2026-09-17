@@ -4,9 +4,9 @@ import {
   MOTION_DEFAULT_RADIUS, MOTION_KEYS, MOTION_OVERRIDES,
 } from './motions/registry.js?v=edge-tint-1';
 import {
-  COLOR_DEFAULTS, DEFAULTS, EDGE_TINT_BASE_BY_BACKDROP, SELECT_DEFAULTS,
+  COLOR_DEFAULTS, DEFAULTS, EDGE_TINT_BASE_BY_BACKDROP, EDGE_TINT_STRENGTH_BY_BACKDROP, SELECT_DEFAULTS,
   SPECTRAL_CAUSTIC_DEFAULTS, TOGGLE_DEFAULTS,
-} from './runtime-defaults.js?v=1';
+} from './runtime-defaults.js?v=tint-light-1';
 
 // 按動態模式各自記憶的參數：使用者在某個模式下調過的值會被保留，切回來時
 // 恢復。count/radius/loopDuration/dolly 每個模式的初始值天生就不同，直接來自
@@ -127,6 +127,30 @@ export function createMemorySlot(params) {
   );
 }
 
+// 特定底色下另有起點的參數。淺底那一組是白底玻璃的基本調校（透射拉高、吸收
+// 加重、邊緣光收斂，並關掉在白底上只會糊成一片的色散與光暈）；深底那兩個焦散
+// 參數則是沿用改版前的值。
+//
+// 這張表以前是寫在 createMotionMemory 裡、在 motionDefaultsFor 之後再補寫一輪，
+// 於是「記憶格的初值」跟「motionDefaultsFor 算出來的預設」對不起來——面板的
+// 「已調整」標記與重設都讀後者，一進淺底就會把這幾根標成已調整。合併成一張表，
+// 兩邊只剩一個來源。
+const BACKDROP_OVERRIDES = {
+  dark: {
+    spectralCausticFocus: 1,
+    spectralCausticSeparation: 1,
+  },
+  light: {
+    transmission: 0.97,
+    absorb: 1.35,
+    envRefraction: 0.025,
+    fresnel: 0.12,
+    rayDispersionEnabled: false,
+    bloomEnabled: false,
+    streaksEnabled: false,
+  },
+};
+
 export function motionDefaultsFor(key) {
   const intrinsicByMode = {
     count: MOTION_DEFAULT_COUNTS,
@@ -146,8 +170,12 @@ export function motionDefaultsFor(key) {
   }
   return Object.fromEntries(MOTION_KEYS.flatMap(motion => BACKDROP_KEYS.map(backdrop => [
     `${motion}|${backdrop}`,
-    backdrop === 'dark' && EDGE_TINT_TARGETS.some(prefix => key === `${prefix}Tint`)
-      ? 0
+    key in BACKDROP_OVERRIDES[backdrop]
+      ? BACKDROP_OVERRIDES[backdrop][key]
+    // 染色強度兩個底色各有自己的起點（見 runtime-defaults 的
+    // EDGE_TINT_STRENGTH_BY_BACKDROP）：深底 0、淺底滿。
+    : EDGE_TINT_TARGETS.some(prefix => key === `${prefix}Tint`)
+      ? EDGE_TINT_STRENGTH_BY_BACKDROP[backdrop]
       // 基底色跟著底色走（見 runtime-defaults 的 EDGE_TINT_BASE_BY_BACKDROP）。
       // COLOR_DEFAULTS 那邊給的是深底的值，淺底在這裡補上自己的。
       : EDGE_TINT_TARGETS.some(prefix => key === `${prefix}TintColor`)
@@ -163,23 +191,11 @@ export function motionDefaultsFor(key) {
 }
 
 export function createMotionMemory() {
-  const memory = {
+  return {
     count: motionDefaultsFor('count'),
     radius: motionDefaultsFor('radius'),
     loopDuration: motionDefaultsFor('loopDuration'),
     dollyEnabled: motionDefaultsFor('dollyEnabled'),
     ...Object.fromEntries(MOTION_SCOPED_KEYS.map(key => [key, motionDefaultsFor(key)])),
   };
-  for (const motion of MOTION_KEYS) {
-    if (memory.spectralCausticFocus) memory.spectralCausticFocus[`${motion}|dark`] = 1;
-    if (memory.spectralCausticSeparation) memory.spectralCausticSeparation[`${motion}|dark`] = 1;
-    if (memory.transmission) memory.transmission[`${motion}|light`] = 0.97;
-    if (memory.absorb) memory.absorb[`${motion}|light`] = 1.35;
-    if (memory.envRefraction) memory.envRefraction[`${motion}|light`] = 0.025;
-    if (memory.fresnel) memory.fresnel[`${motion}|light`] = 0.12;
-    if (memory.rayDispersionEnabled) memory.rayDispersionEnabled[`${motion}|light`] = false;
-    if (memory.bloomEnabled) memory.bloomEnabled[`${motion}|light`] = false;
-    if (memory.streaksEnabled) memory.streaksEnabled[`${motion}|light`] = false;
-  }
-  return memory;
 }

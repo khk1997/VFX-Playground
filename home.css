@@ -154,13 +154,9 @@ a { color: inherit; }
     var(--glass-tint);
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat)) brightness(1.08);
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat)) brightness(1.08);
-  /* 邊緣的三層結構，缺一層就不像玻璃：
-     1. 外面一條暗線 —— 玻璃把背景壓縮進邊界，跟底色分開；
-     2. 上緣內側的聚光 —— 打下來的光在斜邊聚起來；
-     3. 下緣內側更強的聚光 —— 光穿過整塊玻璃之後堆在底部，這道通常比上面亮。 */
+  /* 卡片本身只負責「外面」：一條把玻璃跟底色分開的暗線，加上落影。
+     內側的斜邊全部搬到 ::after —— 畫在這裡會被媒體蓋住，變成只有下半部看得到。 */
   box-shadow:
-    inset 0 7px 9px -8px rgba(255,255,255,.3),
-    inset 0 -10px 12px -10px rgba(255,255,255,.42),
     0 0 0 1px rgba(0,0,0,.34),
     0 18px 44px -16px rgba(0,0,0,.6), 0 4px 10px -5px rgba(0,0,0,.45);
   text-decoration: none; transform: translateZ(0); isolation: isolate; opacity: 0;
@@ -168,34 +164,45 @@ a { color: inherit; }
   transition: transform 380ms cubic-bezier(.2,.8,.2,1), box-shadow 380ms ease,
     background-color 240ms ease, opacity 240ms ease;
 }
-/* iOS 的圓角是連續曲率，不是正圓弧；支援的瀏覽器直接用，其餘退回一般圓角。 */
 /* iOS 的圓角是連續曲率，不是正圓弧；支援的瀏覽器直接用，其餘退回一般圓角。
-   媒體不需要跟著設 —— 它是被卡片裁出來的，形狀自動一致。 */
+   媒體不需要跟著設 —— 它是被卡片裁出來的，形狀自動一致。
+   兩個偽元素就必須自己設：corner-shape 不會繼承，border-radius: inherit 只帶
+   到半徑。少了這一行，鏡緣與游標高光會用正圓弧畫在一張超橢圓的卡片上，轉角處
+   兩條弧分家——白線跟底下的黑色媒體對不起來，看起來就是上下圓角不一致。 */
 @supports (corner-shape: squircle) {
   .card { corner-shape: squircle; border-radius: 30px; }
+  .card::before, .card::after { corner-shape: squircle; }
 }
 .card--featured { grid-column: span 4; }
 /* 唯一留在表面上的光是跟著游標走的那一點，而且很淡。它會動，所以讀起來是反射，
-   不是印在卡片上的花紋。 */
+   不是印在卡片上的花紋。
+   不能用 mix-blend-mode：這一層一旦參與混合，Chrome 會把整張卡片重新分組，連
+   排在它上面的 ::after 鏡緣都被壓到媒體底下去——實測卡片上緣的亮度直接從背景
+   跳到媒體的黑，那條 1px 白線整條不見，只剩下緣那圈 box-shadow 的柔光，看起來
+   就是「上下圓角不一致」。深色卡片上 screen 跟一般疊加本來就幾乎沒有差別。 */
 .card::before {
   content: ""; position: absolute; z-index: 4; inset: 0; border-radius: inherit; pointer-events: none;
-  background: radial-gradient(44% 58% at var(--mx) var(--my), rgba(255,255,255,.2), transparent 64%);
-  mix-blend-mode: screen; opacity: .5; transition: opacity 240ms ease;
+  background: radial-gradient(44% 58% at var(--mx) var(--my), rgba(255,255,255,.14), transparent 64%);
+  opacity: .8; transition: opacity 240ms ease;
 }
-/* 鏡緣：1px 的漸層描邊，用 mask-composite 挖掉中間只留一圈。
-   漸層是上到下（不是斜的）：上緣亮、兩側中段最暗、下緣最亮。左右兩段邊因為
-   縱跨整個漸層，自然就是「兩頭亮、中間暗」，這正是圓角玻璃邊緣該有的樣子。
-   斜向漸層做出來的是一條擦痕，不是一圈邊。 */
+/* ===== 斜邊 =====
+   一條 1px 的線讀起來是 border，不是玻璃。真正看得出厚度的邊緣是分層的：
+   由外往內是「亮線 → 比本體更暗的折射帶 → 本體」，那條暗帶是玻璃把背景壓縮
+   進邊界留下的痕跡，少了它就只是描邊。
+   用堆疊的 inset box-shadow 而不是 mask 描邊：前面的陰影畫在後面的上面，所以
+   把細的亮線排前、厚的暗帶排後，就疊出由外而內的層次；而且 box-shadow 跟著
+   corner-shape 走，不像 mask 那樣一碰到偽元素混合就整條消失。
+   方向性靠位移：整圈給一點底，上緣中等，下緣最亮——光穿過整塊玻璃之後會堆在
+   底部，所以下面那條通常比上面亮。 */
 .card::after {
   content: ""; position: absolute; z-index: 5; inset: 0; border-radius: inherit; pointer-events: none;
-  padding: 1px;
-  background: linear-gradient(180deg,
-    var(--glass-rim) 0%, rgba(255,255,255,.14) 20%, rgba(255,255,255,.06) 52%,
-    rgba(255,255,255,.3) 86%, rgba(255,255,255,.88) 100%);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
+  box-shadow:
+    inset 0 1.5px 0 -0.5px var(--glass-rim),
+    inset 0 -1.6px 0 -0.5px rgba(255,255,255,.9),
+    inset 0 0 0 1px rgba(255,255,255,.17),
+    inset 0 0 0 2.5px rgba(0,0,0,.26),
+    inset 0 9px 10px -9px rgba(255,255,255,.26),
+    inset 0 -12px 13px -11px rgba(255,255,255,.4);
   transition: opacity 240ms ease, filter 240ms ease;
 }
 .card:hover, .card:focus-visible {
@@ -204,7 +211,7 @@ a { color: inherit; }
   box-shadow: 0 34px 78px -18px rgba(0,0,0,.72), 0 8px 20px -8px rgba(0,0,0,.55),
     0 0 42px -14px rgba(var(--theme-left),.35), 0 0 42px -14px rgba(var(--theme-right),.3);
 }
-.card:hover::before, .card:focus-visible::before { opacity: .78; }
+.card:hover::before, .card:focus-visible::before { opacity: 1; }
 .card:hover::after, .card:focus-visible::after { filter: brightness(1.45); }
 /* 沒有 backdrop-filter 就沒有玻璃可言，退回不透明面板，可讀性優先。hover 也要蓋，
    否則 .card:hover 的權重較高，游標一移上去又變回半透明。 */
@@ -266,6 +273,7 @@ a { color: inherit; }
   border-radius: 999px;
   background: linear-gradient(180deg, rgba(0,0,0,.1), rgba(255,255,255,.03) 62%, rgba(255,255,255,.08)), rgba(8,11,17,.42);
   box-shadow: inset 0 1px rgba(255,255,255,.2), inset 0 -1px rgba(255,255,255,.34);
+  text-shadow: 0 1px 1px rgba(0,0,0,.6);
   font: 600 8px/1 var(--font-mono);
   letter-spacing: .13em; text-transform: uppercase; backdrop-filter: blur(14px) saturate(var(--glass-sat));
   -webkit-backdrop-filter: blur(14px) saturate(var(--glass-sat));
@@ -284,26 +292,41 @@ a { color: inherit; }
 .card-meta {
   display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 12px;
   color: #8d94a2; font: 600 9px/1 var(--font-mono); letter-spacing: .12em; text-transform: uppercase;
+  text-shadow: 0 1px 1px rgba(0,0,0,.5);
 }
 .card-index { color: rgb(var(--theme-left)); }
 .card-title-row { display: flex; align-items: start; justify-content: space-between; gap: 18px; }
-.card-title { margin: 0; font: 560 clamp(17px,1.4vw,23px)/1.12 var(--font-display); letter-spacing: -.025em; text-wrap: balance; }
+/* ===== 壓花 =====
+   玻璃底下的東西不會是平貼上去的：受光的那一側有一道極細的亮邊，背光側落一層
+   短而緊的暗影。位移只有 1px、透明度都壓得很低——一旦看得出「有陰影」就變成
+   浮在上面的貼紙，這一層要讓人感覺得到、但指不出來。 */
+.card-title {
+  margin: 0; font: 560 clamp(17px,1.4vw,23px)/1.12 var(--font-display);
+  letter-spacing: -.025em; text-wrap: balance;
+  text-shadow: 0 -1px 0 rgba(255,255,255,.1), 0 1px 2px rgba(0,0,0,.6);
+}
 .card-arrow {
   display: grid; flex: 0 0 auto; place-items: center; width: 31px; height: 31px; color: #e4e7ef;
   border: 1px solid rgba(255,255,255,.2); border-radius: 50%;
   background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.1));
   box-shadow: inset 0 1px rgba(255,255,255,.26), inset 0 -1px rgba(255,255,255,.42), 0 2px 8px rgba(0,0,0,.28);
-  font-size: 15px; transition: transform 240ms ease, background 240ms ease, color 240ms ease;
+  font-size: 15px; text-shadow: 0 1px 1px rgba(0,0,0,.55);
+  transition: transform 240ms ease, background 240ms ease, color 240ms ease;
 }
 .card:hover .card-arrow, .card:focus-visible .card-arrow {
   color: #10131a; background: rgba(255,255,255,.9); transform: translate(2px,-2px);
+  text-shadow: 0 1px 0 rgba(255,255,255,.7);
 }
-.card-description { min-height: 3.1em; margin: 9px 0 15px; color: #b4bbc9; font-size: 11px; line-height: 1.55; letter-spacing: .025em; }
+.card-description {
+  min-height: 3.1em; margin: 9px 0 15px; color: #b4bbc9; font-size: 11px;
+  line-height: 1.55; letter-spacing: .025em; text-shadow: 0 1px 1px rgba(0,0,0,.45);
+}
 .card-tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .tag {
   padding: 5px 7px 4px; color: #bcc3d0; border: 1px solid rgba(255,255,255,.13); border-radius: 8px;
   background: linear-gradient(180deg, rgba(0,0,0,.08), rgba(255,255,255,.025) 60%, rgba(255,255,255,.07));
   box-shadow: inset 0 1px rgba(255,255,255,.14), inset 0 -1px rgba(255,255,255,.26);
+  text-shadow: 0 1px 1px rgba(0,0,0,.55);
   font: 570 8px/1 var(--font-mono); letter-spacing: .07em; text-transform: uppercase;
 }
 .tag[data-tech="Three.js"] { color: #f0f3f8; border-color: rgba(var(--theme-left),.28); background: rgba(var(--theme-left),.075); }
