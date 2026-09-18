@@ -17,14 +17,11 @@ PAGES = [
     ("aurora", "/aurora/index.html"),
     ("bubble", "/bubble/index.html"),
     ("energy-ring", "/energy-ring/index.html"),
-    ("fluid-ink", "/fluid-ink/index.html"),
-    ("nebula", "/nebula/index.html"),
     ("sakura-blizzard", "/sakura-blizzard/index.html"),
 ]
 ONLY_PAGE = os.environ.get("VFX_ONLY_PAGE")
 PLAY_CONTROL_PAGES = {
-    "aurora", "bubble", "energy-ring", "fluid-ink", "nebula",
-    "sakura-blizzard",
+    "aurora", "bubble", "energy-ring", "sakura-blizzard",
 }
 
 
