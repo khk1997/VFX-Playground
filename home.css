@@ -67,16 +67,6 @@ a { color: inherit; }
 }
 .brand { display: inline-flex; align-items: center; gap: 12px; color: var(--ink); text-decoration: none; }
 .brand strong { font: 650 15px/1 var(--font-display); letter-spacing: .16em; }
-.brand-mark {
-  position: relative; width: 27px; height: 27px; border: 1px solid rgba(255,255,255,.56); border-radius: 9px;
-  background: linear-gradient(135deg, rgba(255,255,255,.28), transparent 48%), rgba(255,255,255,.07);
-  box-shadow: -1px 0 rgba(85,225,255,.68), 1px 0 rgba(255,100,211,.62), inset 0 1px rgba(255,255,255,.34);
-  transform: rotate(9deg);
-}
-.brand-mark::after {
-  content: ""; position: absolute; inset: 5px; border: 1px solid rgba(255,255,255,.35);
-  border-radius: 5px; transform: rotate(-18deg);
-}
 #gallery { padding-top: 22px; }
 .filters {
   display: flex; gap: 4px; padding: 5px; overflow-x: auto; border: 1px solid rgba(255,255,255,.13);
@@ -108,7 +98,7 @@ a { color: inherit; }
    裁切 —— 這樣它的外形就「是」卡片的外形，不是另一個對得很準的形狀；兩條同心
    輪廓再怎麼對齊，看起來都還是疊了兩層。 */
 .card {
-  --mx: 50%; --my: 30%; --theme-left: 90,210,255; --theme-right: 255,112,205;
+  --theme-left: 90,210,255; --theme-right: 255,112,205;
   position: relative; grid-column: span 2; min-width: 0; overflow: hidden; color: var(--ink);
   border: 0; border-radius: 24px;
   /* 由下往上三層，跟 iOS icon 的組成一樣：不透明底板 → 主題色 → 玻璃表面。
@@ -139,20 +129,9 @@ a { color: inherit; }
    兩條弧分家——白線跟底下的黑色媒體對不起來，看起來就是上下圓角不一致。 */
 @supports (corner-shape: squircle) {
   .card { corner-shape: squircle; border-radius: 30px; }
-  .card::before, .card::after { corner-shape: squircle; }
+  .card::after { corner-shape: squircle; }
 }
 .card--featured { grid-column: span 4; }
-/* 唯一留在表面上的光是跟著游標走的那一點，而且很淡。它會動，所以讀起來是反射，
-   不是印在卡片上的花紋。
-   不能用 mix-blend-mode：這一層一旦參與混合，Chrome 會把整張卡片重新分組，連
-   排在它上面的 ::after 鏡緣都被壓到媒體底下去——實測卡片上緣的亮度直接從背景
-   跳到媒體的黑，那條 1px 白線整條不見，只剩下緣那圈 box-shadow 的柔光，看起來
-   就是「上下圓角不一致」。深色卡片上 screen 跟一般疊加本來就幾乎沒有差別。 */
-.card::before {
-  content: ""; position: absolute; z-index: 4; inset: 0; border-radius: inherit; pointer-events: none;
-  background: radial-gradient(44% 58% at var(--mx) var(--my), rgba(255,255,255,.14), transparent 64%);
-  opacity: .8; transition: opacity 240ms ease;
-}
 /* ===== 斜邊 =====
    一條 1px 的線讀起來是 border，不是玻璃。真正看得出厚度的邊緣是分層的：
    由外往內是「亮線 → 比本體更暗的折射帶 → 本體」，那條暗帶是玻璃把背景壓縮
@@ -179,7 +158,6 @@ a { color: inherit; }
   box-shadow: 0 34px 78px -18px rgba(0,0,0,.72), 0 8px 20px -8px rgba(0,0,0,.55),
     0 0 42px -14px rgba(var(--theme-left),.35), 0 0 42px -14px rgba(var(--theme-right),.3);
 }
-.card:hover::before, .card:focus-visible::before { opacity: 1; }
 .card:hover::after, .card:focus-visible::after { filter: brightness(1.45); }
 .card[hidden] { display: none; }
 @keyframes card-in { from { opacity: 0; transform: translateY(28px); } to { opacity: 1; transform: translateY(0); } }
@@ -278,31 +256,14 @@ a { color: inherit; }
   text-shadow: 0 1px 1px rgba(0,0,0,.5);
 }
 .card-index { color: rgb(var(--theme-left)); }
-.card-title-row { display: flex; align-items: start; justify-content: space-between; gap: 18px; }
 /* ===== 壓花 =====
    玻璃底下的東西不會是平貼上去的：受光的那一側有一道極細的亮邊，背光側落一層
    短而緊的暗影。位移只有 1px、透明度都壓得很低——一旦看得出「有陰影」就變成
    浮在上面的貼紙，這一層要讓人感覺得到、但指不出來。 */
 .card-title {
-  margin: 0; font: 560 clamp(17px,1.4vw,23px)/1.12 var(--font-display);
+  margin: 0 0 14px; font: 560 clamp(17px,1.4vw,23px)/1.12 var(--font-display);
   letter-spacing: -.025em; text-wrap: balance;
   text-shadow: 0 -1px 0 rgba(255,255,255,.1), 0 1px 2px rgba(0,0,0,.6);
-}
-.card-arrow {
-  display: grid; flex: 0 0 auto; place-items: center; width: 31px; height: 31px; color: #e4e7ef;
-  border: 1px solid rgba(255,255,255,.2); border-radius: 50%;
-  background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.1));
-  box-shadow: inset 0 1px rgba(255,255,255,.26), inset 0 -1px rgba(255,255,255,.42), 0 2px 8px rgba(0,0,0,.28);
-  font-size: 15px; text-shadow: 0 1px 1px rgba(0,0,0,.55);
-  transition: transform 240ms ease, background 240ms ease, color 240ms ease;
-}
-.card:hover .card-arrow, .card:focus-visible .card-arrow {
-  color: #10131a; background: rgba(255,255,255,.9); transform: translate(2px,-2px);
-  text-shadow: 0 1px 0 rgba(255,255,255,.7);
-}
-.card-description {
-  min-height: 3.1em; margin: 9px 0 15px; color: #b4bbc9; font-size: 11px;
-  line-height: 1.55; letter-spacing: .025em; text-shadow: 0 1px 1px rgba(0,0,0,.45);
 }
 .card-tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .tag {
@@ -364,6 +325,4 @@ body.leaving .site-footer, body.leaving .card:not(.launching) { opacity: 0; tran
 }
 @media (prefers-contrast: more) {
   .card, .card:hover, .card:focus-visible { background: #11151e; }
-  .card::before { opacity: 0; }
-  .card-description { color: #d5dae4; }
 }

@@ -31,7 +31,7 @@ def main() -> int:
         assert page.locator(".hero, .gallery-title, .gallery-kicker").count() == 0, (
             "home reintroduced explanatory hero copy above the cards"
         )
-        assert page.locator(".card-description").count() == 13
+        assert page.locator(".card-title").count() == 13
         assert page.locator(".card-poster").count() == 13
         assert page.locator("iframe").count() == 0, "home mounted a live preview before intent"
         assert page.evaluate(
@@ -54,26 +54,30 @@ def main() -> int:
           return box.bottom - tags.bottom <= 24;
         })"""), "one or more cards still leaves excess space below its tags"
 
-        cards.nth(0).hover()
+        # 卡片 1 與 2 是 Energy Ring 與 Aurora，兩張都是 Canvas 2D，載入即播。
+        # 這裡刻意不用卡片 0：那是 Installing，走 Three.js，冷啟動要先編譯著色器，
+        # 實測在 D3D11 上是數十秒級、Vulkan 上也要數秒——用它來驗「hover 會掛上一個
+        # 預覽」只會讓這個測試變成計時賽。要測的是掛載與互斥，不是編譯速度。
+        cards.nth(1).hover()
         page.wait_for_timeout(1_100)
         assert page.locator("iframe").count() == 1, "hover did not activate one live preview"
         live_frame = page.locator("iframe.is-ready")
         assert live_frame.count() == 1, "live preview iframe loaded but was never revealed"
-        preview_a = cards.nth(0).locator(".card-preview").screenshot(animations="allow")
+        preview_a = cards.nth(1).locator(".card-preview").screenshot(animations="allow")
         page.wait_for_timeout(500)
-        preview_b = cards.nth(0).locator(".card-preview").screenshot(animations="allow")
+        preview_b = cards.nth(1).locator(".card-preview").screenshot(animations="allow")
         assert preview_a != preview_b, "live preview is visible but its rendered frame is static"
-        cards.nth(1).hover()
+        cards.nth(2).hover()
         page.wait_for_timeout(1_100)
         assert page.locator("iframe").count() == 1, "hover mounted more than one live preview"
-        assert cards.nth(1).get_attribute("class").find("is-previewing") >= 0
-        assert cards.nth(1).locator("iframe.is-ready").count() == 1, (
-            "Energy Ring live preview loaded but was never revealed"
+        assert cards.nth(2).get_attribute("class").find("is-previewing") >= 0
+        assert cards.nth(2).locator("iframe.is-ready").count() == 1, (
+            "Aurora live preview loaded but was never revealed"
         )
-        energy_a = cards.nth(1).locator(".card-preview").screenshot(animations="allow")
+        aurora_a = cards.nth(2).locator(".card-preview").screenshot(animations="allow")
         page.wait_for_timeout(700)
-        energy_b = cards.nth(1).locator(".card-preview").screenshot(animations="allow")
-        assert energy_a != energy_b, "Energy Ring live preview is visible but not animating"
+        aurora_b = cards.nth(2).locator(".card-preview").screenshot(animations="allow")
+        assert aurora_a != aurora_b, "Aurora live preview is visible but not animating"
 
         page.locator('[data-filter="liquid"]').click()
         assert page.locator("#cards .card:visible").count() == 10

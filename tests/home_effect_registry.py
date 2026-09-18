@@ -42,7 +42,7 @@ READ_CARDS = """() => {
   return cards.map(c => ({
     href: c.getAttribute('href'),
     title: c.querySelector('.card-title')?.textContent,
-    description: c.querySelector('.card-description')?.textContent,
+    description: (c.getAttribute('aria-label') ?? '').split('：').slice(1).join('：') || null,
     tags: [...c.querySelectorAll('.tag')].map(tag => tag.textContent),
     poster: c.querySelector('.card-poster')?.getAttribute('src'),
   }));

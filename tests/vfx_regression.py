@@ -173,7 +173,7 @@ def main():
             else:
                 cards = page.locator("#cards .card")
                 metrics["galleryCardCount"] = cards.count()
-                metrics["galleryDescriptions"] = page.locator(".card-description").count()
+                metrics["galleryTitles"] = page.locator(".card-title").count()
                 metrics["galleryTags"] = page.locator(".card-tags .tag").count()
                 page.locator('[data-filter="liquid"]').click()
                 page.wait_for_timeout(200)
@@ -236,8 +236,8 @@ def main():
             metrics = result["metrics"]
             if metrics.get("galleryCardCount") != 13:
                 failures.append(f"home: expected 13 gallery cards, got {metrics.get('galleryCardCount')}")
-            if metrics.get("galleryDescriptions") != metrics.get("galleryCardCount"):
-                failures.append("home: some gallery cards have no description")
+            if metrics.get("galleryTitles") != metrics.get("galleryCardCount"):
+                failures.append("home: some gallery cards have no title")
             if metrics.get("galleryTags", 0) < metrics.get("galleryCardCount", 0):
                 failures.append("home: some gallery cards have no technology tags")
             if not metrics.get("galleryFilterChanged"):

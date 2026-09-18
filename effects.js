@@ -41,7 +41,15 @@ const STANDALONE_EFFECTS = [
   },
 ];
 
-export const EFFECTS = [...STANDALONE_EFFECTS, ...BUBBLE_EFFECTS].map(effect => ({
+// 開場那張卡是 Installing，不是櫻花。兩者原本落在 0 與 3，而 home.js 的
+// card--featured 正好是 [0, 3, 8]，所以對調的是內容不是版位，格線不受影響。
+const ORDERED = [...STANDALONE_EFFECTS, ...BUBBLE_EFFECTS];
+const lead = ORDERED.findIndex(effect => effect.id === 'research');
+const trail = ORDERED.findIndex(effect => effect.id === 'sakura');
+if (lead < 0 || trail < 0) throw new Error('首頁清單找不到要對調的 research / sakura');
+[ORDERED[lead], ORDERED[trail]] = [ORDERED[trail], ORDERED[lead]];
+
+export const EFFECTS = ORDERED.map(effect => ({
   ...effect,
   posterSrc: `image/previews/${effect.id}.webp`,
 }));

@@ -1,6 +1,6 @@
 'use strict';
 
-import { EFFECTS } from './effects.js?v=ios27-gallery-1';
+import { EFFECTS } from './effects.js?v=vfx-lab-2';
 
 const PREVIEW_W = 660;
 const PREVIEW_H = 570;
@@ -212,31 +212,20 @@ function buildCard(effect, index) {
     makeElement('span', 'card-index', String(index + 1).padStart(2, '0')),
     makeElement('span', 'card-category', effect.category),
   );
-  const titleRow = makeElement('div', 'card-title-row');
   const title = makeElement('h3', 'card-title', effect.title);
-  const arrow = makeElement('span', 'card-arrow', '↗');
-  arrow.setAttribute('aria-hidden', 'true');
-  titleRow.append(title, arrow);
-  const description = makeElement('p', 'card-description', effect.description);
   const tags = makeElement('div', 'card-tags');
   effect.tags.forEach(technology => {
     const tag = makeElement('span', 'tag', technology);
     tag.dataset.tech = technology;
     tags.appendChild(tag);
   });
-  body.append(meta, titleRow, description, tags);
+  body.append(meta, title, tags);
   card.append(preview, body);
 
   card.addEventListener('pointerenter', () => queueLivePreview(card, effect));
   card.addEventListener('pointerleave', () => leaveCard(card));
   card.addEventListener('focus', () => queueLivePreview(card, effect));
   card.addEventListener('blur', () => leaveCard(card));
-  card.addEventListener('pointermove', event => {
-    if (!livePreviewQuery.matches) return;
-    const rect = card.getBoundingClientRect();
-    card.style.setProperty('--mx', `${((event.clientX - rect.left) / rect.width) * 100}%`);
-    card.style.setProperty('--my', `${((event.clientY - rect.top) / rect.height) * 100}%`);
-  });
   card.addEventListener('click', event => {
     event.preventDefault();
     launch(card, effect);
