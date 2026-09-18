@@ -1,6 +1,6 @@
 'use strict';
 
-import { MOTION_HDRI, MOTION_TEXT_DEFAULTS } from './motions/registry.js?v=edge-tint-1';
+import { MOTION_HDRI, MOTION_TEXT_DEFAULTS } from './motions/registry.js?v=type-center-1';
 import {
   DEFAULTS, LEGACY_SELECT_VALUES, SELECT_DEFAULTS, SPECTRAL_CAUSTIC_DEFAULTS,
 } from './runtime-defaults.js?v=tint-light-1';

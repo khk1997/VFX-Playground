@@ -2,7 +2,7 @@ import { EDGE_TINT_TARGETS, edgeTintKeys } from './edge-tint.js?v=dark-tint-1';
 import {
   MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_DOLLY, MOTION_DEFAULT_LOOP_DURATION,
   MOTION_DEFAULT_RADIUS, MOTION_KEYS, MOTION_OVERRIDES,
-} from './motions/registry.js?v=edge-tint-1';
+} from './motions/registry.js?v=type-center-1';
 import {
   COLOR_DEFAULTS, DEFAULTS, EDGE_TINT_BASE_BY_BACKDROP, EDGE_TINT_STRENGTH_BY_BACKDROP, SELECT_DEFAULTS,
   SPECTRAL_CAUSTIC_DEFAULTS, TOGGLE_DEFAULTS,

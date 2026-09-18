@@ -1,5 +1,5 @@
 import { EDGE_TINT_TARGETS, EDGE_TINT_STOPS } from './edge-tint.js?v=dark-tint-1';
-import { MOTION_UNIFORM_MAP } from './motions/registry.js?v=edge-tint-1';
+import { MOTION_UNIFORM_MAP } from './motions/registry.js?v=type-center-1';
 
 // select 字串 → int uniform
 export const SELECTS = {

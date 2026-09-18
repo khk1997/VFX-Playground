@@ -17,7 +17,7 @@ import {
 import {
   MOTION_UNIFORM_MAP, MOTION_SVG_DEMO,
   MOTION_HDRI, MOTION_KEYS, MOTION_TEXT_DEFAULTS, usesShapeField,
-} from './motions/registry.js?v=edge-tint-1';
+} from './motions/registry.js?v=type-center-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import { buildMorphPairs } from './motions/morph.js?v=post-mask-3';
@@ -49,7 +49,7 @@ import {
 import {
   COLORS, SELECTS, createFormatters, createToggleBindings,
 } from './control-schema.js?v=1';
-import { createTypewriterRuntime } from './typewriter-runtime.js?v=1';
+import { createTypewriterRuntime } from './typewriter-runtime.js?v=type-center-1';
 import { createStaticCapillaryRuntime } from './motions/runtime/static-capillary.js?v=1';
 import { createJellyRuntime } from './motions/runtime/jelly.js?v=1';
 import { createResearchRuntime } from './motions/runtime/research.js?v=1';
@@ -855,11 +855,18 @@ let renderer = null, scene = null, camera = null, mesh = null, uniforms = null;
 let pmremGenerator = null, pmremTarget = null;
 let gpuProfiler = null;
 let inited = false;
-// 裝置本身撐得住的解析度上限，不受使用者「抗鋸齒」偏好影響——DIAG.lowres／
-// PREVIEW 場景本來就該固定走最省資源那一路，不該被手動調高的超取樣蓋過去。
-const deviceMaxDpr = DIAG.lowres ? 1 : PREVIEW ? 1 : mobileRenderQuery.matches
-  ? Math.min(window.devicePixelRatio || 1, 1.5)
-  : Math.min(window.devicePixelRatio || 1, 2);
+// 裝置本身撐得住的解析度上限，不受使用者「抗鋸齒」偏好影響——DIAG.lowres 本來
+// 就該固定走最省資源那一路，不該被手動調高的超取樣蓋過去。
+//
+// 預覽以前也一起鎖死在 1，結果是 660×570 的畫面被首頁的大卡片放大到 1090px 才
+// 顯示，等於 1.65 倍的放大，邊緣全是鋸齒。改成跟著 window.devicePixelRatio
+// 走——那個值在預覽裡已經被 preview-performance.js 蓋成外層要求的倍率，而外層
+// 才知道這張卡片實際上要顯示多大（見 home.js 的 previewQuality）。
+let deviceMaxDpr = DIAG.lowres ? 1 : PREVIEW
+  ? Math.min(window.devicePixelRatio || 1, 2.5)
+  : mobileRenderQuery.matches
+    ? Math.min(window.devicePixelRatio || 1, 1.5)
+    : Math.min(window.devicePixelRatio || 1, 2);
 // 這兩個原本是 const，現在會被 applyAntialiasLevel() 依使用者選的超取樣倍率
 // 重算，所以改 let。倍率 ×1（預設）時算出來的值跟原本寫死的一模一樣。
 const initialMaxRenderDpr = deviceMaxDpr;
@@ -1856,6 +1863,8 @@ function updateDropUniforms(t) {
   const capillaryFamily = staticCapillaryRuntime.active();
   // 打字模式的排版與行狀態。回傳值是這一行需要的包圍球半徑（見下面 dropBounds）。
   const typewriterReach = P.motion === 'typewriter' ? updateTypewriterUniforms(phase) : 0;
+  // 鏡頭那邊也要用（見 frame() 的取景），但它不在這個函式裡。
+  typewriterLineReach = typewriterReach;
   if (uniforms) {
     if (capillaryFamily) {
       staticCapillaryRuntime.writeUniforms(uniforms);
@@ -2435,6 +2444,8 @@ const POWER_SAVE_INTERVAL = 1000 / POWER_SAVE_FPS;
 const IDLE_DELAY_MS = 4000;
 let lastInteractionAt = performance.now();
 let lastRenderedAt = 0;
+// 這一行字目前需要的水平半寬（世界單位），由 updateDropUniforms 每幀寫入。
+let typewriterLineReach = 0;
 let windowFocused = true;
 let powerSaveThrottled = false;
 
@@ -3292,6 +3303,16 @@ reducedMotionQuery.addEventListener('change', event => {
 window.addEventListener('message', e => {
   if (e.data === 'vfx-pause') { extPaused = true; syncLoop(); }
   else if (e.data === 'vfx-play') { extPaused = false; syncLoop(); }
+  // 算繪解析度由外層決定：只有首頁知道這張卡片實際上會被顯示成多大。訊息可能
+  // 比這支模組晚到（deviceMaxDpr 是載入當下算的），所以收到就重算一次上限。
+  else if (PREVIEW && e.data?.type === 'vfx-quality' && Number.isFinite(e.data.dpr)) {
+    const next = Math.max(0.75, Math.min(2.5, e.data.dpr));
+    if (Math.abs(next - deviceMaxDpr) > 0.01) {
+      deviceMaxDpr = next;
+      adaptiveQuality.updateLimits(next, next);
+      refreshRenderQuality();
+    }
+  }
 });
 document.addEventListener('visibilitychange', syncLoop);
 
@@ -3367,9 +3388,10 @@ function frame(now) {
   sampleRenderQuality(now);
   const dt = Math.min((now - last) / 1000, 0.05);
   last = now;
-  // 卡片只會被短暫 hover，預覽用稍快節奏把長達 12 秒的敘事循環壓進可感知的
-  // 時間窗；正式頁面與匯出維持原速。
-  const previewTimeScale = PREVIEW ? 1.8 : 1;
+  // 預覽與作品頁同速。這裡曾經是 1.8 倍，理由是「卡片只會被短暫 hover，把長達
+  // 12 秒的循環壓進可感知的時間窗」——但代價是首頁看到的節奏跟點進去之後對不
+  // 起來，同一個效果變成兩種速度，預覽反而不再是預覽。
+  const previewTimeScale = 1;
   simT = (simT + dt * previewTimeScale) % Math.max(0.001, P.loopDuration);
   // 診斷：釘死動畫時間，讓兩個 shader 變體能在同一幀上做逐像素比對。
   if (DIAG_TIME !== null) simT = DIAG_TIME;
@@ -3439,7 +3461,19 @@ function frame(now) {
   const formationDolly = 1 - formationFocus * 0.30;
   // 首頁卡片預覽沿用上一版較寬鬆的取景距離，避免分裂時右側大滴貼近邊緣；
   // 完整調參頁仍使用面板中的鏡頭距離。
-  const previewCameraDistance = PREVIEW ? 4.95 : P.cameraDistance;
+  let previewCameraDistance = PREVIEW ? 4.95 : P.cameraDistance;
+  // 打字模式的寬度是由字串長度決定的，不是固定的——一個固定鏡距沒辦法同時服務
+  // 「LIQUID」跟一整句話。而且預覽框（660×570）比作品頁窄得多，同樣的距離在
+  // 那裡會直接把字切掉：上面那個 4.95 是照水滴模式調的，對打字反而比面板的
+  // 5.1 還近。
+  //
+  // 可見半寬 = 距離 × tanHalfFov × aspect（見 shaders.js 的 ro/rd），反過來就能
+  // 算出「要放到多遠才裝得下」。只往後退不往前進：字短的時候維持原本的構圖。
+  if (P.motion === 'typewriter' && typewriterLineReach > 0) {
+    const halfWidthPerUnit = uniforms.uTanHalfFov.value * Math.max(0.35, aspect);
+    const fitDistance = (typewriterLineReach * 1.12) / halfWidthPerUnit;
+    previewCameraDistance = Math.max(previewCameraDistance, fitDistance);
+  }
   let cameraDistance = previewCameraDistance * dolly * compositionDistance * formationDolly;
   if (isMobilePortrait) {
     // 以主要水滴投影外輪廓的中點校正構圖。面積重心會被較大的水滴拉動，

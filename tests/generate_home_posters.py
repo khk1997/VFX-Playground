@@ -12,9 +12,10 @@ from playwright.sync_api import sync_playwright
 # 與 bubble.js 主迴圈裡預覽的起始 simT 相同（loopDuration 的 8%）。
 PREVIEW_START_PHASE = 0.08
 # 卡片不是在第一幀就把海報換成 iframe：bubble.js 畫出第一幀後還會等
-# PREVIEW_PRESENT_DELAY_MS（260ms）才標記 stageReady，而預覽的時間流速是 1.8 倍。
-# 海報要對上的是「亮出來的那一幀」，所以要把這段時間也加進相位。
-PREVIEW_REVEAL_LEAD_S = 0.26 * 1.8
+# PREVIEW_PRESENT_DELAY_MS（260ms）才標記 stageReady。海報要對上的是「亮出來的
+# 那一幀」，所以要把這段時間也加進相位。
+# （預覽曾經跑 1.8 倍速，這裡要再乘上去；現在預覽與作品頁同速，倍率就是 1。）
+PREVIEW_REVEAL_LEAD_S = 0.26
 
 POSTERS = {
     "sakura": "sakura-blizzard/index.html?preview=1",

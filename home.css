@@ -14,8 +14,17 @@
   /* ===== 玻璃材質 =====
      一片真的玻璃需要三件事同時成立：底下的東西看得見（半透明）、看見的東西被
      折散（backdrop blur + 提高飽和度），以及邊緣比中央亮（鏡緣的全反射）。
-     少了任何一件都只會變成一塊深色壓克力板。 */
+     少了任何一件都只會變成一塊深色壓克力板。
+     這組給的是頂欄、篩選列那些真的疊在頁面上的小元件；卡片走底板那條路。 */
   --glass-tint: rgba(18, 24, 37, .26);
+  /* ===== 卡片底板 =====
+     iOS 的玻璃 icon 不是一扇開在桌布上的窗：它底下永遠有一層自己的、不透明的
+     色塊，玻璃疊在那上面。邊緣讀得出厚度，是因為它在折那層底板——有東西可折。
+     我們原本的卡片底下是近黑（整頁亮度中位數 18/255），斜邊做得再準，也只是
+     一條白線浮在黑上。改成不透明的中間調底板之後，斜邊的亮線與暗帶才有對比可
+     依附。代價是頁面背景不再透進卡片，所以各自的主題色要自己撐起身分（見
+     .card 的兩道 radial，等同 icon 的底色層）。 */
+  --card-base: #242a39;
   --glass-blur: 26px;
   --glass-sat: 185%;
   --glass-rim: rgba(255, 255, 255, .5);
@@ -144,16 +153,17 @@ a { color: inherit; }
   --mx: 50%; --my: 30%; --theme-left: 90,210,255; --theme-right: 255,112,205;
   position: relative; grid-column: span 2; min-width: 0; overflow: hidden; color: var(--ink);
   border: 0; border-radius: 24px;
-  /* 表面本身幾乎是平的。玻璃感全部交給邊緣去講——一道斜向的擦光會把整塊卡片
-     變成一片有紋路的壓克力，真正的厚玻璃中央是乾淨的，只有邊緣在折光。 */
+  /* 由下往上三層，跟 iOS icon 的組成一樣：不透明底板 → 主題色 → 玻璃表面。
+     表面那層本身幾乎是平的，玻璃感全部交給邊緣去講——一道斜向的擦光會把整塊
+     卡片變成一片有紋路的壓克力，真正的厚玻璃中央是乾淨的，只有邊緣在折光。
+     底板不透明，所以不掛 backdrop-filter：什麼都透不過來，那層模糊只是白花
+     GPU（13 張卡片同時模糊不是小數目）。 */
   background:
-    linear-gradient(180deg, rgba(0,0,0,.1), rgba(0,0,0,.02) 26%,
-      rgba(255,255,255,.012) 62%, rgba(255,255,255,.07)),
-    radial-gradient(130% 96% at 10% -12%, rgba(var(--theme-left),.15), transparent 48%),
-    radial-gradient(130% 96% at 94% 112%, rgba(var(--theme-right),.12), transparent 46%),
-    var(--glass-tint);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat)) brightness(1.08);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat)) brightness(1.08);
+    linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.012) 34%,
+      rgba(0,0,0,.05) 68%, rgba(255,255,255,.05)),
+    radial-gradient(130% 96% at 10% -12%, rgba(var(--theme-left),.20), transparent 52%),
+    radial-gradient(130% 96% at 94% 112%, rgba(var(--theme-right),.16), transparent 50%),
+    var(--card-base);
   /* 卡片本身只負責「外面」：一條把玻璃跟底色分開的暗線，加上落影。
      內側的斜邊全部搬到 ::after —— 畫在這裡會被媒體蓋住，變成只有下半部看得到。 */
   box-shadow:
@@ -207,17 +217,12 @@ a { color: inherit; }
 }
 .card:hover, .card:focus-visible {
   transform: translateY(-7px) scale(1.006); outline: none;
-  background-color: rgba(22, 28, 42, .42);
+  background-color: #2b3244;
   box-shadow: 0 34px 78px -18px rgba(0,0,0,.72), 0 8px 20px -8px rgba(0,0,0,.55),
     0 0 42px -14px rgba(var(--theme-left),.35), 0 0 42px -14px rgba(var(--theme-right),.3);
 }
 .card:hover::before, .card:focus-visible::before { opacity: 1; }
 .card:hover::after, .card:focus-visible::after { filter: brightness(1.45); }
-/* 沒有 backdrop-filter 就沒有玻璃可言，退回不透明面板，可讀性優先。hover 也要蓋，
-   否則 .card:hover 的權重較高，游標一移上去又變回半透明。 */
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .card, .card:hover, .card:focus-visible { background-color: rgba(14,18,28,.93); }
-}
 .card[hidden] { display: none; }
 @keyframes card-in { from { opacity: 0; transform: translateY(28px); } to { opacity: 1; transform: translateY(0); } }
 
@@ -227,7 +232,7 @@ a { color: inherit; }
   position: relative; aspect-ratio: 4/3; overflow: hidden;
   background: radial-gradient(circle at 28% 20%, rgba(var(--theme-left),.48), transparent 30%),
     radial-gradient(circle at 73% 76%, rgba(var(--theme-right),.36), transparent 34%), #090c12;
-  box-shadow: 0 6px 14px -8px rgba(0,0,0,.7);
+  box-shadow: 0 10px 18px -10px rgba(0,0,0,.85), 0 2px 4px -2px rgba(0,0,0,.6);
 }
 .card--featured .card-preview { aspect-ratio: 16/8.9; }
 .card-poster, .card-preview iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
@@ -371,10 +376,7 @@ body.leaving .site-footer, body.leaving .card:not(.launching) { opacity: 0; tran
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
 @media (prefers-contrast: more) {
-  .card, .card:hover, .card:focus-visible {
-    background: rgba(9,12,18,.96); backdrop-filter: none; -webkit-backdrop-filter: none;
-  }
+  .card, .card:hover, .card:focus-visible { background: #11151e; }
   .card::before { opacity: 0; }
-  .card::after { background: rgba(255,255,255,.46); }
   .card-description { color: #d5dae4; }
 }

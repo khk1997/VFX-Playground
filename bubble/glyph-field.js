@@ -202,11 +202,18 @@ function bakeOneGlyph(ch, tile, ctx, hi) {
   ctx.fillText(ch, hi * 0.5, hi * BASELINE_RATIO);
   const pixels = ctx.getImageData(0, 0, hi, hi).data;
   const coverage = new Float32Array(hi * hi);
-  let ink = 0;
+  // 順手記下這個字墨跡的上下界。垂直置中要看的是墨在哪裡，不是基線在哪裡：
+  // 大寫字整個落在基線上方，descender 又只有部分字有，靠字體度量猜一定會偏。
+  let ink = 0, inkTopPx = hi, inkBottomPx = -1;
   for (let i = 0; i < hi * hi; i++) {
     const a = pixels[i * 4 + 3] / 255;
     coverage[i] = a;
-    if (a > 0.5) ink++;
+    if (a > 0.5) {
+      ink++;
+      const y = (i / hi) | 0;
+      if (y < inkTopPx) inkTopPx = y;
+      if (y > inkBottomPx) inkBottomPx = y;
+    }
   }
   // 空白字元沒有墨——不必付 EDT 的錢，直接填一格全正距離。夾在 RANGE 上，
   // 這樣它在 shader 眼裡就是「這格什麼都沒有」。
@@ -234,7 +241,8 @@ function bakeOneGlyph(ch, tile, ctx, hi) {
   // 推到黏在一起——繁體字正是踩在這條線上（見 shaders.js 的 bevel 夾制）。
   let inner = 0;
   for (let i = 0; i < blurred.length; i++) if (blurred[i] < 0) inner = Math.max(inner, -blurred[i]);
-  return { field: blurred, empty: false, inner };
+  // 格單位、由上緣起算（跟 canvas 同向）。
+  return { field: blurred, empty: false, inner, inkTop: inkTopPx / hi, inkBottom: (inkBottomPx + 1) / hi };
 }
 
 // 烘焙一份字形圖集。同步計算（跟 SVG 路徑一樣），呼叫端負責 debounce。
@@ -281,9 +289,16 @@ export function bakeGlyphAtlas(phrases) {
   const indexOf = new Map();
   // 整份圖集取最小值：一行字裡最細的那個字決定圓角的安全上限。
   let feature = Infinity;
+  // 整行的墨跡上下界，用來把整行當成一塊去置中（不是每個字各自置中——那樣
+  // 「LIQUID」裡沒有 descender 的字會跟有 descender 的字不對齊）。
+  let inkTop = Infinity, inkBottom = -Infinity;
   for (let i = 0; i < chars.length; i++) {
-    const { field, empty, inner } = bakeGlyphCached(chars[i], tile, ctx, hi);
-    if (!empty) feature = Math.min(feature, inner);
+    const { field, empty, inner, inkTop: top, inkBottom: bottom } = bakeGlyphCached(chars[i], tile, ctx, hi);
+    if (!empty) {
+      feature = Math.min(feature, inner);
+      inkTop = Math.min(inkTop, top);
+      inkBottom = Math.max(inkBottom, bottom);
+    }
     const col = i % cols;
     const row = (i / cols) | 0;
     // 每格自己翻轉列序：canvas 的 y=0 是上緣，DataTexture 的第一列是 v=0（下緣）。
@@ -310,6 +325,11 @@ export function bakeGlyphAtlas(phrases) {
     advance: advancePx * (TILE_WORLD / hi) * (cjk ? CJK_TRACKING : 1),
     // 基線相對格中心的位移，正值代表格中心在基線上方。
     baseline: (BASELINE_RATIO - 0.5) * TILE_WORLD,
+    // 墨跡中心相對格中心的位移，正值代表墨在格中心上方（格單位）。
+    // 排版時要對齊的是這個，不是基線——見 typewriter-runtime 的 updateUniforms。
+    inkCenter: Number.isFinite(inkTop) && Number.isFinite(inkBottom)
+      ? (0.5 - (inkTop + inkBottom) * 0.5) * TILE_WORLD
+      : 0,
     indexOf,
     count: chars.length,
     truncated,

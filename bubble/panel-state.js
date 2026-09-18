@@ -1,7 +1,7 @@
 'use strict';
 
 import { EDGE_TINT_TARGETS, edgeTintParams } from './edge-tint.js?v=dark-tint-1';
-import { motionGates, usesShapeField } from './motions/registry.js?v=edge-tint-1';
+import { motionGates, usesShapeField } from './motions/registry.js?v=type-center-1';
 
 export function createPanelStateController({
   params: P,

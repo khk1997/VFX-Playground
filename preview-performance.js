@@ -71,7 +71,9 @@
     }
 
     if (Number.isFinite(event.data.dpr)) {
-      const nextDprCap = Math.max(1, Math.min(1.5, event.data.dpr));
+      // 上限放到 2.5：首頁的大卡片會把 660×570 的畫面放大到 1090px 以上，
+      // 卡在 1.5 的話送過來的需求會被砍掉，畫面就是被放大的鋸齒。
+      const nextDprCap = Math.max(0.75, Math.min(2.5, event.data.dpr));
       if (Math.abs(nextDprCap - dprCap) > .01) {
         dprCap = nextDprCap;
         nativeRAF(() => dispatchEvent(new Event('resize')));

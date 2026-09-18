@@ -5,7 +5,7 @@ import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
   setCustomFont, useSystemFont, clearCustomFont, CUSTOM_FONT_FAMILY_NAME,
-} from './glyph-field.js?v=typewriter-3';
+} from './glyph-field.js?v=type-center-1';
 
 export function createTypewriterRuntime({ THREE, params: P, getUniforms, requestRender, formatters }) {
   const glyphData = new Float32Array(MAX_TYPE_GLYPHS * 4);
@@ -124,7 +124,13 @@ export function createTypewriterRuntime({ THREE, params: P, getUniforms, request
 
     const advance = glyphAtlas.advance * Math.max(0.1, P.typeTracking);
     const size = Math.max(0.01, P.typeSize);
-    uniforms.uTypeLine.value.set(advance, size, glyphAtlas.baseline, anchor);
+    // uTypeLine.z 是「格中心要放在世界的哪個高度」（字級單位）。
+    //
+    // 原本放的是 baseline，效果是把基線對到原點——但大寫字整個落在基線上方，
+    // 於是整行字看起來就是浮在畫面中央的上方（實測偏高約半個字高）。要置中的
+    // 是墨跡，不是基線，所以改成把墨跡中心對到原點。
+    const lineCenter = -glyphAtlas.inkCenter;
+    uniforms.uTypeLine.value.set(advance, size, lineCenter, anchor);
     uniforms.uTypeShape.value.set(P.typeDepth, P.typeBevel, P.typeGrow, glyphAtlas.feature);
     const caretWidth = Math.max(0, P.typeCaretWidth) * size * 0.5;
     if (caretWidth > 0.001) {
@@ -133,7 +139,10 @@ export function createTypewriterRuntime({ THREE, params: P, getUniforms, request
       const caretX = visible > 0 ? x0 + visible * advWorld : 0;
       const blinks = Math.max(1, Math.round(P.loopDuration / 0.53));
       const on = fract(phase * blinks) < 0.5 ? 1 : 0;
-      uniforms.uTypeCaret.value.set(caretX, size * 0.18, caretWidth, on);
+      // 游標是照基線設計的（基線之上 0.18 個字級），所以要跟著基線走，不是跟著
+      // 格中心走。基線的位置 = 格中心 − baseline。
+      const caretY = (lineCenter - glyphAtlas.baseline + 0.18) * size;
+      uniforms.uTypeCaret.value.set(caretX, caretY, caretWidth, on);
     } else {
       uniforms.uTypeCaret.value.set(0, 0, 0, 0);
     }

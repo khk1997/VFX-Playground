@@ -1,6 +1,6 @@
 'use strict';
 
-import { MOTION_PARAMS } from './motions/registry.js?v=edge-tint-1';
+import { MOTION_PARAMS } from './motions/registry.js?v=type-center-1';
 
 function buildMotionSubgroup(param, block) {
   const details = document.createElement('details');

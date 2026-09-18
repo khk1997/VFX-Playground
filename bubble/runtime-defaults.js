@@ -1,7 +1,7 @@
 import {
   MOTION_DEFAULT_DOLLY, MOTION_PARAM_DEFAULTS, MOTION_TOGGLE_DEFAULTS,
   MOTION_COLOR_DEFAULTS,
-} from './motions/registry.js?v=edge-tint-1';
+} from './motions/registry.js?v=type-center-1';
 
 /* ===== 參數 ===== */
 export const DEFAULTS = {              // 數值滑桿

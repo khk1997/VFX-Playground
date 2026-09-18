@@ -93,6 +93,20 @@ function makeElement(tag, className, text) {
   return element;
 }
 
+// 預覽該用多少算繪解析度。
+//
+// iframe 永遠是 660×570，但卡片有大有小：首頁的大卡片會把它放大到 1090 裝置
+// 像素寬顯示，小卡片只用到 528。以前固定送 1.25、而且效果頁那邊還把預覽鎖死在
+// 1，等於大卡片一律是「660 的畫面放大成 1090」——邊緣全是鋸齒。
+//
+// 要的就是 1:1：算繪的像素數 = 這張卡片實際佔的裝置像素數。上限 2 是成本護欄
+// （raymarch 的成本跟像素面積成線性），下限 0.75 讓小卡片省一點。
+function previewDpr(host) {
+  const rect = host.getBoundingClientRect();
+  const needed = (rect.width * (window.devicePixelRatio || 1)) / PREVIEW_W;
+  return Math.max(0.75, Math.min(2, Number(needed.toFixed(2))));
+}
+
 function fitPreview(frame, host) {
   const rect = host.getBoundingClientRect();
   if (!rect.width || !rect.height) return;
@@ -133,7 +147,7 @@ function startLivePreview(card, effect) {
   frame.addEventListener('load', () => {
     if (activePreview?.frame !== frame) return;
     fitPreview(frame, host);
-    try { frame.contentWindow?.postMessage({ type: 'vfx-quality', fps: 30, dpr: 1.25 }, '*'); } catch (_) {}
+    try { frame.contentWindow?.postMessage({ type: 'vfx-quality', fps: 30, dpr: previewDpr(host) }, '*'); } catch (_) {}
     try { frame.contentWindow?.postMessage('vfx-play', '*'); } catch (_) {}
     const reveal = () => {
       if (activePreview?.frame === frame && frame.isConnected) {
