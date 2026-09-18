@@ -6,7 +6,8 @@
 
 :root {
   color-scheme: dark;
-  --page: #05070b;
+  /* Discord 預設深色主題的主背景色。 */
+  --page: #313338;
   --ink: #f6f8ff;
   --muted: #a7adba;
   --quiet: #727987;
@@ -48,35 +49,13 @@ a { color: inherit; }
 }
 .skip-link:focus { transform: translateY(0); }
 
-#bg {
-  position: fixed; z-index: 0; inset: 0; overflow: hidden; pointer-events: none;
-  background: linear-gradient(180deg, rgba(5,7,11,.08), rgba(5,7,11,.92)),
-    radial-gradient(circle at 50% -10%, #182033 0, #090c13 34%, #05070b 70%);
-}
-#bg::before, #bg::after {
-  content: ""; position: absolute; width: min(58vw, 850px); aspect-ratio: 1; border-radius: 50%;
-  filter: blur(90px); opacity: .22; transform: translateZ(0);
-}
-#bg::before {
-  top: -26%; left: -13%; background: conic-gradient(from 140deg, #35d6ff, #6a75ff, #ed7fd2, #35d6ff);
-  animation: atmosphere-a 22s ease-in-out infinite alternate;
-}
-#bg::after {
-  right: -22%; bottom: -38%; background: conic-gradient(from 310deg, #ff8274, #7a6dff, #41e5cb, #ff8274);
-  animation: atmosphere-b 27s ease-in-out infinite alternate;
-}
-.bg-grid {
-  position: absolute; inset: 0; opacity: .16;
-  background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
-  background-size: 72px 72px; mask-image: linear-gradient(to bottom, #000, transparent 78%);
-}
-.bg-noise {
-  position: absolute; inset: 0; opacity: .2; mix-blend-mode: soft-light;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.86' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.16'/%3E%3C/svg%3E");
-}
-@keyframes atmosphere-a { to { transform: translate(13vw, 8vh) scale(1.1) rotate(16deg); } }
-@keyframes atmosphere-b { to { transform: translate(-10vw, -6vh) scale(.92) rotate(-18deg); } }
+/* 背景就是一塊底色，沒有光暈、沒有漸層、沒有網格與雜訊。
+   前一版是兩顆 850px 的 conic-gradient 疊 filter: blur(90px)。頁面靜止時那層
+   模糊會被快取，看起來毫無代價；但只要卡片的即時預覽開始逐幀重繪，Chrome 就
+   每一幀重算一次那兩個大模糊——整個分頁（不只 iframe）從 60fps 掉到 8.8fps，
+   每幀 114ms，其中畫圖只佔 0.5ms。單獨關掉那道 filter 就立刻回到 60fps。
+   will-change、contain: paint、isolation 全都救不了，Chrome 照樣重算。
+   這個背景不是這個專案的重點，所以直接換成單色，順便把問題連根拔掉。 */
 
 .site-shell { position: relative; z-index: 1; width: min(100% - 48px, 1540px); margin: 0 auto; }
 /* 版頭只有兩件東西：左邊是身分，右邊是唯一的控制項。篩選列原本自己佔一整列，
@@ -377,7 +356,6 @@ body.leaving .site-footer, body.leaving .card:not(.launching) { opacity: 0; tran
    關掉「動畫效果」就會整站生效。 */
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  #bg::before, #bg::after { animation: none; }
   /* .card 的基態是 opacity: 0，靠 card-in 的 forwards 補到 1。拿掉動畫就必須同時
      把透明度補回來，否則 13 張卡全部隱形。 */
   .card { animation: none; opacity: 1; }
