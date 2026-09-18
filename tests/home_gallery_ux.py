@@ -35,8 +35,8 @@ def main() -> int:
         assert page.locator(".card-poster").count() == 13
         assert page.locator("iframe").count() == 0, "home mounted a live preview before intent"
         assert page.evaluate(
-            "() => getComputedStyle(document.querySelector('.work-count')).alignItems"
-        ) == "center", "experiment count text is not vertically centered"
+            "() => document.querySelectorAll('.topbar .filters .filter-btn').length"
+        ) == 5, "filters are no longer the topbar's only control"
         assert page.evaluate(
             "() => getComputedStyle(document.querySelector('#cards')).gridTemplateColumns.split(' ').length"
         ) == 10, "desktop gallery is not using five two-track card columns"

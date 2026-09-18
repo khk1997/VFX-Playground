@@ -79,11 +79,15 @@ a { color: inherit; }
 @keyframes atmosphere-b { to { transform: translate(-10vw, -6vh) scale(.92) rotate(-18deg); } }
 
 .site-shell { position: relative; z-index: 1; width: min(100% - 48px, 1540px); margin: 0 auto; }
+/* 版頭只有兩件東西：左邊是身分，右邊是唯一的控制項。篩選列原本自己佔一整列，
+   但它只有一排藥丸，那一列有九成是空的——收進版頭之後標題與篩選共用同一條基線，
+   卡片也往上移了四十幾個像素。 */
 .topbar {
-  display: flex; align-items: center; justify-content: space-between; min-height: 86px;
-  border-bottom: 1px solid rgba(255,255,255,.08);
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px;
+  min-height: 86px; border-bottom: 1px solid rgba(255,255,255,.08);
 }
 .brand { display: inline-flex; align-items: center; gap: 12px; color: var(--ink); text-decoration: none; }
+.brand strong { font: 650 15px/1 var(--font-display); letter-spacing: .16em; }
 .brand-mark {
   position: relative; width: 27px; height: 27px; border: 1px solid rgba(255,255,255,.56); border-radius: 9px;
   background: linear-gradient(135deg, rgba(255,255,255,.28), transparent 48%), rgba(255,255,255,.07);
@@ -94,32 +98,7 @@ a { color: inherit; }
   content: ""; position: absolute; inset: 5px; border: 1px solid rgba(255,255,255,.35);
   border-radius: 5px; transform: rotate(-18deg);
 }
-.brand-copy { display: grid; gap: 1px; }
-.brand-copy strong { font: 650 13px/1 var(--font-display); letter-spacing: .16em; }
-.brand-copy span {
-  color: var(--quiet); font: 500 8px/1.2 var(--font-mono); letter-spacing: .22em; text-transform: uppercase;
-}
-.topbar-meta { display: flex; align-items: center; gap: 9px; }
-.work-count, #sndBtn {
-  min-height: 37px; padding: 0 14px; color: #d9deea; border: 1px solid var(--line); border-radius: 999px;
-  background: linear-gradient(180deg, rgba(0,0,0,.08), rgba(255,255,255,.03) 62%, rgba(255,255,255,.07)), var(--glass-tint);
-  box-shadow: inset 0 1px rgba(255,255,255,.2), inset 0 -1px rgba(255,255,255,.34),
-    inset 0 -6px 8px -7px rgba(255,255,255,.4), 0 8px 24px rgba(0,0,0,.22);
-  font: 600 10px/1 var(--font-mono); letter-spacing: .12em;
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
-}
-.work-count { display: inline-flex; align-items: center; justify-content: center; }
-#sndBtn {
-  display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
-  transition: transform 180ms ease, border-color 180ms ease, background-color 180ms ease;
-}
-#sndBtn:hover { transform: translateY(-1px); border-color: rgba(255,255,255,.3); }
-#sndBtn:active { transform: scale(.97); }
-.sound-dot { width: 6px; height: 6px; border-radius: 50%; background: #72f6c3; box-shadow: 0 0 12px rgba(114,246,195,.72); }
-#sndBtn[aria-pressed="false"] .sound-dot { background: #69707d; box-shadow: none; }
-
-.gallery-head { display: flex; justify-content: flex-end; padding: 24px 0 18px; }
+#gallery { padding-top: 22px; }
 .filters {
   display: flex; gap: 4px; padding: 5px; overflow-x: auto; border: 1px solid rgba(255,255,255,.13);
   border-radius: 999px;
@@ -257,11 +236,19 @@ a { color: inherit; }
   background: linear-gradient(112deg, rgba(255,255,255,.12), transparent 18% 74%, rgba(255,255,255,.05)),
     linear-gradient(180deg, transparent 52%, rgba(3,5,9,.3)); box-shadow: inset 0 -1px rgba(255,255,255,.1);
 }
+/* 掃描光只有在「這張卡正在載入或正在播」時才存在。
+   原本它是 display 著的、opacity: 0、外加 will-change——那三件事加起來等於 13 張
+   卡各自常駐一個 GPU 圖層，而且因為 mix-blend-mode: screen，每一個都要求合成器
+   把底下讀回來混一次。一張都看不見，成本卻照付。同時間最多只有一張卡在預覽，所以
+   基態直接 display: none，will-change 也只在真的要動的那一瞬間才掛。 */
 .preview-prism::after {
-  content: ""; position: absolute; inset: -40% -65%; opacity: 0; transform: translate3d(-42%,0,0) rotate(12deg);
+  content: ""; position: absolute; display: none; inset: -40% -65%; opacity: 0;
+  transform: translate3d(-42%,0,0) rotate(12deg);
   background: linear-gradient(90deg, transparent 37%, rgba(var(--theme-left),.04) 45%, rgba(255,255,255,.28) 50%, rgba(var(--theme-right),.12) 55%, transparent 63%);
-  mix-blend-mode: screen; will-change: transform, opacity;
+  mix-blend-mode: screen;
 }
+.card.is-loading-preview .preview-prism::after,
+.card.is-previewing .preview-prism::after { display: block; will-change: transform, opacity; }
 .card.is-loading-preview .preview-prism::after {
   opacity: .72; animation: preview-scan 1.15s cubic-bezier(.45,0,.2,1) infinite;
 }
@@ -276,11 +263,23 @@ a { color: inherit; }
   position: absolute; z-index: 3; top: 15px; right: 15px; display: inline-flex; align-items: center; gap: 7px;
   height: 28px; padding: 0 10px; color: rgba(255,255,255,.82); border: 1px solid rgba(255,255,255,.18);
   border-radius: 999px;
-  background: linear-gradient(180deg, rgba(0,0,0,.1), rgba(255,255,255,.03) 62%, rgba(255,255,255,.08)), rgba(8,11,17,.42);
+  background-image: linear-gradient(180deg, rgba(0,0,0,.1), rgba(255,255,255,.03) 62%, rgba(255,255,255,.08));
+  background-color: rgba(8,11,17,.58);
   box-shadow: inset 0 1px rgba(255,255,255,.2), inset 0 -1px rgba(255,255,255,.34);
   text-shadow: 0 1px 1px rgba(0,0,0,.6);
   font: 600 8px/1 var(--font-mono);
-  letter-spacing: .13em; text-transform: uppercase; backdrop-filter: blur(14px) saturate(var(--glass-sat));
+  letter-spacing: .13em; text-transform: uppercase;
+  transition: background-color 200ms ease;
+}
+/* 玻璃只給游標底下那一張。徽章是 28px 高的小藥丸，疊在一張已經被壓暗到
+   brightness(.82) 的海報上——模糊與不模糊的差別，靠把底色從 .42 補到 .58 就幾乎
+   補平了。但成本差很多：backdrop-filter 不是一個濾鏡參數，是每幀一次獨立的
+   render pass（擷取背景 → 降採樣 → 兩趟高斯 → saturate → 合回去）。13 張卡全掛
+   著，就是每幀 13 次。而真的需要玻璃的只有正在播即時預覽的那一張：只有它底下的
+   東西在動。 */
+.card:hover .preview-state, .card:focus-visible .preview-state {
+  background-color: rgba(8,11,17,.42);
+  backdrop-filter: blur(14px) saturate(var(--glass-sat));
   -webkit-backdrop-filter: blur(14px) saturate(var(--glass-sat));
 }
 .preview-state::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: rgba(255,255,255,.42); }
@@ -342,7 +341,7 @@ a { color: inherit; }
   letter-spacing: .12em; text-transform: uppercase;
 }
 .site-footer strong { color: #aeb4c0; font-weight: 600; }
-body.leaving .topbar, body.leaving .gallery-head,
+body.leaving .topbar,
 body.leaving .site-footer, body.leaving .card:not(.launching) { opacity: 0; transition: opacity 260ms ease; }
 .card.launching { z-index: 20; transform: scale(1.035); opacity: 0; transition: transform 360ms cubic-bezier(.4,0,.9,.35), opacity 300ms ease 60ms; }
 
@@ -358,10 +357,9 @@ body.leaving .site-footer, body.leaving .card:not(.launching) { opacity: 0; tran
 }
 @media (max-width: 680px) {
   .site-shell { width: min(100% - 24px, 520px); }
-  .topbar { min-height: 72px; }
-  .brand-copy span, .work-count { display: none; }
-  #sndBtn { width: 37px; padding: 0; justify-content: center; font-size: 0; }
-  .gallery-head { padding: 18px 0 14px; }
+  /* 窄螢幕放不下「標題 + 五顆篩選」同一排，讓 topbar 換行、篩選列自己佔滿一行。 */
+  .topbar { min-height: 0; padding: 16px 0; }
+  #gallery { padding-top: 16px; }
   .filters { width: 100%; }
   .filter-btn { flex: 1 0 auto; }
   #cards { gap: 15px; padding-bottom: 54px; }
@@ -371,9 +369,20 @@ body.leaving .site-footer, body.leaving .card:not(.launching) { opacity: 0; tran
   .card-title { font-size: 21px; }
   .site-footer { flex-direction: column; padding-bottom: 30px; }
 }
+/* reduced-motion 只關「自己會動的」，不關「你要它動它才動的」。
+   這個查詢針對的是非自願的動態：背景光暈的漂移縮放、卡片進場的位移、無限循環的
+   掃描光。hover 一張卡片是使用者主動請求，把它的過渡一起壓成 0.01ms 不會讓任何人
+   比較舒服，只會讓整站的每一次互動變成硬跳——實測 59.9fps、一幀都沒掉，但讀起來
+   就是卡。原本那條 `*, *::before, *::after` 的全域覆寫正是這樣，而且 Windows 只要
+   關掉「動畫效果」就會整站生效。 */
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  #bg::before, #bg::after { animation: none; }
+  /* .card 的基態是 opacity: 0，靠 card-in 的 forwards 補到 1。拿掉動畫就必須同時
+     把透明度補回來，否則 13 張卡全部隱形。 */
+  .card { animation: none; opacity: 1; }
+  .card.is-loading-preview .preview-prism::after,
+  .card.is-previewing .preview-prism::after { display: none; }
 }
 @media (prefers-contrast: more) {
   .card, .card:hover, .card:focus-visible { background: #11151e; }

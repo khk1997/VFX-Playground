@@ -10,8 +10,6 @@ const livePreviewQuery = window.matchMedia('(hover: hover) and (pointer: fine)')
 const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
 
 const cardsEl = document.getElementById('cards');
-const visibleCountEl = document.getElementById('visibleCount');
-const sndBtn = document.getElementById('sndBtn');
 const filterButtons = [...document.querySelectorAll('.filter-btn')];
 const cardEls = [];
 
@@ -19,8 +17,6 @@ let activePreview = null;
 let previewTimer = 0;
 let pendingCard = null;
 let launching = false;
-let audioCtx = null;
-let soundOn = (localStorage.getItem('vfx-sound') ?? '1') === '1';
 let masonryRaf = 0;
 
 function scheduleMasonryLayout() {
@@ -43,39 +39,6 @@ function scheduleMasonryLayout() {
     });
   });
 }
-
-function blip(freq, duration = 0.055, gain = 0.055) {
-  if (!soundOn) return;
-  try {
-    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    const now = audioCtx.currentTime;
-    const oscillator = audioCtx.createOscillator();
-    const volume = audioCtx.createGain();
-    oscillator.type = 'sine';
-    oscillator.frequency.setValueAtTime(freq, now);
-    volume.gain.setValueAtTime(gain, now);
-    volume.gain.exponentialRampToValueAtTime(.0001, now + duration);
-    oscillator.connect(volume).connect(audioCtx.destination);
-    oscillator.start(now);
-    oscillator.stop(now + duration + .02);
-  } catch (_) {
-    // 音效是裝飾性回饋，瀏覽器若不允許建立 AudioContext 就保持安靜。
-  }
-}
-
-function renderSoundButton() {
-  sndBtn.setAttribute('aria-pressed', String(soundOn));
-  sndBtn.title = soundOn ? '關閉介面音效' : '開啟介面音效';
-}
-
-sndBtn.addEventListener('click', () => {
-  soundOn = !soundOn;
-  localStorage.setItem('vfx-sound', soundOn ? '1' : '0');
-  renderSoundButton();
-  if (soundOn) blip(780, .07, .07);
-});
-renderSoundButton();
 
 function categoriesFor(effect) {
   const categories = ['all'];
@@ -130,8 +93,13 @@ function stopLivePreview() {
   activePreview = null;
 }
 
+// 預覽是使用者把游標停在某張卡片上才會發生的事，不是自動播放，所以不受
+// prefers-reduced-motion 管。原本這裡把它一起擋掉，結果是只要作業系統關了動畫效果
+// （Windows 的「顯示動畫效果」預設就可能是關的），整個首頁的即時預覽就完全不存在，
+// 使用者永遠只看得到靜態海報，而且沒有任何線索說明為什麼。裝飾性的掃描光另外在 CSS
+// 的 reduced-motion 區塊關掉。
 function startLivePreview(card, effect) {
-  if (!livePreviewQuery.matches || reducedMotionQuery.matches || !effect.previewSrc) return;
+  if (!livePreviewQuery.matches || !effect.previewSrc) return;
   if (activePreview?.card === card) return;
   stopLivePreview();
 
@@ -209,7 +177,6 @@ function launch(card, effect) {
   if (launching || !effect.href) return;
   launching = true;
   stopLivePreview();
-  blip(940, .11, .08);
   document.body.classList.add('leaving');
   card.classList.add('launching');
   window.setTimeout(() => { window.location.href = effect.href; }, reducedMotionQuery.matches ? 0 : 340);
@@ -260,10 +227,7 @@ function buildCard(effect, index) {
   body.append(meta, titleRow, description, tags);
   card.append(preview, body);
 
-  card.addEventListener('pointerenter', () => {
-    queueLivePreview(card, effect);
-    blip(510 + index * 12);
-  });
+  card.addEventListener('pointerenter', () => queueLivePreview(card, effect));
   card.addEventListener('pointerleave', () => leaveCard(card));
   card.addEventListener('focus', () => queueLivePreview(card, effect));
   card.addEventListener('blur', () => leaveCard(card));
@@ -294,13 +258,11 @@ function applyFilter(filter) {
     card.hidden = !show;
     if (show) visible += 1;
   });
-  visibleCountEl.textContent = String(visible).padStart(2, '0');
   cardsEl.setAttribute('aria-label', `視覺特效作品，目前顯示 ${visible} 件`);
   filterButtons.forEach(button => {
     button.setAttribute('aria-pressed', String(button.dataset.filter === filter));
   });
   scheduleMasonryLayout();
-  blip(690, .06, .05);
 }
 
 filterButtons.forEach(button => {
