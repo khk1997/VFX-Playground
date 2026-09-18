@@ -17,6 +17,34 @@ rem and GL), and plain Chrome on this machine picks D3D11 when no flag is
 rem passed. So the default now forces Vulkan -- that's the "just works, don't
 rem think about it" path. Pass an explicit backend to override for testing.
 rem
+rem Re-measured 2026-09-19 on the RTX 5070 Ti / 4K@150% box, from the home page
+rem rather than the shader matrix: every card hovered cold, timed from hover to
+rem the preview's first frame, fresh Chrome profile per backend.
+rem
+rem                                            D3D11        Vulkan
+rem   Sakura / Energy Ring / Aurora (2D)       ~0.6s        ~0.6s
+rem   Shatter                                   1.1s         1.1s
+rem   Jelly / Melt / Weave / Capillary    11.5-29.9s    2.6-3.0s
+rem   Formation / Morph / Installing     never loaded   4.2-12.1s
+rem   ---------------------------------------------------------------
+rem   the ten Three.js cards, total          over 258s        41.7s
+rem
+rem Three of them never finished at all on D3D11 (60s cap). The cost is FXC
+rem compiling the raymarch fragment shader -- single-threaded CPU work, so a
+rem faster GPU buys nothing. The same page on an M4 MacBook never stalls
+rem because ANGLE there targets Metal.
+rem
+rem Vulkan is not a free win, though: it does NOT expose
+rem KHR_parallel_shader_compile, so three.js compileAsync falls back to a
+rem synchronous link. The failure mode changes rather than disappearing -- on
+rem D3D11 the page stays at 60fps but the preview never arrives, on Vulkan the
+rem preview arrives but the page freezes 3-6s on the worst three modes.
+rem
+rem chrome://flags/#use-angle no longer offers Vulkan (the dropdown is down to
+rem Default / D3D11 / D3D11 WARP), so this launcher's flag is the only way in.
+rem It is not silently ignored -- GL_RENDERER confirms
+rem "ANGLE (NVIDIA, Vulkan 1.4.341 (... RTX 5070 Ti), NVIDIA)".
+rem
 rem   start-server.bat            --use-angle=vulkan (default)
 rem   start-server.bat d3d11      --use-angle=d3d11
 rem   start-server.bat vulkan     --use-angle=vulkan
