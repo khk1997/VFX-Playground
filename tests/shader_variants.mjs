@@ -61,11 +61,19 @@ assert.equal(planner.staticUsesImportedShape(), false);
 assert.equal(procedural.shapeField, false);
 assert.equal(procedural.staticShape, true);
 assert.equal(procedural.capillaryTexture, true);
+assert.equal(procedural.staticGlass, true);
+// staticGlass 必須涵蓋匯入造型，staticShape 則刻意不涵蓋：前者問的是「要不要編
+// 新的玻璃光學」，後者問的是「有沒有形狀場」，兩個問題在值 7 上的答案相反。
+params.staticShape = 7;
+assert.equal(planner.variantState().staticGlass, true);
+assert.equal(planner.variantState().staticShape, false);
 params.motion = 'formation';
 params.staticShape = 7;
+assert.equal(planner.variantState().staticGlass, false,
+  '其餘模式不得編進靜態玻璃');
 
 const key = planner.variantKey(formation);
-assert.equal(key, 'gSV--MN----T.oFLDPKBE');
+assert.equal(key, 'gSV--MN----T.oFLDPKBE-');
 assert.equal(planner.variantKey(formation), key, 'variant keys must be deterministic');
 
 const desktopDefines = planner.shaderFeatures(formation);

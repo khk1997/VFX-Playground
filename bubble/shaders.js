@@ -356,6 +356,34 @@ uniform vec3  uLightBgGradientBottom;
 // 這裡要的只是「選了淺底就顯示漸層背景」這一件事，所以另開一個乾淨的開關，
 // 不去牽動那些休眠中的路徑）。
 uniform float uLightBgGradientEnabled;
+// ===== 程序化棚景（只有靜態模式編譯，見 FEATURE_STATIC_GLASS）=====
+//
+// 為什麼玻璃需要一個有結構的背景，而不只是換個底色：色散是「同一條視線的不同
+// 波長落在背景的不同位置」，所以背景在那個角度差之內必須有東西不一樣。純色畫布
+// 完全不看方向，三個波長取到同一個常數，相減恆為零 —— 這正是 traceExitSurface
+// 之後那段註解記錄過的死路。垂直漸層好一點，但它是整張畫面最低頻的訊號，一個
+// 波長差那麼小的角度掃過去，亮度差仍然在捨入誤差等級。
+//
+// 棚景補的就是這件事：地平線、地板、接觸陰影、漣漪與棚燈卡，每一項都在背景上
+// 放一段夠陡的梯度。玻璃邊緣把大片立體角壓進幾個像素，梯度在那裡被放大，彩虹
+// 因此自己長在輪廓與摺痕上，不必額外畫上去。
+//
+// 它同時服務深底與淺底：背景紙的顏色沿用既有的 uBgColor／漸層，棚景只在那之上
+// 疊結構，所以換底色不會換成另一套美術。HDRI 背景（uBgMode==1）不套用 —— 那本來
+// 就已經是有結構的環境。
+//
+// 宣告連同下面的實作一起關在旗標裡，其餘九個模式連這幾行都不會編到。
+#ifdef FEATURE_STATIC_GLASS
+uniform float uStudioBackdrop;      // 0 = 沿用原本的純色／漸層背景
+uniform float uStudioFloorHeight;   // 地板平面的 y
+uniform float uStudioFloorTone;     // 地板相對背景紙的明度（<1 壓暗）
+uniform float uStudioHorizonSoft;   // 地平線的收斂柔度
+uniform float uStudioShadowStrength;// 接觸陰影最深處
+uniform float uStudioShadowRadius;  // 接觸陰影的半徑
+uniform float uStudioRipple;        // 地板漣漪振幅
+uniform float uStudioRippleScale;   // 漣漪環的密度
+uniform float uStudioCardStrength;  // 棚燈卡亮度
+#endif // FEATURE_STATIC_GLASS
 // 底色情境（見 bubble.js 的 SELECT_DEFAULTS.backdrop）。0 = 深底，1 = 淺底。
 //
 // 這個材質在深底上的顯色方式是「自身能量」：水滴自己發出的光疊在黑場上，最後
@@ -559,7 +587,13 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
   vec3 rd = uRot * normalize(vec3(uv * tanHalfFov, -1.0));
 
   // 物體背後的背景畫布：不吃粗糙度（那是物體表面的性質，不是背景的）。
+#ifdef FEATURE_STATIC_GLASS
+  // 鏡頭這條射線從 ro 出發，所以棚景的地板交點也要用 ro（見 studioBackdropSample）。
+  // 棚景關掉時 studioBackdropSample 原樣回傳 backgroundSample，是精確的恆等。
+  vec4 bg = studioBackdropSample(ro, rd, 0.0);
+#else
   vec4 bg = backgroundSample(rd, 0.0);
+#endif
   // 透射側的粗糙度預濾波寬度（見 transmissionSpread 的說明），直接當 PMREM 的
   // lod 參數用。上限壓在 0.85 而不是 1.0：PMREM 最高階的那幾層已經接近一顆單色
   // 球，糊到底會讓玻璃裡什麼結構都不剩，看起來像實心塑膠而不是霧面玻璃。
@@ -746,7 +780,13 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
         transmissionDir = exitDir;
         // A：折射進來的背景依粗糙度預濾波。這是「霧面玻璃」最主要的視覺來源——
         // 畫面九成以上的內容走這條路徑，接上這裡滑桿才真的有感。
+#ifdef FEATURE_STATIC_GLASS
+        // 折射出去的那條射線是從出口點出發的，不是鏡頭。用 exitPoint 求地板交點，
+        // 折射影像裡的地平線才會跟玻璃的厚度一起錯開 —— 那個錯位就是厚度感本身。
+        refractedBg = studioBackdropSample(exitPoint, exitDir, roughBlur).rgb;
+#else
         refractedBg = backgroundSample(exitDir, roughBlur).rgb;
+#endif
         // 註：這裡試過「RGB 通道各自以不同折射率取樣」的真色散（chromatic
         // aberration），結論是不划算，已經移除。留個記錄避免重踩：
         //

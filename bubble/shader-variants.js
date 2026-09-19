@@ -39,6 +39,13 @@ export function createShaderVariantPlanner({
       dissolveField: shapeMorph || formationCut,
       capillaryTexture: motion === 'capillary' || motion === 'static' || motion === 'research',
       staticShape: motion === 'static' && params.staticShape !== 7,
+      // 靜態模式專屬的玻璃光學。刻意不重用上面那個 staticShape —— 它為了「有沒有
+      // 形狀場」而排除了匯入造型（值 7），而新的玻璃模型兩種都要吃到：這個模組
+      // 的賣點就是自己丟 SVG／GLB 進來，只有內建幾何漂亮等於沒做。
+      //
+      // 其餘九個模式因此完全不編這一塊，畫面逐位元不變（tests/glass_baseline.py
+      // 會驗）。等靜態這條路成立了再決定要不要推廣出去。
+      staticGlass: motion === 'static',
       research: motion === 'research',
       typewriter: motion === 'typewriter',
       microDrops: shapeField
@@ -70,7 +77,7 @@ export function createShaderVariantPlanner({
       'o' + flag(state.thinFilm, 'F') + flag(state.liquidFilm, 'L')
         + flag(state.dispersion, 'D') + flag(state.prismBeam, 'P')
         + flag(state.spectralCaustics, 'K') + flag(state.beamPatterns, 'B')
-        + flag(state.envPmrem, 'E'),
+        + flag(state.envPmrem, 'E') + flag(state.staticGlass, 'A'),
     ].join('.') + diagSalt;
   }
 
@@ -131,6 +138,7 @@ export function createShaderVariantPlanner({
       FEATURE_SPECTRAL_CAUSTICS: state.spectralCaustics ? '' : false,
       FEATURE_ENV_PMREM: state.envPmrem ? '' : false,
       FEATURE_BEAM_PATTERNS: state.beamPatterns ? '' : false,
+      FEATURE_STATIC_GLASS: state.staticGlass ? '' : false,
     };
 
     if (DIAG.allFeatures) {

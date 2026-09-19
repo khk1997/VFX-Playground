@@ -118,4 +118,66 @@ vec4 backgroundSample(vec3 rd, float extraBlur){
   return vec4(uBgColor, uTransparentBackground == 1 ? 0.0 : 1.0);
 }
 
+#ifdef FEATURE_STATIC_GLASS
+// 程序化棚景（見 shaders.js 的 uStudioBackdrop 那段說明）。只有靜態模式編它，
+// 其餘九個模式的 backgroundSample 逐字不變。
+//
+// 它接一個 origin 而不是只吃方向：地板要跟平面求交，而穿過玻璃出去的那條射線
+// 是從出口點出發的，不是從鏡頭。沿用鏡頭原點的話，折射影像裡的地平線會跟畫面上
+// 那條對不齊 —— 而「折射影像與背景錯開多少」正是玻璃讀起來有沒有厚度的來源。
+//
+// 這裡刻意不做陰影的遮蔽測試。接觸陰影是一顆隨距離衰減的軟斑，不是投影：物體
+// 本身是 SDF，真要投影得對每個地板像素再 march 一次，而那個成本換來的差別在
+// 一顆離地不遠的玻璃上幾乎看不出來。
+vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur){
+  vec4 paper = backgroundSample(rd, extraBlur);
+  // HDRI 背景已經是有結構的環境，不需要也不該再蓋一層假棚景。
+  if (uStudioBackdrop < 0.5 || uBgMode == 1) return paper;
+
+  vec3 col = paper.rgb;
+
+  // 地板。只有往下走的射線會碰到；denom 的下限同時擋掉了近乎水平那些會把交點
+  // 推到無窮遠的射線（那裡本來就該是地平線）。
+  if (rd.y < -0.0005) {
+    float tFloor = (uStudioFloorHeight - origin.y) / rd.y;
+    if (tFloor > 0.0) {
+      vec2 fp = (origin + rd * tFloor).xz;
+      float dist = length(fp);
+
+      // 接觸陰影：物體正下方最深，以高斯往外收。用平方距離而不是距離，邊界才
+      // 不會有一圈看得出來的硬邊。
+      float shadowR = max(uStudioShadowRadius, 0.001);
+      float shadow = exp(-(dist * dist) / (shadowR * shadowR))
+        * uStudioShadowStrength;
+
+      // 漣漪。振幅隨距離衰減（能量往外攤開），相位一個循環剛好走整數圈，所以
+      // 首尾精確接得回去 —— 跟 loopNoiseOffset 同一個慣例。
+      float phase = TAU * fract(uTime / max(uLoopDuration, 0.001));
+      float rings = sin(dist * uStudioRippleScale - phase)
+        * exp(-dist * 1.1) * uStudioRipple;
+
+      // 地板明度隨距離往背景紙收斂。少了這一段，地板只是「整片乘一個常數的
+      // 漸層」，跟牆面的漸層疊起來讀不出交界 —— 也就沒有地平線。有了它，近處
+      // 的地板明顯比牆暗、遠處接回牆面，交界自己就浮出來了，而那條線正是
+      // 折射影像裡最強的一段梯度。
+      float recede = smoothstep(2.0, 14.0, dist);
+      vec3 floorCol = paper.rgb * mix(uStudioFloorTone, 1.0, recede)
+        * (1.0 - shadow) * (1.0 + rings);
+
+      // 地平線：越接近水平越還原成背景紙，避免地板與紙之間出現一條硬邊。
+      float horizon = smoothstep(0.0, max(uStudioHorizonSoft, 0.001), -rd.y);
+      col = mix(paper.rgb, floorCol, horizon);
+    }
+  }
+
+  // 棚燈卡。用 mix 往白色靠而不是相加：淺底已經接近 1.0，相加只會 clip 成一片
+  // 死白，而 mix 在兩種底色上都還留得住形狀。
+  float key = smoothstep(0.90, 1.0, dot(rd, normalize(vec3(-0.42, 0.52, 0.74))));
+  float fill = smoothstep(0.84, 1.0, dot(rd, normalize(vec3(0.76, 0.14, 0.63))));
+  col = mix(col, vec3(1.0), clamp((key + fill * 0.55) * uStudioCardStrength, 0.0, 1.0));
+
+  return vec4(col, paper.a);
+}
+#endif // FEATURE_STATIC_GLASS
+
 `;

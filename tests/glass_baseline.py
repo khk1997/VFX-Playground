@@ -138,8 +138,8 @@ def set_select(page: Page, selector: str, value: str) -> None:
     )
 
 
-def capture_case(page: Page, base_url: str, case, output: Path) -> dict:
-    name, mode, backdrop, static_shape = case
+def reach_state(page: Page, base_url: str, mode: str, backdrop: str,
+                static_shape: str | None) -> None:
     page.goto(
         f"{base_url}/bubble/index.html?mode={mode}&diagTime={DIAG_TIME}",
         wait_until="domcontentloaded",
@@ -151,6 +151,25 @@ def capture_case(page: Page, base_url: str, case, output: Path) -> dict:
         wait_for_shader(page)
     set_select(page, "#backdrop", backdrop)
     wait_for_shader(page)
+
+
+def capture_case(page: Page, base_url: str, case, output: Path) -> dict:
+    name, mode, backdrop, static_shape = case
+
+    # Reach the state twice and capture only the second visit.
+    #
+    # A program compiled for the first time does not produce the same pixels as
+    # the same program loaded back from Chrome's cache: measured here, the first
+    # baseline disagreed with every later run on fourteen of twenty-two cases,
+    # by 1-15 per channel and only on the object, never the background. Stashing
+    # the shader edit and re-running reproduced the later hashes exactly, so the
+    # edit was never involved -- the first sweep was simply the cold one.
+    #
+    # The second visit always reads a cached program, whatever state the profile
+    # started in, which makes a run comparable against any other run. It costs
+    # one extra page load per case and no extra compile.
+    reach_state(page, base_url, mode, backdrop, static_shape)
+    reach_state(page, base_url, mode, backdrop, static_shape)
 
     # The capture helper cancels the frame loop after reading pixels, so it has to
     # be the last thing that happens on this page load. The next case reloads.

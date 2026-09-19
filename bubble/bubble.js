@@ -2264,6 +2264,20 @@ function initGL() {
     // 直接讀 P.backdrop 字串，不透過 SELECTS.backdrop.map（那張表兩個值目前都
     // 映射成 0，見 uLightBackdrop 旁的說明）。
     uLightBgGradientEnabled: { value: P.backdrop === 'light' ? 1 : 0 },
+    // 程序化棚景（見 shaders.js 的 uStudioBackdrop）。目前只有靜態模式的 shader
+    // 會讀它們，其餘模式連編都沒編，所以這裡一律送值是安全的。
+    //
+    // 這一批刻意還沒接上控制面板：先把畫面調到對，才知道哪幾根真的值得給使用者，
+    // 接線留到參數定案之後（否則面板會先長出一排之後要拔掉的滑桿）。
+    uStudioBackdrop: { value: 1 },
+    uStudioFloorHeight: { value: -1.15 },
+    uStudioFloorTone: { value: 0.88 },
+    uStudioHorizonSoft: { value: 0.10 },
+    uStudioShadowStrength: { value: 0.32 },
+    uStudioShadowRadius: { value: 0.72 },
+    uStudioRipple: { value: 0.07 },
+    uStudioRippleScale: { value: 11.0 },
+    uStudioCardStrength: { value: 0.35 },
     uLightShow:  { value: P.lightShow },
     uLightClarity: { value: P.lightClarity },
     uLightDepth: { value: P.lightDepth },
