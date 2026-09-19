@@ -383,6 +383,7 @@ uniform float uStudioShadowRadius;  // 接觸陰影的半徑
 uniform float uStudioRipple;        // 地板漣漪振幅
 uniform float uStudioRippleScale;   // 漣漪環的密度
 uniform float uStudioCardStrength;  // 棚燈卡亮度
+uniform float uStudioAmbient;       // 柔光罩強度（只作用於折射與反射取樣）
 // ===== 光譜折射 =====
 // 折射率在光譜兩端的差（≈ 1/阿貝數的效果量）。0 = 各波長同路，沒有色散。
 uniform float uRefractDispersion;
@@ -392,6 +393,9 @@ uniform int   uSpectralSamples;
 // boost 是單純的倍率。兩根合起來就是參考影片面板上的 Edge Path Boost／Power。
 uniform float uEdgePathBoost;
 uniform float uEdgePathPower;
+// 新玻璃合成的混合量。1 = 完全走新模型，0 = 完全退回原本的暗底外殼，
+// 中間值用來做並排比較（這是研究分支，能退回去才能判斷改動是不是進步）。
+uniform float uStaticGlassMix;
 #endif // FEATURE_STATIC_GLASS
 // 底色情境（見 bubble.js 的 SELECT_DEFAULTS.backdrop）。0 = 深底，1 = 淺底。
 //
@@ -599,7 +603,7 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
 #ifdef FEATURE_STATIC_GLASS
   // 鏡頭這條射線從 ro 出發，所以棚景的地板交點也要用 ro（見 studioBackdropSample）。
   // 棚景關掉時 studioBackdropSample 原樣回傳 backgroundSample，是精確的恆等。
-  vec4 bg = studioBackdropSample(ro, rd, 0.0);
+  vec4 bg = studioBackdropSample(ro, rd, 0.0, 0.0);
 #else
   vec4 bg = backgroundSample(rd, 0.0);
 #endif
@@ -792,7 +796,7 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
 #ifdef FEATURE_STATIC_GLASS
         // 折射出去的那條射線是從出口點出發的，不是鏡頭。用 exitPoint 求地板交點，
         // 折射影像裡的地平線才會跟玻璃的厚度一起錯開 —— 那個錯位就是厚度感本身。
-        refractedBg = studioBackdropSample(exitPoint, exitDir, roughBlur).rgb;
+        refractedBg = studioBackdropSample(exitPoint, exitDir, roughBlur, 1.0).rgb;
         // ===== 光譜折射 =====
         //
         // 這裡不重跑追蹤。上面那段註解記錄過「五個波長各自穿過 SDF」因為太貴而
@@ -839,7 +843,7 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
               if (dot(o, o) > 0.0001) outBand = normalize(o);
             }
             vec3 w = visibleSpectrum(band);
-            spectralSum += studioBackdropSample(exitPoint, outBand, roughBlur).rgb * w;
+            spectralSum += studioBackdropSample(exitPoint, outBand, roughBlur, 1.0).rgb * w;
             weightSum += w;
           }
           // 逐通道除以權重和。這一步讓「背景是常數時結果精確等於那個常數」成為
@@ -2211,6 +2215,47 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
   // 這一行是精確的恆等運算。
   finalColor = clampOutput(finalColor * beamAbsorb);
 
+#ifdef FEATURE_STATIC_GLASS
+  // ===== 靜態模式的玻璃合成 =====
+  //
+  // 上面那一整條路徑對靜態模式來說是條死路，而且是可以證明的死路：唯一可達的
+  // 材質是通用玻璃（materialStyle 只有一個選項），它把 bgLum 歸零；uLightBackdrop
+  // 兩個底色都映射成 0。所以 brightBg 恆為 0，glassComposite = mix(darkComposite,
+  // brightComposite, brightBg) 永遠只取 darkComposite —— 整條 brightComposite
+  // 淺底路徑從來沒有執行過（它是被刻意擱置的，見 uLightBackdrop 的註解）。
+  //
+  // darkComposite 是一個「自身能量疊在黑場上」的美術模型。黑底上它很漂亮；淺底
+  // 上它是一層灰殼蓋在背景前面，而折射進來的背景只能從殼底下透出一點 —— 那就是
+  // 淺底看起來像灰白爛泥的原因，不是色散不夠強。
+  //
+  // 這裡換成一般的玻璃排序：透射被 Fresnel 讓出去的部分留給反射，剩下的才是
+  // 穿過來的背景。它對兩種底色都成立，不需要兩套美術：掠射角 Fresnel 趨近 1，
+  // 輪廓自己變成一圈暗邊（玻璃就是這樣讀出形狀的）；正面 Fresnel 很小，背景
+  // 幾乎原樣穿過來，連同上一步分好的光譜。
+  {
+    float cosView = clamp(dot(N, -rd), 0.0, 1.0);
+    float f0 = pow((uIOR - 1.0) / (uIOR + 1.0), 2.0);
+    float fresView = f0 + (1.0 - f0) * pow(1.0 - cosView, 5.0);
+    // 背面的 Fresnel 也要算進去：光要穿過來得同時通過兩個介面，只算前表面會讓
+    // 厚處太亮、讀不出體積。
+    float throughput = (1.0 - fresView) * (1.0 - backFres * 0.5);
+    vec3 transmitted = refractedBg * material.transmission * volumeAbsorption
+      * throughput;
+    // 反射也必須來自同一個棚景。少了這一項，深底就整顆變黑：material.baseSurface
+    // 的環境是 sampleReflection（HDRI／程序化棚燈），而棚景只餵背景與透射，兩者
+    // 是不同的來源 —— 玻璃於是變成「透射一片黑、反射也一片黑」。同一個場景同時
+    // 當背景與反射源，物體才會跟它所在的空間對得起來。
+    vec3 studioReflection = studioBackdropSample(
+      p, reflect(rd, N), uRoughness, 1.0
+    ).rgb * uReflect * fresView;
+    // material.baseSurface 已經是 tone map 過的「環境反射＋高光」，而且內含
+    // Fresnel 加權，所以直接加，不再乘一次 fresView（那會變成平方）。
+    vec3 staticGlass = transmitted + material.baseSurface + studioReflection;
+    finalColor = clampOutput(
+      mix(finalColor, staticGlass, clamp(uStaticGlassMix, 0.0, 1.0))
+    );
+  }
+#endif
 
   float outputAlpha = 1.0;
   if (uTransparentBackground == 1) {

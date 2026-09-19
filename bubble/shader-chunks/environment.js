@@ -129,7 +129,14 @@ vec4 backgroundSample(vec3 rd, float extraBlur){
 // 這裡刻意不做陰影的遮蔽測試。接觸陰影是一顆隨距離衰減的軟斑，不是投影：物體
 // 本身是 SDF，真要投影得對每個地板像素再 march 一次，而那個成本換來的差別在
 // 一顆離地不遠的玻璃上幾乎看不出來。
-vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur){
+// cards：棚燈卡要不要算進來。0 = 不算（直接看背景的那條射線），1 = 算（折射與
+// 反射的取樣）。
+//
+// 這不是開關語意的方便，是棚拍本來的樣子：棚燈在框外，鏡頭直接拍不到，但它照亮
+// 物體、也映在物體上。畫進背景的話，深底就不再是黑的而是一大片光暈 —— 那等於把
+// 「深底」這個選擇改掉了。分開之後，深底的背景仍然是乾淨的黑，而玻璃的輪廓與
+// 高光有東西可以反射，這也是深底那顆玻璃不再是一團黑的原因。
+vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards){
   vec4 paper = backgroundSample(rd, extraBlur);
   // HDRI 背景已經是有結構的環境，不需要也不該再蓋一層假棚景。
   if (uStudioBackdrop < 0.5 || uBgMode == 1) return paper;
@@ -172,9 +179,28 @@ vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur){
 
   // 棚燈卡。用 mix 往白色靠而不是相加：淺底已經接近 1.0，相加只會 clip 成一片
   // 死白，而 mix 在兩種底色上都還留得住形狀。
-  float key = smoothstep(0.90, 1.0, dot(rd, normalize(vec3(-0.42, 0.52, 0.74))));
-  float fill = smoothstep(0.84, 1.0, dot(rd, normalize(vec3(0.76, 0.14, 0.63))));
-  col = mix(col, vec3(1.0), clamp((key + fill * 0.55) * uStudioCardStrength, 0.0, 1.0));
+  //
+  // 兩張都是大面積柔光板（smoothstep 的區間很寬），不是點光源。窄的高光在
+  // 玻璃上只會變成幾顆亮點，撐不起形狀；柔光板才會在輪廓上拉出一條長的高光帶，
+  // 而那條帶子正是玻璃讀得出曲面的地方 —— 也是彩虹最容易被看見的位置。
+  if (cards > 0.0) {
+    // 柔光罩。棚拍的黑底不是一間沒有光的黑房間 —— 背景紙是黑的，但整個空間被
+    // 大面積柔光填滿，物體因此有明暗、有輪廓。少了這一層，深底的玻璃會透到一片
+    // 黑、也反射到一片黑，整顆就是黑的（實測過，只加棚燈卡救不回來：正視角的
+    // Fresnel 只有 0.03，窄的高光撐不起一顆玻璃）。
+    //
+    // 用 screen 合成而不是 mix：淺底已經接近 1.0，mix 會把它往柔光罩的中灰拉、
+    // 反而變暗；screen 只會往上加，兩種底色都安全。
+    float sky = clamp(rd.y * 0.5 + 0.5, 0.0, 1.0);
+    vec3 dome = vec3(mix(0.05, 0.36, sky)) * uStudioAmbient * cards;
+    col = vec3(1.0) - (vec3(1.0) - col) * (vec3(1.0) - clamp(dome, 0.0, 1.0));
+
+    float key = smoothstep(0.55, 0.99, dot(rd, normalize(vec3(-0.42, 0.52, 0.74))));
+    float fill = smoothstep(0.38, 0.96, dot(rd, normalize(vec3(0.76, 0.14, 0.63))));
+    col = mix(col, vec3(1.0), clamp(
+      (key + fill * 0.5) * uStudioCardStrength * cards, 0.0, 1.0
+    ));
+  }
 
   return vec4(col, paper.a);
 }
