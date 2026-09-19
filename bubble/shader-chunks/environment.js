@@ -35,6 +35,7 @@ uniform float uAnisoBlur;           // 折射取樣的錐寬：把環境的邊�
 uniform float uAbbe;                // 阿貝數：越小色散越強（冕牌 59 / 火石 30 / 重火石 20）
 uniform float uStudioCaustic;       // 焦散強度：光被玻璃聚到地板上的亮斑
 uniform float uStudioCausticChroma; // 焦散外圈的彩度
+uniform float uStudioFlag;          // 黑旗強度：框外的黑卡，專門用來在淺底製造對比
 // ===== 光譜折射 =====
 // 折射率在光譜兩端的差（≈ 1/阿貝數的效果量）。0 = 各波長同路，沒有色散。
 uniform float uRefractDispersion;
@@ -382,6 +383,21 @@ vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards, fl
     // 的靜態合成），在那之前它是真的很亮。
     col += vec3(key + fill * 0.45 + rim * 0.7)
       * uStudioCardStrength * uStudioCardGain * cards;
+
+    // 黑旗（negative fill）。棚拍在白背景上拍玻璃就是靠這個：框外擺黑卡，讓
+    // 玻璃有東西可以「反射出暗部」。
+    //
+    // 它同時是淺底色散飽和度的天花板所在。色帶的飽和度等於環境那道邊的相對
+    // 落差，而白紙上的白燈只有兩成落差 —— 再怎麼加亮度都跨不過去，因為亮度
+    // 是分子也是分母。黑旗把落差拉到接近 100%，色帶才能真的飽和。
+    //
+    // 只作用在折射與反射的取樣（cards > 0），所以背景紙照樣是乾淨的白，
+    // 跟真正的黑旗一樣待在框外。
+    if (uStudioFlag > 0.0) {
+      float flag = studioCard(rd, normalize(vec3(0.34, -0.42, -0.84)), 0.68, soft * 1.6);
+      float flag2 = studioCard(rd, normalize(vec3(-0.88, -0.12, 0.46)), 0.45, soft * 1.6);
+      col *= 1.0 - clamp((flag + flag2 * 0.7) * uStudioFlag * cards, 0.0, 0.96);
+    }
   }
 
   return vec4(col, paper.a);

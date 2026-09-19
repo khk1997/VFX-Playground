@@ -295,7 +295,7 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
     <div class="row"><label>透射率</label><input type="range" id="transmission" min="0" max="1" step="0.01" value="0.96"><span class="val" id="transmission_v"></span></div>
     <div class="row"><label>體積吸收</label><input type="range" id="absorb" min="0" max="10" step="0.05" value="1"><span class="val" id="absorb_v"></span></div>
     <div class="row"><label>吸收色</label><input type="color" id="absorbColor" value="#68b2e7"><span class="val"></span></div>
-    <div class="row"><label>材質曝光</label><input type="range" id="materialExposure" min="0.25" max="2.5" step="0.05" value="1"><span class="val" id="materialExposure_v"></span></div>
+    <div class="row" data-gate="!static"><label>材質曝光</label><input type="range" id="materialExposure" min="0.25" max="2.5" step="0.05" value="1"><span class="val" id="materialExposure_v"></span></div>
     <div class="row"><label>粗糙度</label><input type="range" id="roughness" min="0" max="1" step="0.01" value="0"><span class="val" id="roughness_v"></span></div>
     <div class="row"><label>邊緣光</label><input type="range" id="fresnel" min="0" max="3" step="0.05" value="0.8"><span class="val" id="fresnel_v"></span></div>
     <div class="row"><label>折射率</label><input type="range" id="ior" min="1.0" max="1.8" step="0.01" value="1.33"><span class="val" id="ior_v"></span></div>
@@ -316,6 +316,7 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
         <div class="row"><label>棚燈亮度倍率</label><input type="range" id="studioCardGain" min="1" max="16" step="0.25" value="11"><span class="val" id="studioCardGain_v"></span></div>
         <div class="row"><label>棚燈強度</label><input type="range" id="studioCardStrength" min="0" max="1" step="0.01" value="0.55"><span class="val" id="studioCardStrength_v"></span></div>
         <div class="row"><label>接觸陰影</label><input type="range" id="studioShadowStrength" min="0" max="1" step="0.01" value="0.4"><span class="val" id="studioShadowStrength_v"></span></div>
+        <div class="row"><label>黑旗</label><input type="range" id="studioFlag" min="0" max="1" step="0.01" value="0.55"><span class="val" id="studioFlag_v"></span></div>
         <div class="row"><label>焦散</label><input type="range" id="studioCaustic" min="0" max="0.6" step="0.005" value="0.09"><span class="val" id="studioCaustic_v"></span></div>
         <div class="row"><label>地板漣漪</label><input type="range" id="studioRipple" min="0" max="0.5" step="0.005" value="0.09"><span class="val" id="studioRipple_v"></span></div>
       </div>
@@ -526,7 +527,7 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
     <div class="row"><label>HDRI 水平</label><input type="range" id="hdriYaw" min="-180" max="180" step="1" value="0"><span class="val" id="hdriYaw_v"></span></div>
     <div class="row"><label>HDRI 垂直</label><input type="range" id="hdriPitch" min="-90" max="90" step="1" value="0"><span class="val" id="hdriPitch_v"></span></div>
     <div class="row"><label>HDRI 模糊</label><input type="range" id="hdriBlur" min="0" max="1" step="0.01" value="0.11"><span class="val" id="hdriBlur_v"></span></div>
-    <div class="row"><label>環境折射</label><input type="range" id="envRefraction" min="0" max="1" step="0.01" value="0"><span class="val" id="envRefraction_v"></span></div>
+    <div class="row" data-gate="!static"><label>環境折射</label><input type="range" id="envRefraction" min="0" max="1" step="0.01" value="0"><span class="val" id="envRefraction_v"></span></div>
     <div class="row"><button id="hdriBtn">更換 HDRI…</button></div>
     <div id="hdriState" class="note">通用玻璃預設 HDRI：photo_studio2_london_hall_1k.hdr</div>
     <input type="file" id="hdriInput" accept=".hdr,image/*" hidden>

@@ -172,6 +172,7 @@ export const DEFAULTS = {              // 數值滑桿
   anisoBlur: 0.02,
   abbe: 22,
   studioCaustic: 0.09,
+  studioFlag: 0.55,
   spectralSamples: 12,
   studioCardEdge: 0.075,
   studioCardGain: 11.0,

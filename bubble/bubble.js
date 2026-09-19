@@ -2290,6 +2290,7 @@ function initGL() {
     uAbbe: { value: P.abbe },
     uStudioCaustic: { value: P.studioCaustic },
     uStudioCausticChroma: { value: 0.45 },
+    uStudioFlag: { value: P.studioFlag },
     uRefractDispersion: { value: P.refractDispersion },
     uSpectralSamples: { value: P.spectralSamples },
     uEdgePathBoost: { value: 1.0 },
