@@ -26,6 +26,10 @@ uniform float uStudioRipple;        // 地板漣漪振幅
 uniform float uStudioRippleScale;   // 漣漪環的密度
 uniform float uStudioCardStrength;  // 棚燈卡亮度
 uniform float uStudioAmbient;       // 柔光罩強度（只作用於折射與反射取樣）
+uniform float uStudioWallLift;      // 牆面的絕對亮度底（深底才看得出差別）
+uniform float uStudioFloorLift;     // 地板的絕對亮度底
+uniform float uStudioCardEdge;      // 棚燈卡邊緣的銳利度：越小邊越硬、色帶越明顯
+uniform float uStudioCardGain;      // 棚燈卡相對背景紙的亮度倍率（可大於 1）
 // ===== 光譜折射 =====
 // 折射率在光譜兩端的差（≈ 1/阿貝數的效果量）。0 = 各波長同路，沒有色散。
 uniform float uRefractDispersion;
@@ -177,12 +181,45 @@ vec4 backgroundSample(vec3 rd, float extraBlur){
 // 物體、也映在物體上。畫進背景的話，深底就不再是黑的而是一大片光暈 —— 那等於把
 // 「深底」這個選擇改掉了。分開之後，深底的背景仍然是乾淨的黑，而玻璃的輪廓與
 // 高光有東西可以反射，這也是深底那顆玻璃不再是一團黑的原因。
+// 光譜取樣的顯色響應。band 0 = 藍端，1 = 紅端。
+//
+// 不沿用 visibleSpectrum：那一支是給「把光譜畫上去」用的，三個瓣又寬又重疊，
+// 相鄰取樣算出來的顏色幾乎一樣，平均完就是灰的。這裡要的相反 —— 瓣越窄，
+// 相鄰波長取到不同背景時的顏色差越大，色帶才分得開。紅端補一個小的次瓣：
+// 人眼對短波紅有殘餘響應，少了它紫色會缺一角、光譜尾端讀起來會斷掉。
+//
+// 權重不必歸一：呼叫端會逐通道除以權重和，所以這裡只決定「形狀」。
+vec3 spectralResponse(float band){
+  float t = clamp(band, 0.0, 1.0);
+  float r = exp(-pow((t - 0.88) / 0.20, 2.0))
+    + 0.20 * exp(-pow((t - 0.04) / 0.11, 2.0));
+  float g = exp(-pow((t - 0.55) / 0.18, 2.0));
+  float b = exp(-pow((t - 0.20) / 0.20, 2.0));
+  return vec3(r, g, b);
+}
+
+// 棚燈卡：方向球上的一塊圓盤，邊緣的銳利度自己控制。
+//
+// 為什麼要是「有邊的」而不是一團柔光：色散的顏色來自背景在一個很小的角度差內
+// 的差異，所以平滑的漸層被分開之後仍然是平滑的漸層 —— 只會整片變淡，不會出現
+// 色帶。要看到參考影片那種細而飽和的 ROYGBIV，環境裡必須有「邊」被拆開。柔光
+// 板照亮物體、它的邊緣負責顯色，兩件事都需要。
+float studioCard(vec3 rd, vec3 dir, float radius, float soft){
+  float a = acos(clamp(dot(rd, dir), -1.0, 1.0));
+  return 1.0 - smoothstep(radius - soft, radius + soft, a);
+}
+
 vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards){
   vec4 paper = backgroundSample(rd, extraBlur);
   // HDRI 背景已經是有結構的環境，不需要也不該再蓋一層假棚景。
   if (uStudioBackdrop < 0.5 || uBgMode == 1) return paper;
 
-  vec3 col = paper.rgb;
+  // 牆面抬底。深底的背景紙幾乎是純黑，而純黑乘上任何東西都還是黑 —— 地板、
+  // 陰影、漣漪全部會一起消失（前一版就是這樣，深底只剩一團黑玻璃）。加一個
+  // 很小的絕對亮度，深底就變成「一張很暗的背景紙」而不是一個沒有光的空洞，
+  // 這也是參考影片那支深底片子的實際樣子。淺底那邊 0.06 相對於 0.8 可以忽略。
+  float wall = mix(0.35, 1.0, smoothstep(-0.35, 0.85, rd.y));
+  vec3 col = paper.rgb + vec3(uStudioWallLift * wall);
 
   // 地板。只有往下走的射線會碰到；denom 的下限同時擋掉了近乎水平那些會把交點
   // 推到無窮遠的射線（那裡本來就該是地平線）。
@@ -198,32 +235,28 @@ vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards){
       float shadow = exp(-(dist * dist) / (shadowR * shadowR))
         * uStudioShadowStrength;
 
-      // 漣漪。振幅隨距離衰減（能量往外攤開），相位一個循環剛好走整數圈，所以
-      // 首尾精確接得回去 —— 跟 loopNoiseOffset 同一個慣例。
-      float phase = TAU * fract(uTime / max(uLoopDuration, 0.001));
-      float rings = sin(dist * uStudioRippleScale - phase)
-        * exp(-dist * 1.1) * uStudioRipple;
-
-      // 地板明度隨距離往背景紙收斂。少了這一段，地板只是「整片乘一個常數的
-      // 漸層」，跟牆面的漸層疊起來讀不出交界 —— 也就沒有地平線。有了它，近處
-      // 的地板明顯比牆暗、遠處接回牆面，交界自己就浮出來了，而那條線正是
-      // 折射影像裡最強的一段梯度。
+      // 地板明度隨距離往牆面收斂，近處比牆暗、遠處接回去，地平線因此自己浮出來。
       float recede = smoothstep(2.0, 14.0, dist);
-      vec3 floorCol = paper.rgb * mix(uStudioFloorTone, 1.0, recede)
-        * (1.0 - shadow) * (1.0 + rings);
+      // 同樣要有絕對亮度底，否則深底的地板一樣是黑的。
+      vec3 floorCol = col * mix(uStudioFloorTone, 1.0, recede)
+        + vec3(uStudioFloorLift * (1.0 - recede * 0.65));
 
-      // 地平線：越接近水平越還原成背景紙，避免地板與紙之間出現一條硬邊。
+      // 漣漪。改成「細亮環」而不是正負起伏的正弦：pow 把波峰壓成一條窄帶，
+      // 那是一條硬邊，正是色散顯色需要的東西；原本的正弦是平滑起伏，分光之後
+      // 只會變淡。相位一個循環走整數圈，首尾精確接得回去。
+      float phase = TAU * fract(uTime / max(uLoopDuration, 0.001));
+      float wave = sin(dist * uStudioRippleScale - phase);
+      float crest = pow(max(wave, 0.0), 7.0);
+      floorCol += vec3(crest * uStudioRipple * exp(-dist * 0.75));
+      floorCol *= (1.0 - shadow);
+
+      // 地平線收得比以前緊。它是畫面裡最長的一條邊，玻璃把它折彎、分色之後
+      // 就是輪廓上那幾條色帶的主要來源。
       float horizon = smoothstep(0.0, max(uStudioHorizonSoft, 0.001), -rd.y);
-      col = mix(paper.rgb, floorCol, horizon);
+      col = mix(col, floorCol, horizon);
     }
   }
 
-  // 棚燈卡。用 mix 往白色靠而不是相加：淺底已經接近 1.0，相加只會 clip 成一片
-  // 死白，而 mix 在兩種底色上都還留得住形狀。
-  //
-  // 兩張都是大面積柔光板（smoothstep 的區間很寬），不是點光源。窄的高光在
-  // 玻璃上只會變成幾顆亮點，撐不起形狀；柔光板才會在輪廓上拉出一條長的高光帶，
-  // 而那條帶子正是玻璃讀得出曲面的地方 —— 也是彩虹最容易被看見的位置。
   if (cards > 0.0) {
     // 柔光罩。棚拍的黑底不是一間沒有光的黑房間 —— 背景紙是黑的，但整個空間被
     // 大面積柔光填滿，物體因此有明暗、有輪廓。少了這一層，深底的玻璃會透到一片
@@ -233,14 +266,23 @@ vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards){
     // 用 screen 合成而不是 mix：淺底已經接近 1.0，mix 會把它往柔光罩的中灰拉、
     // 反而變暗；screen 只會往上加，兩種底色都安全。
     float sky = clamp(rd.y * 0.5 + 0.5, 0.0, 1.0);
-    vec3 dome = vec3(mix(0.05, 0.36, sky)) * uStudioAmbient * cards;
+    vec3 dome = vec3(mix(0.04, 0.30, sky)) * uStudioAmbient * cards;
     col = vec3(1.0) - (vec3(1.0) - col) * (vec3(1.0) - clamp(dome, 0.0, 1.0));
 
-    float key = smoothstep(0.55, 0.99, dot(rd, normalize(vec3(-0.42, 0.52, 0.74))));
-    float fill = smoothstep(0.38, 0.96, dot(rd, normalize(vec3(0.76, 0.14, 0.63))));
-    col = mix(col, vec3(1.0), clamp(
-      (key + fill * 0.5) * uStudioCardStrength * cards, 0.0, 1.0
-    ));
+    // 三張卡：主光、補光，加一條細長的邊光。邊緣銳利度由 uStudioCardEdge 控制 ——
+    // 這根滑桿改的不是亮度而是「色散看不看得見」，推到 0 就只剩一團柔光，
+    // 色帶會跟著消失。
+    float soft = max(uStudioCardEdge, 0.004);
+    float key  = studioCard(rd, normalize(vec3(-0.42, 0.52, 0.74)), 0.52, soft);
+    float fill = studioCard(rd, normalize(vec3(0.76, 0.14, 0.63)), 0.62, soft * 2.2);
+    float rim  = studioCard(rd, normalize(vec3(0.05, -0.30, -0.95)), 0.30, soft);
+    // 相加而不是往白色 mix，而且刻意讓它超過 1。真正的柔光箱比背景紙亮一個
+    // 數量級，被 mix 夾在 1.0 就等於「一張跟白紙一樣亮的燈」—— 那既打不出
+    // 高光，也給不出飽和的色帶：色帶的飽和度就是背景那道邊的相對落差，落差
+    // 只有兩成，顏色就只能淡兩成。超過 1 的部分留到合成時才壓（見 shaders.js
+    // 的靜態合成），在那之前它是真的很亮。
+    col += vec3(key + fill * 0.45 + rim * 0.7)
+      * uStudioCardStrength * uStudioCardGain * cards;
   }
 
   return vec4(col, paper.a);

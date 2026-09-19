@@ -796,12 +796,21 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
             vec3 outBand = exitDir;
             vec3 inBand = refract(rd, N, 1.0 / iorBand);
             if (dot(inBand, inBand) > 0.0001) {
-              vec3 o = refract(normalize(inBand), -exitNormal, iorBand);
-              // 某個波長全內反射時沿用參考出射方向，不要讓它掉回原始視線 ——
-              // 那會在臨界角附近沿著輪廓畫出一條假的硬邊。
-              if (dot(o, o) > 0.0001) outBand = normalize(o);
+              inBand = normalize(inBand);
+              vec3 o = refract(inBand, -exitNormal, iorBand);
+              if (dot(o, o) > 0.0001) {
+                outBand = normalize(o);
+              } else {
+                // 這個波長在出口面全內反射了。上一版在這裡退回參考出射方向，
+                // 那正好把整個效果最強的地方抹掉：臨界角 θc = asin(1/n) 跟波長
+                // 有關，所以掠射區一定存在一條「短波還過得去、長波已經反射
+                // 回去」的分界，而 dθ_out/dθ_in 在那附近是發散的。兩側取到的
+                // 是環境裡完全不同的兩塊，差異因此極大 —— 參考影片裡最飽和的
+                // 那幾條細色帶就長在這條線上。讓它照實走內反射。
+                outBand = normalize(reflect(inBand, exitNormal));
+              }
             }
-            vec3 w = visibleSpectrum(band);
+            vec3 w = spectralResponse(band);
             spectralSum += studioBackdropSample(exitPoint, outBand, roughBlur, 1.0).rgb * w;
             weightSum += w;
           }
@@ -2210,9 +2219,16 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
     vec3 studioReflection = studioBackdropSample(
       p, reflect(rd, N), uRoughness, 1.0
     ).rgb * uReflect * fresView;
-    // material.baseSurface 已經是 tone map 過的「環境反射＋高光」，而且內含
-    // Fresnel 加權，所以直接加，不再乘一次 fresView（那會變成平方）。
-    vec3 staticGlass = transmitted + material.baseSurface + studioReflection;
+    // 不再加 material.baseSurface。它的環境是 sampleReflection（HDRI／程序化
+    // 棚燈），跟玻璃透射的那個場景不是同一個 —— 兩個光源疊在一起，物體就對不
+    // 上它所在的空間。靜態模式的反射與透射現在都只來自棚景這一個場景。
+    //
+    // 只壓超過 1 的部分：棚燈卡是 HDR 的，硬夾在 1.0 會把高光與色帶一起削平；
+    // 但透射過來的背景紙本來就在顯示範圍內，整體 tone map 會把它壓灰，玻璃
+    // 看起來就比旁邊的紙暗一截。這條式子在 1 以下是精確的恆等，只有超出的
+    // 部分才被壓縮。
+    vec3 lit = transmitted + studioReflection;
+    vec3 staticGlass = lit / (vec3(1.0) + max(vec3(0.0), lit - vec3(1.0)));
     finalColor = clampOutput(
       mix(finalColor, staticGlass, clamp(uStaticGlassMix, 0.0, 1.0))
     );

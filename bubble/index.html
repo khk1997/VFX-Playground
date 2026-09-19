@@ -304,19 +304,21 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
       <summary><h4>玻璃光學 Glass Optics</h4></summary>
       <div class="effectBlock effectBlock--physical">
         <div class="effectTitle"><span>REFRACT</span> 光譜折射</div>
-        <div class="row"><label>色散</label><input type="range" id="refractDispersion" min="0" max="6" step="0.05" value="2.5"><span class="val" id="refractDispersion_v"></span></div>
-        <div class="row"><label>邊緣集中</label><input type="range" id="edgePathPower" min="0.4" max="4" step="0.05" value="1.6"><span class="val" id="edgePathPower_v"></span></div>
-        <div class="row"><label>光譜取樣</label><input type="range" id="spectralSamples" min="1" max="8" step="1" value="6"><span class="val" id="spectralSamples_v"></span></div>
+        <div class="row"><label>色散</label><input type="range" id="refractDispersion" min="0" max="8" step="0.05" value="4"><span class="val" id="refractDispersion_v"></span></div>
+        <div class="row"><label>邊緣集中</label><input type="range" id="edgePathPower" min="0.4" max="4" step="0.05" value="1.15"><span class="val" id="edgePathPower_v"></span></div>
+        <div class="row"><label>光譜取樣</label><input type="range" id="spectralSamples" min="1" max="12" step="1" value="12"><span class="val" id="spectralSamples_v"></span></div>
         <div class="effectSubhead">棚景</div>
-        <div class="row"><label>柔光罩</label><input type="range" id="studioAmbient" min="0" max="2" step="0.02" value="1"><span class="val" id="studioAmbient_v"></span></div>
+        <div class="row"><label>柔光罩</label><input type="range" id="studioAmbient" min="0" max="2" step="0.02" value="0.38"><span class="val" id="studioAmbient_v"></span></div>
+        <div class="row"><label>棚燈邊緣</label><input type="range" id="studioCardEdge" min="0.004" max="0.4" step="0.004" value="0.03"><span class="val" id="studioCardEdge_v"></span></div>
+        <div class="row"><label>棚燈亮度倍率</label><input type="range" id="studioCardGain" min="1" max="16" step="0.25" value="11"><span class="val" id="studioCardGain_v"></span></div>
         <div class="row"><label>棚燈強度</label><input type="range" id="studioCardStrength" min="0" max="1" step="0.01" value="0.55"><span class="val" id="studioCardStrength_v"></span></div>
-        <div class="row"><label>接觸陰影</label><input type="range" id="studioShadowStrength" min="0" max="1" step="0.01" value="0.32"><span class="val" id="studioShadowStrength_v"></span></div>
-        <div class="row"><label>地板漣漪</label><input type="range" id="studioRipple" min="0" max="0.3" step="0.005" value="0.07"><span class="val" id="studioRipple_v"></span></div>
+        <div class="row"><label>接觸陰影</label><input type="range" id="studioShadowStrength" min="0" max="1" step="0.01" value="0.4"><span class="val" id="studioShadowStrength_v"></span></div>
+        <div class="row"><label>地板漣漪</label><input type="range" id="studioRipple" min="0" max="0.5" step="0.005" value="0.09"><span class="val" id="studioRipple_v"></span></div>
       </div>
       <p class="note">這一組只作用於靜態模式。色散是真的把背景分波長折射，所以它需要背景有東西可以分 ——「棚景」關掉之後色散也會跟著消失，那不是故障。</p>
     </details>
 
-    <details class="subgroup" id="dispersionGroup">
+    <details class="subgroup" id="dispersionGroup" data-gate="!static">
       <summary><h4>色散 Dispersion</h4><span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="dispersionMaster"><span class="switchTrack" aria-hidden="true"></span></span></summary>
       <div class="effectBlock effectBlock--physical" id="rayDispersionGroup">
         <div class="effectTitle"><span>RAY</span> 模擬色散<span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="rayDispersionEnabled" checked><span class="switchTrack" aria-hidden="true"></span></span></div>
@@ -394,7 +396,7 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
     </details>
 
 
-    <details class="subgroup" id="thinFilmGroup">
+    <details class="subgroup" id="thinFilmGroup" data-gate="!static">
       <summary><h4>薄膜外觀 Thin Film</h4><span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="filmEnabled"><span class="switchTrack" aria-hidden="true"></span></span></summary>
       <div class="row"><label>上色模式</label><select id="colorMode"><option value="spectral">光譜（物理）</option><option value="ramp">自訂漸層</option></select><span class="val"></span></div>
       <div class="row"><label>薄膜厚度</label><input type="range" id="thickness" min="120" max="760" step="5" value="250"><span class="val" id="thickness_v"></span></div>

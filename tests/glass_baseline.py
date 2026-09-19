@@ -48,6 +48,11 @@ CASES: tuple[tuple[str, str, str, str | None], ...] = (
     ("static-builtin-dark", "static", "dark", "0"),
     ("static-builtin-light", "static", "light", "0"),
     ("static-import-dark", "static", "dark", "7"),
+    # 圓環：唯一一個表面處處有曲率的內建造型。方體與多數匯入造型是大片平面加
+    # 一圈圓角，而平行面的淨偏折是零 —— 色散只可能出現在那一圈圓角上，看起來
+    # 就是幾點色斑。要判斷分光本身做得好不好，得有一個曲率連續的表面。
+    ("static-torus-dark", "static", "dark", "6"),
+    ("static-torus-light", "static", "light", "6"),
     ("static-import-light", "static", "light", "7"),
     ("formation-dark", "formation", "dark", None),
     ("formation-light", "formation", "light", None),

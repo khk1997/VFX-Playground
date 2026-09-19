@@ -162,13 +162,15 @@ export const DEFAULTS = {              // 數值滑桿
   // 這裡只列出真的值得調的那幾根。棚景的幾何（地板高度、地平線柔度、陰影半徑、
   // 漣漪密度）與 edgePathBoost、staticGlassMix 仍然是 bubble.js 裡的字面值：
   // 它們調出來的差別是「同一個場景的細微變體」，多七根滑桿換不到那個。
-  refractDispersion: 2.5,
-  edgePathPower: 1.6,
-  spectralSamples: 6,
-  studioAmbient: 1,
+  refractDispersion: 6.5,
+  edgePathPower: 1.15,
+  spectralSamples: 12,
+  studioCardEdge: 0.075,
+  studioCardGain: 11.0,
+  studioAmbient: 0.38,
   studioCardStrength: 0.55,
-  studioShadowStrength: 0.32,
-  studioRipple: 0.07,
+  studioShadowStrength: 0.40,
+  studioRipple: 0.09,
   hdriYaw: -45,
   hdriPitch: 20,
   hdriBlur: 0.21,

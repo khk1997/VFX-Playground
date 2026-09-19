@@ -145,8 +145,25 @@ export function createShaderVariantPlanner({
       //
       // 其餘模式給 false 而不是給個數字：那會多一行 #define 進到它們的 shader
       // 前綴，而「原始碼有動、輸出就不保證相同」這件事這個分支已經踩過一次。
-      MAX_SPECTRAL_COMPILE: state.staticGlass ? 8 : false,
+      MAX_SPECTRAL_COMPILE: state.staticGlass ? 12 : false,
     };
+
+    // 靜態模式不編舊的外觀層。這不是精簡，是它們與新模型互相衝突：
+    //
+    //   薄膜干涉、藝術色散、稜光光芒、光譜焦散全部是「把算好的光譜加到畫面上」。
+    //   新模型的顏色是折射本身分出來的，而那兩種顏色疊在一起就互相稀釋 ——
+    //   加色層先把邊緣填成淡彩，真正的分光帶再疊上去就看不出來了。要的是細而
+    //   飽和的色帶，不是一層淡彩加一條細帶。
+    //
+    // 順帶把靜態變體的編譯量降回來：這幾塊是整支 shader 裡最大的幾段。
+    if (state.staticGlass) {
+      defines.FEATURE_THIN_FILM = false;
+      defines.FEATURE_DISPERSION = false;
+      defines.FEATURE_PRISM_BEAM = false;
+      defines.FEATURE_PRISM_SATURATION = false;
+      defines.FEATURE_SPECTRAL_CAUSTICS = false;
+      defines.FEATURE_BEAM_PATTERNS = false;
+    }
 
     if (DIAG.allFeatures) {
       for (const key of Object.keys(defines)) {
