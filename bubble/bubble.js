@@ -2288,6 +2288,8 @@ function initGL() {
     uEdgeRimWeight: { value: P.edgeRimWeight },
     uAnisoBlur: { value: P.anisoBlur },
     uAbbe: { value: P.abbe },
+    uStudioCaustic: { value: P.studioCaustic },
+    uStudioCausticChroma: { value: 0.45 },
     uRefractDispersion: { value: P.refractDispersion },
     uSpectralSamples: { value: P.spectralSamples },
     uEdgePathBoost: { value: 1.0 },

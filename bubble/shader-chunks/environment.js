@@ -33,6 +33,8 @@ uniform float uStudioCardGain;      // 棚燈卡相對背景紙的亮度倍率�
 uniform float uEdgeRimWeight;       // 剪影對色散的加權（見 shaders.js 的 deviation）
 uniform float uAnisoBlur;           // 折射取樣的錐寬：把環境的邊按射線 footprint 攤開
 uniform float uAbbe;                // 阿貝數：越小色散越強（冕牌 59 / 火石 30 / 重火石 20）
+uniform float uStudioCaustic;       // 焦散強度：光被玻璃聚到地板上的亮斑
+uniform float uStudioCausticChroma; // 焦散外圈的彩度
 // ===== 光譜折射 =====
 // 折射率在光譜兩端的差（≈ 1/阿貝數的效果量）。0 = 各波長同路，沒有色散。
 uniform float uRefractDispersion;
@@ -239,6 +241,12 @@ float bandIOR(float band, float strength){
 // 的差異，所以平滑的漸層被分開之後仍然是平滑的漸層 —— 只會整片變淡，不會出現
 // 色帶。要看到參考影片那種細而飽和的 ROYGBIV，環境裡必須有「邊」被拆開。柔光
 // 板照亮物體、它的邊緣負責顯色，兩件事都需要。
+// 主光方向。焦散必須跟棚燈卡讀同一個方向，否則地板上的亮斑會跟物體的高光
+// 指向不同的光源，一眼就看得出是貼上去的。
+vec3 studioKeyDir(){
+  return normalize(vec3(-0.42, 0.52, 0.74));
+}
+
 float studioCard(vec3 rd, vec3 dir, float radius, float soft){
   float a = acos(clamp(dot(rd, dir), -1.0, 1.0));
   return 1.0 - smoothstep(radius - soft, radius + soft, a);
@@ -252,6 +260,49 @@ float studioCard(vec3 rd, vec3 dir, float radius, float soft){
 // 在錐內多重取樣，但那要乘上波長數，太貴。這裡改成把環境自己的邊按 footprint
 // 攤開：結果等價於預濾波，成本是零（就是幾個 smoothstep 的區間變寬）。
 // HDRI 那條路用 PMREM 的 mip 做同一件事，這是程序化棚景的對應版本。
+// 焦散：光穿過玻璃之後被聚到地板上。
+//
+// 真的算焦散要從光源那側打光子再收集，離線算繪才付得起。這裡用一個解析近似：
+// 把物體當成它的包圍球，從地板點往主光方向看，量這條線離球心多遠。球透鏡會把
+// 邊緣的光往軸線收，所以軸線附近是亮核、球緣對應的半徑上是一圈更亮的環 ——
+// 那圈環正是焦散最顯眼的特徵，也是參考影片地板上那幾塊亮斑的形狀。
+//
+// 彩虹長在環上而不是核上，理由跟玻璃本體的色散同一個：環是邊緣的光聚起來的，
+// 走的是最掠射、最接近臨界角的那條路，分離量在那裡最大。
+//
+// 用包圍球而不是真正的 SDF 是刻意的取捨：正確做法得對每個地板像素再 march 一次，
+// 而地板佔了畫面大半。近似的代價是亮斑不會跟著造型的細節變形，只跟著它的大小
+// 與位置走 —— 在一顆離地不遠的玻璃底下，那個差別遠小於「有沒有焦散」的差別。
+vec3 studioCaustics(vec3 floorPos){
+  if (uStudioCaustic <= 0.0001) return vec3(0.0);
+  vec3 lightDir = studioKeyDir();
+  vec3 toCenter = uBounds.xyz - floorPos;
+  float along = dot(toCenter, lightDir);
+  // 光源在地板點的另一側時沒有東西擋在中間，也就沒有焦散。用 smoothstep 而不是
+  // 直接 return：硬切會在地板上留下一道筆直的邊，看起來像貼圖沒對齊。
+  float front = smoothstep(0.0, uBounds.w * 1.5, along);
+  if (front <= 0.0) return vec3(0.0);
+  float axis = length(toCenter - lightDir * along);
+  float t = axis / max(uBounds.w, 0.001);
+
+  // 亮斑必須待在物體附近。光源方向相當側向，只看軸線距離的話那個橢圓會沿著
+  // 光線拖得非常長 —— 畫面上是一圈跟物體無關的巨大彩環。再乘一個以物體正下方
+  // 為中心的衰減把它收回來。
+  vec2 ground = (floorPos.xz - uBounds.xz) / max(uBounds.w * 1.8, 0.001);
+  float reach = exp(-dot(ground, ground));
+
+  float core = exp(-t * t * 6.0);
+  float ring = exp(-pow((t - 0.72) / 0.10, 2.0));
+
+  // 環上跑一次光譜。spectralResponse 的三個瓣沒有歸一，除以最大分量才會是
+  // 飽和的色相而不是一條偏暗的帶。
+  vec3 hue = spectralResponse(clamp((t - 0.55) / 0.55, 0.0, 1.0));
+  hue /= max(max(hue.r, max(hue.g, hue.b)), 0.001);
+  vec3 rim = mix(vec3(1.0), hue, clamp(uStudioCausticChroma, 0.0, 1.0));
+
+  return (vec3(core) * 0.65 + rim * ring * 1.5) * uStudioCaustic * front * reach;
+}
+
 vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards, float soften){
   vec4 paper = backgroundSample(rd, extraBlur);
   // HDRI 背景已經是有結構的環境，不需要也不該再蓋一層假棚景。
@@ -292,6 +343,10 @@ vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards, fl
       float crest = pow(max(wave, 0.0), mix(7.0, 1.2, clamp(soften * 4.0, 0.0, 1.0)));
       floorCol += vec3(crest * uStudioRipple * exp(-dist * 0.75));
       floorCol *= (1.0 - shadow);
+      // 焦散加在陰影之後：玻璃把光聚起來，所以亮核就長在自己的影子裡面 ——
+      // 那個「暗斑中間有一塊更亮」正是玻璃與不透明物體最好認的差別。
+      floorCol += studioCaustics(origin + rd * tFloor)
+        * (1.0 - recede * 0.5);
 
       // 地平線收得比以前緊。它是畫面裡最長的一條邊，玻璃把它折彎、分色之後
       // 就是輪廓上那幾條色帶的主要來源。
