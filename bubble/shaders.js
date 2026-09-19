@@ -388,6 +388,10 @@ uniform float uStudioCardStrength;  // 棚燈卡亮度
 uniform float uRefractDispersion;
 // 光譜取樣數。1 等於關閉；越多色帶越連續，但每一個都是一次背景取樣。
 uniform int   uSpectralSamples;
+// 偏折量對色散的加權。power 越高越把彩虹收進摺痕與掠射面，越低越鋪滿整顆；
+// boost 是單純的倍率。兩根合起來就是參考影片面板上的 Edge Path Boost／Power。
+uniform float uEdgePathBoost;
+uniform float uEdgePathPower;
 #endif // FEATURE_STATIC_GLASS
 // 底色情境（見 bubble.js 的 SELECT_DEFAULTS.backdrop）。0 = 深底，1 = 淺底。
 //
@@ -799,7 +803,25 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
         //
         // 已知的近似：發生全內反射彈跳時，出口面換成了第二個出口，而各波長仍用
         // 原始視線與前表面法線入射。彈跳本來就只補一次，這一層近似在同一個量級。
-        if (uRefractDispersion > 0.0001 && uSpectralSamples > 1) {
+        // 色散強度綁在「光線的淨偏折量」上，這是物理不是美術取捨：平行平板把光
+        // 折進去再折出來，出射方向與入射方向平行，各波長的淨偏折都是零 —— 一塊
+        // 窗玻璃不會打彩虹，稜鏡會，差別只在這一項。所以平坦的正視面自己就會
+        // 保持無色透明，不必另外做遮罩去擋；而輪廓、摺痕、掠射面上偏折量本來
+        // 就大，彩虹自己長在那裡。這就是那支參考影片說的 edge dispersion。
+        //
+        // 偏折量用的是下游 localPrism 同一個式子（length(exitDir - rd) 是兩個
+        // 單位向量的夾角弦長）。它在這裡算一次而不是共用，是因為 localPrism 要
+        // 到 exitDir 全部定案之後才指派，而那在這一段的後面。
+        float deviation = clamp(
+          length(exitDir - rd) * 0.55 + backRim * 0.18, 0.0, 1.0
+        );
+        // 上限不是美術保險，是物理界線：折射率被推到 1 以下時 refract() 的行為
+        // 會整個翻過來（掠射端變成往外彎），畫面上是一圈突然反向的假邊。
+        float bandSpread = min(
+          uRefractDispersion * pow(deviation, uEdgePathPower) * uEdgePathBoost,
+          0.9
+        );
+        if (bandSpread > 0.0001 && uSpectralSamples > 1) {
           vec3 spectralSum = vec3(0.0);
           vec3 weightSum = vec3(0.0);
           for (int i = 0; i < MAX_SPECTRAL_COMPILE; i++) {
@@ -807,7 +829,7 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
             // band 0 = 藍端，1 = 紅端（visibleSpectrum 的慣例）。短波折射率高，
             // 所以偏移量是 (0.5 - band)。
             float band = (float(i) + 0.5) / float(uSpectralSamples);
-            float iorBand = uIOR + (0.5 - band) * uRefractDispersion;
+            float iorBand = uIOR + (0.5 - band) * bandSpread;
             vec3 outBand = exitDir;
             vec3 inBand = refract(rd, N, 1.0 / iorBand);
             if (dot(inBand, inBand) > 0.0001) {

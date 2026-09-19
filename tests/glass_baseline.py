@@ -143,17 +143,27 @@ def chroma_metrics(path: Path) -> dict[str, float]:
     """How much colour the frame carries, as max(RGB) - min(RGB) per pixel.
 
     A hash says a frame changed but not in which direction, and the point of
-    this branch is colour appearing on the glass. Both backdrops are neutral
-    grey, so the backdrop contributes nothing and the numbers describe the
-    object: `coloured` is the share of pixels far enough from grey to read as a
-    tint, which tracks a dispersion change far more legibly than the mean does.
+    this branch is colour appearing on the glass.
+
+    The threshold is 16 rather than something smaller because the light
+    backdrop is not perfectly neutral: its lower gradient stop is #c9ccd1,
+    whose channels already span exactly 8. At a threshold of 8 the entire
+    backdrop counted as coloured, the object was a rounding error beside it,
+    and a dispersion change of nearly a factor of two moved the number by
+    0.2 percentage points -- a metric that reported almost nothing. Above 16
+    only the glass contributes, and the same change moves it by half its value.
+
+    p999Chroma is the strongest colour actually present: rainbow fringes live
+    on a thin band of pixels, so a percentile describes them better than a mean
+    over a frame that is mostly backdrop.
     """
     image = Image.open(path).convert("RGB")
-    chroma = [max(pixel) - min(pixel) for pixel in image.getdata()]
+    chroma = sorted(max(pixel) - min(pixel) for pixel in image.getdata())
     total = len(chroma)
     return {
         "meanChroma": round(sum(chroma) / total, 3),
-        "colouredPct": round(sum(1 for c in chroma if c >= 8) / total * 100, 3),
+        "colouredPct": round(sum(1 for c in chroma if c >= 16) / total * 100, 3),
+        "p999Chroma": chroma[int(total * 0.999)],
     }
 
 
