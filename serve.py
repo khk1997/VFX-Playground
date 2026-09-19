@@ -33,9 +33,26 @@ class FastRequestHandler(SimpleHTTPRequestHandler):
         super().end_headers()
 
 
+class DevServer(ThreadingHTTPServer):
+    # socketserver defaults this to 5, i.e. listen(5), and ThreadingHTTPServer
+    # never raises it. bubble/index.html pulls forty-odd module scripts, so the
+    # browser opens connections in bursts; once more than five are waiting to be
+    # accepted the kernel refuses the rest outright and Chrome reports
+    # ERR_CONNECTION_REFUSED.
+    #
+    # A refused module script is close to invisible: it fires no pageerror, so
+    # the page just sits there half-booted. That is what made
+    # home_effect_registry look like a slow shader compile -- bubble.js had
+    # never arrived, THREE was undefined, and the test waited out its full 90s
+    # on a condition nothing was ever going to satisfy. Roughly one load in
+    # twenty was hit, which is exactly often enough to look like flakiness in
+    # the app rather than a five-deep accept queue.
+    request_queue_size = 128
+
+
 def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
-    server = ThreadingHTTPServer(("", port), FastRequestHandler)
+    server = DevServer(("", port), FastRequestHandler)
     print(f"Serving on http://localhost:{port}/ (Ctrl+C to stop)")
     try:
         server.serve_forever()

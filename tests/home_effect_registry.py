@@ -131,12 +131,29 @@ def main() -> int:
             page = context.new_page()
             errors = []
             page.on("pageerror", lambda error, m=mode: errors.append(f"{m}: {error}"))
+            # 載入失敗的 module script 不會觸發 pageerror：頁面就停在半啟動的狀態，
+            # 而下面的 wait_for_shader 會用滿 90 秒去等一個永遠不會成立的條件。那個
+            # 症狀看起來像著色器編譯很慢，實際上是 bubble.js 根本沒送達。
+            #
+            # 只記錄、不當場斷言：ERR_ABORTED 是正常的（HDRI 等待有 4 秒上限，逾時
+            # 就主動取消，見 bubble.js 的 waitForEnvSettled）。真的逾時的時候再把這
+            # 份清單附上去，才不會把正常的取消誤報成故障。
+            dropped = []
+            page.on("requestfailed", lambda request, m=mode: dropped.append(
+                f"{m}: {request.url} :: {request.failure}"
+            ))
             response = page.goto(
                 f"{args.base_url}/bubble/index.html?mode={mode}&diag=baseline",
                 wait_until="networkidle", timeout=60_000,
             )
             assert response and response.ok
-            wait_for_shader(page)
+            try:
+                wait_for_shader(page)
+            except Exception as exc:
+                raise AssertionError(
+                    f"{mode}: the shader never settled. Requests that failed on the way: "
+                    f"{dropped or 'none'}"
+                ) from exc
             state = page.evaluate("""() => ({
               motion: window.__bubbleDiagReport().模式.motion,
               select: document.getElementById('motion').value,
