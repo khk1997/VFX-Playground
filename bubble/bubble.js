@@ -2264,25 +2264,27 @@ function initGL() {
     // 直接讀 P.backdrop 字串，不透過 SELECTS.backdrop.map（那張表兩個值目前都
     // 映射成 0，見 uLightBackdrop 旁的說明）。
     uLightBgGradientEnabled: { value: P.backdrop === 'light' ? 1 : 0 },
-    // 程序化棚景（見 shaders.js 的 uStudioBackdrop）。目前只有靜態模式的 shader
-    // 會讀它們，其餘模式連編都沒編，所以這裡一律送值是安全的。
+    // 程序化棚景與光譜折射（見 shader-chunks/environment.js）。只有靜態
+    // 模式的 shader 會讀它們，其餘模式連編都沒編，所以一律送值是安全的。
     //
-    // 這一批刻意還沒接上控制面板：先把畫面調到對，才知道哪幾根真的值得給使用者，
-    // 接線留到參數定案之後（否則面板會先長出一排之後要拔掉的滑桿）。
+    // 讀 P 的那幾根有面板滑桿；其餘留字面值。分界不是「調不調得動」，是「調了
+    // 有沒有人看得出差別」—— 地板高度、地平線柔度、陰影半徑、漣漪密度調出來
+    // 都是同一個棚景的細微變體，而 edgePathBoost 與 staticGlassMix 是研究用的
+    // 旋鈕（後者是「退回舊外殼」的 A/B 開關，不是給使用者的選項）。
     uStudioBackdrop: { value: 1 },
     uStudioFloorHeight: { value: -1.15 },
     uStudioFloorTone: { value: 0.88 },
     uStudioHorizonSoft: { value: 0.10 },
-    uStudioShadowStrength: { value: 0.32 },
+    uStudioShadowStrength: { value: P.studioShadowStrength },
     uStudioShadowRadius: { value: 0.72 },
-    uStudioRipple: { value: 0.07 },
+    uStudioRipple: { value: P.studioRipple },
     uStudioRippleScale: { value: 11.0 },
-    uStudioCardStrength: { value: 0.55 },
-    uStudioAmbient: { value: 1.0 },
-    uRefractDispersion: { value: 2.5 },
-    uSpectralSamples: { value: 6 },
+    uStudioCardStrength: { value: P.studioCardStrength },
+    uStudioAmbient: { value: P.studioAmbient },
+    uRefractDispersion: { value: P.refractDispersion },
+    uSpectralSamples: { value: P.spectralSamples },
     uEdgePathBoost: { value: 1.0 },
-    uEdgePathPower: { value: 1.6 },
+    uEdgePathPower: { value: P.edgePathPower },
     uStaticGlassMix: { value: 1.0 },
     uLightShow:  { value: P.lightShow },
     uLightClarity: { value: P.lightClarity },

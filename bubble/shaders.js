@@ -356,47 +356,6 @@ uniform vec3  uLightBgGradientBottom;
 // 這裡要的只是「選了淺底就顯示漸層背景」這一件事，所以另開一個乾淨的開關，
 // 不去牽動那些休眠中的路徑）。
 uniform float uLightBgGradientEnabled;
-// ===== 程序化棚景（只有靜態模式編譯，見 FEATURE_STATIC_GLASS）=====
-//
-// 為什麼玻璃需要一個有結構的背景，而不只是換個底色：色散是「同一條視線的不同
-// 波長落在背景的不同位置」，所以背景在那個角度差之內必須有東西不一樣。純色畫布
-// 完全不看方向，三個波長取到同一個常數，相減恆為零 —— 這正是 traceExitSurface
-// 之後那段註解記錄過的死路。垂直漸層好一點，但它是整張畫面最低頻的訊號，一個
-// 波長差那麼小的角度掃過去，亮度差仍然在捨入誤差等級。
-//
-// 棚景補的就是這件事：地平線、地板、接觸陰影、漣漪與棚燈卡，每一項都在背景上
-// 放一段夠陡的梯度。玻璃邊緣把大片立體角壓進幾個像素，梯度在那裡被放大，彩虹
-// 因此自己長在輪廓與摺痕上，不必額外畫上去。
-//
-// 它同時服務深底與淺底：背景紙的顏色沿用既有的 uBgColor／漸層，棚景只在那之上
-// 疊結構，所以換底色不會換成另一套美術。HDRI 背景（uBgMode==1）不套用 —— 那本來
-// 就已經是有結構的環境。
-//
-// 宣告連同下面的實作一起關在旗標裡，其餘九個模式連這幾行都不會編到。
-#ifdef FEATURE_STATIC_GLASS
-uniform float uStudioBackdrop;      // 0 = 沿用原本的純色／漸層背景
-uniform float uStudioFloorHeight;   // 地板平面的 y
-uniform float uStudioFloorTone;     // 地板相對背景紙的明度（<1 壓暗）
-uniform float uStudioHorizonSoft;   // 地平線的收斂柔度
-uniform float uStudioShadowStrength;// 接觸陰影最深處
-uniform float uStudioShadowRadius;  // 接觸陰影的半徑
-uniform float uStudioRipple;        // 地板漣漪振幅
-uniform float uStudioRippleScale;   // 漣漪環的密度
-uniform float uStudioCardStrength;  // 棚燈卡亮度
-uniform float uStudioAmbient;       // 柔光罩強度（只作用於折射與反射取樣）
-// ===== 光譜折射 =====
-// 折射率在光譜兩端的差（≈ 1/阿貝數的效果量）。0 = 各波長同路，沒有色散。
-uniform float uRefractDispersion;
-// 光譜取樣數。1 等於關閉；越多色帶越連續，但每一個都是一次背景取樣。
-uniform int   uSpectralSamples;
-// 偏折量對色散的加權。power 越高越把彩虹收進摺痕與掠射面，越低越鋪滿整顆；
-// boost 是單純的倍率。兩根合起來就是參考影片面板上的 Edge Path Boost／Power。
-uniform float uEdgePathBoost;
-uniform float uEdgePathPower;
-// 新玻璃合成的混合量。1 = 完全走新模型，0 = 完全退回原本的暗底外殼，
-// 中間值用來做並排比較（這是研究分支，能退回去才能判斷改動是不是進步）。
-uniform float uStaticGlassMix;
-#endif // FEATURE_STATIC_GLASS
 // 底色情境（見 bubble.js 的 SELECT_DEFAULTS.backdrop）。0 = 深底，1 = 淺底。
 //
 // 這個材質在深底上的顯色方式是「自身能量」：水滴自己發出的光疊在黑場上，最後
@@ -2232,6 +2191,9 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
   // 穿過來的背景。它對兩種底色都成立，不需要兩套美術：掠射角 Fresnel 趨近 1，
   // 輪廓自己變成一圈暗邊（玻璃就是這樣讀出形狀的）；正面 Fresnel 很小，背景
   // 幾乎原樣穿過來，連同上一步分好的光譜。
+  // 去背輸出要用的那一份：光線穿過這塊玻璃之後還剩多少（逐通道）。它就是
+  // over 合成裡的 (1 - alpha)，所以留到下面反解 straight color。
+  vec3 staticGlassTransfer = vec3(0.0);
   {
     float cosView = clamp(dot(N, -rd), 0.0, 1.0);
     float f0 = pow((uIOR - 1.0) / (uIOR + 1.0), 2.0);
@@ -2239,8 +2201,8 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
     // 背面的 Fresnel 也要算進去：光要穿過來得同時通過兩個介面，只算前表面會讓
     // 厚處太亮、讀不出體積。
     float throughput = (1.0 - fresView) * (1.0 - backFres * 0.5);
-    vec3 transmitted = refractedBg * material.transmission * volumeAbsorption
-      * throughput;
+    staticGlassTransfer = material.transmission * volumeAbsorption * throughput;
+    vec3 transmitted = refractedBg * staticGlassTransfer;
     // 反射也必須來自同一個棚景。少了這一項，深底就整顆變黑：material.baseSurface
     // 的環境是 sampleReflection（HDRI／程序化棚燈），而棚景只餵背景與透射，兩者
     // 是不同的來源 —— 玻璃於是變成「透射一片黑、反射也一片黑」。同一個場景同時
@@ -2274,7 +2236,34 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
       1.0
     );
     outputAlpha = mix(glassAlpha, membraneAlpha, membraneMode);
-    if (universalGlass) {
+    // 靜態玻璃走自己的去背，走完就把下面那條通用玻璃的路徑讓開。用一個布林
+    // 而不是把 if 包進 #ifdef：下面是一條 if/else if 鏈，切斷它會把液態薄膜
+    // 那一支一起帶走。
+    bool exportHandled = false;
+#ifdef FEATURE_STATIC_GLASS
+    // 靜態玻璃的去背。這裡不能沿用下面那條通用玻璃的路徑：它是從
+    // universalOwnEnergy 反解的，而那份自身能量屬於已經被換掉的暗底外殼 ——
+    // 照著解出來，匯出的 PNG 會是舊模型，跟畫面上看到的不是同一顆玻璃。
+    //
+    // 新模型本來就是標準的 over 合成：畫面 = 自身能量 + 背景 × 透過率。透過率
+    // 是上面算好的 staticGlassTransfer，也就是 (1 - alpha)，所以把已知的背景
+    // 減掉再除以覆蓋率就得到 straight color。這跟液態薄膜對白底反乘是同一招，
+    // 差別只在這裡的背景是 bg 而不是寫死的白。
+    //
+    // 覆蓋率取亮度而不是逐通道：alpha 只有一個通道，而透過率的色偏已經留在
+    // 反解出來的顏色裡了。
+    {
+      float transferLum = dot(
+        clamp(staticGlassTransfer, 0.0, 1.0), vec3(0.2126, 0.7152, 0.0722)
+      );
+      outputAlpha = clamp(1.0 - transferLum, 0.03, 1.0);
+      finalColor = clamp(
+        (finalColor - bg.rgb * (1.0 - outputAlpha)) / outputAlpha, 0.0, 1.0
+      );
+      exportHandled = true;
+    }
+#endif
+    if (universalGlass && !exportHandled) {
       // 通用玻璃天生就是 over 合成，去背不需要任何特殊處理：直接拿還沒被
       // over 合成夾過的自身能量除以覆蓋率反解出 straight color，不從已經
       // 截頂的畫面反減，亮部才不會在去背後失真變暗。

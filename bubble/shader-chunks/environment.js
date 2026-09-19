@@ -1,4 +1,45 @@
-export const ENVIRONMENT_GLSL = `// 環境：程序化棚燈（無 HDRI 時的預設反射來源）；rough 越大光斑越柔散
+export const ENVIRONMENT_GLSL = `// ===== 程序化棚景（只有靜態模式編譯，見 FEATURE_STATIC_GLASS）=====
+//
+// 為什麼玻璃需要一個有結構的背景，而不只是換個底色：色散是「同一條視線的不同
+// 波長落在背景的不同位置」，所以背景在那個角度差之內必須有東西不一樣。純色畫布
+// 完全不看方向，三個波長取到同一個常數，相減恆為零 —— 這正是 traceExitSurface
+// 之後那段註解記錄過的死路。垂直漸層好一點，但它是整張畫面最低頻的訊號，一個
+// 波長差那麼小的角度掃過去，亮度差仍然在捨入誤差等級。
+//
+// 棚景補的就是這件事：地平線、地板、接觸陰影、漣漪與棚燈卡，每一項都在背景上
+// 放一段夠陡的梯度。玻璃邊緣把大片立體角壓進幾個像素，梯度在那裡被放大，彩虹
+// 因此自己長在輪廓與摺痕上，不必額外畫上去。
+//
+// 它同時服務深底與淺底：背景紙的顏色沿用既有的 uBgColor／漸層，棚景只在那之上
+// 疊結構，所以換底色不會換成另一套美術。HDRI 背景（uBgMode==1）不套用 —— 那本來
+// 就已經是有結構的環境。
+//
+// 宣告連同下面的實作一起關在旗標裡，其餘九個模式連這幾行都不會編到。
+#ifdef FEATURE_STATIC_GLASS
+uniform float uStudioBackdrop;      // 0 = 沿用原本的純色／漸層背景
+uniform float uStudioFloorHeight;   // 地板平面的 y
+uniform float uStudioFloorTone;     // 地板相對背景紙的明度（<1 壓暗）
+uniform float uStudioHorizonSoft;   // 地平線的收斂柔度
+uniform float uStudioShadowStrength;// 接觸陰影最深處
+uniform float uStudioShadowRadius;  // 接觸陰影的半徑
+uniform float uStudioRipple;        // 地板漣漪振幅
+uniform float uStudioRippleScale;   // 漣漪環的密度
+uniform float uStudioCardStrength;  // 棚燈卡亮度
+uniform float uStudioAmbient;       // 柔光罩強度（只作用於折射與反射取樣）
+// ===== 光譜折射 =====
+// 折射率在光譜兩端的差（≈ 1/阿貝數的效果量）。0 = 各波長同路，沒有色散。
+uniform float uRefractDispersion;
+// 光譜取樣數。1 等於關閉；越多色帶越連續，但每一個都是一次背景取樣。
+uniform int   uSpectralSamples;
+// 偏折量對色散的加權。power 越高越把彩虹收進摺痕與掠射面，越低越鋪滿整顆；
+// boost 是單純的倍率。兩根合起來就是參考影片面板上的 Edge Path Boost／Power。
+uniform float uEdgePathBoost;
+uniform float uEdgePathPower;
+// 新玻璃合成的混合量。1 = 完全走新模型，0 = 完全退回原本的暗底外殼，
+// 中間值用來做並排比較（這是研究分支，能退回去才能判斷改動是不是進步）。
+uniform float uStaticGlassMix;
+#endif // FEATURE_STATIC_GLASS
+// 環境：程序化棚燈（無 HDRI 時的預設反射來源）；rough 越大光斑越柔散
 vec3 proceduralEnv(vec3 d, float rough){
   vec3 col = mix(vec3(0.015, 0.02, 0.03), vec3(0.05, 0.06, 0.08), d.y * 0.5 + 0.5);
   col += vec3(1.0, 0.98, 0.95) * smoothstep(mix(0.55, 0.12, rough), 0.98, dot(d, normalize(vec3(0.35, 0.7, 0.5)))) * 1.1;
@@ -119,7 +160,7 @@ vec4 backgroundSample(vec3 rd, float extraBlur){
 }
 
 #ifdef FEATURE_STATIC_GLASS
-// 程序化棚景（見 shaders.js 的 uStudioBackdrop 那段說明）。只有靜態模式編它，
+// 程序化棚景（見這個檔案開頭 uStudioBackdrop 那段說明）。只有靜態模式編它，
 // 其餘九個模式的 backgroundSample 逐字不變。
 //
 // 它接一個 origin 而不是只吃方向：地板要跟平面求交，而穿過玻璃出去的那條射線

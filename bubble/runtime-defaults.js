@@ -156,6 +156,19 @@ export const DEFAULTS = {              // 數值滑桿
   // 水的折射率約 1.33，玻璃約 1.5；預設維持原本水滴的手感，改高會讓邊緣
   // 反射（Fresnel）變強、折射彎曲角度變陡，看起來更像玻璃而不是水珠。
   ior: 1.33,
+  // 靜態模式的玻璃光學（見 shaders.js 的 FEATURE_STATIC_GLASS）。其餘模式的
+  // shader 沒有這些 uniform，值照送但不會被讀到。
+  //
+  // 這裡只列出真的值得調的那幾根。棚景的幾何（地板高度、地平線柔度、陰影半徑、
+  // 漣漪密度）與 edgePathBoost、staticGlassMix 仍然是 bubble.js 裡的字面值：
+  // 它們調出來的差別是「同一個場景的細微變體」，多七根滑桿換不到那個。
+  refractDispersion: 2.5,
+  edgePathPower: 1.6,
+  spectralSamples: 6,
+  studioAmbient: 1,
+  studioCardStrength: 0.55,
+  studioShadowStrength: 0.32,
+  studioRipple: 0.07,
   hdriYaw: -45,
   hdriPitch: 20,
   hdriBlur: 0.21,

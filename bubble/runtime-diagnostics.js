@@ -448,6 +448,20 @@ window.__bubbleDiagReport = function () {
         uMaterialStyle: runtime().uniforms.uMaterialStyle.value,
         uRayBeamPattern: runtime().uniforms.uRayBeamPattern.value,
       } : '(未初始化)',
+      // 靜態模式的玻璃光學（見 shader-chunks/environment.js 的 FEATURE_STATIC_GLASS）。
+      // 這一組的共同特徵是「改了看不出來」很難跟「根本沒寫進去」分辨 —— 棚景的
+      // 地板參數尤其如此，因為它們只作用在畫面下半的一小塊。攤出執行期實際值，
+      // 滑桿沒反應時第一眼就能分清是綁線壞了還是效果太弱。
+      靜態玻璃: runtime().uniforms && P.motion === 'static' ? {
+        uStudioBackdrop: runtime().uniforms.uStudioBackdrop.value,
+        uStudioAmbient: runtime().uniforms.uStudioAmbient.value,
+        uStudioCardStrength: runtime().uniforms.uStudioCardStrength.value,
+        uStudioShadowStrength: runtime().uniforms.uStudioShadowStrength.value,
+        uStudioRipple: runtime().uniforms.uStudioRipple.value,
+        uRefractDispersion: runtime().uniforms.uRefractDispersion.value,
+        uSpectralSamples: runtime().uniforms.uSpectralSamples.value,
+        uEdgePathPower: runtime().uniforms.uEdgePathPower.value,
+      } : '(非靜態模式)',
       // 打字模式的排版狀態。字沒出現時第一個要看的就是這幾個值：可見字數（.w）、
       // 字距、字級，以及射線邊界有沒有涵蓋整行。
       打字: runtime().uniforms && P.motion === 'typewriter' ? {
