@@ -25,6 +25,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from PIL import Image
 from playwright.sync_api import Page, sync_playwright
 
 
@@ -138,6 +139,24 @@ def set_select(page: Page, selector: str, value: str) -> None:
     )
 
 
+def chroma_metrics(path: Path) -> dict[str, float]:
+    """How much colour the frame carries, as max(RGB) - min(RGB) per pixel.
+
+    A hash says a frame changed but not in which direction, and the point of
+    this branch is colour appearing on the glass. Both backdrops are neutral
+    grey, so the backdrop contributes nothing and the numbers describe the
+    object: `coloured` is the share of pixels far enough from grey to read as a
+    tint, which tracks a dispersion change far more legibly than the mean does.
+    """
+    image = Image.open(path).convert("RGB")
+    chroma = [max(pixel) - min(pixel) for pixel in image.getdata()]
+    total = len(chroma)
+    return {
+        "meanChroma": round(sum(chroma) / total, 3),
+        "colouredPct": round(sum(1 for c in chroma if c >= 8) / total * 100, 3),
+    }
+
+
 def reach_state(page: Page, base_url: str, mode: str, backdrop: str,
                 static_shape: str | None) -> None:
     page.goto(
@@ -185,7 +204,8 @@ def capture_case(page: Page, base_url: str, case, output: Path) -> dict:
         raise RuntimeError(f"{name}: capture failed: {captured['錯誤']}")
 
     page.add_style_tag(content=HIDE_UI_STYLE)
-    page.screenshot(path=output / f"{name}.png", animations="disabled")
+    shot = output / f"{name}.png"
+    page.screenshot(path=shot, animations="disabled")
 
     return {
         "mode": mode,
@@ -195,6 +215,7 @@ def capture_case(page: Page, base_url: str, case, output: Path) -> dict:
         "size": captured["尺寸"],
         "simT": captured["simT"],
         "variant": captured["目前變體"],
+        **chroma_metrics(shot),
     }
 
 
@@ -214,7 +235,14 @@ def compare(current: dict, reference_path: Path, expect_changed: list[str]) -> i
             if allowed:
                 changed_as_planned.append(f"{name} (allowed to change, did not)")
         elif allowed:
-            changed_as_planned.append(name)
+            before = reference[name].get("colouredPct")
+            after = entry.get("colouredPct")
+            delta = (
+                f" 有色像素 {before}% -> {after}%"
+                if before is not None and after is not None
+                else ""
+            )
+            changed_as_planned.append(name + delta)
         else:
             unexpected.append(
                 f"{name}: {reference[name]['hash']} -> {entry['hash']}"

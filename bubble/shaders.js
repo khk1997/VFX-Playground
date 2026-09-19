@@ -383,6 +383,11 @@ uniform float uStudioShadowRadius;  // 接觸陰影的半徑
 uniform float uStudioRipple;        // 地板漣漪振幅
 uniform float uStudioRippleScale;   // 漣漪環的密度
 uniform float uStudioCardStrength;  // 棚燈卡亮度
+// ===== 光譜折射 =====
+// 折射率在光譜兩端的差（≈ 1/阿貝數的效果量）。0 = 各波長同路，沒有色散。
+uniform float uRefractDispersion;
+// 光譜取樣數。1 等於關閉；越多色帶越連續，但每一個都是一次背景取樣。
+uniform int   uSpectralSamples;
 #endif // FEATURE_STATIC_GLASS
 // 底色情境（見 bubble.js 的 SELECT_DEFAULTS.backdrop）。0 = 深底，1 = 淺底。
 //
@@ -784,6 +789,42 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
         // 折射出去的那條射線是從出口點出發的，不是鏡頭。用 exitPoint 求地板交點，
         // 折射影像裡的地平線才會跟玻璃的厚度一起錯開 —— 那個錯位就是厚度感本身。
         refractedBg = studioBackdropSample(exitPoint, exitDir, roughBlur).rgb;
+        // ===== 光譜折射 =====
+        //
+        // 這裡不重跑追蹤。上面那段註解記錄過「五個波長各自穿過 SDF」因為太貴而
+        // 被移除 —— 那個結論沒錯，錯的是「必須各自穿過」這個前提。色散的分離角
+        // 只有零點幾度，出口點在那個角度差之內幾乎不動；真正變的是出射方向。
+        // 所以入射點、入射法線、出口點、出口法線全部沿用同一次 traceExitSurface，
+        // 每個波長只重算兩次 refract()。N 個波長＝N 次背景取樣、零次額外 march。
+        //
+        // 已知的近似：發生全內反射彈跳時，出口面換成了第二個出口，而各波長仍用
+        // 原始視線與前表面法線入射。彈跳本來就只補一次，這一層近似在同一個量級。
+        if (uRefractDispersion > 0.0001 && uSpectralSamples > 1) {
+          vec3 spectralSum = vec3(0.0);
+          vec3 weightSum = vec3(0.0);
+          for (int i = 0; i < MAX_SPECTRAL_COMPILE; i++) {
+            if (i >= uSpectralSamples) break;
+            // band 0 = 藍端，1 = 紅端（visibleSpectrum 的慣例）。短波折射率高，
+            // 所以偏移量是 (0.5 - band)。
+            float band = (float(i) + 0.5) / float(uSpectralSamples);
+            float iorBand = uIOR + (0.5 - band) * uRefractDispersion;
+            vec3 outBand = exitDir;
+            vec3 inBand = refract(rd, N, 1.0 / iorBand);
+            if (dot(inBand, inBand) > 0.0001) {
+              vec3 o = refract(normalize(inBand), -exitNormal, iorBand);
+              // 某個波長全內反射時沿用參考出射方向，不要讓它掉回原始視線 ——
+              // 那會在臨界角附近沿著輪廓畫出一條假的硬邊。
+              if (dot(o, o) > 0.0001) outBand = normalize(o);
+            }
+            vec3 w = visibleSpectrum(band);
+            spectralSum += studioBackdropSample(exitPoint, outBand, roughBlur).rgb * w;
+            weightSum += w;
+          }
+          // 逐通道除以權重和。這一步讓「背景是常數時結果精確等於那個常數」成為
+          // 式子自己的性質，而不是靠參數調出來的：每個波長取到同一個值，加權
+          // 平均把它原樣還原。也就是說彩虹只可能來自背景本身的梯度。
+          refractedBg = spectralSum / max(weightSum, vec3(1e-4));
+        }
 #else
         refractedBg = backgroundSample(exitDir, roughBlur).rgb;
 #endif

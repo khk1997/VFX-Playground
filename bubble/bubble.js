@@ -2278,6 +2278,8 @@ function initGL() {
     uStudioRipple: { value: 0.07 },
     uStudioRippleScale: { value: 11.0 },
     uStudioCardStrength: { value: 0.35 },
+    uRefractDispersion: { value: 0.35 },
+    uSpectralSamples: { value: 6 },
     uLightShow:  { value: P.lightShow },
     uLightClarity: { value: P.lightClarity },
     uLightDepth: { value: P.lightDepth },

@@ -139,6 +139,13 @@ export function createShaderVariantPlanner({
       FEATURE_ENV_PMREM: state.envPmrem ? '' : false,
       FEATURE_BEAM_PATTERNS: state.beamPatterns ? '' : false,
       FEATURE_STATIC_GLASS: state.staticGlass ? '' : false,
+      // 光譜迴圈的編譯期上限。跟 MAX_MARCH_COMPILE 同一個用法：實際圈數由
+      // uSpectralSamples 在執行期決定，編譯期只知道一個上限，fxc 才不會把整段
+      // 展開成一份一份的背景取樣（README 那條 154 秒就是這樣來的）。
+      //
+      // 其餘模式給 false 而不是給個數字：那會多一行 #define 進到它們的 shader
+      // 前綴，而「原始碼有動、輸出就不保證相同」這件事這個分支已經踩過一次。
+      MAX_SPECTRAL_COMPILE: state.staticGlass ? 8 : false,
     };
 
     if (DIAG.allFeatures) {
