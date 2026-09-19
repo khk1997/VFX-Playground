@@ -2286,6 +2286,7 @@ function initGL() {
     uStudioCardEdge: { value: P.studioCardEdge },
     uStudioCardGain: { value: P.studioCardGain },
     uEdgeRimWeight: { value: P.edgeRimWeight },
+    uAnisoBlur: { value: P.anisoBlur },
     uRefractDispersion: { value: P.refractDispersion },
     uSpectralSamples: { value: P.spectralSamples },
     uEdgePathBoost: { value: 1.0 },

@@ -31,6 +31,7 @@ uniform float uStudioFloorLift;     // 地板的絕對亮度底
 uniform float uStudioCardEdge;      // 棚燈卡邊緣的銳利度：越小邊越硬、色帶越明顯
 uniform float uStudioCardGain;      // 棚燈卡相對背景紙的亮度倍率（可大於 1）
 uniform float uEdgeRimWeight;       // 剪影對色散的加權（見 shaders.js 的 deviation）
+uniform float uAnisoBlur;           // 折射取樣的錐寬：把環境的邊按射線 footprint 攤開
 // ===== 光譜折射 =====
 // 折射率在光譜兩端的差（≈ 1/阿貝數的效果量）。0 = 各波長同路，沒有色散。
 uniform float uRefractDispersion;
@@ -210,7 +211,15 @@ float studioCard(vec3 rd, vec3 dir, float radius, float soft){
   return 1.0 - smoothstep(radius - soft, radius + soft, a);
 }
 
-vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards){
+// soften：這條射線的 footprint 有多寬。0 = 直接看背景的那條（鏡頭射線，
+// 一個像素就是一個方向），大於 0 = 穿過玻璃出去的那些。
+//
+// 為什麼需要它：玻璃把一大片立體角壓進幾個像素，單樣本折射打在硬邊上就會在
+// 相鄰像素之間跳邊，色帶因此斷成碎斑 —— 參考影片裡是連續的緞帶。真正的解是
+// 在錐內多重取樣，但那要乘上波長數，太貴。這裡改成把環境自己的邊按 footprint
+// 攤開：結果等價於預濾波，成本是零（就是幾個 smoothstep 的區間變寬）。
+// HDRI 那條路用 PMREM 的 mip 做同一件事，這是程序化棚景的對應版本。
+vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards, float soften){
   vec4 paper = backgroundSample(rd, extraBlur);
   // HDRI 背景已經是有結構的環境，不需要也不該再蓋一層假棚景。
   if (uStudioBackdrop < 0.5 || uBgMode == 1) return paper;
@@ -247,13 +256,14 @@ vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards){
       // 只會變淡。相位一個循環走整數圈，首尾精確接得回去。
       float phase = TAU * fract(uTime / max(uLoopDuration, 0.001));
       float wave = sin(dist * uStudioRippleScale - phase);
-      float crest = pow(max(wave, 0.0), 7.0);
+      float crest = pow(max(wave, 0.0), mix(7.0, 1.2, clamp(soften * 4.0, 0.0, 1.0)));
       floorCol += vec3(crest * uStudioRipple * exp(-dist * 0.75));
       floorCol *= (1.0 - shadow);
 
       // 地平線收得比以前緊。它是畫面裡最長的一條邊，玻璃把它折彎、分色之後
       // 就是輪廓上那幾條色帶的主要來源。
-      float horizon = smoothstep(0.0, max(uStudioHorizonSoft, 0.001), -rd.y);
+      float horizon = smoothstep(0.0,
+        max(uStudioHorizonSoft, 0.001) * (1.0 + soften * 8.0), -rd.y);
       col = mix(col, floorCol, horizon);
     }
   }
@@ -273,7 +283,7 @@ vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards){
     // 三張卡：主光、補光，加一條細長的邊光。邊緣銳利度由 uStudioCardEdge 控制 ——
     // 這根滑桿改的不是亮度而是「色散看不看得見」，推到 0 就只剩一團柔光，
     // 色帶會跟著消失。
-    float soft = max(uStudioCardEdge, 0.004);
+    float soft = max(uStudioCardEdge, 0.004) * (1.0 + soften * 10.0);
     float key  = studioCard(rd, normalize(vec3(-0.42, 0.52, 0.74)), 0.78, soft);
     float fill = studioCard(rd, normalize(vec3(0.76, 0.14, 0.63)), 0.70, soft * 2.2);
     float rim  = studioCard(rd, normalize(vec3(0.05, -0.30, -0.95)), 0.30, soft);
@@ -288,6 +298,58 @@ vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards){
 
   return vec4(col, paper.a);
 }
+// 光譜折射：沿著同一條已經追好的光路，逐波長重算兩次 refract()，取樣同一個
+// 棚景再合回 RGB。
+//
+// 關鍵是這裡不重跑追蹤。色散的分離角只有零點幾度，出口點在那個角度差之內幾乎
+// 不動，真正變的是出射方向 —— 所以入射點、入射法線、出口點、出口法線全部沿用
+// 呼叫端那一次 traceExitSurface，N 個波長＝N 次背景取樣、零次額外 march。
+// （舊版註解記錄過「五個波長各自穿過 SDF」太貴而被移除；那個結論沒錯，錯的是
+// 「必須各自穿過」這個前提。）
+//
+// 已知的近似：發生全內反射彈跳時，出口面換成了第二個出口，而各波長仍用原始
+// 視線與前表面法線入射。彈跳本來就只補一次，這一層近似在同一個量級。
+vec3 spectralRefraction(vec3 rd, vec3 N, vec3 exitNormal, vec3 exitPoint,
+                        vec3 exitDir, float bandSpread, float roughBlur,
+                        float studioSoften){
+
+  vec3 spectralSum = vec3(0.0);
+  vec3 weightSum = vec3(0.0);
+  for (int i = 0; i < MAX_SPECTRAL_COMPILE; i++) {
+    if (i >= uSpectralSamples) break;
+    // band 0 = 藍端，1 = 紅端（visibleSpectrum 的慣例）。短波折射率高，
+    // 所以偏移量是 (0.5 - band)。
+    float band = (float(i) + 0.5) / float(uSpectralSamples);
+    float iorBand = uIOR + (0.5 - band) * bandSpread;
+    vec3 outBand = exitDir;
+    vec3 inBand = refract(rd, N, 1.0 / iorBand);
+    if (dot(inBand, inBand) > 0.0001) {
+      inBand = normalize(inBand);
+      vec3 o = refract(inBand, -exitNormal, iorBand);
+      if (dot(o, o) > 0.0001) {
+        outBand = normalize(o);
+      } else {
+        // 這個波長在出口面全內反射了。上一版在這裡退回參考出射方向，
+        // 那正好把整個效果最強的地方抹掉：臨界角 θc = asin(1/n) 跟波長
+        // 有關，所以掠射區一定存在一條「短波還過得去、長波已經反射
+        // 回去」的分界，而 dθ_out/dθ_in 在那附近是發散的。兩側取到的
+        // 是環境裡完全不同的兩塊，差異因此極大 —— 參考影片裡最飽和的
+        // 那幾條細色帶就長在這條線上。讓它照實走內反射。
+        outBand = normalize(reflect(inBand, exitNormal));
+      }
+    }
+    vec3 w = spectralResponse(band);
+    spectralSum += studioBackdropSample(
+      exitPoint, outBand, roughBlur, 1.0, studioSoften
+    ).rgb * w;
+    weightSum += w;
+  }
+  // 逐通道除以權重和。這一步讓「背景是常數時結果精確等於那個常數」成為
+  // 式子自己的性質，而不是靠參數調出來的：每個波長取到同一個值，加權
+  // 平均把它原樣還原。也就是說彩虹只可能來自背景本身的梯度。
+  return spectralSum / max(weightSum, vec3(1e-4));
+        }
+
 #endif // FEATURE_STATIC_GLASS
 
 `;

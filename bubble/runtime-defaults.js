@@ -165,6 +165,7 @@ export const DEFAULTS = {              // 數值滑桿
   refractDispersion: 6.5,
   edgePathPower: 1.15,
   edgeRimWeight: 0.55,
+  anisoBlur: 0.02,
   spectralSamples: 12,
   studioCardEdge: 0.075,
   studioCardGain: 11.0,

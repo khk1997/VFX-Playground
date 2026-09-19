@@ -562,7 +562,7 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
 #ifdef FEATURE_STATIC_GLASS
   // 鏡頭這條射線從 ro 出發，所以棚景的地板交點也要用 ro（見 studioBackdropSample）。
   // 棚景關掉時 studioBackdropSample 原樣回傳 backgroundSample，是精確的恆等。
-  vec4 bg = studioBackdropSample(ro, rd, 0.0, 0.0);
+  vec4 bg = studioBackdropSample(ro, rd, 0.0, 0.0, 0.0);
 #else
   vec4 bg = backgroundSample(rd, 0.0);
 #endif
@@ -755,7 +755,11 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
 #ifdef FEATURE_STATIC_GLASS
         // 折射出去的那條射線是從出口點出發的，不是鏡頭。用 exitPoint 求地板交點，
         // 折射影像裡的地平線才會跟玻璃的厚度一起錯開 —— 那個錯位就是厚度感本身。
-        refractedBg = studioBackdropSample(exitPoint, exitDir, roughBlur, 1.0).rgb;
+        // footprint 隨光程成長：走得越久、被彎得越多，同一個像素涵蓋的立體角越大。
+        float studioSoften = uAnisoBlur * (0.4 + pathLength * 0.9);
+        refractedBg = studioBackdropSample(
+          exitPoint, exitDir, roughBlur, 1.0, studioSoften
+        ).rgb;
         // ===== 光譜折射 =====
         //
         // 這裡不重跑追蹤。上面那段註解記錄過「五個波長各自穿過 SDF」因為太貴而
@@ -796,39 +800,10 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
           0.9
         );
         if (bandSpread > 0.0001 && uSpectralSamples > 1) {
-          vec3 spectralSum = vec3(0.0);
-          vec3 weightSum = vec3(0.0);
-          for (int i = 0; i < MAX_SPECTRAL_COMPILE; i++) {
-            if (i >= uSpectralSamples) break;
-            // band 0 = 藍端，1 = 紅端（visibleSpectrum 的慣例）。短波折射率高，
-            // 所以偏移量是 (0.5 - band)。
-            float band = (float(i) + 0.5) / float(uSpectralSamples);
-            float iorBand = uIOR + (0.5 - band) * bandSpread;
-            vec3 outBand = exitDir;
-            vec3 inBand = refract(rd, N, 1.0 / iorBand);
-            if (dot(inBand, inBand) > 0.0001) {
-              inBand = normalize(inBand);
-              vec3 o = refract(inBand, -exitNormal, iorBand);
-              if (dot(o, o) > 0.0001) {
-                outBand = normalize(o);
-              } else {
-                // 這個波長在出口面全內反射了。上一版在這裡退回參考出射方向，
-                // 那正好把整個效果最強的地方抹掉：臨界角 θc = asin(1/n) 跟波長
-                // 有關，所以掠射區一定存在一條「短波還過得去、長波已經反射
-                // 回去」的分界，而 dθ_out/dθ_in 在那附近是發散的。兩側取到的
-                // 是環境裡完全不同的兩塊，差異因此極大 —— 參考影片裡最飽和的
-                // 那幾條細色帶就長在這條線上。讓它照實走內反射。
-                outBand = normalize(reflect(inBand, exitNormal));
-              }
-            }
-            vec3 w = spectralResponse(band);
-            spectralSum += studioBackdropSample(exitPoint, outBand, roughBlur, 1.0).rgb * w;
-            weightSum += w;
-          }
-          // 逐通道除以權重和。這一步讓「背景是常數時結果精確等於那個常數」成為
-          // 式子自己的性質，而不是靠參數調出來的：每個波長取到同一個值，加權
-          // 平均把它原樣還原。也就是說彩虹只可能來自背景本身的梯度。
-          refractedBg = spectralSum / max(weightSum, vec3(1e-4));
+          refractedBg = spectralRefraction(
+            rd, N, exitNormal, exitPoint, exitDir,
+            bandSpread, roughBlur, studioSoften
+          );
         }
 #else
         refractedBg = backgroundSample(exitDir, roughBlur).rgb;
@@ -2228,7 +2203,7 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
     // 是不同的來源 —— 玻璃於是變成「透射一片黑、反射也一片黑」。同一個場景同時
     // 當背景與反射源，物體才會跟它所在的空間對得起來。
     vec3 studioReflection = studioBackdropSample(
-      p, reflect(rd, N), uRoughness, 1.0
+      p, reflect(rd, N), uRoughness, 1.0, uAnisoBlur * 0.35
     ).rgb * uReflect * fresView;
     // 不再加 material.baseSurface。它的環境是 sampleReflection（HDRI／程序化
     // 棚燈），跟玻璃透射的那個場景不是同一個 —— 兩個光源疊在一起，物體就對不
