@@ -775,8 +775,19 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
         // 偏折量用的是下游 localPrism 同一個式子（length(exitDir - rd) 是兩個
         // 單位向量的夾角弦長）。它在這裡算一次而不是共用，是因為 localPrism 要
         // 到 exitDir 全部定案之後才指派，而那在這一段的後面。
+        // 兩項相加，因為參考影片的彩帶同時長在兩種地方：
+        //
+        //   淨偏折量 —— 摺痕與折角，光被彎得最多的地方。
+        //   掠射程度 —— 剪影那一圈。光在那裡幾乎貼著表面走，穿過的玻璃最厚，
+        //               而且最接近臨界角，兩個因素都讓分離量爆增。
+        //
+        // 只用偏折量的話彩帶只會出現在內部摺痕上，輪廓反而是乾淨的 —— 那跟
+        // 影片正好相反。
+        float grazing = clamp(material.edgeFactor, 0.0, 1.0);
         float deviation = clamp(
-          length(exitDir - rd) * 0.55 + backRim * 0.18, 0.0, 1.0
+          length(exitDir - rd) * 0.55 + backRim * 0.18
+            + grazing * grazing * uEdgeRimWeight,
+          0.0, 1.0
         );
         // 上限不是美術保險，是物理界線：折射率被推到 1 以下時 refract() 的行為
         // 會整個翻過來（掠射端變成往外彎），畫面上是一圈突然反向的假邊。
@@ -2228,7 +2239,14 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
     // 看起來就比旁邊的紙暗一截。這條式子在 1 以下是精確的恆等，只有超出的
     // 部分才被壓縮。
     vec3 lit = transmitted + studioReflection;
-    vec3 staticGlass = lit / (vec3(1.0) + max(vec3(0.0), lit - vec3(1.0)));
+    // HDR 輸出開著（後處理鏈在跑）時什麼都不壓：光暈是靠超過 1 的部分觸發的，
+    // 在這裡先壓掉就等於把玻璃上最亮的那幾條交出去 —— 參考影片裡色帶與高光
+    // 是會發光的，那層輝光就是這樣來的。關掉後處理時才需要自己收尾，而且只
+    // 收超過 1 的部分：透射過來的背景紙本來就在範圍內，整體 tone map 會把它
+    // 壓灰，玻璃看起來就比旁邊的紙暗一截。
+    vec3 staticGlass = uHdrOutput > 0.5
+      ? lit
+      : lit / (vec3(1.0) + max(vec3(0.0), lit - vec3(1.0)));
     finalColor = clampOutput(
       mix(finalColor, staticGlass, clamp(uStaticGlassMix, 0.0, 1.0))
     );

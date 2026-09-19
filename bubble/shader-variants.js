@@ -145,7 +145,7 @@ export function createShaderVariantPlanner({
       //
       // 其餘模式給 false 而不是給個數字：那會多一行 #define 進到它們的 shader
       // 前綴，而「原始碼有動、輸出就不保證相同」這件事這個分支已經踩過一次。
-      MAX_SPECTRAL_COMPILE: state.staticGlass ? 12 : false,
+      MAX_SPECTRAL_COMPILE: state.staticGlass ? 16 : false,
     };
 
     // 靜態模式不編舊的外觀層。這不是精簡，是它們與新模型互相衝突：

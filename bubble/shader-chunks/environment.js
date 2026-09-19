@@ -30,6 +30,7 @@ uniform float uStudioWallLift;      // 牆面的絕對亮度底（深底才看�
 uniform float uStudioFloorLift;     // 地板的絕對亮度底
 uniform float uStudioCardEdge;      // 棚燈卡邊緣的銳利度：越小邊越硬、色帶越明顯
 uniform float uStudioCardGain;      // 棚燈卡相對背景紙的亮度倍率（可大於 1）
+uniform float uEdgeRimWeight;       // 剪影對色散的加權（見 shaders.js 的 deviation）
 // ===== 光譜折射 =====
 // 折射率在光譜兩端的差（≈ 1/阿貝數的效果量）。0 = 各波長同路，沒有色散。
 uniform float uRefractDispersion;
@@ -273,8 +274,8 @@ vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards){
     // 這根滑桿改的不是亮度而是「色散看不看得見」，推到 0 就只剩一團柔光，
     // 色帶會跟著消失。
     float soft = max(uStudioCardEdge, 0.004);
-    float key  = studioCard(rd, normalize(vec3(-0.42, 0.52, 0.74)), 0.52, soft);
-    float fill = studioCard(rd, normalize(vec3(0.76, 0.14, 0.63)), 0.62, soft * 2.2);
+    float key  = studioCard(rd, normalize(vec3(-0.42, 0.52, 0.74)), 0.78, soft);
+    float fill = studioCard(rd, normalize(vec3(0.76, 0.14, 0.63)), 0.70, soft * 2.2);
     float rim  = studioCard(rd, normalize(vec3(0.05, -0.30, -0.95)), 0.30, soft);
     // 相加而不是往白色 mix，而且刻意讓它超過 1。真正的柔光箱比背景紙亮一個
     // 數量級，被 mix 夾在 1.0 就等於「一張跟白紙一樣亮的燈」—— 那既打不出

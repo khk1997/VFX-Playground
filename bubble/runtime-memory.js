@@ -68,7 +68,12 @@ export const MOTION_SCOPED_KEYS = [
   // 這些值只會在切進私語的那一刻套用一次，之後被使用者調過、切到別的模式
   // 再切回來就再也拿不回研究預設，而是沿用使用者上次調到的全域值。
   'absorb', 'postExposure', 'postContrast', 'postBrightness', 'postGrain', 'postGrainScale',
-  'bloomEnabled', 'streaksEnabled', 'streakCount', 'streakAngle', 'streakLength',
+  'bloomEnabled',
+  // 光暈的形狀參數也按模式記憶。靜態模式的高光與色帶是 HDR 的，需要一組比
+  // 全域高很多的門檻（淺底的背景紙本身就接近 1，門檻低於它整顆會過曝）；
+  // 不列進來的話 registry 的 override 寫不回去，看起來像 override 沒生效。
+  'bloomThreshold', 'bloomIntensity', 'bloomRadius',
+  'streaksEnabled', 'streakCount', 'streakAngle', 'streakLength',
   'streakChroma', 'streakIntensity',
 ];
 // 會按「模式＋底色情境」各記一格的參數。

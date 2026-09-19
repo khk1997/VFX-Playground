@@ -164,6 +164,7 @@ export const DEFAULTS = {              // 數值滑桿
   // 它們調出來的差別是「同一個場景的細微變體」，多七根滑桿換不到那個。
   refractDispersion: 6.5,
   edgePathPower: 1.15,
+  edgeRimWeight: 0.55,
   spectralSamples: 12,
   studioCardEdge: 0.075,
   studioCardGain: 11.0,

@@ -48,14 +48,17 @@ export const MOTIONS = {
     // 其餘為這顆landing 畫面各自調整。
     overrides: {
       materialStyle: 'universal',
-      rayBeamIntensity: 13.5,
-      rayBeamSeparation: 0.065,
-      rayBeamChroma: 1.3,
-      rayBeamZoom: 5,
-      rayBeamFresnelMask: 0.8,
-      rayBeamNoiseScale: 0.5,
+      // 稜光光芒那組參數已經拿掉：靜態模式改走折射分光之後就不編那一塊了
+      // （見 shader-variants.js 的 staticGlass），留著只是一組不會被讀的數字。
       spectralCausticEnabled: false,
       dispersionEnabled: false,
+      // 後處理光暈只對這個模式預設打開。玻璃的高光與色帶在新模型裡是 HDR 的，
+      // 沒有光暈它們就只是一條很亮的線；有了才會像參考影片那樣發光。這是模式
+      // 層級的覆寫，其餘九個模式的預設完全不動。
+      bloomEnabled: true,
+      bloomThreshold: 1.75,
+      bloomIntensity: 0.4,
+      bloomRadius: 0.6,
       cameraDistance: 6.8,
       cameraRotationX: -40.4,
       cameraRotationY: 47.7,
