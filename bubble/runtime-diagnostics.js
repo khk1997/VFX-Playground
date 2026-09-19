@@ -458,9 +458,11 @@ window.__bubbleDiagReport = function () {
         uStudioCardStrength: runtime().uniforms.uStudioCardStrength.value,
         uStudioShadowStrength: runtime().uniforms.uStudioShadowStrength.value,
         uStudioRipple: runtime().uniforms.uStudioRipple.value,
-        uRefractDispersion: runtime().uniforms.uRefractDispersion.value,
+        uStudioFlag: runtime().uniforms.uStudioFlag.value,
+        uStudioCaustic: runtime().uniforms.uStudioCaustic.value,
+        uDispersionScale: runtime().uniforms.uDispersionScale.value,
+        uDispersionAbbe: runtime().uniforms.uDispersionAbbe.value,
         uSpectralSamples: runtime().uniforms.uSpectralSamples.value,
-        uEdgePathPower: runtime().uniforms.uEdgePathPower.value,
       } : '(非靜態模式)',
       // 打字模式的排版狀態。字沒出現時第一個要看的就是這幾個值：可見字數（.w）、
       // 字距、字級，以及射線邊界有沒有涵蓋整行。

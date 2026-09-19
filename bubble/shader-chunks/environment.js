@@ -30,21 +30,17 @@ uniform float uStudioWallLift;      // 牆面的絕對亮度底（深底才看�
 uniform float uStudioFloorLift;     // 地板的絕對亮度底
 uniform float uStudioCardEdge;      // 棚燈卡邊緣的銳利度：越小邊越硬、色帶越明顯
 uniform float uStudioCardGain;      // 棚燈卡相對背景紙的亮度倍率（可大於 1）
-uniform float uEdgeRimWeight;       // 剪影對色散的加權（見 shaders.js 的 deviation）
-uniform float uAnisoBlur;           // 折射取樣的錐寬：把環境的邊按射線 footprint 攤開
-uniform float uAbbe;                // 阿貝數：越小色散越強（冕牌 59 / 火石 30 / 重火石 20）
+// OpenPBR: transmission_dispersion_abbe_number。越小色散越強（冕牌 59 / 火石 30 /
+// 重火石 20）。
+uniform float uDispersionAbbe;
 uniform float uStudioCaustic;       // 焦散強度：光被玻璃聚到地板上的亮斑
 uniform float uStudioCausticChroma; // 焦散外圈的彩度
 uniform float uStudioFlag;          // 黑旗強度：框外的黑卡，專門用來在淺底製造對比
 // ===== 光譜折射 =====
-// 折射率在光譜兩端的差（≈ 1/阿貝數的效果量）。0 = 各波長同路，沒有色散。
-uniform float uRefractDispersion;
+// OpenPBR: transmission_dispersion_scale。0 = 各波長同路，沒有色散。
+uniform float uDispersionScale;
 // 光譜取樣數。1 等於關閉；越多色帶越連續，但每一個都是一次背景取樣。
 uniform int   uSpectralSamples;
-// 偏折量對色散的加權。power 越高越把彩虹收進摺痕與掠射面，越低越鋪滿整顆；
-// boost 是單純的倍率。兩根合起來就是參考影片面板上的 Edge Path Boost／Power。
-uniform float uEdgePathBoost;
-uniform float uEdgePathPower;
 // 新玻璃合成的混合量。1 = 完全走新模型，0 = 完全退回原本的暗底外殼，
 // 中間值用來做並排比較（這是研究分支，能退回去才能判斷改動是不是進步）。
 uniform float uStaticGlassMix;
@@ -230,7 +226,7 @@ float bandIOR(float band, float strength){
   const float INV_LC2 = 2.3215;   // 1/λC²，λC = 0.6563 µm
   float lambda = bandWavelength(band);
   float invL2 = 1.0 / (lambda * lambda);
-  float b = (uIOR - 1.0) / max(uAbbe, 0.8) / (INV_LF2 - INV_LC2);
+  float b = (uIOR - 1.0) / max(uDispersionAbbe, 0.8) / (INV_LF2 - INV_LC2);
   // 下限 1.02：折射率掉到 1 以下時 refract() 整個翻過來，掠射端會變成往外彎，
   // 畫面上是一圈突然反向的假邊。
   return max(uIOR + b * strength * (invL2 - INV_LD2), 1.02);

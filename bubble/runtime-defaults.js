@@ -162,18 +162,22 @@ export const DEFAULTS = {              // 數值滑桿
   // 這裡只列出真的值得調的那幾根。棚景的幾何（地板高度、地平線柔度、陰影半徑、
   // 漣漪密度）與 edgePathBoost、staticGlassMix 仍然是 bubble.js 裡的字面值：
   // 它們調出來的差別是「同一個場景的細微變體」，多七根滑桿換不到那個。
-  // 色散增益。單位不是折射率差 —— 曲線形狀由阿貝數決定（見 environment.js 的
-  // bandIOR），這根只放大它。數字看起來大是因為物理量本身很小：阿貝數 22 算出來
-  // 藍端的 Δn 只有 0.018，在一顆玻璃上分離角不到零點幾度，不放大幾十倍肉眼看
-  // 不出來。參考影片面板上那個 15.81 同樣是這種美術增益，不是材料常數。
-  refractDispersion: 95,
-  edgePathPower: 1.15,
-  edgeRimWeight: 0.55,
-  anisoBlur: 0.02,
-  abbe: 22,
+  // ===== 靜態模式的玻璃光學 =====
+  //
+  // 材質那幾根照 OpenPBR Surface 的命名與語意，不另立規格：
+  //   dispersionScale ↔ transmission_dispersion_scale
+  //   dispersionAbbe  ↔ transmission_dispersion_abbe_number
+  // 其餘的折射率、粗糙度、透射率、吸收色沿用模組原有的 ior / roughness /
+  // transmission / absorbColor，它們本來就對應 specular_ior、specular_roughness、
+  // transmission_weight 與 transmission_color。
+  //
+  // 底下的 studio* 是打光與場景，不是材質 —— OpenPBR 只描述表面，燈與背景本來
+  // 就在它的範圍之外，所以這些用平白的名字而不是硬套規格。
+  dispersionScale: 1.0,
+  dispersionAbbe: 22,
+  spectralSamples: 12,
   studioCaustic: 0.09,
   studioFlag: 0.55,
-  spectralSamples: 12,
   studioCardEdge: 0.075,
   studioCardGain: 11.0,
   studioAmbient: 0.38,

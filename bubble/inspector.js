@@ -318,6 +318,23 @@ export function buildInspector({ defaults, modeDefault = () => undefined }) {
     'researchIconPhaseOffset', 'researchIconBirthStagger', 'researchIconSizeA',
     'researchIconSizeB', 'researchIconAspect', 'researchIconSpread',
     'researchIconStagger', 'researchIconDepth',
+    // 靜態模式的玻璃。六根，而且全部是「看得到就懂」的量：彩虹多不多、燈亮不
+    // 亮、對比夠不夠、影子多深、地板上有沒有光斑與波紋。
+    //
+    // 其餘的留在完整模式，因為它們都需要先知道一件事才調得動：阿貝數要知道那是
+    // 材料常數、光譜取樣是品質不是外觀、燈的銳利度改的其實是「色帶看不看得見」。
+    // 那些是 3D 出身的人才會有的前提，不該擋在第一次開面板的人前面。
+    'dispersionScale', 'studioCardStrength', 'studioFlag',
+    'studioShadowStrength', 'studioCaustic', 'studioRipple',
+    // 幾何造型的選擇器與它的尺寸。這幾根本來歸在完整模式，等於把這個模組最
+    // 主要的操作藏在第二層 —— 常用模式下的「造型」分頁整頁是空的。
+    // 全部由 staticShape* 閘門控制，只有靜態模式看得到，不影響其餘模式。
+    'staticShape', 'boxSize', 'boxCornerRadius',
+    'primitiveSize', 'primitiveHeight', 'primitiveTubeRatio',
+    // 圓角是第一級的外觀控制，尤其對匯入的 SVG：平行面偏折為零，色散只可能
+    // 長在那一圈圓角上，所以圓角大小直接決定「看不看得到彩虹」。這一根的閘門
+    // 是 shape，其餘形狀場模式的常用面板也會一起出現它 —— 那是刻意的。
+    'shapeEdgeBevel',
   ]);
   for (const prefix of EDGE_TINT_TARGETS) {
     primaryControls.add(`${prefix}MultiTint`);

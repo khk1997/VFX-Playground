@@ -70,6 +70,11 @@
 .inspectorDepthPicker.inspectorSegments { width: 138px; justify-self: end; margin: 0; padding: 3px; }
 #panel.inspector .inspectorDepthPicker button { padding: 7px 8px; font-size: 12px; }
 #panel.inspector[data-control-depth="concise"] .inspectorExpert { display: none !important; }
+/* 閘門在檢視器版面下要贏過 .inspectorSection 的 .row 規則。
+   bubble.css 的 `#panel .gated-off { display: none }` 特異性跟區塊裡的 .row
+   一樣，而後者排在後面 —— 結果是「被檢視器搬進 section 的那些 gated row」
+   照樣顯示（材質曝光在靜態模式下就是這樣漏出來的），沒被搬動的則正常隱藏。 */
+#panel.inspector .gated-off { display: none !important; }
 .inspectorTabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 7px 0 8px; padding: 4px; border-radius: 99px; background: #1c1c1e; }
 #panel.inspector .inspectorTabs button { border: 0 !important; background: transparent !important; border-radius: 99px; padding: 9px 0; color: #98989e !important; font-size: 13px; }
 #panel.inspector .inspectorTabs button[aria-selected=true] { color: #fff !important; background: #38383b !important; }

@@ -756,7 +756,8 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
         // 折射出去的那條射線是從出口點出發的，不是鏡頭。用 exitPoint 求地板交點，
         // 折射影像裡的地平線才會跟玻璃的厚度一起錯開 —— 那個錯位就是厚度感本身。
         // footprint 隨光程成長：走得越久、被彎得越多，同一個像素涵蓋的立體角越大。
-        float studioSoften = uAnisoBlur * (0.4 + pathLength * 0.9);
+        // footprint 隨光程成長；基準寬度來自 specular_roughness，不另開參數。
+        float studioSoften = (0.012 + uRoughness * 0.22) * (0.4 + pathLength * 0.9);
         refractedBg = studioBackdropSample(
           exitPoint, exitDir, roughBlur, 1.0, studioSoften
         ).rgb;
@@ -779,24 +780,13 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
         // 偏折量用的是下游 localPrism 同一個式子（length(exitDir - rd) 是兩個
         // 單位向量的夾角弦長）。它在這裡算一次而不是共用，是因為 localPrism 要
         // 到 exitDir 全部定案之後才指派，而那在這一段的後面。
-        // 兩項相加，因為參考影片的彩帶同時長在兩種地方：
+        // 色散強度是材質性質，不按幾何加權 —— OpenPBR 的 transmission_dispersion_scale
+        // 就是一個純量。邊緣之所以比較彩，是光程長與接近臨界角自然造成的，那已經
+        // 在逐波長的 refract() 裡了，再乘一層幾何權重是重複計價。
         //
-        //   淨偏折量 —— 摺痕與折角，光被彎得最多的地方。
-        //   掠射程度 —— 剪影那一圈。光在那裡幾乎貼著表面走，穿過的玻璃最厚，
-        //               而且最接近臨界角，兩個因素都讓分離量爆增。
-        //
-        // 只用偏折量的話彩帶只會出現在內部摺痕上，輪廓反而是乾淨的 —— 那跟
-        // 影片正好相反。
-        float grazing = clamp(material.edgeFactor, 0.0, 1.0);
-        float deviation = clamp(
-          length(exitDir - rd) * 0.55 + backRim * 0.18
-            + grazing * grazing * uEdgeRimWeight,
-          0.0, 1.0
-        );
-        // 這裡算的是「色散曲線要被放大幾倍」，不是折射率差本身 —— 曲線的形狀
-        // 由阿貝數決定（見 environment.js 的 bandIOR），這一項只決定強度。
-        float bandSpread =
-          uRefractDispersion * pow(deviation, uEdgePathPower) * uEdgePathBoost;
+        // 常數 24 是把 scale 換算成 Cauchy 曲線倍率的比例：阿貝數 22 算出來藍端的
+        // Δn 只有 0.018，scale 1.0 要對應到「看得出來但仍像玻璃」，就落在這個量級。
+        float bandSpread = uDispersionScale * 24.0;
         if (bandSpread > 0.0001 && uSpectralSamples > 1) {
           refractedBg = spectralRefraction(
             rd, N, exitNormal, exitPoint, exitDir,
@@ -2201,7 +2191,7 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
     // 是不同的來源 —— 玻璃於是變成「透射一片黑、反射也一片黑」。同一個場景同時
     // 當背景與反射源，物體才會跟它所在的空間對得起來。
     vec3 studioReflection = studioBackdropSample(
-      p, reflect(rd, N), uRoughness, 1.0, uAnisoBlur * 0.35
+      p, reflect(rd, N), uRoughness, 1.0, uRoughness * 0.2
     ).rgb * uReflect * fresView;
     // 不再加 material.baseSurface。它的環境是 sampleReflection（HDRI／程序化
     // 棚燈），跟玻璃透射的那個場景不是同一個 —— 兩個光源疊在一起，物體就對不

@@ -301,26 +301,22 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
     <div class="row"><label>折射率</label><input type="range" id="ior" min="1.0" max="1.8" step="0.01" value="1.33"><span class="val" id="ior_v"></span></div>
 
     <details class="subgroup" id="staticGlassGroup" data-gate="static">
-      <summary><h4>玻璃光學 Glass Optics</h4></summary>
+      <summary><h4>玻璃 Glass</h4></summary>
       <div class="effectBlock effectBlock--physical">
-        <div class="effectTitle"><span>REFRACT</span> 光譜折射</div>
-        <div class="row"><label>色散</label><input type="range" id="refractDispersion" min="0" max="220" step="0.5" value="95"><span class="val" id="refractDispersion_v"></span></div>
-        <div class="row"><label>阿貝數</label><input type="range" id="abbe" min="4" max="70" step="0.5" value="22"><span class="val" id="abbe_v"></span></div>
-        <div class="row"><label>邊緣集中</label><input type="range" id="edgePathPower" min="0.4" max="4" step="0.05" value="1.15"><span class="val" id="edgePathPower_v"></span></div>
-        <div class="row"><label>剪影權重</label><input type="range" id="edgeRimWeight" min="0" max="1.5" step="0.01" value="0.55"><span class="val" id="edgeRimWeight_v"></span></div>
-        <div class="row"><label>折射柔化</label><input type="range" id="anisoBlur" min="0" max="0.12" step="0.001" value="0.02"><span class="val" id="anisoBlur_v"></span></div>
+        <div class="row"><label>彩虹強度</label><input type="range" id="dispersionScale" min="0" max="3" step="0.02" value="1"><span class="val" id="dispersionScale_v"></span></div>
+        <div class="row"><label>打光強度</label><input type="range" id="studioCardStrength" min="0" max="1" step="0.01" value="0.55"><span class="val" id="studioCardStrength_v"></span></div>
+        <div class="row"><label>對比（黑卡）</label><input type="range" id="studioFlag" min="0" max="1" step="0.01" value="0.55"><span class="val" id="studioFlag_v"></span></div>
+        <div class="row"><label>影子深度</label><input type="range" id="studioShadowStrength" min="0" max="1" step="0.01" value="0.4"><span class="val" id="studioShadowStrength_v"></span></div>
+        <div class="row"><label>地板光斑</label><input type="range" id="studioCaustic" min="0" max="0.6" step="0.005" value="0.09"><span class="val" id="studioCaustic_v"></span></div>
+        <div class="row"><label>地板波紋</label><input type="range" id="studioRipple" min="0" max="0.5" step="0.005" value="0.09"><span class="val" id="studioRipple_v"></span></div>
+        <div class="effectSubhead">進階</div>
+        <div class="row"><label>阿貝數</label><input type="range" id="dispersionAbbe" min="4" max="70" step="0.5" value="22"><span class="val" id="dispersionAbbe_v"></span></div>
         <div class="row"><label>光譜取樣</label><input type="range" id="spectralSamples" min="1" max="16" step="1" value="12"><span class="val" id="spectralSamples_v"></span></div>
-        <div class="effectSubhead">棚景</div>
-        <div class="row"><label>柔光罩</label><input type="range" id="studioAmbient" min="0" max="2" step="0.02" value="0.38"><span class="val" id="studioAmbient_v"></span></div>
-        <div class="row"><label>棚燈邊緣</label><input type="range" id="studioCardEdge" min="0.004" max="0.4" step="0.004" value="0.03"><span class="val" id="studioCardEdge_v"></span></div>
-        <div class="row"><label>棚燈亮度倍率</label><input type="range" id="studioCardGain" min="1" max="16" step="0.25" value="11"><span class="val" id="studioCardGain_v"></span></div>
-        <div class="row"><label>棚燈強度</label><input type="range" id="studioCardStrength" min="0" max="1" step="0.01" value="0.55"><span class="val" id="studioCardStrength_v"></span></div>
-        <div class="row"><label>接觸陰影</label><input type="range" id="studioShadowStrength" min="0" max="1" step="0.01" value="0.4"><span class="val" id="studioShadowStrength_v"></span></div>
-        <div class="row"><label>黑旗</label><input type="range" id="studioFlag" min="0" max="1" step="0.01" value="0.55"><span class="val" id="studioFlag_v"></span></div>
-        <div class="row"><label>焦散</label><input type="range" id="studioCaustic" min="0" max="0.6" step="0.005" value="0.09"><span class="val" id="studioCaustic_v"></span></div>
-        <div class="row"><label>地板漣漪</label><input type="range" id="studioRipple" min="0" max="0.5" step="0.005" value="0.09"><span class="val" id="studioRipple_v"></span></div>
+        <div class="row"><label>燈的亮度</label><input type="range" id="studioCardGain" min="1" max="16" step="0.25" value="11"><span class="val" id="studioCardGain_v"></span></div>
+        <div class="row"><label>燈的銳利度</label><input type="range" id="studioCardEdge" min="0.004" max="0.4" step="0.004" value="0.075"><span class="val" id="studioCardEdge_v"></span></div>
+        <div class="row"><label>環境亮度</label><input type="range" id="studioAmbient" min="0" max="2" step="0.02" value="0.38"><span class="val" id="studioAmbient_v"></span></div>
       </div>
-      <p class="note">這一組只作用於靜態模式。色散是真的把背景分波長折射，所以它需要背景有東西可以分 ——「棚景」關掉之後色散也會跟著消失，那不是故障。</p>
+      <p class="note">彩虹是真的把背景分波長折射出來的，所以它需要背景有東西可以分：「對比（黑卡）」拉高會讓色帶更明顯，拉到 0 幾乎就看不到了。阿貝數是玻璃的材料常數（冕牌 59、火石 30、重火石 20），越小色散越強。</p>
     </details>
 
     <details class="subgroup" id="dispersionGroup" data-gate="!static">
