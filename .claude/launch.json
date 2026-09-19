@@ -1,6 +1,7 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "vfx", "runtimeExecutable": "python3", "runtimeArgs": ["serve.py", "8642"], "port": 8642 }
+    { "name": "vfx", "runtimeExecutable": "python3", "runtimeArgs": ["serve.py", "8642"], "port": 8642 },
+    { "name": "vfx-win", "runtimeExecutable": "python", "runtimeArgs": ["serve.py", "8642"], "port": 8642 }
   ]
 }
