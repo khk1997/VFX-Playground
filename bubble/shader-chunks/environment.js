@@ -32,6 +32,7 @@ uniform float uStudioCardEdge;      // 棚燈卡邊緣的銳利度：越小邊�
 uniform float uStudioCardGain;      // 棚燈卡相對背景紙的亮度倍率（可大於 1）
 uniform float uEdgeRimWeight;       // 剪影對色散的加權（見 shaders.js 的 deviation）
 uniform float uAnisoBlur;           // 折射取樣的錐寬：把環境的邊按射線 footprint 攤開
+uniform float uAbbe;                // 阿貝數：越小色散越強（冕牌 59 / 火石 30 / 重火石 20）
 // ===== 光譜折射 =====
 // 折射率在光譜兩端的差（≈ 1/阿貝數的效果量）。0 = 各波長同路，沒有色散。
 uniform float uRefractDispersion;
@@ -193,11 +194,43 @@ vec4 backgroundSample(vec3 rd, float extraBlur){
 // 權重不必歸一：呼叫端會逐通道除以權重和，所以這裡只決定「形狀」。
 vec3 spectralResponse(float band){
   float t = clamp(band, 0.0, 1.0);
-  float r = exp(-pow((t - 0.88) / 0.20, 2.0))
-    + 0.20 * exp(-pow((t - 0.04) / 0.11, 2.0));
-  float g = exp(-pow((t - 0.55) / 0.18, 2.0));
-  float b = exp(-pow((t - 0.20) / 0.20, 2.0));
+  // 瓣的位置換算自波長（見 bandWavelength）：紅 610nm、綠 545nm、藍 470nm，
+  // 在 430–660 這個取樣區間裡分別落在 0.78 / 0.50 / 0.17。
+  float r = exp(-pow((t - 0.78) / 0.20, 2.0))
+    + 0.20 * exp(-pow((t - 0.02) / 0.11, 2.0));
+  float g = exp(-pow((t - 0.50) / 0.18, 2.0));
+  float b = exp(-pow((t - 0.17) / 0.20, 2.0));
   return vec3(r, g, b);
+}
+
+// 取樣點的波長，單位 µm。band 0 = 藍端，1 = 紅端。
+float bandWavelength(float band){
+  return mix(0.430, 0.660, clamp(band, 0.0, 1.0));
+}
+
+// Cauchy 色散曲線 n(λ) = A + B/λ²，B 由阿貝數換算。
+//
+// 為什麼要換掉原本那條「折射率沿波段線性內插」：線性是左右對稱的，真實的
+// 1/λ² 不是。以 n_d（587.6nm）為中心，440nm 的偏移量大約是 650nm 的四倍多 ——
+// 所以真實玻璃的色散邊是「暖色擠成一條細邊、冷色拖出一條長尾」，而對稱的版本
+// 會畫出一條紫色過重、紅橙偏弱的假色帶。顏色對不對就差在這裡。
+//
+// 阿貝數 Vd = (n_d - 1) / (n_F - n_C)，數字越小色散越強：冕牌玻璃約 59，
+// 火石玻璃約 30，重火石約 20。參考影片面板上那個 15.81 落在「比任何真實玻璃
+// 都更誇張」的區間，是美術值不是材料值，所以這裡的下限放得比現實低。
+//
+// strength 是邊緣加權與美術增益的總和。物理只決定曲線的「形狀」，強度仍然交給
+// 使用者 —— 真實阿貝數算出來的分離量在單顆玻璃上只有零點幾度，不放大看不見。
+float bandIOR(float band, float strength){
+  const float INV_LD2 = 2.8959;   // 1/λd²，λd = 0.5876 µm
+  const float INV_LF2 = 4.2318;   // 1/λF²，λF = 0.4861 µm
+  const float INV_LC2 = 2.3215;   // 1/λC²，λC = 0.6563 µm
+  float lambda = bandWavelength(band);
+  float invL2 = 1.0 / (lambda * lambda);
+  float b = (uIOR - 1.0) / max(uAbbe, 0.8) / (INV_LF2 - INV_LC2);
+  // 下限 1.02：折射率掉到 1 以下時 refract() 整個翻過來，掠射端會變成往外彎，
+  // 畫面上是一圈突然反向的假邊。
+  return max(uIOR + b * strength * (invL2 - INV_LD2), 1.02);
 }
 
 // 棚燈卡：方向球上的一塊圓盤，邊緣的銳利度自己控制。
@@ -317,10 +350,9 @@ vec3 spectralRefraction(vec3 rd, vec3 N, vec3 exitNormal, vec3 exitPoint,
   vec3 weightSum = vec3(0.0);
   for (int i = 0; i < MAX_SPECTRAL_COMPILE; i++) {
     if (i >= uSpectralSamples) break;
-    // band 0 = 藍端，1 = 紅端（visibleSpectrum 的慣例）。短波折射率高，
-    // 所以偏移量是 (0.5 - band)。
+    // band 0 = 藍端，1 = 紅端。折射率由 Cauchy 曲線決定（見 bandIOR）。
     float band = (float(i) + 0.5) / float(uSpectralSamples);
-    float iorBand = uIOR + (0.5 - band) * bandSpread;
+    float iorBand = bandIOR(band, bandSpread);
     vec3 outBand = exitDir;
     vec3 inBand = refract(rd, N, 1.0 / iorBand);
     if (dot(inBand, inBand) > 0.0001) {

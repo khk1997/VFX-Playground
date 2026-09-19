@@ -793,12 +793,10 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
             + grazing * grazing * uEdgeRimWeight,
           0.0, 1.0
         );
-        // 上限不是美術保險，是物理界線：折射率被推到 1 以下時 refract() 的行為
-        // 會整個翻過來（掠射端變成往外彎），畫面上是一圈突然反向的假邊。
-        float bandSpread = min(
-          uRefractDispersion * pow(deviation, uEdgePathPower) * uEdgePathBoost,
-          0.9
-        );
+        // 這裡算的是「色散曲線要被放大幾倍」，不是折射率差本身 —— 曲線的形狀
+        // 由阿貝數決定（見 environment.js 的 bandIOR），這一項只決定強度。
+        float bandSpread =
+          uRefractDispersion * pow(deviation, uEdgePathPower) * uEdgePathBoost;
         if (bandSpread > 0.0001 && uSpectralSamples > 1) {
           refractedBg = spectralRefraction(
             rd, N, exitNormal, exitPoint, exitDir,
