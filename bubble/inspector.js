@@ -306,7 +306,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined }) {
     'count', 'radius', 'viscosity', 'spread', 'wobble',
     'materialStyle', 'reflect', 'transmission', 'absorb', 'absorbColor',
     'materialExposure', 'roughness', 'fresnel', 'ior',
-    'cameraDistance', 'cameraRotationY', 'cameraRotationX', 'spin', 'dollyEnabled',
+    'cameraDistance', 'cameraFov', 'cameraRotationY', 'cameraRotationX', 'spin', 'dollyEnabled',
     'bgMode', 'bgColor', 'lightBgGradientTop', 'lightBgGradientBottom', 'lightShow',
     'lightClarity', 'lightDepth', 'lightChroma',
     // HDRI 的三根（水平／垂直／模糊）移到完整模式。它們只有在「預覽底色」走

@@ -1604,8 +1604,20 @@ function updateNegativeDrops(phase, fidelityAbsorb = 0) {
 // 這幾根走不了 bindControls 的通用路徑 —— 那條路是「一根滑桿對一個純量 uniform」，
 // 而這裡是四根對一個 vec4。每幀重打包而不是在 input 事件裡寫：成本是五次
 // Vector4.set，比為它們各自接一條事件線便宜，也不會有漏接某一根的可能。
+// 視角。只有靜態模式讀 cameraFov，其餘模式維持原本寫死的 0.42。
+//
+// 不是保守，是算術：tan(45.6°/2) = 0.42045，跟 0.42 差在第四位，而那個差足以讓
+// 其餘九個模式的每一幀都動（回歸測試逐位元比，整批都紅了）。沒有哪個角度能讓
+// tan 剛好還原成那個常數，所以乾脆讓它們繼續讀常數。
+function staticTanHalfFov() {
+  return P.motion === 'static' ? Math.tan(P.cameraFov * Math.PI / 360) : 0.42;
+}
+
 function syncStudioLights() {
   if (!uniforms || !uniforms.uLightKey) return;
+  // 視角：暫停路徑不走 frame()，所以這裡也要設一次，否則靜態模式拉「鏡頭視角」
+  // 完全沒反應（跟燈位同一個坑）。匯出預覽有自己的 fov，那條路不由這裡管。
+  if (!getExportPreviewSettings()) uniforms.uTanHalfFov.value = staticTanHalfFov();
   uniforms.uLightKey.value.set(
     P.lightKeyAzimuth, P.lightKeyElevation, P.lightKeySize, P.lightKeyPower);
   uniforms.uLightFill.value.set(
@@ -3574,7 +3586,7 @@ function frame(now) {
     ? settingsCenter(settingsValue(getExportPreviewSettings(), 'centerY')) : compositionOffsetY;
   uniforms.uTanHalfFov.value = getExportPreviewSettings()
     ? Math.tan(Math.max(10, Math.min(120, Number(getExportPreviewSettings().fov) || 42)) * Math.PI / 360)
-    : 0.42;
+    : staticTanHalfFov();
   uniforms.uTime.value = simT;
   syncStudioLights();
   syncEdgeDropMotion(simT);

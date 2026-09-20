@@ -191,6 +191,12 @@ export const DEFAULTS = {              // 數值滑桿
   hdriPitch: 20,
   hdriBlur: 0.21,
   envRefraction: 0,
+  // 鏡頭視角（水平全角，度）。預設 45.6 就是這根參數出現以前寫死的 0.42
+  // （tan(45.6/2)），所以其餘模式的構圖完全不變。
+  //
+  // 它跟鏡頭距離要一起看：視角變窄、距離拉遠，主體大小不變但透視變平 —— 那正是
+  // 產品攝影用長焦的理由，也是參考影片那種「物體很大、線條卻不誇張」的來源。
+  cameraFov: 45.6,
   cameraDistance: 5.5,
   cameraRotationX: 9.7,
   cameraRotationY: 29.8,

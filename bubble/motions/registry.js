@@ -63,7 +63,10 @@ export const MOTIONS = {
       bloomThreshold: 1.75,
       bloomIntensity: 0.4,
       bloomRadius: 0.6,
-      cameraDistance: 6.8,
+      // 長焦構圖：視角收到 28 度、距離拉到 9.5。主體比原本更滿，但透視比原本
+      // 更平 —— 廣角拉近會把最靠近鏡頭的那個角撐得特別大，玻璃的線條因此變誇張。
+      cameraFov: 28,
+      cameraDistance: 9.5,
       cameraRotationX: -40.4,
       cameraRotationY: 47.7,
       // 靜止的展示畫面，鏡頭不自己繞。

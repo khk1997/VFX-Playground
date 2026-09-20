@@ -37,7 +37,7 @@ export const MOTION_SCOPED_KEYS = [
   ...SPECTRAL_CAUSTIC_DEFAULTS.map((_, index) => `spectralCausticCol${index}`),
   // 藝術色散的開關，跟上面的光譜焦散開關同一個身分。
   'dispersionEnabled',
-  'cameraDistance', 'cameraRotationX', 'cameraRotationY',
+  'cameraDistance', 'cameraRotationX', 'cameraRotationY', 'cameraFov',
   // 環繞幅度也是構圖的一部分，跟上面三條鏡頭參數同一組。
   'spin',
   // 私語的外殼需要比一般水滴低很多的 FBM 起伏；列入模式記憶後 registry
