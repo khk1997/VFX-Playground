@@ -146,6 +146,9 @@ export function createShaderVariantPlanner({
       // 其餘模式給 false 而不是給個數字：那會多一行 #define 進到它們的 shader
       // 前綴，而「原始碼有動、輸出就不保證相同」這件事這個分支已經踩過一次。
       MAX_SPECTRAL_COMPILE: state.staticGlass ? 16 : false,
+      // 地板遮蔽的 march 上限。跟其餘 MAX_*_COMPILE 同一個用法：編譯期只知道
+      // 上限，實際步數由場景決定，fxc 才不會把整段展開。
+      MAX_SHADOW_COMPILE: state.staticGlass ? 20 : false,
     };
 
     // 靜態模式不編舊的外觀層。這不是精簡，是它們與新模型互相衝突：

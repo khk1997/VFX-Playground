@@ -305,6 +305,38 @@ float studioCard(vec3 rd, vec3 dir, float radius, float soft){
 // 在錐內多重取樣，但那要乘上波長數，太貴。這裡改成把環境自己的邊按 footprint
 // 攤開：結果等價於預濾波，成本是零（就是幾個 smoothstep 的區間變寬）。
 // HDRI 那條路用 PMREM 的 mip 做同一件事，這是程序化棚景的對應版本。
+// mapScene 定義在 geometry chunk，而這個 chunk 排在它前面（順序是
+// environment → geometry → optics，見 shader_structure 的斷言）。前向宣告是
+// GLSL ES 1.0 就支援的，比為了一個函式去改 chunk 順序安全 —— 那個順序是
+// backgroundSample 與 sampleReflection 的相依決定的。
+float mapScene(vec3 p);
+
+// 地板的遮蔽：從地板點往主光打一條 sphere trace，回傳 1 = 完全沒被擋、0 = 全遮。
+//
+// 這是接觸陰影與焦散唯一「知道造型長什麼樣」的來源。原本兩者都是以物體中心為
+// 心的高斯斑，圓環與方體因此投出一模一樣的東西 —— 而影子的形狀是眼睛判斷物體
+// 形狀的主要線索之一。
+//
+// 只有鏡頭直接看到的地板會跑這一段（cards 為 0 的那條射線）。折射與反射的取樣
+// 一律走原本的解析近似：那些取樣每個波長各要一次，乘上去就不是這個場景付得起
+// 的成本，而玻璃內部看到的那一小塊地板本來就讀不出影子的形狀。
+//
+// res = min(k·d/t) 是標準的軟陰影：d/t 是射線離表面的角距，離得越近遮得越多，
+// 半影因此自然隨距離變寬，不必另外做模糊。
+float studioOcclusion(vec3 floorPos, vec3 lightDir){
+  float res = 1.0;
+  float t = 0.05;
+  for (int i = 0; i < MAX_SHADOW_COMPILE; i++){
+    float d = mapScene(floorPos + lightDir * t);
+    res = min(res, 9.0 * d / t);
+    if (d < 0.002 || t > 12.0) break;
+    // 步長上限放寬到 1.2：遠處的地板點要走很長一段才碰得到物體，卡在 0.6 的話
+    // 二十步走不完，march 會在半路停住 —— 影子的遠端因此被截成一排鋸齒。
+    t += clamp(d, 0.05, 1.2);
+  }
+  return clamp(res, 0.0, 1.0);
+}
+
 // 焦散：光穿過玻璃之後被聚到地板上。
 //
 // 真的算焦散要從光源那側打光子再收集，離線算繪才付得起。這裡用一個解析近似：
@@ -368,11 +400,19 @@ vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards, fl
       vec2 fp = (origin + rd * tFloor).xz;
       float dist = length(fp);
 
-      // 接觸陰影：物體正下方最深，以高斯往外收。用平方距離而不是距離，邊界才
-      // 不會有一圈看得出來的硬邊。
+      // 接觸陰影。鏡頭直接看到的地板用真正的遮蔽測試，形狀才跟著造型走；
+      // 折射與反射的取樣沿用高斯斑（見 studioOcclusion 的說明）。
       float shadowR = max(uStudioShadowRadius, 0.001);
-      float shadow = exp(-(dist * dist) / (shadowR * shadowR))
-        * uStudioShadowStrength;
+      float shadow = exp(-(dist * dist) / (shadowR * shadowR));
+      if (cards < 0.5) {
+        // 隨距離收掉。主光相當側向，純粹的幾何投影會把影子拖得又長又濃，畫面
+        // 重心整個被拉走；而影子真正在講的是「物體就在這裡」，那件事只在物體
+        // 附近成立。收掉遠端同時也讓 march 走不完的那一段完全看不到。
+        float reach = smoothstep(shadowR * 14.0, shadowR * 5.0, dist);
+        shadow = (1.0 - studioOcclusion(origin + rd * tFloor, studioKeyDir()))
+          * reach;
+      }
+      shadow *= uStudioShadowStrength;
 
       // 地板明度隨距離往牆面收斂，近處比牆暗、遠處接回去，地平線因此自己浮出來。
       float recede = smoothstep(2.0, 14.0, dist);
