@@ -756,8 +756,27 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
         // 折射出去的那條射線是從出口點出發的，不是鏡頭。用 exitPoint 求地板交點，
         // 折射影像裡的地平線才會跟玻璃的厚度一起錯開 —— 那個錯位就是厚度感本身。
         // footprint 隨光程成長：走得越久、被彎得越多，同一個像素涵蓋的立體角越大。
-        // footprint 隨光程成長；基準寬度來自 specular_roughness，不另開參數。
-        float studioSoften = (0.012 + uRoughness * 0.22) * (0.4 + pathLength * 0.9);
+        // 這個像素實際涵蓋多大一塊立體角。
+        //
+        // 玻璃是透鏡：它把一大片方向壓進幾個像素，而壓縮率隨位置變化好幾個數量級。
+        // 用固定寬度去預濾波一定會錯 —— 太小則棚燈卡的硬邊在放大區走樣成鋸齒
+        // （那些三角楔形就是卡的折射影像，把卡的邊軟化掉就會消失，是量出來的），
+        // 太大則平坦處整個糊掉。螢幕空間導數直接量出「相鄰像素的出射方向差多少」，
+        // 也就是真正的 footprint，所以兩邊都不必妥協。這是 mipmap 選階同一個道理，
+        // 只是這裡的環境是程序化的，改成把它自己的邊撐開。
+        //
+        // 導數在非均勻控制流裡嚴格說是未定義的，實務上 GPU 仍以 2x2 quad 計算；
+        // 會拿到錯值的只有剪影上那一圈同 quad 分支不同的像素，而那裡本來就是
+        // 過渡帶。上限 0.5 是保險，避免那幾個像素糊成一塊。
+        vec3 footprintX = dFdx(exitDir);
+        vec3 footprintY = dFdy(exitDir);
+        float spread = length(footprintX) + length(footprintY);
+        // 飽和曲線而不是 clamp。出射方向在「折射光路從一個面換到另一個面」的
+        // 地方是真的不連續，導數在那裡會噴到很大 —— 硬夾在上限會讓那一排像素
+        // 整齊地糊成一格一格的點。x/(1+kx) 讓大值連續地收斂到上限，過渡就看不
+        // 出來了。
+        float studioSoften = spread / (1.0 + spread * 6.0) * 0.75
+          + uRoughness * 0.22;
         refractedBg = studioBackdropSample(
           exitPoint, exitDir, roughBlur, 1.0, studioSoften
         ).rgb;

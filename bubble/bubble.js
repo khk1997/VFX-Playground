@@ -504,6 +504,10 @@ function buildVariantMaterial(V = variantState()) {
     fragmentShader: usesBaselineShader() ? FRAG_BASELINE : FRAG,
     defines: shaderFeatures(V),
     depthTest: false, depthWrite: false,
+    // 靜態玻璃用 dFdx/dFdy 量射線 footprint（見 shaders.js 的 studioSoften）。
+    // 這支 shader 是 GLSL ES 1.0，導數要靠這個擴充；three.js 只在這個旗標打開時
+    // 才會把 #extension 指令加進前綴。
+    extensions: { derivatives: true },
   });
   mat.envMap = pmremTarget.texture;
   return mat;

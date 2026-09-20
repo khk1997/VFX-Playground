@@ -424,18 +424,33 @@ vec3 spectralRefraction(vec3 rd, vec3 N, vec3 exitNormal, vec3 exitPoint,
     vec3 inBand = refract(rd, N, 1.0 / iorBand);
     if (dot(inBand, inBand) > 0.0001) {
       inBand = normalize(inBand);
+      vec3 bounced = normalize(reflect(inBand, exitNormal));
       vec3 o = refract(inBand, -exitNormal, iorBand);
-      if (dot(o, o) > 0.0001) {
-        outBand = normalize(o);
-      } else {
-        // 這個波長在出口面全內反射了。上一版在這裡退回參考出射方向，
-        // 那正好把整個效果最強的地方抹掉：臨界角 θc = asin(1/n) 跟波長
-        // 有關，所以掠射區一定存在一條「短波還過得去、長波已經反射
-        // 回去」的分界，而 dθ_out/dθ_in 在那附近是發散的。兩側取到的
-        // 是環境裡完全不同的兩塊，差異因此極大 —— 參考影片裡最飽和的
-        // 那幾條細色帶就長在這條線上。讓它照實走內反射。
-        outBand = normalize(reflect(inBand, exitNormal));
+
+      // 臨界角附近按 Fresnel 連續過渡，不要用「有沒有全內反射」當二元開關。
+      //
+      // 上一版是開關，而那會在畫面上切出硬邊：臨界角 θc = asin(1/n) 是一條等角
+      // 線，在立方體的平面上就是直線，相鄰像素落在兩側時取到的是環境裡完全不同
+      // 的兩塊 —— 表面因此被切成一塊塊三角形，而且色散開得越強越明顯（關掉色散
+      // 就完全消失，這是分辨出來的）。
+      //
+      // 物理上本來就不是開關：透射的 Fresnel 係數在接近 θc 時連續趨近 0，同時
+      // 折射方向連續轉向與表面相切，所以「按 R 混合兩個方向」在 θc 兩側是接得
+      // 起來的 —— R 在那裡已經是 1，混出來就是內反射本身。用完整的 Fresnel
+      // （s 與 p 偏振各半）而不是 Schlick 近似：Schlick 在臨界角附近正是誤差
+      // 最大的地方，而這裡要的就是那一段。
+      float cosI = clamp(abs(dot(inBand, exitNormal)), 0.0, 1.0);
+      float sinT2 = iorBand * iorBand * (1.0 - cosI * cosI);
+      float bandR = 1.0;
+      if (sinT2 < 1.0) {
+        float cosT = sqrt(1.0 - sinT2);
+        float rs = (iorBand * cosI - cosT) / (iorBand * cosI + cosT);
+        float rp = (cosI - iorBand * cosT) / (cosI + iorBand * cosT);
+        bandR = clamp(0.5 * (rs * rs + rp * rp), 0.0, 1.0);
       }
+      outBand = dot(o, o) > 0.0001
+        ? normalize(mix(normalize(o), bounced, bandR))
+        : bounced;
     }
     vec3 w = spectralResponse(band);
     spectralSum += studioBackdropSample(
