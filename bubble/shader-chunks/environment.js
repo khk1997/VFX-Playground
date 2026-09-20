@@ -457,15 +457,16 @@ vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards, fl
     // 這根滑桿改的不是亮度而是「色散看不看得見」，推到 0 就只剩一團柔光，
     // 色帶會跟著消失。
     float soft = max(uStudioCardEdge, 0.004) * (1.0 + soften * 10.0);
-    float key  = studioCard(rd, normalize(vec3(-0.42, 0.52, 0.74)), 0.78, soft);
-    float fill = studioCard(rd, normalize(vec3(0.76, 0.14, 0.63)), 0.70, soft * 2.2);
-    float rim  = studioCard(rd, normalize(vec3(0.05, -0.30, -0.95)), 0.30, soft);
+    float key  = studioCard(rd, studioKeyDir(), radians(uLightKey.z), soft);
+    float fill = studioCard(rd, studioDir(uLightFill.xy), radians(uLightFill.z),
+      soft * 2.2);
+    float rim  = studioCard(rd, studioDir(uLightRim.xy), radians(uLightRim.z), soft);
     // 相加而不是往白色 mix，而且刻意讓它超過 1。真正的柔光箱比背景紙亮一個
     // 數量級，被 mix 夾在 1.0 就等於「一張跟白紙一樣亮的燈」—— 那既打不出
     // 高光，也給不出飽和的色帶：色帶的飽和度就是背景那道邊的相對落差，落差
     // 只有兩成，顏色就只能淡兩成。超過 1 的部分留到合成時才壓（見 shaders.js
     // 的靜態合成），在那之前它是真的很亮。
-    col += vec3(key + fill * 0.45 + rim * 0.7)
+    col += vec3(key * uLightKey.w + fill * uLightFill.w + rim * uLightRim.w)
       * uStudioCardStrength * uStudioCardGain * cards;
 
     // 黑旗（negative fill）。棚拍在白背景上拍玻璃就是靠這個：框外擺黑卡，讓
