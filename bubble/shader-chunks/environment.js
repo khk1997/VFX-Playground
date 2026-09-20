@@ -30,6 +30,15 @@ uniform float uStudioWallLift;      // 牆面的絕對亮度底（深底才看�
 uniform float uStudioFloorLift;     // 地板的絕對亮度底
 uniform float uStudioCardEdge;      // 棚燈卡邊緣的銳利度：越小邊越硬、色帶越明顯
 uniform float uStudioCardGain;      // 棚燈卡相對背景紙的亮度倍率（可大於 1）
+// ===== 燈位 =====
+// 每盞燈用球座標描述：方位角（繞 Y 軸，度）、仰角（度）、角半徑（度）、相對強度。
+// 這些原本是寫死在 studioBackdropSample 裡的五個常數向量 —— 等於整個模組只有一種
+// 打光。預設值就是那五個常數換算出來的角度，所以接上滑桿當下外觀不變。
+uniform vec4  uLightKey;            // xy = 方位/仰角, z = 角半徑, w = 強度
+uniform vec4  uLightFill;
+uniform vec4  uLightRim;
+uniform vec4  uFlagA;               // 黑卡 A：xy = 方位/仰角, z = 角半徑, w 未用
+uniform vec4  uFlagB;
 // OpenPBR: transmission_dispersion_abbe_number。越小色散越強（冕牌 59 / 火石 30 /
 // 重火石 20）。
 uniform float uDispersionAbbe;
@@ -270,8 +279,16 @@ float bandIOR(float band, float strength){
 // 板照亮物體、它的邊緣負責顯色，兩件事都需要。
 // 主光方向。焦散必須跟棚燈卡讀同一個方向，否則地板上的亮斑會跟物體的高光
 // 指向不同的光源，一眼就看得出是貼上去的。
+// 球座標轉方向。方位角繞 Y 軸，0 = +Z（正對鏡頭的後方），仰角 90 = 正上方。
+// 跟 rayBeamLightDirection 同一個慣例，面板上的數字在兩處意思一致。
+vec3 studioDir(vec2 angles){
+  float az = radians(angles.x);
+  float el = radians(angles.y);
+  return normalize(vec3(cos(el) * sin(az), sin(el), cos(el) * cos(az)));
+}
+
 vec3 studioKeyDir(){
-  return normalize(vec3(-0.42, 0.52, 0.74));
+  return studioDir(uLightKey.xy);
 }
 
 float studioCard(vec3 rd, vec3 dir, float radius, float soft){
@@ -420,8 +437,8 @@ vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards, fl
     // 只作用在折射與反射的取樣（cards > 0），所以背景紙照樣是乾淨的白，
     // 跟真正的黑旗一樣待在框外。
     if (uStudioFlag > 0.0) {
-      float flag = studioCard(rd, normalize(vec3(0.34, -0.42, -0.84)), 0.68, soft * 1.6);
-      float flag2 = studioCard(rd, normalize(vec3(-0.88, -0.12, 0.46)), 0.45, soft * 1.6);
+      float flag = studioCard(rd, studioDir(uFlagA.xy), radians(uFlagA.z), soft * 1.6);
+      float flag2 = studioCard(rd, studioDir(uFlagB.xy), radians(uFlagB.z), soft * 1.6);
       col *= 1.0 - clamp((flag + flag2 * 0.7) * uStudioFlag * cards, 0.0, 0.96);
     }
   }

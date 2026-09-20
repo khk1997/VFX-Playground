@@ -1599,6 +1599,23 @@ function updateNegativeDrops(phase, fidelityAbsorb = 0) {
 }
 
 // 水滴動畫只在 CPU 每幀計算一次；shader 的每個 march step 僅讀取 vec4 array。
+// 燈位：把面板上的角度打包進 vec4。
+//
+// 這幾根走不了 bindControls 的通用路徑 —— 那條路是「一根滑桿對一個純量 uniform」，
+// 而這裡是四根對一個 vec4。每幀重打包而不是在 input 事件裡寫：成本是五次
+// Vector4.set，比為它們各自接一條事件線便宜，也不會有漏接某一根的可能。
+function syncStudioLights() {
+  if (!uniforms || !uniforms.uLightKey) return;
+  uniforms.uLightKey.value.set(
+    P.lightKeyAzimuth, P.lightKeyElevation, P.lightKeySize, P.lightKeyPower);
+  uniforms.uLightFill.value.set(
+    P.lightFillAzimuth, P.lightFillElevation, P.lightFillSize, P.lightFillPower);
+  uniforms.uLightRim.value.set(
+    P.lightRimAzimuth, P.lightRimElevation, P.lightRimSize, P.lightRimPower);
+  uniforms.uFlagA.value.set(P.flagAAzimuth, P.flagAElevation, P.flagASize, 0.0);
+  uniforms.uFlagB.value.set(P.flagBAzimuth, P.flagBElevation, P.flagBSize, 0.0);
+}
+
 function updateDropUniforms(t) {
   // 水滴數量可以是 0（例如崩解噴濺只想要微滴碎片、穿梭環繞只想留形狀本身）。
   // count 本身允許 0，交給 uCount 讓 shader 直接跳過主滴迴圈；但凡是拿它當
@@ -2289,6 +2306,14 @@ function initGL() {
     uStudioFloorLift: { value: 0.11 },
     uStudioCardEdge: { value: P.studioCardEdge },
     uStudioCardGain: { value: P.studioCardGain },
+    // 燈位。打包成 vec4 是因為它們永遠成組使用（方位/仰角/角半徑/強度），
+    // 拆成 16 個純量 uniform 只是讓 shader 多 12 個名字而已。
+    // 每幀由 syncStudioLights 從 P 打包（見 frame()）。
+    uLightKey: { value: new THREE.Vector4() },
+    uLightFill: { value: new THREE.Vector4() },
+    uLightRim: { value: new THREE.Vector4() },
+    uFlagA: { value: new THREE.Vector4() },
+    uFlagB: { value: new THREE.Vector4() },
     uDispersionAbbe: { value: P.dispersionAbbe },
     uStudioCaustic: { value: P.studioCaustic },
     uStudioCausticChroma: { value: 0.45 },
@@ -3203,6 +3228,10 @@ function requestPausedRender() {
         Math.max(1, canvas.clientHeight || document.documentElement.clientHeight),
       );
       uniforms.uMaxSteps.value = resolveMaxSteps();
+      // 暫停路徑不走 frame()，所以 frame() 裡那些「每幀從 P 打包」的 uniform
+      // 也得在這裡補一次。靜態模式本來就是暫停的，漏掉這行的話燈位滑桿會完全
+      // 沒反應 —— 值進了 P，但沒有人把它打包進 vec4。
+      syncStudioLights();
       renderComposite();
       updateExportCameraPreview();
     }
@@ -3546,6 +3575,7 @@ function frame(now) {
     ? Math.tan(Math.max(10, Math.min(120, Number(getExportPreviewSettings().fov) || 42)) * Math.PI / 360)
     : 0.42;
   uniforms.uTime.value = simT;
+  syncStudioLights();
   syncEdgeDropMotion(simT);
   uniforms.uMaxSteps.value = resolveMaxSteps();
   renderComposite();

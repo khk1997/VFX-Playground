@@ -156,12 +156,6 @@ export const DEFAULTS = {              // 數值滑桿
   // 水的折射率約 1.33，玻璃約 1.5；預設維持原本水滴的手感，改高會讓邊緣
   // 反射（Fresnel）變強、折射彎曲角度變陡，看起來更像玻璃而不是水珠。
   ior: 1.33,
-  // 靜態模式的玻璃光學（見 shaders.js 的 FEATURE_STATIC_GLASS）。其餘模式的
-  // shader 沒有這些 uniform，值照送但不會被讀到。
-  //
-  // 這裡只列出真的值得調的那幾根。棚景的幾何（地板高度、地平線柔度、陰影半徑、
-  // 漣漪密度）與 edgePathBoost、staticGlassMix 仍然是 bubble.js 裡的字面值：
-  // 它們調出來的差別是「同一個場景的細微變體」，多七根滑桿換不到那個。
   // ===== 靜態模式的玻璃光學 =====
   //
   // 材質那幾根照 OpenPBR Surface 的命名與語意，不另立規格：
@@ -176,6 +170,14 @@ export const DEFAULTS = {              // 數值滑桿
   dispersionScale: 1.0,
   dispersionAbbe: 22,
   spectralSamples: 12,
+  // 燈位（見 shader-chunks/environment.js 的 studioDir）。方位角 0 = 正對鏡頭的
+  // 後方，仰角 90 = 正上方，大小是角半徑（度）。預設值是改動前那五個寫死的方向
+  // 向量換算出來的，所以接上滑桿當下外觀不變。
+  lightKeyAzimuth: -29.6, lightKeyElevation: 31.4, lightKeySize: 44.7, lightKeyPower: 1,
+  lightFillAzimuth: 50.3, lightFillElevation: 8.1, lightFillSize: 40.1, lightFillPower: 0.45,
+  lightRimAzimuth: 177, lightRimElevation: -17.5, lightRimSize: 17.2, lightRimPower: 0.7,
+  flagAAzimuth: 158, flagAElevation: -24.9, flagASize: 39,
+  flagBAzimuth: -62.4, flagBElevation: -6.9, flagBSize: 25.8,
   studioCaustic: 0.09,
   studioFlag: 0.55,
   studioCardEdge: 0.075,

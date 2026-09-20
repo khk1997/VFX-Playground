@@ -463,6 +463,7 @@ window.__bubbleDiagReport = function () {
         uDispersionScale: runtime().uniforms.uDispersionScale.value,
         uDispersionAbbe: runtime().uniforms.uDispersionAbbe.value,
         uSpectralSamples: runtime().uniforms.uSpectralSamples.value,
+        uLightKey: runtime().uniforms.uLightKey.value.toArray(),
       } : '(非靜態模式)',
       // 打字模式的排版狀態。字沒出現時第一個要看的就是這幾個值：可見字數（.w）、
       // 字距、字級，以及射線邊界有沒有涵蓋整行。

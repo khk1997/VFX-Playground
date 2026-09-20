@@ -328,6 +328,9 @@ export function buildInspector({ defaults, modeDefault = () => undefined }) {
     // 材料常數、光譜取樣是品質不是外觀、燈的銳利度改的其實是「色帶看不看得見」。
     // 那些是 3D 出身的人才會有的前提，不該擋在第一次開面板的人前面。
     'dispersionScale', 'studioCardStrength', 'studioFlag',
+    // 主光的方位與高度：換一種打光是這個材質最大的表情變化，兩根就夠。
+    // 其餘十六根燈位參數留在完整模式。
+    'lightKeyAzimuth', 'lightKeyElevation',
     'studioShadowStrength', 'studioCaustic', 'studioRipple',
     // 幾何造型的選擇器與它的尺寸。這幾根本來歸在完整模式，等於把這個模組最
     // 主要的操作藏在第二層 —— 常用模式下的「造型」分頁整頁是空的。

@@ -309,7 +309,26 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
         <div class="row"><label>影子深度</label><input type="range" id="studioShadowStrength" min="0" max="1" step="0.01" value="0.4"><span class="val" id="studioShadowStrength_v"></span></div>
         <div class="row"><label>地板光斑</label><input type="range" id="studioCaustic" min="0" max="0.6" step="0.005" value="0.09"><span class="val" id="studioCaustic_v"></span></div>
         <div class="row"><label>地板波紋</label><input type="range" id="studioRipple" min="0" max="0.5" step="0.005" value="0.09"><span class="val" id="studioRipple_v"></span></div>
+        <div class="effectSubhead">打光</div>
+        <div class="row"><label>主光 水平</label><input type="range" id="lightKeyAzimuth" min="-180" max="180" step="0.5" value="-29.6"><span class="val" id="lightKeyAzimuth_v"></span></div>
+        <div class="row"><label>主光 高度</label><input type="range" id="lightKeyElevation" min="-89" max="89" step="0.5" value="31.4"><span class="val" id="lightKeyElevation_v"></span></div>
         <div class="effectSubhead">進階</div>
+        <div class="row"><label>主光 大小</label><input type="range" id="lightKeySize" min="2" max="90" step="0.5" value="44.7"><span class="val" id="lightKeySize_v"></span></div>
+        <div class="row"><label>主光 強度</label><input type="range" id="lightKeyPower" min="0" max="3" step="0.02" value="1"><span class="val" id="lightKeyPower_v"></span></div>
+        <div class="row"><label>補光 水平</label><input type="range" id="lightFillAzimuth" min="-180" max="180" step="0.5" value="50.3"><span class="val" id="lightFillAzimuth_v"></span></div>
+        <div class="row"><label>補光 高度</label><input type="range" id="lightFillElevation" min="-89" max="89" step="0.5" value="8.1"><span class="val" id="lightFillElevation_v"></span></div>
+        <div class="row"><label>補光 大小</label><input type="range" id="lightFillSize" min="2" max="90" step="0.5" value="40.1"><span class="val" id="lightFillSize_v"></span></div>
+        <div class="row"><label>補光 強度</label><input type="range" id="lightFillPower" min="0" max="3" step="0.02" value="0.45"><span class="val" id="lightFillPower_v"></span></div>
+        <div class="row"><label>邊光 水平</label><input type="range" id="lightRimAzimuth" min="-180" max="180" step="0.5" value="177"><span class="val" id="lightRimAzimuth_v"></span></div>
+        <div class="row"><label>邊光 高度</label><input type="range" id="lightRimElevation" min="-89" max="89" step="0.5" value="-17.5"><span class="val" id="lightRimElevation_v"></span></div>
+        <div class="row"><label>邊光 大小</label><input type="range" id="lightRimSize" min="2" max="90" step="0.5" value="17.2"><span class="val" id="lightRimSize_v"></span></div>
+        <div class="row"><label>邊光 強度</label><input type="range" id="lightRimPower" min="0" max="3" step="0.02" value="0.7"><span class="val" id="lightRimPower_v"></span></div>
+        <div class="row"><label>黑卡A 水平</label><input type="range" id="flagAAzimuth" min="-180" max="180" step="0.5" value="158"><span class="val" id="flagAAzimuth_v"></span></div>
+        <div class="row"><label>黑卡A 高度</label><input type="range" id="flagAElevation" min="-89" max="89" step="0.5" value="-24.9"><span class="val" id="flagAElevation_v"></span></div>
+        <div class="row"><label>黑卡A 大小</label><input type="range" id="flagASize" min="2" max="90" step="0.5" value="39"><span class="val" id="flagASize_v"></span></div>
+        <div class="row"><label>黑卡B 水平</label><input type="range" id="flagBAzimuth" min="-180" max="180" step="0.5" value="-62.4"><span class="val" id="flagBAzimuth_v"></span></div>
+        <div class="row"><label>黑卡B 高度</label><input type="range" id="flagBElevation" min="-89" max="89" step="0.5" value="-6.9"><span class="val" id="flagBElevation_v"></span></div>
+        <div class="row"><label>黑卡B 大小</label><input type="range" id="flagBSize" min="2" max="90" step="0.5" value="25.8"><span class="val" id="flagBSize_v"></span></div>
         <div class="row"><label>阿貝數</label><input type="range" id="dispersionAbbe" min="4" max="70" step="0.5" value="22"><span class="val" id="dispersionAbbe_v"></span></div>
         <div class="row"><label>光譜取樣</label><input type="range" id="spectralSamples" min="1" max="16" step="1" value="12"><span class="val" id="spectralSamples_v"></span></div>
         <div class="row"><label>燈的亮度</label><input type="range" id="studioCardGain" min="1" max="16" step="0.25" value="11"><span class="val" id="studioCardGain_v"></span></div>
