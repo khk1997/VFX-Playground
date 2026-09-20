@@ -715,12 +715,18 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
         backRim = pow(1.0 - exitFacing, 3.0) * uFresnel;
 
         vec3 exitDir = refract(insideDir, -exitNormal, uIOR);
-        // 第一個出口若全內反射（GLSL refract 在超過臨界角時回傳零向量；uIOR
-        // 越高、臨界角越窄，掠射角附近很容易發生），真正的厚玻璃球通常會在
-        // 內部再彈一次才穿得出去，不是直接放棄折射、退回原始視線方向。這裡
-        // 只補一次彈跳（够蓋大部分情形，又不必把整段追蹤邏輯包成迴圈）：
-        // 沿反射方向重新找下一個出口，Fresnel、光程長度、背面薄膜全部改用
-        // 第二個出口的結果，讓厚玻璃的內部光路看起來有轉折而不是一次到底。
+        // 第一個出口全內反射時（refract 回傳零向量）兩條路：靜態走連續的
+        // Fresnel 混合，其餘模式沿用原本「再追一次出口」的補一次彈跳。
+#ifdef FEATURE_STATIC_GLASS
+        // 靜態：連續的 Fresnel 混合，理由與作法見 staticExitDirection。
+        {
+          float exitR;
+          exitDir = staticExitDirection(insideDir, exitNormal, exitDir, exitR);
+          backFres = exitR;   // 下游的透射率要跟方向的混合讀同一個值
+          backRim = pow(1.0 - clamp(abs(dot(insideDir, exitNormal)), 0.0, 1.0),
+            3.0) * uFresnel;
+        }
+#else
         if (dot(exitDir, exitDir) < 0.0001) {
           vec3 bounceDir = normalize(reflect(insideDir, exitNormal));
           vec3 exitPoint2;
@@ -742,6 +748,7 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
         }
         if (dot(exitDir, exitDir) < 0.0001) exitDir = rd;
         exitDir = normalize(exitDir);
+#endif
         // 註：這裡曾經有一段「微觀刻面」——用一個平滑的三角函數場擾動出射方向，
         // 想模擬霧面把光打散成一個錐。那是錯的：單樣本渲染沒辦法用擾動做出
         // 「散開」，任何確定性的擾動場都會被原封不動地畫成一層看得見的圖案，
@@ -2202,15 +2209,27 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
     float fresView = f0 + (1.0 - f0) * pow(1.0 - cosView, 5.0);
     // 背面的 Fresnel 也要算進去：光要穿過來得同時通過兩個介面，只算前表面會讓
     // 厚處太亮、讀不出體積。
-    float throughput = (1.0 - fresView) * (1.0 - backFres * 0.5);
+    // 只扣入射面的 Fresnel：出口面的反射率已經用在方向的混合上了（見
+    // staticExitDirection），再乘一次是同一筆能量扣兩遍，掠射區會整片變暗。
+    float throughput = 1.0 - fresView;
     staticGlassTransfer = material.transmission * volumeAbsorption * throughput;
     vec3 transmitted = refractedBg * staticGlassTransfer;
     // 反射也必須來自同一個棚景。少了這一項，深底就整顆變黑：material.baseSurface
     // 的環境是 sampleReflection（HDRI／程序化棚燈），而棚景只餵背景與透射，兩者
     // 是不同的來源 —— 玻璃於是變成「透射一片黑、反射也一片黑」。同一個場景同時
     // 當背景與反射源，物體才會跟它所在的空間對得起來。
+    // 反射也要量自己的 footprint。折射那邊早就有了，這裡原本只傳粗糙度換算的
+    // 常數 —— 而粗糙度預設是 0，等於完全沒有預濾波。黑旗與棚燈卡在反射裡的邊
+    // 因此是硬的，曲面把它們壓縮之後就走樣成鋸齒（關掉黑旗，整張圖的高頻能量
+    // 掉到 62%，是這麼量出來的）。
+    //
+    // 反射方向在曲率大的地方變化比折射還快（鏡射把法線的變化加倍），所以這一
+    // 項不是可有可無的補強，而是同一件事在另一條路徑上。
+    vec3 reflDir = reflect(rd, N);
+    float reflSpread = length(dFdx(reflDir)) + length(dFdy(reflDir));
     vec3 studioReflection = studioBackdropSample(
-      p, reflect(rd, N), uRoughness, 1.0, uRoughness * 0.2
+      p, reflDir, uRoughness,
+      1.0, reflSpread / (1.0 + reflSpread * 6.0) * 0.75 + uRoughness * 0.2
     ).rgb * uReflect * fresView;
     // 不再加 material.baseSurface。它的環境是 sampleReflection（HDRI／程序化
     // 棚燈），跟玻璃透射的那個場景不是同一個 —— 兩個光源疊在一起，物體就對不

@@ -191,6 +191,36 @@ vec4 backgroundSample(vec3 rd, float extraBlur){
 // 人眼對短波紅有殘餘響應，少了它紫色會缺一角、光譜尾端讀起來會斷掉。
 //
 // 權重不必歸一：呼叫端會逐通道除以權重和，所以這裡只決定「形狀」。
+// 出射方向：折射與內反射按 Fresnel 連續混合，不做「有沒有全內反射」的二元切換。
+//
+// 舊路徑在全內反射時會重新追一次出口面，整個換掉 exitPoint、exitNormal 與
+// pathLength。臨界角 θc 是一條等值線，兩側因此取到完全不同的光路，而下游的光譜
+// 迴圈整個吃這些值 —— 畫面上就是一塊塊暗三角，斜邊帶著鋸齒（旋轉視角、拉近就
+// 看得到；關掉黑旗只是讓它變淡，邊仍在，是這麼分辨出來的）。
+//
+// 物理上透射不是在 θc 突然中斷：Fresnel 反射率連續升到 1，同時折射方向連續轉到
+// 與表面相切，所以按反射率混合兩個方向在 θc 兩側接得起來，越過之後就是內反射
+// 本身。跟 spectralRefraction 裡逐波長做的是同一件事，這裡是參考路徑。
+//
+// 代價是厚玻璃少了「內部再彈一次才穿出去」那層結構 —— 那層結構本來就是靠第二次
+// traceExitSurface 換來的，而它正是不連續的來源。
+vec3 staticExitDirection(vec3 insideDir, vec3 exitNormal, vec3 refracted,
+                         out float exitR){
+  vec3 bounced = normalize(reflect(insideDir, exitNormal));
+  float cosI = clamp(abs(dot(insideDir, exitNormal)), 0.0, 1.0);
+  float sinT2 = uIOR * uIOR * (1.0 - cosI * cosI);
+  exitR = 1.0;
+  if (sinT2 < 1.0) {
+    float cosT = sqrt(1.0 - sinT2);
+    float rs = (uIOR * cosI - cosT) / (uIOR * cosI + cosT);
+    float rp = (cosI - uIOR * cosT) / (cosI + uIOR * cosT);
+    exitR = clamp(0.5 * (rs * rs + rp * rp), 0.0, 1.0);
+  }
+  return dot(refracted, refracted) > 0.0001
+    ? normalize(mix(normalize(refracted), bounced, exitR))
+    : bounced;
+}
+
 vec3 spectralResponse(float band){
   float t = clamp(band, 0.0, 1.0);
   // 瓣的位置換算自波長（見 bandWavelength）：紅 610nm、綠 545nm、藍 470nm，
