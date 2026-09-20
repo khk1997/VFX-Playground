@@ -511,6 +511,55 @@ vec3 spectralRefraction(vec3 rd, vec3 N, vec3 exitNormal, vec3 exitPoint,
   return spectralSum / max(weightSum, vec3(1e-4));
         }
 
+// 靜態模式的玻璃合成。
+//
+// 舊路徑對它是死路：唯一可達的材質是通用玻璃，它把 bgLum 歸零，而 uLightBackdrop
+// 兩個底色都映射成 0，所以 brightBg 恆為 0，glassComposite 永遠只取 darkComposite
+// —— 一個「自身能量疊在黑場上」的美術模型。那在黑底很漂亮，在淺底就是一層灰殼
+// 蓋在背景前面。
+//
+// 這裡換成一般的玻璃排序：Fresnel 讓出去的部分留給反射，剩下的才是穿過來的背景
+// （光譜已經在上游分好）。兩種底色共用同一個模型，因為掠射角的 Fresnel 自己會
+// 讓輪廓變暗，正面則幾乎原樣透過去。
+//
+// transfer 回傳「光穿過這塊玻璃之後還剩多少」，也就是 over 合成裡的 (1 - alpha)，
+// 去背輸出要用它反解 straight color。
+vec3 staticGlassShade(vec3 p, vec3 N, vec3 rd, vec3 refractedBg,
+                      vec3 transmission, vec3 absorption, out vec3 transfer){
+  float cosView = clamp(dot(N, -rd), 0.0, 1.0);
+  float f0 = pow((uIOR - 1.0) / (uIOR + 1.0), 2.0);
+  float fresView = f0 + (1.0 - f0) * pow(1.0 - cosView, 5.0);
+  // 只扣入射面的 Fresnel：出口面的反射率已經用在方向的混合上了（見
+  // staticExitDirection），再乘一次是同一筆能量扣兩遍，掠射區會整片變暗。
+  transfer = transmission * absorption * (1.0 - fresView);
+  vec3 transmitted = refractedBg * transfer;
+  // 反射必須來自同一個棚景。用 sampleReflection（HDRI／程序化棚燈）的話，反射
+  // 與透射會來自兩個不同的場景，物體就對不上它所在的空間；深底更直接整顆變黑。
+  //
+  // 它也要量自己的 footprint。原本只傳粗糙度換算的
+  // 常數 —— 而粗糙度預設是 0，等於完全沒有預濾波。黑旗與棚燈卡在反射裡的邊
+  // 因此是硬的，曲面把它們壓縮之後就走樣成鋸齒（關掉黑旗，整張圖的高頻能量
+  // 掉到 62%，是這麼量出來的）。
+  //
+  // 反射方向在曲率大的地方變化比折射還快（鏡射把法線的變化加倍），所以這一
+  // 項不是可有可無的補強，而是同一件事在另一條路徑上。
+  vec3 reflDir = reflect(rd, N);
+  float reflSpread = length(dFdx(reflDir)) + length(dFdy(reflDir));
+  vec3 studioReflection = studioBackdropSample(
+    p, reflDir, uRoughness,
+    1.0, reflSpread / (1.0 + reflSpread * 6.0) * 0.75 + uRoughness * 0.2
+  ).rgb * uReflect * fresView;
+  vec3 lit = transmitted + studioReflection;
+  // HDR 輸出開著（後處理鏈在跑）時什麼都不壓：光暈是靠超過 1 的部分觸發的，
+  // 在這裡先壓掉就等於把玻璃上最亮的那幾條交出去 —— 參考影片裡色帶與高光
+  // 是會發光的，那層輝光就是這樣來的。關掉後處理時才需要自己收尾，而且只
+  // 收超過 1 的部分：透射過來的背景紙本來就在範圍內，整體 tone map 會把它
+  // 壓灰，玻璃看起來就比旁邊的紙暗一截。
+  return uHdrOutput > 0.5
+    ? lit
+    : lit / (vec3(1.0) + max(vec3(0.0), lit - vec3(1.0)));
+}
+
 #endif // FEATURE_STATIC_GLASS
 
 `;

@@ -591,14 +591,39 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
 
   float t = max(0.0, -qb - qh);
   bool hit = false;
+#ifdef FEATURE_STATIC_GLASS
+  // 剪影的覆蓋率。SDF 的 hit/miss 是二元的，一個像素一個樣本，所以輪廓完全沒有
+  // 抗鋸齒 —— 把 1x 與超取樣的同一幀相減，誤差最集中的就是這條線。
+  //
+  // 補法是 sphere tracing 免費送的資訊：每一步的 d/t 就是「這條射線離表面差幾
+  // 弧度」，整條射線取最小值，就是最近逼近的角距。它小於半個像素的角張角時，
+  // 這個像素其實被物體蓋掉了一部分。
+  float nearestAngle = 1e9;
+  float nearestT = 0.0;
+  float edgeCoverage = 1.0;
+#endif
   for (int i = 0; i < MAX_MARCH_COMPILE; i++){
     if (i >= uMaxSteps) break;
     vec3 p = ro + rd * t;
     float d = mapScene(p);
+#ifdef FEATURE_STATIC_GLASS
+    float angle = d / max(t, 0.0001);
+    if (angle < nearestAngle){ nearestAngle = angle; nearestT = t; }
+#endif
     if (d < 0.0008){ hit = true; break; }
     t += d * 0.85;               // wobble 讓場非嚴格 Lipschitz → 縮步保險
     if (t > tEnd) break;
   }
+
+#ifdef FEATURE_STATIC_GLASS
+  if (!hit){
+    // 一個像素的角張角。落在一格以內就當部分覆蓋，照常往下算繪，最後用覆蓋率
+    // 跟背景混合 —— 邊緣像素的著色本來就該是掠射角的玻璃，這裡拿到的就是它。
+    float pixelAngle = 2.0 * uTanHalfFov / max(uResolution.y, 1.0);
+    edgeCoverage = 1.0 - smoothstep(0.0, pixelAngle, nearestAngle);
+    if (edgeCoverage > 0.004){ hit = true; t = nearestT; }
+  }
+#endif
 
   if (!hit){ gl_FragColor = backgroundPixel(bg); return; }
 
@@ -2184,74 +2209,13 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
   finalColor = clampOutput(finalColor * beamAbsorb);
 
 #ifdef FEATURE_STATIC_GLASS
-  // ===== 靜態模式的玻璃合成 =====
-  //
-  // 上面那一整條路徑對靜態模式來說是條死路，而且是可以證明的死路：唯一可達的
-  // 材質是通用玻璃（materialStyle 只有一個選項），它把 bgLum 歸零；uLightBackdrop
-  // 兩個底色都映射成 0。所以 brightBg 恆為 0，glassComposite = mix(darkComposite,
-  // brightComposite, brightBg) 永遠只取 darkComposite —— 整條 brightComposite
-  // 淺底路徑從來沒有執行過（它是被刻意擱置的，見 uLightBackdrop 的註解）。
-  //
-  // darkComposite 是一個「自身能量疊在黑場上」的美術模型。黑底上它很漂亮；淺底
-  // 上它是一層灰殼蓋在背景前面，而折射進來的背景只能從殼底下透出一點 —— 那就是
-  // 淺底看起來像灰白爛泥的原因，不是色散不夠強。
-  //
-  // 這裡換成一般的玻璃排序：透射被 Fresnel 讓出去的部分留給反射，剩下的才是
-  // 穿過來的背景。它對兩種底色都成立，不需要兩套美術：掠射角 Fresnel 趨近 1，
-  // 輪廓自己變成一圈暗邊（玻璃就是這樣讀出形狀的）；正面 Fresnel 很小，背景
-  // 幾乎原樣穿過來，連同上一步分好的光譜。
-  // 去背輸出要用的那一份：光線穿過這塊玻璃之後還剩多少（逐通道）。它就是
-  // over 合成裡的 (1 - alpha)，所以留到下面反解 straight color。
+  // 靜態模式的玻璃合成。上面那一整條路徑對它是死路（brightBg 恆為 0，見該處
+  // 說明），所以這裡整個換掉；理由與式子見 staticGlassShade。
   vec3 staticGlassTransfer = vec3(0.0);
-  {
-    float cosView = clamp(dot(N, -rd), 0.0, 1.0);
-    float f0 = pow((uIOR - 1.0) / (uIOR + 1.0), 2.0);
-    float fresView = f0 + (1.0 - f0) * pow(1.0 - cosView, 5.0);
-    // 背面的 Fresnel 也要算進去：光要穿過來得同時通過兩個介面，只算前表面會讓
-    // 厚處太亮、讀不出體積。
-    // 只扣入射面的 Fresnel：出口面的反射率已經用在方向的混合上了（見
-    // staticExitDirection），再乘一次是同一筆能量扣兩遍，掠射區會整片變暗。
-    float throughput = 1.0 - fresView;
-    staticGlassTransfer = material.transmission * volumeAbsorption * throughput;
-    vec3 transmitted = refractedBg * staticGlassTransfer;
-    // 反射也必須來自同一個棚景。少了這一項，深底就整顆變黑：material.baseSurface
-    // 的環境是 sampleReflection（HDRI／程序化棚燈），而棚景只餵背景與透射，兩者
-    // 是不同的來源 —— 玻璃於是變成「透射一片黑、反射也一片黑」。同一個場景同時
-    // 當背景與反射源，物體才會跟它所在的空間對得起來。
-    // 反射也要量自己的 footprint。折射那邊早就有了，這裡原本只傳粗糙度換算的
-    // 常數 —— 而粗糙度預設是 0，等於完全沒有預濾波。黑旗與棚燈卡在反射裡的邊
-    // 因此是硬的，曲面把它們壓縮之後就走樣成鋸齒（關掉黑旗，整張圖的高頻能量
-    // 掉到 62%，是這麼量出來的）。
-    //
-    // 反射方向在曲率大的地方變化比折射還快（鏡射把法線的變化加倍），所以這一
-    // 項不是可有可無的補強，而是同一件事在另一條路徑上。
-    vec3 reflDir = reflect(rd, N);
-    float reflSpread = length(dFdx(reflDir)) + length(dFdy(reflDir));
-    vec3 studioReflection = studioBackdropSample(
-      p, reflDir, uRoughness,
-      1.0, reflSpread / (1.0 + reflSpread * 6.0) * 0.75 + uRoughness * 0.2
-    ).rgb * uReflect * fresView;
-    // 不再加 material.baseSurface。它的環境是 sampleReflection（HDRI／程序化
-    // 棚燈），跟玻璃透射的那個場景不是同一個 —— 兩個光源疊在一起，物體就對不
-    // 上它所在的空間。靜態模式的反射與透射現在都只來自棚景這一個場景。
-    //
-    // 只壓超過 1 的部分：棚燈卡是 HDR 的，硬夾在 1.0 會把高光與色帶一起削平；
-    // 但透射過來的背景紙本來就在顯示範圍內，整體 tone map 會把它壓灰，玻璃
-    // 看起來就比旁邊的紙暗一截。這條式子在 1 以下是精確的恆等，只有超出的
-    // 部分才被壓縮。
-    vec3 lit = transmitted + studioReflection;
-    // HDR 輸出開著（後處理鏈在跑）時什麼都不壓：光暈是靠超過 1 的部分觸發的，
-    // 在這裡先壓掉就等於把玻璃上最亮的那幾條交出去 —— 參考影片裡色帶與高光
-    // 是會發光的，那層輝光就是這樣來的。關掉後處理時才需要自己收尾，而且只
-    // 收超過 1 的部分：透射過來的背景紙本來就在範圍內，整體 tone map 會把它
-    // 壓灰，玻璃看起來就比旁邊的紙暗一截。
-    vec3 staticGlass = uHdrOutput > 0.5
-      ? lit
-      : lit / (vec3(1.0) + max(vec3(0.0), lit - vec3(1.0)));
-    finalColor = clampOutput(
-      mix(finalColor, staticGlass, clamp(uStaticGlassMix, 0.0, 1.0))
-    );
-  }
+  finalColor = clampOutput(mix(finalColor,
+    staticGlassShade(p, N, rd, refractedBg, material.transmission,
+      volumeAbsorption, staticGlassTransfer),
+    clamp(uStaticGlassMix, 0.0, 1.0)));
 #endif
 
   float outputAlpha = 1.0;
@@ -2346,6 +2310,11 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
       finalColor = clamp(finalColor / max(outputAlpha, 0.001), 0.0, 1.0);
     }
   }
+#ifdef FEATURE_STATIC_GLASS
+  // 剪影的部分覆蓋：不透明輸出混回背景，去背輸出則直接乘進 alpha。
+  finalColor = mix(bg.rgb, finalColor, edgeCoverage);
+  outputAlpha *= edgeCoverage;
+#endif
   gl_FragColor = vec4(finalColor, uCoverageAlpha > 0.5 ? 1.0 : outputAlpha);
 }
 `;
