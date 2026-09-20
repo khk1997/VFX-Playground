@@ -178,6 +178,7 @@ export const DEFAULTS = {              // 數值滑桿
   lightRimAzimuth: 177, lightRimElevation: -17.5, lightRimSize: 17.2, lightRimPower: 0.7,
   flagAAzimuth: 158, flagAElevation: -24.9, flagASize: 39,
   flagBAzimuth: -62.4, flagBElevation: -6.9, flagBSize: 25.8,
+  internalBounce: 0.6,
   studioCaustic: 0.09,
   studioFlag: 0.55,
   studioCardEdge: 0.075,

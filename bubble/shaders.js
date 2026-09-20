@@ -847,6 +847,37 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
 #else
         refractedBg = backgroundSample(exitDir, roughBlur).rgb;
 #endif
+#ifdef FEATURE_STATIC_GLASS
+        // 內部再彈一次。這是先前為了消掉臨界角硬邊而拿掉的那層結構，用連續的
+        // 方式補回來：不是「全內反射才彈」，而是永遠彈，再按出口的反射率
+        // （backFres，就是 staticExitDirection 算出來的那個值）決定它佔多少。
+        // 權重連續，所以不會再切出硬邊；掠射區反射率趨近 1，那裡就幾乎全部
+        // 走這條路，正是厚玻璃內部該有的轉折。
+        //
+        // 這一條刻意不做逐波長：它要多一次完整的內部追蹤，再乘上波長數就太貴。
+        // 色散留在主路徑上，彈跳這一份只補結構與明暗。
+        if (uInternalBounce > 0.001 && backFres > 0.004) {
+          vec3 bounceDir = normalize(reflect(insideDir, exitNormal));
+          vec3 bouncePoint;
+          vec3 bounceNormal;
+          float bouncePath;
+          if (traceExitSurface(exitPoint, bounceDir, bouncePoint, bounceNormal,
+              bouncePath)) {
+            float bounceR;
+            vec3 bounceOut = staticExitDirection(
+              bounceDir, bounceNormal,
+              refract(bounceDir, -bounceNormal, uIOR), bounceR
+            );
+            vec3 bounceColor = studioBackdropSample(
+              bouncePoint, bounceOut, roughBlur, 1.0, studioSoften
+            ).rgb;
+            refractedBg = mix(refractedBg, bounceColor,
+              backFres * clamp(uInternalBounce, 0.0, 1.0));
+            // 多走的那一段光程要算進吸收，厚處才會真的比較濃。
+            pathLength += bouncePath * backFres * clamp(uInternalBounce, 0.0, 1.0);
+          }
+        }
+#endif
         // 註：這裡試過「RGB 通道各自以不同折射率取樣」的真色散（chromatic
         // aberration），結論是不划算，已經移除。留個記錄避免重踩：
         //

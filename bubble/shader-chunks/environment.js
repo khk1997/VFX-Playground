@@ -45,6 +45,7 @@ uniform float uDispersionAbbe;
 uniform float uStudioCaustic;       // 焦散強度：光被玻璃聚到地板上的亮斑
 uniform float uStudioCausticChroma; // 焦散外圈的彩度
 uniform float uStudioFlag;          // 黑旗強度：框外的黑卡，專門用來在淺底製造對比
+uniform float uInternalBounce;      // 內部再彈一次的佔比（OpenPBR 沒有這一項，是取樣策略）
 // ===== 光譜折射 =====
 // OpenPBR: transmission_dispersion_scale。0 = 各波長同路，沒有色散。
 uniform float uDispersionScale;

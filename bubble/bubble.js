@@ -2316,6 +2316,7 @@ function initGL() {
     uFlagB: { value: new THREE.Vector4() },
     uDispersionAbbe: { value: P.dispersionAbbe },
     uStudioCaustic: { value: P.studioCaustic },
+    uInternalBounce: { value: P.internalBounce },
     uStudioCausticChroma: { value: 0.45 },
     uStudioFlag: { value: P.studioFlag },
     uDispersionScale: { value: P.dispersionScale },
