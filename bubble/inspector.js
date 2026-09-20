@@ -308,7 +308,10 @@ export function buildInspector({ defaults, modeDefault = () => undefined }) {
     'materialExposure', 'roughness', 'fresnel', 'ior',
     'cameraDistance', 'cameraRotationY', 'cameraRotationX', 'spin', 'dollyEnabled',
     'bgMode', 'bgColor', 'lightBgGradientTop', 'lightBgGradientBottom', 'lightShow',
-    'lightClarity', 'lightDepth', 'lightChroma', 'hdriYaw', 'hdriPitch', 'hdriBlur',
+    'lightClarity', 'lightDepth', 'lightChroma',
+    // HDRI 的三根（水平／垂直／模糊）移到完整模式。它們只有在「預覽底色」走
+    // HDRI 背景時才有作用，而那是一個要先知道 HDRI 是什麼才會選的分支 ——
+    // 擺在常用等於先問使用者一個他還沒遇到的問題。所有模式一致。
     'researchShellTint', 'researchShellTintColor', 'researchShellTintEdge',
     'researchBreath', 'researchCompanionSize', 'researchCompanionExposure',
     'researchCompanionDepth', 'researchCompanionHold', 'researchCompanionPath',
