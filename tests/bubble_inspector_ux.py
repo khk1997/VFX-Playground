@@ -88,9 +88,8 @@ def check_desktop(browser, base_url: str) -> dict[str, object]:
     page.locator("#inspectorTab-shape").press("ArrowRight")
     assert page.locator("#inspectorTab-motion").get_attribute("aria-selected") == "true", "ArrowRight did not select motion"
 
-    # 動態模式那一列收在「完整」深度裡：從首頁卡片進來的人看到的是那一個模式，
-    # 不需要一個會把頁面變成另一個效果的下拉。上面已經切到完整了，所以這裡看得到。
-    assert page.locator("#motion").is_visible(), "the motion row should be back at complete depth"
+    # 每個模式是獨立的模組，任何深度都不能切成另一個模式。
+    assert page.locator("#motion").is_hidden(), "the motion row must stay hidden at complete depth"
 
     # 快速暫存／A/B 比較那一排已經移除，畫面上不該再留下任何殘骸。
     assert page.locator("#quickSlots").count() == 0, "the removed quick-slot bar is still in the page"
@@ -98,7 +97,8 @@ def check_desktop(browser, base_url: str) -> dict[str, object]:
 
     # Coordinated visual presets tune shell/icons separately for each backdrop,
     # while continuing to use the existing per-backdrop memory.
-    page.locator("#motion").select_option("research")
+    page.goto(f"{base_url}/bubble/index.html?mode=research&diag=inspector-ux", wait_until="networkidle")
+    page.wait_for_selector("#panel.inspector[data-control-depth=\"complete\"]")
     page.locator("#inspectorTab-motion").click()
     assert panel.get_attribute("role") == "region"
     assert page.locator(".inspectorTabs").get_attribute("aria-orientation") == "horizontal"
@@ -242,6 +242,65 @@ def check_mobile(browser, base_url: str) -> dict[str, object]:
     return {"noHorizontalOverflow": True, "stickyHeader": True, "touchTabs": True}
 
 
+def check_static(browser, base_url: str) -> dict[str, object]:
+    context = browser.new_context(viewport={"width": 1100, "height": 760}, reduced_motion="reduce")
+    page = context.new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.goto(f"{base_url}/bubble/index.html?mode=static&diag=inspector-ux", wait_until="networkidle", timeout=45_000)
+    page.wait_for_selector('#panel.inspector[data-layout="static"]')
+
+    # 靜態模組是單頁面板：沒有分頁、沒有常用／完整、沒有模式選單。
+    assert page.locator(".inspectorTabs").is_hidden()
+    assert page.locator(".inspectorDepthPicker").is_hidden()
+    assert page.locator("#motion").is_hidden()
+    assert page.locator("#inspectorPage-static").is_visible()
+    sections = page.evaluate(
+        """() => [...document.querySelectorAll('#inspectorPage-static > details > summary h3')]
+             .map(node => node.textContent)"""
+    )
+    assert sections[:7] == ["風格", "造型", "玻璃", "燈光", "地板", "鏡頭", "背景"], sections
+    for key in ("staticShape", "dispersionScale", "edgeDispersion", "studioShadowStrength", "cameraFov"):
+        assert page.locator(f"#{key}").is_visible(), f"{key} is not on the static panel"
+
+    # 主光用方位盤調：往正上方拖是逆光，也就是跟鏡頭方位差 180°。
+    dial = page.locator(".lightDialCanvas")
+    assert dial.is_visible(), "the light dial is missing"
+    dial.scroll_into_view_if_needed()
+    box = dial.bounding_box()
+    page.mouse.click(box["x"] + box["width"] / 2, box["y"] + 20)
+    azimuth = float(page.locator("#lightKeyAzimuth").input_value())
+    camera = float(page.locator("#cameraRotationY").input_value())
+    assert abs(((azimuth - camera) % 360) - 180) < 3, (azimuth, camera)
+
+    # 風格按鈕是絕對的：先套稜鏡再套清透，要回到預設而不是疊在一起。
+    default_edge = page.locator("#edgeDispersion").input_value()
+    page.locator('[data-static-look="prism"]').click()
+    assert page.locator("#edgeDispersion").input_value() != default_edge
+    page.locator('[data-static-look="clear"]').click()
+    assert page.locator("#edgeDispersion").input_value() == default_edge
+
+    # 匯入形狀時才出現檔案按鈕與擠出參數。
+    assert page.locator("#shapeBtn").is_hidden()
+    page.locator("#staticShape").select_option("7")
+    assert page.locator("#shapeBtn").is_visible()
+    page.locator("#staticShape").select_option("0")
+
+    # 參數檔記著別的模式也不能把模組切走。
+    page.locator(".inspectorUtilities > summary").click()
+    page.locator("#presetIO button", has_text="貼上參數").click()
+    page.locator("#presetIO textarea").fill(
+        '{"effect":"prism-drops","values":{"motion":"formation","dispersionScale":1.6}}'
+    )
+    page.locator("#presetIO button", has_text="套用").click()
+    page.wait_for_function("document.querySelector('#dispersionScale').value === '1.6'")
+    assert page.locator("#motion").input_value() == "static", "a preset switched the module"
+    page.locator("#resetBtn").click()
+    assert not errors, f"static inspector page errors: {errors}"
+    context.close()
+    return {"singlePage": True, "modeLocked": True}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:4173")
@@ -251,6 +310,7 @@ def main() -> int:
         results = {
             "desktop": check_desktop(browser, args.base_url),
             "mobile": check_mobile(browser, args.base_url),
+            "static": check_static(browser, args.base_url),
         }
         browser.close()
     print(results)

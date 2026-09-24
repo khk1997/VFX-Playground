@@ -457,7 +457,6 @@ window.__bubbleDiagReport = function () {
         uStudioAmbient: runtime().uniforms.uStudioAmbient.value,
         uStudioCardStrength: runtime().uniforms.uStudioCardStrength.value,
         uStudioShadowStrength: runtime().uniforms.uStudioShadowStrength.value,
-        uStudioRipple: runtime().uniforms.uStudioRipple.value,
         uStudioFlag: runtime().uniforms.uStudioFlag.value,
         uStudioCaustic: runtime().uniforms.uStudioCaustic.value,
         uDispersionScale: runtime().uniforms.uDispersionScale.value,

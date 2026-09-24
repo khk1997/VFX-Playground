@@ -13,7 +13,7 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
 </style>
 <link rel="stylesheet" href="./bubble.css?v=edge-tint-1">
 <link rel="stylesheet" href="../switch2-theme.css?v=panel-scope-1">
-<link rel="stylesheet" href="./inspector.css?v=panel-ux-4">
+<link rel="stylesheet" href="./inspector.css?v=static-look-1">
 <script src="../preview-performance.js?v=preview-dpr-1"></script>
 <script src="../mobile-control-sheet.js?v=mobile-sheet-23"></script>
 <script src="../preset-io.js?v=preset-io-3"></script>
@@ -308,7 +308,6 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
         <div class="row"><label>對比（黑卡）</label><input type="range" id="studioFlag" min="0" max="1" step="0.01" value="0.55"><span class="val" id="studioFlag_v"></span></div>
         <div class="row"><label>影子深度</label><input type="range" id="studioShadowStrength" min="0" max="1" step="0.01" value="0.4"><span class="val" id="studioShadowStrength_v"></span></div>
         <div class="row"><label>地板光斑</label><input type="range" id="studioCaustic" min="0" max="0.6" step="0.005" value="0.09"><span class="val" id="studioCaustic_v"></span></div>
-        <div class="row"><label>地板波紋</label><input type="range" id="studioRipple" min="0" max="0.5" step="0.005" value="0.09"><span class="val" id="studioRipple_v"></span></div>
         <div class="effectSubhead">打光</div>
         <div class="row"><label>主光 水平</label><input type="range" id="lightKeyAzimuth" min="-180" max="180" step="0.5" value="-29.6"><span class="val" id="lightKeyAzimuth_v"></span></div>
         <div class="row"><label>主光 高度</label><input type="range" id="lightKeyElevation" min="-89" max="89" step="0.5" value="31.4"><span class="val" id="lightKeyElevation_v"></span></div>
@@ -333,6 +332,8 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
         <div class="row"><label>阿貝數</label><input type="range" id="dispersionAbbe" min="4" max="70" step="0.5" value="22"><span class="val" id="dispersionAbbe_v"></span></div>
         <div class="row"><label>光譜取樣</label><input type="range" id="spectralSamples" min="1" max="16" step="1" value="12"><span class="val" id="spectralSamples_v"></span></div>
         <div class="row"><label>燈的亮度</label><input type="range" id="studioCardGain" min="1" max="16" step="0.25" value="11"><span class="val" id="studioCardGain_v"></span></div>
+        <div class="row"><label>邊緣彩虹</label><input type="range" id="edgeDispersion" min="0" max="8" step="0.1" value="3"><span class="val" id="edgeDispersion_v"></span></div>
+        <div class="row"><label>燈的衰減</label><input type="range" id="studioCardFalloff" min="0" max="1" step="0.01" value="0.6"><span class="val" id="studioCardFalloff_v"></span></div>
         <div class="row"><label>燈的銳利度</label><input type="range" id="studioCardEdge" min="0.004" max="0.4" step="0.004" value="0.075"><span class="val" id="studioCardEdge_v"></span></div>
         <div class="row"><label>環境亮度</label><input type="range" id="studioAmbient" min="0" max="2" step="0.02" value="0.38"><span class="val" id="studioAmbient_v"></span></div>
       </div>
@@ -560,7 +561,7 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
   </div>
   <div class="hint" data-gate="!capillary !static !typewriter">水滴會依速度與尺寸產生體積守恆形變；接觸時排液壓平、融合收頸，強拉斷時可能形成衛星小滴。<br>拖曳可旋轉視角；滾輪可縮放；上色模式切「自訂漸層」可指定配色。</div>
   <div class="hint" data-gate="capillary">毛細波會直接作用在 SVG／GLB 主體表面，不生成周圍水滴。<br>可搭配同心、定向或螺旋波場，以及 Wave、Noise、Voronoi、Gabor、Gradient、Magic 程序紋理。</div>
-  <div class="hint" data-gate="static">靜態模式可在方體、平面、圓盤、球體、圓柱、圓錐、圓環之間切換，或選「匯入」自行載入 SVG／GLB；材質沿用毛細波的通用玻璃設定，也共用同一組程序波紋（同心、定向或螺旋波場，Wave、Noise、Voronoi、Gabor、Gradient、Magic 程序紋理）直接作用在物體表面。<br>拖曳可旋轉視角；滾輪可縮放。</div>
+  <div class="hint" data-gate="static">彩虹是玻璃把背景分波長折射出來的：邊角越圓、明暗對比越高，色帶越明顯。形狀可選內建幾何體，或選「匯入」載入 SVG／GLB。<br>拖曳可旋轉視角；滾輪可縮放。</div>
   <div class="hint" data-gate="typewriter">打字模式的玻璃主體就是文字本身，不生成周圍水滴。<br>拖曳可旋轉視角；滾輪可縮放。</div>
 </div>
 <button id="exportBtn" type="button" aria-haspopup="dialog" aria-controls="exportDialog" aria-expanded="false">輸出</button>
@@ -663,6 +664,6 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=type-center-1"></script>
+<script type="module" src="./bubble.js?v=static-panel-1"></script>
 </body>
 </html>

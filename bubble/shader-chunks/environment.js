@@ -6,7 +6,7 @@ export const ENVIRONMENT_GLSL = `// ===== 程序化棚景（只有靜態模式�
 // 之後那段註解記錄過的死路。垂直漸層好一點，但它是整張畫面最低頻的訊號，一個
 // 波長差那麼小的角度掃過去，亮度差仍然在捨入誤差等級。
 //
-// 棚景補的就是這件事：地平線、地板、接觸陰影、漣漪與棚燈卡，每一項都在背景上
+// 棚景補的就是這件事：地平線、地板、接觸陰影與棚燈卡，每一項都在背景上
 // 放一段夠陡的梯度。玻璃邊緣把大片立體角壓進幾個像素，梯度在那裡被放大，彩虹
 // 因此自己長在輪廓與摺痕上，不必額外畫上去。
 //
@@ -22,14 +22,21 @@ uniform float uStudioFloorTone;     // 地板相對背景紙的明度（<1 壓�
 uniform float uStudioHorizonSoft;   // 地平線的收斂柔度
 uniform float uStudioShadowStrength;// 接觸陰影最深處
 uniform float uStudioShadowRadius;  // 接觸陰影的半徑
-uniform float uStudioRipple;        // 地板漣漪振幅
-uniform float uStudioRippleScale;   // 漣漪環的密度
 uniform float uStudioCardStrength;  // 棚燈卡亮度
 uniform float uStudioAmbient;       // 柔光罩強度（只作用於折射與反射取樣）
 uniform float uStudioWallLift;      // 牆面的絕對亮度底（深底才看得出差別）
 uniform float uStudioFloorLift;     // 地板的絕對亮度底
 uniform float uStudioCardEdge;      // 棚燈卡邊緣的銳利度：越小邊越硬、色帶越明顯
 uniform float uStudioCardGain;      // 棚燈卡相對背景紙的亮度倍率（可大於 1）
+// 棚燈卡由中心往邊緣的衰減。0 = 整面一樣亮，1 = 邊緣暗到 0。真的柔光箱中間最亮，
+// 平面玻璃正對著它的那一面才會是一道漸層，而不是整片剪成純白。
+uniform float uStudioCardFalloff;
+// 輪廓彩虹：掠射處額外的色散倍率（0 = 只有物理的那一份），乘在 shaders.js 的
+// bandSpread 上。它是「色散強度不按幾何加權」那條規則的刻意例外：物理的那一份
+// 只讓平面物體在圓角上長出幾點色斑，參考影片的 edge dispersion 是沿著整圈輪廓的
+// 一條色帶。權重用視線與法線的夾角，連續、不必另外追蹤；輪廓正上方會被 Fresnel
+// 反射蓋掉，所以色帶自然落在輪廓往內一點。
+uniform float uEdgeDispersion;
 // ===== 燈位 =====
 // 每盞燈用球座標描述：方位角（繞 Y 軸，度）、仰角（度）、角半徑（度）、相對強度。
 // 這些原本是寫死在 studioBackdropSample 裡的五個常數向量 —— 等於整個模組只有一種
@@ -297,6 +304,15 @@ float studioCard(vec3 rd, vec3 dir, float radius, float soft){
   return 1.0 - smoothstep(radius - soft, radius + soft, a);
 }
 
+// 發光的棚燈卡：外框的硬邊照舊（色散靠它），裡面由中心往外衰減。黑旗仍用上面
+// 那支，黑卡本來就是一整片均勻的黑。
+float studioSoftbox(vec3 rd, vec3 dir, float radius, float soft){
+  float a = acos(clamp(dot(rd, dir), -1.0, 1.0));
+  float r = clamp(a / max(radius, 0.001), 0.0, 1.0);
+  float edge = 1.0 - smoothstep(radius - soft, radius + soft, a);
+  return edge * (1.0 - clamp(uStudioCardFalloff, 0.0, 1.0) * r * r);
+}
+
 // soften：這條射線的 footprint 有多寬。0 = 直接看背景的那條（鏡頭射線，
 // 一個像素就是一個方向），大於 0 = 穿過玻璃出去的那些。
 //
@@ -311,30 +327,80 @@ float studioCard(vec3 rd, vec3 dir, float radius, float soft){
 // backgroundSample 與 sampleReflection 的相依決定的。
 float mapScene(vec3 p);
 
-// 地板的遮蔽：從地板點往主光打一條 sphere trace，回傳 1 = 完全沒被擋、0 = 全遮。
+// 玻璃的影子：從地板點往主光打一條 sphere trace，回傳地板要暗掉多少（逐通道，
+// 0 = 沒有影子），caustic 帶回被玻璃聚進影子裡的光。
 //
-// 這是接觸陰影與焦散唯一「知道造型長什麼樣」的來源。原本兩者都是以物體中心為
-// 心的高斯斑，圓環與方體因此投出一模一樣的東西 —— 而影子的形狀是眼睛判斷物體
-// 形狀的主要線索之一。
+// 這是接觸陰影與焦散唯一「知道造型長什麼樣」的來源 —— 影子的形狀是眼睛判斷物體
+// 形狀的主要線索之一。只有鏡頭直接看到的地板會跑這一段（cards 為 0 的那條射線）；
+// 折射與反射的取樣每個波長各要一次，乘上去付不起，而玻璃內部看到的那一小塊地板
+// 本來就讀不出影子的形狀，所以沿用 studioCaustics 與高斯斑的解析近似。
 //
-// 只有鏡頭直接看到的地板會跑這一段（cards 為 0 的那條射線）。折射與反射的取樣
-// 一律走原本的解析近似：那些取樣每個波長各要一次，乘上去就不是這個場景付得起
-// 的成本，而玻璃內部看到的那一小塊地板本來就讀不出影子的形狀。
+// 不透明物體的影子是「光被擋掉」，玻璃的是「光被彎走」：穿過厚處的光大半照樣
+// 落到地板上，只被吸收染上玻璃的顏色；真正暗下來的是輪廓那一圈 —— 光在那裡掠射
+// 進出，偏折最大，被甩到別處去了。所以碰到物體之後不停，繼續穿過去量厚度：厚度
+// 決定吸收與聚焦，薄弦決定暗邊。原本的版本停在碰到的那一刻，投出的是一塊實心的
+// 灰，像一顆塑膠方塊的影子。
 //
-// res = min(k·d/t) 是標準的軟陰影：d/t 是射線離表面的角距，離得越近遮得越多，
-// 半影因此自然隨距離變寬，不必另外做模糊。
-float studioOcclusion(vec3 floorPos, vec3 lightDir){
+// res = min(k·d/t) 是標準的軟陰影：d/t 是射線離表面的角距，半影自然隨距離變寬。
+vec3 studioGlassShadow(vec3 floorPos, vec3 lightDir, out vec3 caustic){
+  caustic = vec3(0.0);
   float res = 1.0;
   float t = 0.05;
+  float tNear = 0.05;
+  bool entered = false;
   for (int i = 0; i < MAX_SHADOW_COMPILE; i++){
     float d = mapScene(floorPos + lightDir * t);
-    res = min(res, 9.0 * d / t);
-    if (d < 0.002 || t > 12.0) break;
+    // k = 5 而不是不透明影子常用的 9：主光是一張四十幾度的大柔光箱，半影本來就寬。
+    float k = 5.0 * d / t;
+    if (k < res){ res = k; tNear = t; }
+    if (d < 0.002){ entered = true; break; }
+    if (t > 12.0) break;
     // 步長上限放寬到 1.2：遠處的地板點要走很長一段才碰得到物體，卡在 0.6 的話
     // 二十步走不完，march 會在半路停住 —— 影子的遠端因此被截成一排鋸齒。
     t += clamp(d, 0.05, 1.2);
   }
-  return clamp(res, 0.0, 1.0);
+  // 沒碰到：只剩半影。擋住那部分燈的是輪廓外緣的薄玻璃，偏折大、幾乎不透光，
+  // 所以照不透明的方式暗；次方讓它往外收得比線性快，洞口（例如圓環中間）才不會
+  // 比玻璃本身還暗。
+  //
+  // 遠處跟影子本體用同一個糊化量（見下面的 blur），輪廓內外才接得起來；不然影子
+  // 本體淡了、外面那一圈半影還是深的，遠端會留一條黑框。
+  float R = max(uBounds.w, 0.001);
+  if (!entered) {
+    float farOut = smoothstep(0.0, 2.5 * R, tNear);
+    return vec3(pow(1.0 - clamp(res, 0.0, 1.0), 1.5) * mix(1.0, 0.45, farOut * 0.7));
+  }
+
+  // 穿過去。物體裡 d 是負的，|d| 仍是到表面距離的下限，照樣能拿來當步長。
+  float tIn = t;
+  t += 0.01;
+  for (int i = 0; i < MAX_SHADOW_COMPILE; i++){
+    float d = mapScene(floorPos + lightDir * t);
+    if (d > 0.0) break;
+    t += max(-d, 0.012);
+  }
+  float thickness = t - tIn;
+
+  float rimLoss = 1.0 - smoothstep(0.0, 0.28 * R, thickness);
+  vec3 absorbCoefficient = -log(clamp(uAbsorbColor, 0.002, 0.999)) / 20.0;
+  vec3 tint = exp(-absorbCoefficient * max(uAbsorb, 0.0) * thickness);
+  vec3 through = tint * clamp(uTransmission, 0.0, 1.0) * 0.92 * (1.0 - rimLoss);
+
+  // 厚處把光往中間收，亮核長在影子裡 —— 「暗斑中間有一塊更亮」正是玻璃與不透明
+  // 物體最好認的差別。彩邊長在暗邊往內那一段：跟玻璃本體的色散同一個理由，
+  // 最掠射的那些光分得最開。
+  float focus = smoothstep(0.35 * R, 1.4 * R, thickness);
+  float fringe = rimLoss * (1.0 - rimLoss) * 4.0;
+  vec3 hue = spectralResponse(clamp(thickness / (0.28 * R), 0.0, 1.0));
+  hue /= max(max(hue.r, max(hue.g, hue.b)), 0.001);
+  caustic = (tint * focus * focus * 1.8
+      + mix(vec3(1.0), hue, clamp(uStudioCausticChroma * 2.0, 0.0, 1.0)) * fringe * 0.45)
+    * uStudioCaustic * uLightKey.w;
+  // 離物體越遠，柔光箱的每一點投出的影子錯開越多，厚薄造成的細節就糊成一片
+  // 平均的淡影。沒有這一段，暗邊在十個物體半徑外仍然銳利，影子看起來像一張剪紙。
+  float blur = smoothstep(0.0, 2.5 * R, tIn);
+  caustic *= 1.0 - 0.7 * blur;
+  return mix(vec3(1.0) - through, vec3(0.45), blur * 0.7);
 }
 
 // 焦散：光穿過玻璃之後被聚到地板上。
@@ -386,7 +452,7 @@ vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards, fl
   if (uStudioBackdrop < 0.5 || uBgMode == 1) return paper;
 
   // 牆面抬底。深底的背景紙幾乎是純黑，而純黑乘上任何東西都還是黑 —— 地板、
-  // 陰影、漣漪全部會一起消失（前一版就是這樣，深底只剩一團黑玻璃）。加一個
+  // 陰影全部會一起消失（前一版就是這樣，深底只剩一團黑玻璃）。加一個
   // 很小的絕對亮度，深底就變成「一張很暗的背景紙」而不是一個沒有光的空洞，
   // 這也是參考影片那支深底片子的實際樣子。淺底那邊 0.06 相對於 0.8 可以忽略。
   float wall = mix(0.35, 1.0, smoothstep(-0.35, 0.85, rd.y));
@@ -403,14 +469,18 @@ vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards, fl
       // 接觸陰影。鏡頭直接看到的地板用真正的遮蔽測試，形狀才跟著造型走；
       // 折射與反射的取樣沿用高斯斑（見 studioOcclusion 的說明）。
       float shadowR = max(uStudioShadowRadius, 0.001);
-      float shadow = exp(-(dist * dist) / (shadowR * shadowR));
+      vec3 shadow = vec3(exp(-(dist * dist) / (shadowR * shadowR)));
+      vec3 caustic;
       if (cards < 0.5) {
         // 隨距離收掉。主光相當側向，純粹的幾何投影會把影子拖得又長又濃，畫面
         // 重心整個被拉走；而影子真正在講的是「物體就在這裡」，那件事只在物體
         // 附近成立。收掉遠端同時也讓 march 走不完的那一段完全看不到。
         float reach = smoothstep(shadowR * 14.0, shadowR * 5.0, dist);
-        shadow = (1.0 - studioOcclusion(origin + rd * tFloor, studioKeyDir()))
+        shadow = studioGlassShadow(origin + rd * tFloor, studioKeyDir(), caustic)
           * reach;
+        caustic *= reach;
+      } else {
+        caustic = studioCaustics(origin + rd * tFloor);
       }
       shadow *= uStudioShadowStrength;
 
@@ -420,18 +490,9 @@ vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards, fl
       vec3 floorCol = col * mix(uStudioFloorTone, 1.0, recede)
         + vec3(uStudioFloorLift * (1.0 - recede * 0.65));
 
-      // 漣漪。改成「細亮環」而不是正負起伏的正弦：pow 把波峰壓成一條窄帶，
-      // 那是一條硬邊，正是色散顯色需要的東西；原本的正弦是平滑起伏，分光之後
-      // 只會變淡。相位一個循環走整數圈，首尾精確接得回去。
-      float phase = TAU * fract(uTime / max(uLoopDuration, 0.001));
-      float wave = sin(dist * uStudioRippleScale - phase);
-      float crest = pow(max(wave, 0.0), mix(7.0, 1.2, clamp(soften * 4.0, 0.0, 1.0)));
-      floorCol += vec3(crest * uStudioRipple * exp(-dist * 0.75));
-      floorCol *= (1.0 - shadow);
-      // 焦散加在陰影之後：玻璃把光聚起來，所以亮核就長在自己的影子裡面 ——
-      // 那個「暗斑中間有一塊更亮」正是玻璃與不透明物體最好認的差別。
-      floorCol += studioCaustics(origin + rd * tFloor)
-        * (1.0 - recede * 0.5);
+      floorCol *= (vec3(1.0) - shadow);
+      // 焦散加在陰影之後：玻璃把光聚起來，所以亮核就長在自己的影子裡面。
+      floorCol += caustic * (1.0 - recede * 0.5);
 
       // 地平線收得比以前緊。它是畫面裡最長的一條邊，玻璃把它折彎、分色之後
       // 就是輪廓上那幾條色帶的主要來源。
@@ -457,10 +518,10 @@ vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards, fl
     // 這根滑桿改的不是亮度而是「色散看不看得見」，推到 0 就只剩一團柔光，
     // 色帶會跟著消失。
     float soft = max(uStudioCardEdge, 0.004) * (1.0 + soften * 10.0);
-    float key  = studioCard(rd, studioKeyDir(), radians(uLightKey.z), soft);
-    float fill = studioCard(rd, studioDir(uLightFill.xy), radians(uLightFill.z),
+    float key  = studioSoftbox(rd, studioKeyDir(), radians(uLightKey.z), soft);
+    float fill = studioSoftbox(rd, studioDir(uLightFill.xy), radians(uLightFill.z),
       soft * 2.2);
-    float rim  = studioCard(rd, studioDir(uLightRim.xy), radians(uLightRim.z), soft);
+    float rim  = studioSoftbox(rd, studioDir(uLightRim.xy), radians(uLightRim.z), soft);
     // 相加而不是往白色 mix，而且刻意讓它超過 1。真正的柔光箱比背景紙亮一個
     // 數量級，被 mix 夾在 1.0 就等於「一張跟白紙一樣亮的燈」—— 那既打不出
     // 高光，也給不出飽和的色帶：色帶的飽和度就是背景那道邊的相對落差，落差
@@ -593,13 +654,25 @@ vec3 staticGlassShade(vec3 p, vec3 N, vec3 rd, vec3 refractedBg,
   ).rgb * uReflect * fresView;
   vec3 lit = transmitted + studioReflection;
   // HDR 輸出開著（後處理鏈在跑）時什麼都不壓：光暈是靠超過 1 的部分觸發的，
-  // 在這裡先壓掉就等於把玻璃上最亮的那幾條交出去 —— 參考影片裡色帶與高光
-  // 是會發光的，那層輝光就是這樣來的。關掉後處理時才需要自己收尾，而且只
-  // 收超過 1 的部分：透射過來的背景紙本來就在範圍內，整體 tone map 會把它
-  // 壓灰，玻璃看起來就比旁邊的紙暗一截。
-  return uHdrOutput > 0.5
-    ? lit
-    : lit / (vec3(1.0) + max(vec3(0.0), lit - vec3(1.0)));
+  // 在這裡先壓掉就等於把玻璃上最亮的那幾條交出去。
+  if (uHdrOutput > 0.5) return lit;
+  // 關掉後處理時自己收高光。棚燈卡是背景紙的好幾倍亮，原本只把「超過 1」的部分
+  // 除回去，1 到 6 全部落在 0.86–1.0 之間，正對著燈的那一面就剪成一整片純白。
+  //
+  // 這裡改成一條有肩部的曲線：膝點以下原樣不動，以上用指數收斂到 1，但尾巴拉得
+  // 夠長，燈卡的衰減在玻璃上才看得出漸層。膝點跟著背景紙走 —— 深底的紙很暗，
+  // 膝點可以壓到 0.6，給高光留很大的空間；淺底的紙本身就接近 1，膝點抬到紙的
+  // 上面，透射過來的背景紙才不會被壓灰、看起來比旁邊的紙暗一截。
+  //
+  // 曲線套在最大通道上、三個通道等比縮放：逐通道各壓一次的話，色帶裡很亮的紅與
+  // 偏暗的藍會被壓向彼此，彩虹直接褪掉一半。
+  float paper = dot(backgroundSample(rd, 0.0).rgb, vec3(0.2126, 0.7152, 0.0722));
+  float knee = clamp(paper + 0.08, 0.5, 0.95);
+  float peak = max(lit.r, max(lit.g, lit.b));
+  if (peak <= knee) return lit;
+  float room = 1.0 - knee;
+  float mapped = knee + room * (1.0 - exp(-(peak - knee) / (room * 4.0)));
+  return lit * (mapped / peak);
 }
 
 #endif // FEATURE_STATIC_GLASS

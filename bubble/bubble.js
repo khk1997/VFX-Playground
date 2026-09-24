@@ -1,6 +1,6 @@
 'use strict';
 import * as THREE from 'three';
-import { buildInspector } from './inspector.js?v=panel-ux-4';
+import { buildInspector } from './inspector.js?v=static-look-2';
 import { createAdaptiveQuality, QUALITY_TIER_NAMES } from './adaptive-quality.js?v=2';
 import { createGpuProfiler } from './gpu-profiler.js?v=1';
 let inspector = null;
@@ -340,7 +340,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=structured-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=static-look-1';
 import { createPostChain } from './post.js?v=post-mask-3';
 
 const {
@@ -2301,7 +2301,7 @@ function initGL() {
     // 模式的 shader 會讀它們，其餘模式連編都沒編，所以一律送值是安全的。
     //
     // 讀 P 的那幾根有面板滑桿；其餘留字面值。分界不是「調不調得動」，是「調了
-    // 有沒有人看得出差別」—— 地板高度、地平線柔度、陰影半徑、漣漪密度調出來
+    // 有沒有人看得出差別」—— 地板高度、地平線柔度、陰影半徑調出來
     // 都是同一個棚景的細微變體，而 edgePathBoost 與 staticGlassMix 是研究用的
     // 旋鈕（後者是「退回舊外殼」的 A/B 開關，不是給使用者的選項）。
     uStudioBackdrop: { value: 1 },
@@ -2310,13 +2310,13 @@ function initGL() {
     uStudioHorizonSoft: { value: 0.035 },
     uStudioShadowStrength: { value: P.studioShadowStrength },
     uStudioShadowRadius: { value: 0.55 },
-    uStudioRipple: { value: P.studioRipple },
-    uStudioRippleScale: { value: 11.0 },
     uStudioCardStrength: { value: P.studioCardStrength },
     uStudioAmbient: { value: P.studioAmbient },
     uStudioWallLift: { value: 0.13 },
     uStudioFloorLift: { value: 0.11 },
     uStudioCardEdge: { value: P.studioCardEdge },
+    uStudioCardFalloff: { value: P.studioCardFalloff },
+    uEdgeDispersion: { value: P.edgeDispersion },
     uStudioCardGain: { value: P.studioCardGain },
     // 燈位。打包成 vec4 是因為它們永遠成組使用（方位/仰角/角半徑/強度），
     // 拆成 16 個純量 uniform 只是讓 shader 多 12 個名字而已。
@@ -3610,6 +3610,7 @@ if (!PREVIEW) {
       ...DEFAULTS, ...MOTION_TEXT_DEFAULTS, ...SELECT_DEFAULTS, ...TOGGLE_DEFAULTS, ...COLOR_DEFAULTS,
     },
     modeDefault: key => motionDefaultSlots[key]?.[memorySlot(key)],
+    launchMotion: LAUNCH_MOTION,
   });
   inspector.setQualityStatus(adaptiveQuality.snapshot());
 }
@@ -3667,8 +3668,18 @@ if (!PREVIEW && window.PresetIO) {
       // 不參與另一底色的鏡射。
       mirrorBackdropMemory();
       updateUIState();
+      enforceLaunchMotion();
     },
   });
+  // 模組是由網址決定的：自動保存的快照或手動匯入的檔案記著別的模式時，仍然拉回
+  // 這個模組。走跟切換模式同一條路，這個模式自己記憶的那一格才會回來；而且仍在
+  // 開機遮罩撤掉之前，畫面不會先跳一次。
+  function enforceLaunchMotion() {
+    if (!LAUNCH_MOTION || P.motion === LAUNCH_MOTION) return;
+    const motionSelect = document.getElementById('motion');
+    motionSelect.value = LAUNCH_MOTION;
+    motionSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  }
   // 自動保存的快照是使用者資料，可能來自任何一個舊版本，也可能已經壞掉。它要是
   // 丟出例外，這支 module script 就會就地中止 —— 底下的收尾（尤其是移除
   // data-bubble-boot 這道遮罩）永遠跑不到，面板就此卡在開機狀態，使用者連把壞
@@ -3681,14 +3692,7 @@ if (!PREVIEW && window.PresetIO) {
   } catch (error) {
     console.error('[bubble] 自動保存的參數組合還原失敗，改用預設值開機', error);
   }
-  // 自動保存的快照可能記著另一個模式，但使用者是點了指定模式的連結進來的，
-  // 網址優先。這裡走跟面板切換完全同一條路（面板有監聽器，PresetIO 也只在
-  // 非預覽時才初始化），而且仍在開機遮罩撤掉之前，所以畫面不會先跳一次。
-  if (LAUNCH_MOTION && P.motion !== LAUNCH_MOTION) {
-    const motionSelect = document.getElementById('motion');
-    motionSelect.value = LAUNCH_MOTION;
-    motionSelect.dispatchEvent(new Event('change', { bubbles: true }));
-  }
+  enforceLaunchMotion();
 }
 
 document.body.dataset.reducedMotion = reducedMotionPaused ? 'paused' : 'allowed';

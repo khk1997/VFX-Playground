@@ -114,7 +114,7 @@ export const MOTIONS = {
         gate: 'staticShapeBox',
       },
       {
-        key: 'boxCornerRadius', label: '圓角', min: 0, max: 0.4, step: 0.005, value: 0.12,
+        key: 'boxCornerRadius', label: '圓角', min: 0, max: 0.4, step: 0.005, value: 0.2,
         gate: 'staticShapeBox',
       },
       {

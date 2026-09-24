@@ -4,6 +4,32 @@ import { INSTALLING_VISUAL_PRESETS, installingVisualPresetValues } from './visua
 
 const PAGES = [['shape', '造型'], ['motion', '動態'], ['look', '外觀'], ['scene', '場景']];
 
+// 靜態模組的風格。套用時這裡列的每一根都會寫一次（沒給值的回到預設）。
+const STATIC_LOOK_KEYS = [
+  'dispersionScale', 'edgeDispersion', 'dispersionAbbe', 'ior', 'roughness',
+  'absorb', 'absorbColor', 'internalBounce', 'studioFlag', 'studioCardStrength',
+];
+const STATIC_LOOKS = [
+  { id: 'clear', label: '清透', swatch: 'linear-gradient(90deg, #e9f1fb, #c9d9ec)', values: {} },
+  {
+    id: 'prism', label: '稜鏡',
+    swatch: 'linear-gradient(90deg, #ff5a5a, #ffd24a, #5ce07a, #4ab4ff, #a46bff)',
+    values: { dispersionScale: 2.2, edgeDispersion: 5, dispersionAbbe: 12, ior: 1.5, studioFlag: 0.85 },
+  },
+  {
+    id: 'frost', label: '霧面', swatch: 'linear-gradient(90deg, #d7dde4, #aeb6c0)',
+    values: { roughness: 0.32, dispersionScale: 0.6, edgeDispersion: 1.5 },
+  },
+  {
+    id: 'tint', label: '有色', swatch: 'linear-gradient(90deg, #7fb6ff, #2f6fd8)',
+    values: { absorbColor: '#3f86e0', absorb: 4.5 },
+  },
+  {
+    id: 'crystal', label: '水晶', swatch: 'linear-gradient(90deg, #ffffff, #b9e2ff, #ffffff)',
+    values: { ior: 1.62, internalBounce: 0.9, dispersionScale: 1.4, edgeDispersion: 4, studioCardStrength: 0.7 },
+  },
+];
+
 const $ = id => document.getElementById(id);
 const rowOf = id => $(id)?.closest('.row');
 function element(tag, className, text) {
@@ -67,7 +93,7 @@ function segmented(labels, onSelect, name) {
 }
 
 // Move the original controls, preserving IDs, handlers, gates and preset state.
-export function buildInspector({ defaults, modeDefault = () => undefined }) {
+export function buildInspector({ defaults, modeDefault = () => undefined, launchMotion = null }) {
   const panel = $('panel');
   panel.classList.add('inspector');
   const DEPTH_KEY = 'vfx:bubble:control-depth';
@@ -94,12 +120,11 @@ export function buildInspector({ defaults, modeDefault = () => undefined }) {
   panel.prepend(header);
   header.append(identity, context);
   context.append(rowOf('motion'), rowOf('backdrop'));
-  rowOf('motion').querySelector('label').textContent = '動態模式';
-  // 動態模式收進「完整」深度。首頁的每張卡片就是一個模式（見 effect-registry），
-  // 從那裡進來的人要看的就是那一個，頭上不需要一個會把頁面變成另一個效果的下拉。
-  // 要互相比較時切到完整就有，而且深度選擇是記住的，所以只要切一次。
-  // 這一列在頭部，不會被下面那個 .row 分類迴圈掃到，得自己標。
-  rowOf('motion').classList.add('inspectorExpert');
+  // 每個模式是首頁上一個獨立的模組，進來之後不能切成另一個。選單留在 DOM 裡只是
+  // 給參數檔與模式記憶讀寫用，任何深度都不顯示。
+  const motionRow = rowOf('motion');
+  motionRow.hidden = true;
+  motionRow.style.display = 'none';
   rowOf('backdrop').querySelector('label').textContent = '預覽底色';
 
   let controlDepth = 'concise';
@@ -331,7 +356,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined }) {
     // 主光的方位與高度：換一種打光是這個材質最大的表情變化，兩根就夠。
     // 其餘十六根燈位參數留在完整模式。
     'lightKeyAzimuth', 'lightKeyElevation',
-    'studioShadowStrength', 'studioCaustic', 'studioRipple',
+    'studioShadowStrength', 'studioCaustic',
     // 幾何造型的選擇器與它的尺寸。這幾根本來歸在完整模式，等於把這個模組最
     // 主要的操作藏在第二層 —— 常用模式下的「造型」分頁整頁是空的。
     // 全部由 staticShape* 閘門控制，只有靜態模式看得到，不影響其餘模式。
@@ -658,17 +683,156 @@ export function buildInspector({ defaults, modeDefault = () => undefined }) {
     }
     // 最後才跑：閘門、深度與上面那些 hidden 都定案之後，空區塊才數得準。
     pruneEmptySections();
+    staticDial?.draw();
   }
-  let initialPage = 'look';
-  try {
-    const saved = localStorage.getItem(PAGE_KEY);
-    if (saved && panes[saved]) initialPage = saved;
-  } catch (_) {}
+  let staticDial = null;
   built = true;
-  setControlDepth(controlDepth, false);
-  selectPage(initialPage);
+  if (launchMotion === 'static') {
+    buildStaticLayout();
+    // 單頁面板沒有「常用／完整」之分；不寫回 localStorage，其餘模式的深度照舊。
+    setControlDepth('complete', false);
+  } else {
+    let initialPage = 'look';
+    try {
+      const saved = localStorage.getItem(PAGE_KEY);
+      if (saved && panes[saved]) initialPage = saved;
+    } catch (_) {}
+    setControlDepth(controlDepth, false);
+    selectPage(initialPage);
+  }
   refresh();
   return { refresh, setQualityStatus };
+
+  // 靜態模組的面板：一頁、由上而下照「東西 → 材質 → 光 → 地板 → 鏡頭 → 背景」排，
+  // 只放看得到效果的參數。其餘控制項留在隱藏的分頁裡，參數檔與重設照常讀寫它們。
+  function buildStaticLayout() {
+    panel.dataset.layout = 'static';
+    tabs.hidden = true;
+    depthHeading.hidden = true;
+    depthPicker.group.hidden = true;
+    depthHelp.hidden = true;
+    for (const pane of Object.values(panes)) pane.hidden = true;
+
+    const page = element('section', 'inspectorPage');
+    page.id = 'inspectorPage-static';
+    header.after(page);
+    const relabel = (key, text) => {
+      const label = rowOf(key)?.querySelector('label');
+      if (label) label.textContent = text;
+    };
+    const group = (text, entries, open = true) => {
+      const block = section(text, null, open);
+      for (const [key, label] of entries) {
+        const row = rowOf(key);
+        if (!row) continue;
+        if (label) relabel(key, label);
+        block.append(row);
+      }
+      page.append(block);
+      return block;
+    };
+
+    // 風格：一鍵換一組玻璃外觀。每一組都是絕對的 —— 沒列到的參數回到這個模式／
+    // 底色的預設，所以連按兩個風格不會疊在一起。
+    const looks = section('風格', null, true);
+    const lookButtons = element('div', 'inspectorStylePresetButtons');
+    const lookStatus = element('output', 'inspectorStatus');
+    lookStatus.setAttribute('aria-live', 'polite');
+    for (const look of STATIC_LOOKS) {
+      const lookButton = button(look.label, () => {
+        for (const key of STATIC_LOOK_KEYS) writeControl(key, look.values[key] ?? colorDefault(key));
+        lookStatus.textContent = `已套用「${look.label}」，下面的參數仍可繼續調整。`;
+        refresh();
+      });
+      lookButton.classList.add('inspectorStylePreset');
+      lookButton.dataset.staticLook = look.id;
+      lookButton.style.setProperty('--preset-swatch', look.swatch);
+      lookButtons.append(lookButton);
+    }
+    looks.append(lookButtons, lookStatus);
+    page.append(looks);
+
+    const shapeBlock = group('造型', [
+      ['staticShape', '形狀'],
+      ['boxSize', '大小'], ['boxCornerRadius', '圓角'],
+      ['primitiveSize', '大小'], ['primitiveHeight', '高度'], ['primitiveTubeRatio', '管徑'],
+    ]);
+    // 匯入的 SVG／GLB 借用形狀匯聚那組控制；原本的外層閘門（shape）搬出來後就不在了，
+    // 所以自己包一層 staticShapeImport。
+    const importBlock = element('div');
+    importBlock.dataset.gate = 'staticShapeImport';
+    for (const [key, label] of [
+      ['shapeSource', '檔案類型'], ['shapeQuality', '模型品質'], ['shapeBtn', null],
+      ['shapeAScale', '大小'], ['shapeDepth', '厚度'], ['shapeEdgeBevel', '圓角'],
+    ]) {
+      const row = rowOf(key);
+      if (!row) continue;
+      if (label) relabel(key, label);
+      importBlock.append(row);
+    }
+    shapeBlock.append(importBlock);
+
+    group('玻璃', [
+      ['dispersionScale', '彩虹強度'],
+      ['edgeDispersion', '邊緣彩虹'],
+      ['ior', '折射率'],
+      ['absorbColor', '玻璃顏色'],
+      ['absorb', '顏色濃度'],
+      ['roughness', '霧面'],
+      ['reflect', '反射'],
+    ]);
+    const lightBlock = group('燈光', [
+      ['studioCardStrength', '燈光強度'],
+      ['studioFlag', '明暗對比'],
+    ]);
+    staticDial = buildLightDial();
+    lightBlock.querySelector(':scope > summary').after(staticDial.root);
+    group('地板', [
+      ['studioShadowStrength', '影子深度'],
+      ['studioCaustic', '透光光斑'],
+    ]);
+    const cameraBlock = group('鏡頭', [
+      ['cameraFov', '視角'],
+      ['cameraDistance', '距離'],
+      ['cameraRotationY', '水平角度'],
+      ['cameraRotationX', '垂直角度'],
+    ]);
+    cameraBlock.append(element('p', 'inspectorNote', '也可以直接在畫面上拖曳旋轉、滾輪縮放。'));
+    group('背景', [
+      ['bgColor', '背景顏色'],
+      ['lightBgGradientTop', '上方顏色'],
+      ['lightBgGradientBottom', '下方顏色'],
+    ]);
+
+    const advanced = group('進階', [
+      ['lightKeyAzimuth', '主光 方向'], ['lightKeyElevation', '主光 高度'],
+      ['lightKeySize', '主光 大小'], ['lightKeyPower', '主光 強度'],
+      ['lightFillAzimuth', '補光 方向'], ['lightFillElevation', '補光 高度'],
+      ['lightFillSize', '補光 大小'], ['lightFillPower', '補光 強度'],
+      ['lightRimAzimuth', '邊光 方向'], ['lightRimElevation', '邊光 高度'],
+      ['lightRimSize', '邊光 大小'], ['lightRimPower', '邊光 強度'],
+      ['flagAAzimuth', '黑卡A 方向'], ['flagAElevation', '黑卡A 高度'], ['flagASize', '黑卡A 大小'],
+      ['flagBAzimuth', '黑卡B 方向'], ['flagBElevation', '黑卡B 高度'], ['flagBSize', '黑卡B 大小'],
+      ['dispersionAbbe', '阿貝數'], ['internalBounce', '內部反射'],
+      ['transmission', '透射率'], ['fresnel', '邊緣光'],
+      ['studioCardGain', '燈的亮度'], ['studioCardFalloff', '燈的衰減'], ['studioCardEdge', '燈的銳利度'], ['studioAmbient', '環境亮度'],
+      ['spectralSamples', '光譜取樣'], ['antialiasLevel', '抗鋸齒'],
+    ], false);
+    advanced.append($('bloomGroup'));
+
+    // 存檔、提示與整個模組的重設。
+    $('resetBtn').textContent = '全部重設';
+    // 存檔按鈕直接放在這一層，不要再包一層要另外展開的「儲存與載入」。
+    share.before($('presetIO'));
+    share.hidden = true;
+    page.append(utilities);
+
+    for (const node of page.querySelectorAll('details')) {
+      const top = node.parentElement === page;
+      node.classList.toggle('inspectorSection', top);
+      node.classList.toggle('inspectorSubsection', !top);
+    }
+  }
 }
 
 function buildPalette(prefix, applyValues) {
@@ -775,6 +939,94 @@ function buildPalette(prefix, applyValues) {
     position.setAttribute('aria-label', `${name}色標 ${selected + 1} 位置百分比`);
   }
   return { root, refresh };
+}
+
+// 主光的方位盤：從正上方俯瞰，鏡頭固定在下方，所以光點往上拖是逆光、往下是順光，
+// 跟畫面上看到的方向一致（鏡頭轉了，盤面跟著轉）。半徑是高度：中心是正上方，
+// 外圈是地平線。寫回的仍是那兩根滑桿，參數檔與重設不必知道這個盤的存在。
+function buildLightDial() {
+  const SIZE = 132;
+  const root = element('div', 'lightDial');
+  const canvas = element('canvas', 'lightDialCanvas');
+  canvas.tabIndex = 0;
+  canvas.setAttribute('role', 'slider');
+  canvas.setAttribute('aria-label', '主光方向與高度');
+  const info = element('div', 'lightDialInfo');
+  const readout = element('strong', 'lightDialReadout');
+  info.append(
+    readout,
+    element('p', 'inspectorNote', '拖曳光點改變主光方向；越靠近中心，光越從正上方打下來。方向鍵也可以微調。'),
+  );
+  root.append(canvas, info);
+  const wrap = deg => ((((deg + 180) % 360) + 360) % 360) - 180;
+  const read = () => ({
+    az: Number($('lightKeyAzimuth').value),
+    el: Number($('lightKeyElevation').value),
+    cam: Number($('cameraRotationY').value),
+  });
+  const snap = value => Math.round(value * 2) / 2;
+  function setFromPointer(event) {
+    const box = canvas.getBoundingClientRect();
+    const dx = event.clientX - box.left - box.width / 2;
+    const dy = event.clientY - box.top - box.height / 2;
+    const r = Math.min(1, Math.hypot(dx, dy) / (box.width / 2 - 10));
+    const angle = Math.atan2(dx, dy) * 180 / Math.PI;
+    writeControl('lightKeyAzimuth', snap(wrap(angle + read().cam)));
+    writeControl('lightKeyElevation', snap(Math.max(0, Math.min(89, 90 * (1 - r)))));
+  }
+  canvas.addEventListener('pointerdown', event => {
+    if (event.button !== 0) return;
+    setFromPointer(event);
+    try { canvas.setPointerCapture(event.pointerId); } catch (_) {}
+  });
+  canvas.addEventListener('pointermove', event => {
+    if (canvas.hasPointerCapture(event.pointerId)) setFromPointer(event);
+  });
+  canvas.addEventListener('keydown', event => {
+    const { az, el } = read();
+    const step = event.shiftKey ? 15 : 5;
+    if (event.key === 'ArrowLeft') writeControl('lightKeyAzimuth', wrap(az - step));
+    else if (event.key === 'ArrowRight') writeControl('lightKeyAzimuth', wrap(az + step));
+    else if (event.key === 'ArrowUp') writeControl('lightKeyElevation', Math.min(89, el + step));
+    else if (event.key === 'ArrowDown') writeControl('lightKeyElevation', Math.max(-89, el - step));
+    else return;
+    event.preventDefault();
+  });
+  function draw() {
+    const dpr = window.devicePixelRatio || 1;
+    if (canvas.width !== SIZE * dpr) { canvas.width = SIZE * dpr; canvas.height = SIZE * dpr; }
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, SIZE, SIZE);
+    const c = SIZE / 2, R = c - 10;
+    const circle = (x, y, radius) => { ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); };
+    circle(c, c, R + 6); ctx.fillStyle = '#141416'; ctx.fill();
+    ctx.lineWidth = 1;
+    for (const ring of [0, 30, 60]) {
+      circle(c, c, R * (1 - ring / 90));
+      ctx.strokeStyle = ring === 0 ? '#ffffff2e' : '#ffffff14';
+      ctx.stroke();
+    }
+    // 鏡頭在盤面下方。
+    ctx.beginPath();
+    ctx.moveTo(c, SIZE - 12); ctx.lineTo(c - 6, SIZE - 2); ctx.lineTo(c + 6, SIZE - 2); ctx.closePath();
+    ctx.fillStyle = '#8e8e93'; ctx.fill();
+    circle(c, c, 6); ctx.fillStyle = '#ffffff3a'; ctx.fill();
+    const { az, el, cam } = read();
+    const a = (az - cam) * Math.PI / 180;
+    const r = Math.max(0, Math.min(1, 1 - el / 90));
+    const x = c + R * r * Math.sin(a), y = c + R * r * Math.cos(a);
+    ctx.beginPath(); ctx.moveTo(c, c); ctx.lineTo(x, y);
+    ctx.strokeStyle = '#ffd98a80'; ctx.stroke();
+    ctx.save();
+    ctx.shadowColor = '#ffd98a'; ctx.shadowBlur = 12;
+    circle(x, y, 7); ctx.fillStyle = '#ffe3a3'; ctx.fill();
+    ctx.restore();
+    const text = `方向 ${Math.round(az)}° · 高度 ${Math.round(el)}°`;
+    readout.textContent = text;
+    canvas.setAttribute('aria-valuetext', text);
+  }
+  return { root, draw };
 }
 
 function installNumberEditing(panel) {

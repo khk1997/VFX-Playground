@@ -837,7 +837,7 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
         //
         // 常數 24 是把 scale 換算成 Cauchy 曲線倍率的比例：阿貝數 22 算出來藍端的
         // Δn 只有 0.018，scale 1.0 要對應到「看得出來但仍像玻璃」，就落在這個量級。
-        float bandSpread = uDispersionScale * 24.0;
+        float bandSpread = uDispersionScale * 24.0 * (1.0 + max(uEdgeDispersion, 0.0) * pow(1.0 - clamp(dot(N, -rd), 0.0, 1.0), 2.0));  // 見 uEdgeDispersion
         if (bandSpread > 0.0001 && uSpectralSamples > 1) {
           refractedBg = spectralRefraction(
             rd, N, exitNormal, exitPoint, exitDir,
