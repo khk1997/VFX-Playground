@@ -62,12 +62,64 @@ function settingsCenter(value) {
   return Math.max(-0.5, Math.min(0.5, value));
 }
 
-async function renderExportFrame(settings, time, target) {
-  applyExportCamera(time, settings.renderWidth, settings.renderHeight, settings.fov, settings.scale, settings);
+function renderExportPixels(settings, target) {
   renderComposite(target, settings.renderWidth / Math.max(1, settings.width));
   const pixels = new Uint8Array(settings.renderWidth * settings.renderHeight * 4);
   getRenderer().readRenderTargetPixels(target, 0, 0, settings.renderWidth, settings.renderHeight, pixels);
   getRenderer().setRenderTarget(null);
+  return pixels;
+}
+
+// 靜態玻璃的去背：同一幀在全黑、全白兩張背景紙上各算一次，由兩者的差解出
+// alpha 與顏色（difference matting）。
+//
+// 單張去背（shader 裡 uTransparentBackground 那條）對靜態玻璃是錯的：它假設
+// 「畫面 = 自身 + 正後方的背景 × 透過率」，但玻璃透過來的是折射、分光之後的
+// 背景。那份差距被除以很小的 alpha（平面玻璃只有一成左右）之後大半超出 0–1
+// 被截掉 —— 輸出的 PNG 幾乎沒有色散，淺底更整顆變白（背景紙的漸層沒關，玻璃
+// 裡看到的還是灰紙）；地板影子則因為屬於背景，alpha 直接是 0 而整個消失。
+//
+// 兩張背景紙的差正是「背景透過來多少」，不管它是從正後方還是被折過來的：
+//   黑底 = F·a            白底 = F·a + (1 − a)
+// 所以 1 − (白 − 黑) 就是覆蓋率。燈卡、反射、色散是玻璃自己的光，兩張都有、
+// 相減就留在顏色裡；地板影子是把紙壓暗，自然解成半透明的黑。疊回黑底或白底
+// 時與直接算繪一致。
+//
+// 單一 alpha 表示不了有色的透過率，所以 a 取透過率的亮度，顏色取「讓黑底與白底
+// 兩邊誤差平均」的那個值。直接在 8 位元的輸出值上解，而不是線性空間：PNG 的
+// 使用者（瀏覽器、設計軟體）就是在這個空間裡做 over 合成的。
+function matteExportPixels(black, white) {
+  const out = new Uint8Array(black.length);
+  for (let i = 0; i < black.length; i += 4) {
+    const tr = Math.min(Math.max((white[i] - black[i]) / 255, 0), 1);
+    const tg = Math.min(Math.max((white[i + 1] - black[i + 1]) / 255, 0), 1);
+    const tb = Math.min(Math.max((white[i + 2] - black[i + 2]) / 255, 0), 1);
+    const alpha = 1 - (0.2126 * tr + 0.7152 * tg + 0.0722 * tb);
+    if (alpha < 0.5 / 255) continue;   // 全透明：留 0,0,0,0
+    const leak = 1 - alpha;
+    for (let c = 0; c < 3; c++) {
+      const b = black[i + c] / 255;
+      const w = white[i + c] / 255;
+      out[i + c] = Math.round(Math.min(Math.max((b + w - leak) / (2 * alpha), 0), 1) * 255);
+    }
+    out[i + 3] = Math.round(alpha * 255);
+  }
+  return out;
+}
+
+async function renderExportFrame(settings, time, target) {
+  applyExportCamera(time, settings.renderWidth, settings.renderHeight, settings.fov, settings.scale, settings);
+  let pixels;
+  if (settings.staticMatte) {
+    const paper = getUniforms().uBgColor.value;
+    paper.setRGB(0, 0, 0, THREE.LinearSRGBColorSpace);
+    const black = renderExportPixels(settings, target);
+    paper.setRGB(1, 1, 1, THREE.LinearSRGBColorSpace);
+    const white = renderExportPixels(settings, target);
+    pixels = matteExportPixels(black, white);
+  } else {
+    pixels = renderExportPixels(settings, target);
+  }
   return pixelsToPng(pixels, settings.renderWidth, settings.renderHeight, settings.width, settings.height);
 }
 
@@ -112,6 +164,11 @@ async function runExport(settings) {
     transparent: getUniforms().uTransparentBackground.value,
     membraneOverWhite: getUniforms().uMembraneOverWhite.value,
     bgColor: getUniforms().uBgColor.value.clone(),
+    lightGradient: getUniforms().uLightBgGradientEnabled.value,
+    wallLift: getUniforms().uStudioWallLift.value,
+    floorLift: getUniforms().uStudioFloorLift.value,
+    floorTone: getUniforms().uStudioFloorTone.value,
+    shadowStrength: getUniforms().uStudioShadowStrength.value,
   };
   const target = new THREE.WebGLRenderTarget(renderWidth, renderHeight, {
     format: THREE.RGBAFormat,
@@ -127,16 +184,30 @@ async function runExport(settings) {
   //（uMembraneOverWhite 分支），背景照樣透得過來。通用玻璃維持原本的「黑場 +
   // 反預乘」，它的顏色本來就不依附背景。
   const membraneOverWhite = transparentExport && P.materialStyle === 'membrane';
-  getUniforms().uTransparentBackground.value = transparentExport ? 1 : 0;
+  // 靜態玻璃改走雙背景去背（見 matteExportPixels）。兩張都照一般的不透明輸出
+  // 來算，後處理與 HDR 的行為就跟畫面上一模一樣；背景紙要是一張均勻的紙，
+  // 牆面與地板的抬底、地板的壓暗、淺底的漸層都拿掉 —— 不然它們兩張都有，
+  // 會被當成玻璃自己的東西，成品上浮出一整片灰色的地板。
+  const staticMatte = transparentExport && !membraneOverWhite && P.motion === 'static';
+  getUniforms().uTransparentBackground.value = transparentExport && !staticMatte ? 1 : 0;
   getUniforms().uMembraneOverWhite.value = membraneOverWhite ? 1 : 0;
   getUniforms().uBgMode.value = settings.background === 'scene' ? SELECTS.bgMode.map[P.bgMode] : 0;
   if (transparentExport && !membraneOverWhite) getUniforms().uBgColor.value.setHex(0x000000, THREE.LinearSRGBColorSpace);
+  if (staticMatte) {
+    getUniforms().uLightBgGradientEnabled.value = 0;
+    getUniforms().uStudioWallLift.value = 0;
+    getUniforms().uStudioFloorLift.value = 0;
+    getUniforms().uStudioFloorTone.value = 1;
+    // 不留影子：地板在兩張背景紙上就都是一張乾淨的紙，解出來整片透明。
+    if (settings.shadow === false) getUniforms().uStudioShadowStrength.value = 0;
+  }
+  const frameSettings = { ...settings, width, height, renderWidth, renderHeight, staticMatte };
 
   try {
     resetPreviousDropT();
     if (settings.type === 'still') {
       exportEvent('prism-export-progress', { progress: 0.15, message: '正在渲染 PNG…' });
-      const png = await renderExportFrame({ ...settings, width, height, renderWidth, renderHeight }, saved.time, target);
+      const png = await renderExportFrame(frameSettings, saved.time, target);
       if (job.cancelled) throw new DOMException('輸出已取消', 'AbortError');
       downloadBlob(png, `prism-drops_${width}x${height}.png`);
     } else {
@@ -148,7 +219,7 @@ async function runExport(settings) {
         // remains one complete loop, while a custom value controls the output
         // playback length as advertised by the export UI.
         const time = index / frames * settings.duration;
-        const png = await renderExportFrame({ ...settings, width, height, renderWidth, renderHeight }, time, target);
+        const png = await renderExportFrame(frameSettings, time, target);
         entries.push({
           name: `prism-drops_${String(index + 1).padStart(digits, '0')}.png`,
           bytes: new Uint8Array(await png.arrayBuffer()),
@@ -181,6 +252,11 @@ async function runExport(settings) {
     getUniforms().uTransparentBackground.value = saved.transparent;
     getUniforms().uMembraneOverWhite.value = saved.membraneOverWhite;
     getUniforms().uBgColor.value.copy(saved.bgColor);
+    getUniforms().uLightBgGradientEnabled.value = saved.lightGradient;
+    getUniforms().uStudioWallLift.value = saved.wallLift;
+    getUniforms().uStudioFloorLift.value = saved.floorLift;
+    getUniforms().uStudioFloorTone.value = saved.floorTone;
+    getUniforms().uStudioShadowStrength.value = saved.shadowStrength;
     resetPreviousDropT();
     setSimTime(saved.time);
     exportJob = null;

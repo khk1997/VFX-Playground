@@ -588,6 +588,9 @@
     font-variant-numeric: tabular-nums;
   }
   .exportHelp { margin: 9px 0 0; color: #6f747d; font-size: 10px; line-height: 1.5; }
+  .exportCheckLabel { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: #c4c8cf; font-size: 11px; cursor: pointer; }
+  .exportCheckLabel[hidden] { display: none; }
+  .exportCheckLabel input { width: 14px; height: 14px; margin: 0; accent-color: #7c6cff; }
   .exportQualityLock {
     display: flex;
     align-items: center;

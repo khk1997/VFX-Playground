@@ -376,9 +376,20 @@ vec3 studioGlassShadow(vec3 floorPos, vec3 lightDir, out vec3 caustic){
     // （Inigo Quilez 的 improved soft shadow）；只看取樣點的話，擦邊而過的射線
     // 量到的 res 偏大，輪廓外的半影到不了 0，跟輪廓內那一側接不起來，影子邊上
     // 就留一道硬線。
+    //
+    // 這一招只對精確的距離場成立：它假設相鄰兩步的距離球真的是「到表面的
+    // 歐氏距離」。匯入的造型（形狀場）不是 —— SVG 的距離只在 xy 平面精確，擠出的
+    // 厚度與圓角是用 max／smin 跟 z 合起來的，角落附近的距離跟真值差很多。拿它去
+    // 交距離球，估出來的最近點每一步跳一次，地板上就是一圈一圈沿著輪廓外推的
+    // 階梯（問號的影子就是這樣）。所以形狀場退回只看取樣點；它的輪廓邊本來就被
+    // 貼圖的三次濾波抹軟了，那道硬線在它身上看不出來。
+#ifdef FEATURE_SHAPE_FIELD
+    res = min(res, k * d / t);
+#else
     float y = d * d / (2.0 * prevD);
     float closest = sqrt(max(d * d - y * y, 0.0));
     res = min(res, k * closest / max(t - y, 0.001));
+#endif
     prevD = d;
     if (d < 0.002){ entered = true; break; }
     if (t > 12.0) break;

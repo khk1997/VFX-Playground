@@ -11,7 +11,7 @@ html.preview-mode #homeBtn,html.preview-mode #toggleBtn,html.preview-mode #expor
    inspector or WebGL snapshot from appearing during initialization. */
 body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!important;opacity:0!important}
 </style>
-<link rel="stylesheet" href="./bubble.css?v=edge-tint-1">
+<link rel="stylesheet" href="./bubble.css?v=export-shadow-1">
 <link rel="stylesheet" href="../switch2-theme.css?v=panel-scope-1">
 <link rel="stylesheet" href="./inspector.css?v=static-look-1">
 <script src="../preview-performance.js?v=preview-dpr-1"></script>
@@ -618,6 +618,10 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
             <option value="color">純色背景</option>
           </select>
         </label>
+        <label class="exportCheckLabel" id="exportShadowField" hidden>
+          <input type="checkbox" id="exportShadow" checked>
+          <span>保留地板影子</span>
+        </label>
         <p class="exportHelp">透明模式仍保留 HDRI 對水滴的反射與折射。液態薄膜的膜身顏色來自白底透射，因此它的透明輸出是對白底反乘出來的：疊回白色版面與畫面完全一致，疊在其他顏色上背景仍會透出來，但水滴自身的顏色維持白底時的樣子。</p>
       </section>
 
@@ -655,7 +659,7 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
   </form>
 </dialog>
 
-<script src="./bubble-export-ui.js?v=9"></script>
+<script src="./bubble-export-ui.js?v=10"></script>
 
 <script type="importmap">
 { "imports": {

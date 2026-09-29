@@ -62,7 +62,7 @@ import { createFormationRuntime } from './motions/runtime/formation.js?v=1';
 import { buildExtendedMotionControls } from './panel-builder.js?v=1';
 import { createPanelStateController } from './panel-state.js?v=1';
 import { createPanelBindings } from './panel-bindings.js?v=1';
-import { createExportRuntime } from './export-runtime.js?v=1';
+import { createExportRuntime } from './export-runtime.js?v=2';
 import { createCompileDiagnostics } from './compile-diagnostics.js?v=1';
 import { createRuntimeDiagnostics } from './runtime-diagnostics.js?v=1';
 

@@ -92,6 +92,7 @@
       width: Number(width.value),
       height: Number(height.value),
       background: document.getElementById('exportBackground').value,
+      shadow: document.getElementById('exportShadow').checked,
       fov: Number(document.getElementById('exportFov').value),
       scale: Number(document.getElementById('exportScale').value) / 100,
       centerX: Number(document.getElementById('exportCenterX').value) / 100,
@@ -219,7 +220,19 @@
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
   });
-  document.getElementById('exportBackground').addEventListener('change', syncPreview);
+  // 「保留地板影子」只對靜態模式的去背有意義：其餘模式沒有地板，不透明輸出則
+  // 影子本來就在場景裡。
+  function syncShadowOption() {
+    const motion = document.getElementById('motion')?.value;
+    document.getElementById('exportShadowField').hidden =
+      document.getElementById('exportBackground').value !== 'transparent' || motion !== 'static';
+  }
+  document.getElementById('exportBackground').addEventListener('change', () => {
+    syncShadowOption();
+    syncPreview();
+  });
+  document.getElementById('motion')?.addEventListener('change', syncShadowOption);
+  syncShadowOption();
   start.addEventListener('click', () => {
     if (exporting) {
       window.dispatchEvent(new CustomEvent('prism-export-cancel'));
