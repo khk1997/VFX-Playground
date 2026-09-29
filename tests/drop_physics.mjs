@@ -5,6 +5,7 @@ import {
   STUDIO_FLOOR_DEFAULT,
   staticShapeBoundsRadius,
   staticShapeFloorHeight,
+  staticShapeShadowRadius,
   updateDropBounds,
 } from '../bubble/drop-physics.js';
 
@@ -93,5 +94,14 @@ near(staticShapeFloorHeight({ ...floorParams, staticShape: 6, primitiveTubeRatio
 near(staticShapeFloorHeight({ ...floorParams, staticShape: 0, boxSize: 0 }), -0.07);
 // 匯入造型的最低點看 SVG，沿用原本的固定高度。
 assert.equal(staticShapeFloorHeight({ ...floorParams, staticShape: 7 }), STUDIO_FLOOR_DEFAULT);
+
+// 影子用的緊包圍球：造型整個在裡面（方體取外接球，圓角把角收進去）。
+near(staticShapeShadowRadius({ staticShape: 0, boxSize: 1, boxCornerRadius: 0 }), Math.sqrt(3));
+near(staticShapeShadowRadius({ staticShape: 0, boxSize: 1, boxCornerRadius: 0.2 }), Math.sqrt(3) * 0.8 + 0.2);
+near(staticShapeShadowRadius({ staticShape: 6, primitiveSize: 0.6, primitiveTubeRatio: 0.35 }), 0.81);
+// 表面會被推出去、或沒有精確值時回 0，shader 端改用 uBounds。
+assert.equal(staticShapeShadowRadius({ staticShape: 0, boxSize: 1, boxCornerRadius: 0, capillaryHeight: 0.02 }), 0);
+assert.equal(staticShapeShadowRadius({ staticShape: 0, boxSize: 1, boxCornerRadius: 0, wobble: 0.1 }), 0);
+assert.equal(staticShapeShadowRadius({ staticShape: 7 }), 0);
 
 console.log('Contact merge gate, pair physics, conservative bounds, and studio floor passed');

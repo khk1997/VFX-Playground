@@ -156,6 +156,21 @@ const DIAG = (() => {
     probeNoEnvPmrem: set.has('probe-no-env-pmrem'),
     probeNoRefractionFilm: set.has('probe-no-refraction'),
     probeNoWobble: set.has('probe-no-wobble'),
+    // 靜態玻璃的執行期成本拆解（不是編譯期探針）：一次拿掉一項，量 GPU 時間差。
+    // 畫面會少東西，只用於量測。見 shader-chunks/environment.js 的 PROBE_STATIC_*。
+    //   probe-static-no-shadow           地板影子的 march（改成沒有影子）
+    //   probe-static-no-spectral         主光路的逐波長折射（改成單一取樣）
+    //   probe-static-no-spectral-bounce  內部反射的逐波長（改成單一取樣）
+    //   probe-static-no-bounce           整段內部反射（含它的內部追蹤）
+    //   probe-static-no-reflection       表面反射的棚景取樣
+    //   probe-static-no-opt              關掉純效能的捷徑（影子提前跳過、色散單點），
+    //                                    用來跟正式版在同一個瀏覽器裡成對比較
+    probeStaticNoOpt: set.has('probe-static-no-opt'),
+    probeStaticNoShadow: set.has('probe-static-no-shadow'),
+    probeStaticNoSpectral: set.has('probe-static-no-spectral'),
+    probeStaticNoSpectralBounce: set.has('probe-static-no-spectral-bounce'),
+    probeStaticNoBounce: set.has('probe-static-no-bounce'),
+    probeStaticNoReflection: set.has('probe-static-no-reflection'),
     // B 的三個成分，用來二分 B 本身。probe-no-refraction 等於這三個同時開。
     probeNoTraceExit: set.has('probe-no-trace-exit'),
     // B1 的兩個成分：B1a 拿掉 traceExitSurface 結尾的 calcNormal（10 個 mapScene tap

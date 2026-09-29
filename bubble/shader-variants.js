@@ -222,6 +222,12 @@ export function createShaderVariantPlanner({
     if (DIAG.singleReflectionSample) defines.PROBE_SINGLE_REFLECTION_SAMPLE = '';
     if (DIAG.probeUnrolledSvgTaps) defines.PROBE_UNROLLED_SVG_TAPS = '';
     if (DIAG.probeNoWobble) defines.PROBE_NO_GEOMETRY_WOBBLE = '';
+    if (DIAG.probeStaticNoOpt) defines.PROBE_STATIC_NO_OPT = '';
+    if (DIAG.probeStaticNoShadow) defines.PROBE_STATIC_NO_SHADOW = '';
+    if (DIAG.probeStaticNoSpectral) defines.PROBE_STATIC_NO_SPECTRAL = '';
+    if (DIAG.probeStaticNoSpectralBounce) defines.PROBE_STATIC_NO_SPECTRAL_BOUNCE = '';
+    if (DIAG.probeStaticNoBounce) defines.PROBE_STATIC_NO_BOUNCE = '';
+    if (DIAG.probeStaticNoReflection) defines.PROBE_STATIC_NO_REFLECTION = '';
     if (DIAG.probeNoRefractionFilm || DIAG.probeNoTraceExit) defines.PROBE_NO_TRACE_EXIT = '';
     if (DIAG.probeNoRefractionFilm || DIAG.probeNoArtDispersion) defines.PROBE_NO_ART_DISPERSION = '';
     if (DIAG.probeNoTraceNormal) defines.PROBE_NO_TRACE_NORMAL = '';

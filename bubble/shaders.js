@@ -855,7 +855,7 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
         //
         // 內部追蹤只做一次；色散在第二個出口逐波長重算方向（見 spectralBounce），
         // 全內反射區的顏色就是從這裡來的。
-        if (backFres > 0.004) {  // 比例完全交給出口面的 Fresnel，跟 OpenPBR 一樣不打折
+        if (backFres > STATIC_BOUNCE_MIN_FRESNEL) {  // 比例完全交給出口面的 Fresnel，不打折
           vec3 bounceDir = normalize(reflect(insideDir, exitNormal));
           vec3 bouncePoint;
           vec3 bounceNormal;

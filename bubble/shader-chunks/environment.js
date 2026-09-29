@@ -55,11 +55,25 @@ uniform float uStudioFlag;          // 黑旗強度：框外的黑卡，專門�
 // 內部再彈一次。靜態模組已不讀它（彈跳的比例完全由出口面的 Fresnel 決定，見
 // shaders.js），uniform 留著只是因為其他模式與參數檔還帶著這個名字。
 uniform float uInternalBounce;
+// 內部反射的最低出口反射率：低於它就不追彈跳。探針 probe-static-no-bounce 把它
+// 拉到 2（反射率不可能超過 1），整段彈跳連同內部追蹤就都不跑。
+#ifdef PROBE_STATIC_NO_BOUNCE
+#define STATIC_BOUNCE_MIN_FRESNEL 2.0
+#else
+#define STATIC_BOUNCE_MIN_FRESNEL 0.004
+#endif
 // ===== 光譜折射 =====
 // OpenPBR: transmission_dispersion_scale。0 = 各波長同路，沒有色散。
 uniform float uDispersionScale;
 // 光譜取樣數。1 等於關閉；越多色帶越連續，但每一個都是一次背景取樣。
 uniform int   uSpectralSamples;
+// 自動畫質等級（0 = high、1 = balanced、2 = low，見 adaptive-quality.js）。high
+// 什麼都不動；往下依序關掉最貴、但少了也最不顯眼的幾項（見 staticSpectralSamples、
+// spectralBounce 與地板影子）。輸出一律用 0。
+uniform int   uStaticQualityTier;
+// 地板影子判斷用的緊包圍球半徑（見 drop-physics.js 的 staticShapeShadowRadius）。
+// 0 = 沒有精確值，改用 uBounds.w。
+uniform float uStudioShadowBound;
 // 新玻璃合成的混合量。1 = 完全走新模型，0 = 完全退回原本的暗底外殼，
 // 中間值用來做並排比較（這是研究分支，能退回去才能判斷改動是不是進步）。
 uniform float uStaticGlassMix;
@@ -293,6 +307,12 @@ float bandIOR(float band, float strength){
   return uIOR + sign(dn) * softened;
 }
 
+// 實際使用的光譜取樣數。low 畫質最多 6 個：少掉的是色帶的細緻度，抖動仍讓它
+// 連續（見 spectralRefraction 的 bandJitter），不會退回一段一段。
+int staticSpectralSamples(){
+  return uStaticQualityTier >= 2 ? min(uSpectralSamples, 6) : uSpectralSamples;
+}
+
 // 棚燈卡：方向球上的一塊圓盤，邊緣的銳利度自己控制。
 //
 // 為什麼要是「有邊的」而不是一團柔光：色散的顏色來自背景在一個很小的角度差內
@@ -361,13 +381,50 @@ float mapScene(vec3 p);
 // 寬度隨離物體的距離自然變寬。前一版只有輪廓外那一段，射線一穿進去就改用厚度，
 // 輪廓內沒有半影 —— 影子邊怎麼樣都是硬的；遠處再把整塊拉向一個常數冒充糊化，
 // 結果是一張均勻的灰色剪紙。
+// 半影寬度 k（見 studioGlassShadow）。抽出來是因為下面的 studioShadowPossible
+// 要跟 march 用同一個值，兩邊對不上的話「確定沒影子」的判斷就不成立。
+float studioShadowK(){
+  return clamp(2.2 / tan(radians(clamp(uLightKey.z, 2.0, 120.0)) * 0.5), 2.0, 16.0);
+}
+
+// 這個地板點「有沒有可能」落在影子裡。不可能的話 studioGlassShadow 的結果精確是
+// 0，march 可以整段跳過 —— 這是純效能優化，畫面不變。
+//
+// 影子只來自兩件事：射線穿進物體（entered），或 res = min(k·d/t) 掉到 1 以下
+// （輪廓外的半影；res ≥ 1 時 coverage 精確是 0）。物體整個包在 uBounds 那顆
+// 球裡，所以 d 至少是「到球面的距離」。沿著射線 p(t) = f + L·t，若對所有 t 都有
+//   |p(t) − c| − R  >  m·t，  m = 2 / k
+// 射線就碰不到物體，而且 k·d/t 一路都大於 2 —— 留兩倍餘裕，是因為 march 裡的
+// 最近點估計（見 studioGlassShadow 的 improved soft shadow）可能比真正的距離小。
+// 左式減右式對 t 的最小值有解析解：a = (c − f)·L、h 是 c 到射線的垂距，極小點在
+// t* = a + m·h / √(1 − m²)，值是 h·√(1 − m²) − R − m·a；t* 夾在 march 實際走得到
+// 的範圍裡。
+//
+// 地板佔畫面大半，而大部分地板點離物體很遠 —— 這一段在預設構圖省下地板影子
+// 七成以上的成本。
+bool studioShadowPossible(vec3 floorPos, vec3 lightDir){
+#ifdef PROBE_STATIC_NO_OPT
+  return true;
+#endif
+  vec3 w = uBounds.xyz - floorPos;
+  float R = uStudioShadowBound > 0.0 ? uStudioShadowBound : max(uBounds.w, 0.001);
+  float a = dot(w, lightDir);
+  float h = sqrt(max(dot(w, w) - a * a, 0.0));
+  float m = 2.0 / studioShadowK();
+  float root = sqrt(max(1.0 - m * m, 0.0));
+  float tStar = clamp(a + m * h / max(root, 1e-4), 0.0, 13.2);
+  float gap = length(floorPos + lightDir * tStar - uBounds.xyz) - R - m * tStar;
+  float gapStart = length(w) - R;
+  return min(gap, gapStart) <= 0.0;
+}
+
 vec3 studioGlassShadow(vec3 floorPos, vec3 lightDir, out vec3 caustic){
   caustic = vec3(0.0);
   float R = max(uBounds.w, 0.001);
   // 半影寬度跟著主光的大小走：k ≈ 1/tan(半角)。常數 2.2 讓預設那張 44.5° 的
   // 柔光箱落在 k ≈ 5，也就是前一版手調出來的寬度；夾住兩端，免得極小的燈把
   // 半影收成一條鋸齒、極大的燈把影子糊到看不見。
-  float k = clamp(2.2 / tan(radians(clamp(uLightKey.z, 2.0, 120.0)) * 0.5), 2.0, 16.0);
+  float k = studioShadowK();
   float res = 1.0;
   float t = 0.05;
   float prevD = 1e10;
@@ -544,8 +601,25 @@ vec4 studioBackdropSampleEdge(vec3 origin, vec3 rd, float extraBlur, float cards
         // 重心整個被拉走；而影子真正在講的是「物體就在這裡」，那件事只在物體
         // 附近成立。收掉遠端同時也讓 march 走不完的那一段完全看不到。
         float reach = smoothstep(shadowR * 14.0, shadowR * 5.0, dist);
-        shadow = studioGlassShadow(floorPos, keyDir, caustic) * reach;
-        caustic *= reach;
+        // reach 是 0（影子的有效範圍外）或射線確定碰不到物體時，下面的結果精確是 0，
+        // 直接跳過 march（見 studioShadowPossible）。
+        vec3 blobShadow = shadow;
+        shadow = vec3(0.0);
+        caustic = vec3(0.0);
+#ifndef PROBE_STATIC_NO_SHADOW
+        if (uStaticQualityTier >= 2) {
+          // low 畫質：不 march，退回折射取樣那一份高斯斑與解析焦散。
+          shadow = blobShadow;
+          caustic = studioCaustics(floorPos);
+#ifdef PROBE_STATIC_NO_OPT
+        } else if (true) {
+#else
+        } else if (reach > 0.0 && studioShadowPossible(floorPos, keyDir)) {
+#endif
+          shadow = studioGlassShadow(floorPos, keyDir, caustic) * reach;
+          caustic *= reach;
+        }
+#endif
       } else {
         caustic = studioCaustics(floorPos);
       }
@@ -733,6 +807,9 @@ vec3 spectralExitDir(vec3 rd, vec3 N, vec3 exitNormal, vec3 exitDir, float iorBa
 vec3 spectralRefraction(vec3 rd, vec3 N, vec3 exitNormal, vec3 exitPoint,
                         vec3 exitDir, float bandSpread, float roughBlur,
                         float studioSoften, float roughEdge){
+#ifdef PROBE_STATIC_NO_SPECTRAL
+  return studioBackdropSampleEdge(exitPoint, exitDir, roughBlur, 1.0, studioSoften, roughEdge).rgb;
+#endif
 
   // 取樣之間要接得起來。光譜是連續的，但這裡只取 uSpectralSamples 個波長，每個
   // 波長各自折射出一份完整的棚景 —— 棚景的邊（燈卡、黑旗，尤其是地平線）是硬的，
@@ -746,12 +823,23 @@ vec3 spectralRefraction(vec3 rd, vec3 N, vec3 exitNormal, vec3 exitPoint,
   vec3 dirBlue = spectralExitDir(rd, N, exitNormal, exitDir, bandIOR(0.0, bandSpread));
   vec3 dirRed = spectralExitDir(rd, N, exitNormal, exitDir, bandIOR(1.0, bandSpread));
   // 取樣點在波段上的間距是 1/N（band = (i+0.5)/N），兩端之間的角距除以 N 就是它。
-  float gap = length(dirRed - dirBlue) / max(float(uSpectralSamples), 1.0);
+  float gap = length(dirRed - dirBlue) / max(float(staticSpectralSamples()), 1.0);
   // 上限：藍端接近全內反射時方向會轉向反射那一側，兩端的角距一下子變很大；
   // 不夾的話那一圈會整片糊掉，彩虹直接消失。0.25 rad ≈ 14°。
   // 霧面的錐跟這個取樣間距是兩回事，取大的那個：霧面糊掉的是整個影像（色帶
   // 也一起被抹平，粗糙的玻璃本來就不太打彩虹），不受上面那個 0.25 的限制。
   float minEdge = max(min(gap, 0.25), roughEdge);
+  // 光譜兩端出去的方向幾乎一樣時，每個波長取到的都是同一個背景點，加權平均
+  // 就等於取一次 —— 平行的入射面與出口面淨偏折是零（方體正對著看的大片平面
+  // 就是這樣），這裡直接取一次，省下其餘的取樣。純效能優化，畫面不變。
+#ifdef PROBE_STATIC_NO_OPT
+  if (false) {
+#else
+  if (length(dirRed - dirBlue) < 1e-4) {
+#endif
+    return studioBackdropSampleEdge(exitPoint, normalize(dirBlue + dirRed), roughBlur, 1.0,
+      studioSoften, minEdge).rgb;
+  }
 
   // 每個像素把取樣點在自己那一格波長裡錯開一點（分層抖動）。
   //
@@ -770,9 +858,9 @@ vec3 spectralRefraction(vec3 rd, vec3 N, vec3 exitNormal, vec3 exitPoint,
   vec3 spectralSum = vec3(0.0);
   vec3 weightSum = vec3(0.0);
   for (int i = 0; i < MAX_SPECTRAL_COMPILE; i++) {
-    if (i >= uSpectralSamples) break;
+    if (i >= staticSpectralSamples()) break;
     // band 0 = 藍端，1 = 紅端。折射率由 Cauchy 曲線決定（見 bandIOR）。
-    float band = (float(i) + bandJitter) / float(uSpectralSamples);
+    float band = (float(i) + bandJitter) / float(staticSpectralSamples());
     float iorBand = bandIOR(band, bandSpread);
     vec3 outBand = spectralExitDir(rd, N, exitNormal, exitDir, iorBand);
     vec3 w = spectralResponse(band);
@@ -814,8 +902,32 @@ vec3 spectralRefraction(vec3 rd, vec3 N, vec3 exitNormal, vec3 exitPoint,
 vec3 spectralBounce(vec3 rd, vec3 N, vec3 exitNormal, vec3 bouncePoint,
                     vec3 bounceNormal, vec3 bounceOut, float bandSpread, float backFres,
                     float roughBlur, float studioSoften, float roughEdge){
-  if (bandSpread <= 0.0001 || uSpectralSamples <= 1 || backFres < 0.05) {
+#ifdef PROBE_STATIC_NO_SPECTRAL_BOUNCE
+  if (true) {
+#else
+  if (uStaticQualityTier >= 1 || bandSpread <= 0.0001 || uSpectralSamples <= 1
+      || backFres < 0.05) {
+#endif
     return studioBackdropSampleEdge(bouncePoint, bounceOut, roughBlur, 1.0,
+      studioSoften, roughEdge).rgb;
+  }
+  // 跟 spectralRefraction 同一個捷徑：光譜兩端出去的方向幾乎一樣時只取一次。
+  vec3 endBlue = bounceOut;
+  vec3 endRed = bounceOut;
+  for (int e = 0; e < 2; e++) {
+    float iorEnd = bandIOR(float(e), bandSpread);
+    vec3 inEnd = refract(rd, N, 1.0 / iorEnd);
+    if (dot(inEnd, inEnd) <= 0.0001) continue;
+    vec3 outEnd = bandExitFromInside(normalize(reflect(normalize(inEnd), exitNormal)),
+      bounceNormal, iorEnd);
+    if (e == 0) endBlue = outEnd; else endRed = outEnd;
+  }
+#ifdef PROBE_STATIC_NO_OPT
+  if (false) {
+#else
+  if (length(endRed - endBlue) < 1e-4) {
+#endif
+    return studioBackdropSampleEdge(bouncePoint, normalize(endBlue + endRed), roughBlur, 1.0,
       studioSoften, roughEdge).rgb;
   }
   float bandJitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
@@ -824,8 +936,8 @@ vec3 spectralBounce(vec3 rd, vec3 N, vec3 exitNormal, vec3 bouncePoint,
   vec3 first = bounceOut;
   vec3 last = bounceOut;
   for (int i = 0; i < MAX_SPECTRAL_COMPILE; i++) {
-    if (i >= uSpectralSamples) break;
-    float band = (float(i) + bandJitter) / float(uSpectralSamples);
+    if (i >= staticSpectralSamples()) break;
+    float band = (float(i) + bandJitter) / float(staticSpectralSamples());
     float iorBand = bandIOR(band, bandSpread);
     vec3 outBand = bounceOut;
     vec3 inBand = refract(rd, N, 1.0 / iorBand);
@@ -889,10 +1001,14 @@ vec3 staticGlassShade(vec3 p, vec3 N, vec3 rd, vec3 refractedBg,
   // 項不是可有可無的補強，而是同一件事在另一條路徑上。
   vec3 reflDir = reflect(rd, N);
   float reflSpread = length(dFdx(reflDir)) + length(dFdy(reflDir));
+#ifdef PROBE_STATIC_NO_REFLECTION
+  vec3 studioReflection = vec3(0.0);
+#else
   vec3 studioReflection = studioBackdropSampleEdge(
     p, reflDir, uRoughness,
     1.0, reflSpread / (1.0 + reflSpread * 6.0) * 0.75, roughReflectionEdge()
   ).rgb * fresSpec;
+#endif
   vec3 lit = transmitted + baseLobe + studioReflection;
   // HDR 輸出開著（後處理鏈在跑）時什麼都不壓：光暈是靠超過 1 的部分觸發的，
   // 在這裡先壓掉就等於把玻璃上最亮的那幾條交出去。

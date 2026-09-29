@@ -64,6 +64,28 @@ export function staticShapeBoundsRadius(params) {
 //
 // 匯入的造型（7）走形狀場，最低點得看那張 SVG，沿用原本的高度。
 export const STUDIO_FLOOR_DEFAULT = -1.15;
+
+// 地板影子判斷「這個地板點不可能有影子」用的包圍球半徑（中心在原點，跟造型的
+// SDF 同一個座標）。要的是「整個造型都在裡面」的最小球 —— uBounds 那顆是給
+// raymarch 的，刻意放寬了一大圈（方體是 2.46，實際外接球只有 1.64），拿它來判斷
+// 影子會把一大片其實照得到燈的地板也算成「可能有影子」，march 就省不下來。
+// 夾值跟 geometry.js 的 SDF 一致；回傳 0 代表沒有精確值（匯入的造型），shader
+// 端改用 uBounds。
+export function staticShapeShadowRadius(params) {
+  // 表面波紋與幾何擾動會把表面往外推，推多少取決於噪聲，沒有精確上限 —— 開著
+  // 的時候就退回 uBounds。
+  if ((params.capillaryHeight ?? 0) > 0 || (params.wobble ?? 0) > 0) return 0;
+  if (params.staticShape === 0) {
+    const half = Math.max(params.boxSize, 0.05);
+    const corner = Math.min(Math.max(params.boxCornerRadius, 0), half * 0.98);
+    return Math.sqrt(3) * (half - corner) + corner;
+  }
+  if (params.staticShape === 6) {
+    const major = Math.max(params.primitiveSize, 0.05);
+    return major + Math.min(Math.max(params.primitiveTubeRatio, 0.05), 0.9) * major;
+  }
+  return 0;
+}
 const STUDIO_FLOOR_GAP = 0.02;
 export function staticShapeFloorHeight(params) {
   const size = Math.max(params.primitiveSize, 0.05);

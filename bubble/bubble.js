@@ -33,9 +33,10 @@ import { createEnvironmentLoader, selectMaterialEnvironment } from './environmen
 import { describeShapeImport, loadShapeAsset } from './shape-loader.js?v=1';
 import { createShaderVariantPlanner, VariantMaterialCache } from './shader-variants.js?v=2';
 import {
-  contactMergeAmount, findClosestDropPair, staticShapeFloorHeight, updateDropBounds,
+  contactMergeAmount, findClosestDropPair, staticShapeFloorHeight, staticShapeShadowRadius,
+  updateDropBounds,
   STUDIO_FLOOR_DEFAULT,
-} from './drop-physics.js?v=2';
+} from './drop-physics.js?v=3';
 import {
   distributeDetailedAnchors, distributeFormationAnchors, distributePrimaryAnchors,
   formationEdgeScaleFor, scaleShapePoints as scalePoints,
@@ -62,7 +63,7 @@ import { createFormationRuntime } from './motions/runtime/formation.js?v=1';
 import { buildExtendedMotionControls } from './panel-builder.js?v=1';
 import { createPanelStateController } from './panel-state.js?v=1';
 import { createPanelBindings } from './panel-bindings.js?v=1';
-import { createExportRuntime } from './export-runtime.js?v=2';
+import { createExportRuntime } from './export-runtime.js?v=3';
 import { createCompileDiagnostics } from './compile-diagnostics.js?v=1';
 import { createRuntimeDiagnostics } from './runtime-diagnostics.js?v=1';
 
@@ -332,6 +333,9 @@ const LOOP_SCALED_KEYS = [
   'gatherDuration', 'shapeHold', 'morphHold', 'rayBeamSpeed',
   'researchIconPhaseOffset', 'researchIconBirthStagger',
 ];
+// 首頁卡片裡靜態模組額外後退的倍率（見 previewCameraDistance）。
+const STATIC_PREVIEW_PULLBACK = 1.1;
+
 function refreshLoopScaledReadouts() {
   for (const key of LOOP_SCALED_KEYS) {
     const valEl = document.getElementById(key + '_v');
@@ -2079,6 +2083,7 @@ function updateDropUniforms(t) {
   if (uniforms?.uStudioFloorHeight) {
     uniforms.uStudioFloorHeight.value = P.motion === 'static'
       ? staticShapeFloorHeight(P) : STUDIO_FLOOR_DEFAULT;
+    uniforms.uStudioShadowBound.value = P.motion === 'static' ? staticShapeShadowRadius(P) : 0;
   }
 }
 
@@ -2183,6 +2188,8 @@ function initGL() {
     uCompositionOffsetX: { value: 0 },
     uCompositionOffsetY: { value: 0 },
     uMaxSteps:   { value: adaptiveQuality.snapshot().steps },
+    uStaticQualityTier: { value: 0 },
+    uStudioShadowBound: { value: 0 },
     // 這兩顆的作用都不是調整取樣數，而是讓 calcNormal 兩條法線路徑的迴圈 trip count
     // 對 fxc 保持未知，迴圈才不會被靜態展開成一份一份的 mapScene（見 shaders.js 的
     // calcNormal）。所以值恆定：四面體 4 個 tap、SVG 分軸中央差分 6 個 tap。
@@ -2497,6 +2504,12 @@ function resize() {
 // 每一幀的步數上限。舊版在 refreshRenderQuality 裡也算過一份，但那份每幀都被
 // frame() 覆寫掉，等於死碼；而 frame() 的 formation 分支又漏看了 dragging，
 // 於是 Formation 模式拖曳時完全沒有降級。現在只有這一個決策點。
+// 靜態玻璃的畫質等級跟 raymarch 步數同一個時機更新（兩個呼叫點都緊接在
+// resolveMaxSteps 後面）。輸出不走這裡，由 export-runtime 自己設成 0。
+function syncStaticQualityTier() {
+  uniforms.uStaticQualityTier.value = adaptiveQuality.snapshot().tierIndex;
+}
+
 function resolveMaxSteps() {
   // 診斷：只壓 raymarch 主迴圈步數，其他視覺設定一概不動。
   if (DIAG.lowsteps) return 32;
@@ -3248,6 +3261,7 @@ function requestPausedRender() {
         Math.max(1, canvas.clientHeight || document.documentElement.clientHeight),
       );
       uniforms.uMaxSteps.value = resolveMaxSteps();
+      syncStaticQualityTier();
       // 暫停路徑不走 frame()，所以 frame() 裡那些「每幀從 P 打包」的 uniform
       // 也得在這裡補一次。靜態模式本來就是暫停的，漏掉這行的話燈位滑桿會完全
       // 沒反應 —— 值進了 P，但沒有人把它打包進 vec4。
@@ -3542,7 +3556,14 @@ function frame(now) {
   const formationDolly = 1 - formationFocus * 0.30;
   // 首頁卡片預覽沿用上一版較寬鬆的取景距離，避免分裂時右側大滴貼近邊緣；
   // 完整調參頁仍使用面板中的鏡頭距離。
-  let previewCameraDistance = PREVIEW ? 4.95 : P.cameraDistance;
+  //
+  // 靜態模組例外：它的構圖是長焦（視角 28°、距離 9.5，見 registry 的 static
+  // overrides），4.95 是照水滴模式的廣角調的，放在這裡等於把鏡頭推近一半 ——
+  // 方體會塞滿整張卡片。卡片（660×570）比作品頁窄，再往後退一成，右後方的
+  // 地板影子才不會被切掉。
+  let previewCameraDistance = !PREVIEW ? P.cameraDistance
+    : P.motion === 'static' ? P.cameraDistance * STATIC_PREVIEW_PULLBACK
+    : 4.95;
   // 打字模式的寬度是由字串長度決定的，不是固定的——一個固定鏡距沒辦法同時服務
   // 「LIQUID」跟一整句話。而且預覽框（660×570）比作品頁窄得多，同樣的距離在
   // 那裡會直接把字切掉：上面那個 4.95 是照水滴模式調的，對打字反而比面板的
@@ -3598,6 +3619,7 @@ function frame(now) {
   syncStudioLights();
   syncEdgeDropMotion(simT);
   uniforms.uMaxSteps.value = resolveMaxSteps();
+  syncStaticQualityTier();
   renderComposite();
   // 只在第一幀標記一次；之後 diagTiming.第一幀完成ms 已有值就不再量。
 

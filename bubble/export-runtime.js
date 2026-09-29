@@ -52,6 +52,8 @@ function applyExportCamera(time, width, height, fov, scale, settings = null) {
   getUniforms().uTime.value = time;
   syncEdgeDropMotion(time);
   getUniforms().uMaxSteps.value = 88;
+  // 輸出一律用最高畫質：自動降級是給即時預覽的，成品不該跟著當下的 fps 變。
+  getUniforms().uStaticQualityTier.value = 0;
 }
 
 function settingsValue(settings, key) {
