@@ -51,6 +51,16 @@ for (const motion of MOTION_KEYS) {
   // 的說明：那個值就是改動前寫死的吸收係數，預設外觀不變），但淺底沒有這層
   // 歷史包袱，預設就該跟淺底背景同色——不然一開箱就是一顆藍色的球浮在白色
   // 背景上。兩個底色各自記一格，調淺底不會污染已經定案的深底外觀。
+  //
+  // 靜態模組例外：展示用的玻璃兩個底色都從純白、濃度 4 起步（見 runtime-memory
+  // 的 MOTION_FIXED_OVERRIDES）。
+  if (motion === 'static') {
+    for (const backdrop of ['dark', 'light']) {
+      assert.equal(memory.absorbColor[`static|${backdrop}`], '#ffffff');
+      assert.equal(memory.absorb[`static|${backdrop}`], 4);
+    }
+    continue;
+  }
   assert.equal(memory.absorbColor[`${motion}|dark`], '#68b2e7');
   assert.equal(memory.absorbColor[`${motion}|light`], EDGE_TINT_BASE_BY_BACKDROP.light);
 }

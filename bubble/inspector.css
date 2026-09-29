@@ -200,7 +200,54 @@
 #exportBtn:hover { background: #28adff !important; }
 #exportBtn[aria-expanded="true"] { background: #007dcc !important; box-shadow: inset 0 0 0 1px #ffffff1f !important; }
 #toggleBtn[aria-expanded="true"] { background: #38383b !important; border-color: #ffffff35 !important; }
+/* 靜態模組：畫面右下角常駐的燈光調整（見 inspector.js 的 buildQuickDock）。 */
+.staticQuickDock {
+  --inspector-accent: #7957ff;
+  position: fixed; right: 16px; bottom: 16px; z-index: 11;
+  width: 260px; box-sizing: border-box; padding: 14px 16px 10px;
+  background: #050505eb; color: #f5f5f7; color-scheme: dark;
+  border: 1px solid #ffffff24; border-radius: 20px;
+  box-shadow: 0 18px 60px #0005, inset 0 1px 0 #ffffff0a;
+  font-family: inherit;
+}
+.staticQuickDockTitle { margin-bottom: 8px; font-size: 13px; font-weight: 700; letter-spacing: .02em; }
+/* 方向盤在常駐區裡縮小，說明文字改成滑鼠提示（canvas 的 title），只留讀數。 */
+.staticQuickDock .lightDial { margin: 0 0 8px; gap: 12px; }
+.staticQuickDock .lightDialCanvas { width: 104px; height: 104px; }
+.staticQuickDock .lightDialInfo .inspectorNote { display: none; }
+.staticQuickDockRow { display: block; margin-bottom: 6px; cursor: pointer; }
+.staticQuickDockHead { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: #a1a1a6; }
+.staticQuickDockValue { color: #e6e6eb; font-variant-numeric: tabular-nums; }
+.staticQuickDock input[type=range] {
+  width: 100%; height: 26px; margin: 0; appearance: none; -webkit-appearance: none;
+  background: transparent; cursor: pointer; accent-color: var(--inspector-accent);
+}
+.staticQuickDock input[type=range]::-webkit-slider-runnable-track {
+  height: 5px; border-radius: 99px;
+  background: linear-gradient(to right, var(--inspector-accent) 0 var(--range-progress, 0%), #303033 var(--range-progress, 0%) 100%);
+}
+.staticQuickDock input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 24px; height: 18px; margin-top: -6.5px;
+  border: 0; border-radius: 99px; background: #f8f8fa; box-shadow: 0 1px 4px #0006;
+}
+.staticQuickDock input[type=range]::-moz-range-track { height: 5px; border-radius: 99px; background: #303033; }
+.staticQuickDock input[type=range]::-moz-range-progress { height: 5px; border-radius: 99px; background: var(--inspector-accent); }
+.staticQuickDock input[type=range]::-moz-range-thumb { width: 24px; height: 18px; border: 0; border-radius: 99px; background: #f8f8fa; }
+html.preview-mode .staticQuickDock, body[data-bubble-boot] .staticQuickDock { display: none; }
+
 @media (max-width: 760px) {
+  /* 手機的參數面板是從底部拉起的抽屜，最高到畫面 78%；放在頂部按鈕下方才不會
+     跟抽屜的任何一個狀態打架。兩根並排，高度壓到最小。 */
+  .staticQuickDock {
+    left: 12px; right: 12px; top: calc(64px + env(safe-area-inset-top, 0px)); bottom: auto; width: auto;
+    display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 14px; align-items: center;
+    padding: 8px 14px 6px; border-radius: 16px;
+  }
+  .staticQuickDockTitle { display: none; }
+  .staticQuickDock .lightDial { margin: 0; flex-direction: column; gap: 2px; }
+  .staticQuickDock .lightDialCanvas { width: 76px; height: 76px; }
+  .staticQuickDock .lightDialReadout { font-size: 10px; }
+  .staticQuickDockRow { margin-bottom: 2px; }
   /* Both sticky rows share a scroll origin; top padding would expose content above them. */
   #panel.inspector { padding-top: 0 !important; scroll-padding-top: 226px; }
   .inspectorHeader { top: 62px; margin: 0 -16px 12px; padding: 8px 16px 0; }

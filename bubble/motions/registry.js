@@ -87,8 +87,11 @@ export const MOTIONS = {
       capillaryHeight: 0,
       capillaryRings: 2,
       capillarySpeed: 1,
-      // 體積吸收。新合成裡透射是主角，厚處與薄處的差別要靠它才讀得出來。
-      absorb: 1.8,
+      // 體積吸收。玻璃預設純白（不吸收），濃度先給到 4：使用者一換顏色，厚處
+      // 與薄處的差別就讀得出來。淺底也要是這組，見 runtime-memory 的
+      // MOTION_FIXED_OVERRIDES。
+      absorb: 4,
+      absorbColor: '#ffffff',
     },
     // 幾何選項用數字枚舉（不是字串），這樣才能沿用 bindControls 既有的「數值
     // 滑桿／數字型 select 一律 parseFloat」那條路徑，不必為了一個字串型 select

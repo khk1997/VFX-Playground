@@ -140,6 +140,17 @@ export function createMemorySlot(params) {
 // 於是「記憶格的初值」跟「motionDefaultsFor 算出來的預設」對不起來——面板的
 // 「已調整」標記與重設都讀後者，一進淺底就會把這幾根標成已調整。合併成一張表，
 // 兩邊只剩一個來源。
+// 某個模式不分底色都要的起點，優先於上面兩張表。靜態模組的玻璃預設是純白：
+// 淺底那張表會把吸收色換成背景色、吸收降到 1.35，那是給水滴模式的白底調校，
+// 放在靜態的展示玻璃上就是一開箱帶著顏色。濃度先給到 4，使用者一換顏色就看得
+// 出來；純白本身不吸收，所以預設外觀仍是無色的。
+const MOTION_FIXED_OVERRIDES = {
+  static: {
+    absorbColor: '#ffffff',
+    absorb: 4,
+  },
+};
+
 const BACKDROP_OVERRIDES = {
   dark: {
     spectralCausticFocus: 1,
@@ -167,7 +178,8 @@ export function motionDefaultsFor(key) {
     : key in TOGGLE_DEFAULTS ? TOGGLE_DEFAULTS[key]
       : key in COLOR_DEFAULTS ? COLOR_DEFAULTS[key]
         : SELECT_DEFAULTS[key];
-  const darkValue = motion => MOTION_OVERRIDES[motion]?.[key]
+  const darkValue = motion => MOTION_FIXED_OVERRIDES[motion]?.[key]
+    ?? MOTION_OVERRIDES[motion]?.[key]
     ?? intrinsicByMode[key]?.[motion]
     ?? base;
   if (!BACKDROP_SCOPED_KEYS.has(key)) {
@@ -175,7 +187,9 @@ export function motionDefaultsFor(key) {
   }
   return Object.fromEntries(MOTION_KEYS.flatMap(motion => BACKDROP_KEYS.map(backdrop => [
     `${motion}|${backdrop}`,
-    key in BACKDROP_OVERRIDES[backdrop]
+    key in (MOTION_FIXED_OVERRIDES[motion] ?? {})
+      ? MOTION_FIXED_OVERRIDES[motion][key]
+    : key in BACKDROP_OVERRIDES[backdrop]
       ? BACKDROP_OVERRIDES[backdrop][key]
     // 染色強度兩個底色各有自己的起點（見 runtime-defaults 的
     // EDGE_TINT_STRENGTH_BY_BACKDROP）：深底 0、淺底滿。

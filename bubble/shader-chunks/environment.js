@@ -619,6 +619,63 @@ vec4 studioBackdropSampleEdge(vec3 origin, vec3 rd, float extraBlur, float cards
 vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards, float soften){
   return studioBackdropSampleEdge(origin, rd, extraBlur, cards, soften, 0.0);
 }
+
+// ===== 霧面：OpenPBR specular_roughness =====
+//
+// 跟 OpenPBR／Blender 一樣是 GGX 微表面：α = roughness²。這條平方是面板上 0–0.3
+// 幾乎還是清玻璃、大半的變化落在 0.5 以後的原因，也是換成這一套之後滑桿才有
+// 那種「越後面越霧」的手感。
+//
+// 前一版把 roughness 線性乘進 soften，只是按比例把燈卡與地平線的邊放寬，拉滿
+// 也才 14°，折射影像、地板影子、色帶全部還是清楚的 —— 0 到 1 看起來差不多。
+// 這裡改成算出微表面把一條光線打散成多寬的錐，當成「每一道邊至少多寬」的絕對
+// 下限（studioBackdropSampleEdge 的 minEdge），整個透過來的棚景一起糊。
+//
+// 錐的大小：GGX 法線分布裡含七成五能量的角度是 tan²θ = 3α²。光穿過玻璃要經過
+// 兩個粗糙面，各自按折射把法線的歪斜換成方向的偏折：進去那一面偏
+// θ − asin(sinθ/n)，出來那一面偏 asin(n·sinθ) − θ（超過臨界角就夾在切線）。
+// 用完整的折射式而不是小角度近似 —— 法線歪到幾十度時兩者差很多，而那正是
+// roughness 接近 1 的區間。兩面的偏折獨立，平方和開根號合起來。
+float ggxLobeAngle(){
+  float r = clamp(uRoughness, 0.0, 1.0);
+  float alpha = r * r;
+  return atan(1.7320508 * alpha);
+}
+float roughTransmissionEdge(){
+  float theta = ggxLobeAngle();
+  float n = max(uIOR, 1.0001);
+  float s = sin(theta);
+  float entry = theta - asin(clamp(s / n, 0.0, 1.0));
+  float exit = asin(clamp(n * s, 0.0, 1.0)) - theta;
+  return sqrt(entry * entry + max(exit, 0.0) * max(exit, 0.0));
+}
+// 反射的錐是法線錐的兩倍寬（入射角等於反射角，法線歪 θ，反射方向歪 2θ）。
+// 上限 1.2 rad：再寬就是整個半球，棚景本來就只剩一片平均亮度了。
+float roughReflectionEdge(){
+  return min(2.0 * ggxLobeAngle(), 1.2);
+}
+
+// 霧面的另一半：把玻璃裡的結構也糊掉。
+//
+// roughTransmissionEdge 只糊得到「棚景的邊」。玻璃裡那些摺線、內部的方框、色帶
+// 的邊界不是背景的邊，是相鄰像素的光線從不同的面出去 —— 那是幾何本身，撐寬
+// 背景救不了。真正粗糙的玻璃會連它們一起糊掉，因為每條光線一進去就被打散到
+// 不同方向、各自走不同的路；要照做就得每個像素重追好幾條光路，付不起。
+//
+// 近似：粗糙到一個程度之後，透過來的光接近「以視線為中心的一片散射」，看不出
+// 折射的結構了。所以沿視線方向取一份很寬的棚景，按 GGX 的 α 混進來：
+// 1 − e^(−3α) 在 roughness 0.25 約兩成、0.5 約五成、1.0 約九成五。色帶也跟著
+// 淡掉 —— 粗糙的玻璃本來就不太打彩虹。roughness 為 0 時整段跳過，不多取樣。
+vec3 frostedTransmission(vec3 refracted, vec3 exitPoint, vec3 rd, float roughBlur,
+                         float studioSoften, float roughEdge){
+  float r = clamp(uRoughness, 0.0, 1.0);
+  float frost = 1.0 - exp(-3.0 * r * r);
+  if (frost <= 0.002) return refracted;
+  vec3 scattered = studioBackdropSampleEdge(
+    exitPoint, rd, roughBlur, 1.0, studioSoften, max(roughEdge * 1.5, 0.35)
+  ).rgb;
+  return mix(refracted, scattered, frost);
+}
 // 光譜折射：沿著同一條已經追好的光路，逐波長重算兩次 refract()，取樣同一個
 // 棚景再合回 RGB。
 //
@@ -670,7 +727,7 @@ vec3 spectralExitDir(vec3 rd, vec3 N, vec3 exitNormal, vec3 exitDir, float iorBa
 
 vec3 spectralRefraction(vec3 rd, vec3 N, vec3 exitNormal, vec3 exitPoint,
                         vec3 exitDir, float bandSpread, float roughBlur,
-                        float studioSoften){
+                        float studioSoften, float roughEdge){
 
   // 取樣之間要接得起來。光譜是連續的，但這裡只取 uSpectralSamples 個波長，每個
   // 波長各自折射出一份完整的棚景 —— 棚景的邊（燈卡、黑旗，尤其是地平線）是硬的，
@@ -687,7 +744,9 @@ vec3 spectralRefraction(vec3 rd, vec3 N, vec3 exitNormal, vec3 exitPoint,
   float gap = length(dirRed - dirBlue) / max(float(uSpectralSamples), 1.0);
   // 上限：藍端接近全內反射時方向會轉向反射那一側，兩端的角距一下子變很大；
   // 不夾的話那一圈會整片糊掉，彩虹直接消失。0.25 rad ≈ 14°。
-  float minEdge = min(gap, 0.25);
+  // 霧面的錐跟這個取樣間距是兩回事，取大的那個：霧面糊掉的是整個影像（色帶
+  // 也一起被抹平，粗糙的玻璃本來就不太打彩虹），不受上面那個 0.25 的限制。
+  float minEdge = max(min(gap, 0.25), roughEdge);
 
   // 每個像素把取樣點在自己那一格波長裡錯開一點（分層抖動）。
   //
@@ -757,9 +816,9 @@ vec3 staticGlassShade(vec3 p, vec3 N, vec3 rd, vec3 refractedBg,
   // 項不是可有可無的補強，而是同一件事在另一條路徑上。
   vec3 reflDir = reflect(rd, N);
   float reflSpread = length(dFdx(reflDir)) + length(dFdy(reflDir));
-  vec3 studioReflection = studioBackdropSample(
+  vec3 studioReflection = studioBackdropSampleEdge(
     p, reflDir, uRoughness,
-    1.0, reflSpread / (1.0 + reflSpread * 6.0) * 0.75 + uRoughness * 0.2
+    1.0, reflSpread / (1.0 + reflSpread * 6.0) * 0.75, roughReflectionEdge()
   ).rgb * uReflect * fresView;
   vec3 lit = transmitted + studioReflection;
   // HDR 輸出開著（後處理鏈在跑）時什麼都不壓：光暈是靠超過 1 的部分觸發的，

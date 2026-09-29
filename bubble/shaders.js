@@ -807,11 +807,10 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
         // 地方是真的不連續，導數在那裡會噴到很大 —— 硬夾在上限會讓那一排像素
         // 整齊地糊成一格一格的點。x/(1+kx) 讓大值連續地收斂到上限，過渡就看不
         // 出來了。
-        float studioSoften = spread / (1.0 + spread * 6.0) * 0.75
-          + uRoughness * 0.22;
-        refractedBg = studioBackdropSample(
-          exitPoint, exitDir, roughBlur, 1.0, studioSoften
-        ).rgb;
+        float studioSoften = spread / (1.0 + spread * 6.0) * 0.75;
+        float roughEdge = roughTransmissionEdge();  // 霧面：GGX 透射錐當最小邊寬
+        refractedBg = studioBackdropSampleEdge(exitPoint, exitDir, roughBlur, 1.0,
+          studioSoften, roughEdge).rgb;
         // ===== 光譜折射 =====
         //
         // 這裡不重跑追蹤。上面那段註解記錄過「五個波長各自穿過 SDF」因為太貴而
@@ -841,7 +840,7 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
         if (bandSpread > 0.0001 && uSpectralSamples > 1) {
           refractedBg = spectralRefraction(
             rd, N, exitNormal, exitPoint, exitDir,
-            bandSpread, roughBlur, studioSoften
+            bandSpread, roughBlur, studioSoften, roughEdge
           );
         }
 #else
@@ -868,8 +867,8 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
               bounceDir, bounceNormal,
               refract(bounceDir, -bounceNormal, uIOR), bounceR
             );
-            vec3 bounceColor = studioBackdropSample(
-              bouncePoint, bounceOut, roughBlur, 1.0, studioSoften
+            vec3 bounceColor = studioBackdropSampleEdge(
+              bouncePoint, bounceOut, roughBlur, 1.0, studioSoften, roughEdge
             ).rgb;
             refractedBg = mix(refractedBg, bounceColor,
               backFres * clamp(uInternalBounce, 0.0, 1.0));
@@ -877,6 +876,7 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
             pathLength += bouncePath * backFres * clamp(uInternalBounce, 0.0, 1.0);
           }
         }
+        refractedBg = frostedTransmission(refractedBg, exitPoint, rd, roughBlur, studioSoften, roughEdge);  // 霧面的另一半
 #endif
         // 註：這裡試過「RGB 通道各自以不同折射率取樣」的真色散（chromatic
         // aberration），結論是不划算，已經移除。留個記錄避免重踩：

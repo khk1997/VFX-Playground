@@ -259,13 +259,34 @@ def check_static(browser, base_url: str) -> dict[str, object]:
         """() => [...document.querySelectorAll('#inspectorPage-static > details > summary h3')]
              .map(node => node.textContent)"""
     )
-    assert sections[:7] == ["風格", "造型", "玻璃", "燈光", "地板", "鏡頭", "背景"], sections
-    for key in ("staticShape", "dispersionScale", "edgeDispersion", "studioShadowStrength", "cameraFov"):
+    assert sections[:6] == ["風格", "造型", "玻璃", "地板", "鏡頭", "背景"], sections
+    for key in ("staticShape", "dispersionScale", "studioShadowStrength", "cameraFov"):
         assert page.locator(f"#{key}").is_visible(), f"{key} is not on the static panel"
+    # 邊緣彩虹不開給使用者；燈光強度與明暗對比改成畫面右下角的常駐調整。
+    for key in ("edgeDispersion", "studioCardStrength", "studioFlag"):
+        assert page.locator(f"#{key}").is_hidden(), f"{key} should not be on the static panel"
+    assert page.locator("#absorbColor").input_value() == "#ffffff"
+    assert page.locator("#absorb").input_value() == "4"
+
+    # 右下角的鏡像滑桿：拖它要寫回真正的參數（連同自動保存），重設要讓它跟著回去。
+    dock = page.locator("#staticQuickDock")
+    assert dock.is_visible(), "the quick light dock is missing"
+    mirror = dock.locator("input[type=range]").first
+    mirror.evaluate("el => { el.value = '0.9'; el.dispatchEvent(new Event('input', { bubbles: true })); }")
+    assert page.locator("#studioCardStrength").input_value() == "0.9"
+    page.wait_for_function(
+        "(JSON.parse(localStorage.getItem('vfx:prism-drops:last') || '{}').values || {}).studioCardStrength === '0.9'"
+    )
+    # 重設鈕此刻收在尚未展開的工具區裡，直接派發點擊。
+    page.locator("#resetBtn").evaluate("el => el.click()")
+    page.wait_for_function(
+        "document.querySelector('#staticQuickDock input[type=range]').value"
+        " === document.querySelector('#studioCardStrength').value"
+    )
 
     # 主光用方位盤調：往正上方拖是逆光，也就是跟鏡頭方位差 180°。
-    dial = page.locator(".lightDialCanvas")
-    assert dial.is_visible(), "the light dial is missing"
+    dial = page.locator("#staticQuickDock .lightDialCanvas")
+    assert dial.is_visible(), "the light dial is missing from the quick dock"
     dial.scroll_into_view_if_needed()
     box = dial.bounding_box()
     page.mouse.click(box["x"] + box["width"] / 2, box["y"] + 20)

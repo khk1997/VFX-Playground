@@ -18,7 +18,9 @@ const STATIC_LOOKS = [
   },
   {
     id: 'frost', label: '霧面', swatch: 'linear-gradient(90deg, #d7dde4, #aeb6c0)',
-    values: { roughness: 0.32, dispersionScale: 0.6, edgeDispersion: 1.5 },
+    // roughness 是 GGX 的 α = r²（見 environment.js 的 ggxLobeAngle），0.3 附近還
+    // 幾乎是清玻璃；0.55 才是一眼看得出來的霧面。
+    values: { roughness: 0.55, dispersionScale: 0.6, edgeDispersion: 1.5 },
   },
   {
     id: 'tint', label: '有色', swatch: 'linear-gradient(90deg, #7fb6ff, #2f6fd8)',
@@ -573,7 +575,9 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
   function hasVisibleControl(node) {
     for (const child of node.children) {
       if (child.tagName === 'SUMMARY' || isHiddenNode(child)) continue;
-      if (child.matches('input, select, textarea, button')) return true;
+      // [role="slider"]：自己畫的控制項（例如燈光方向盤是一張 canvas）也算。
+      // 靜態模組的燈光區只剩方向盤時，少了這一條整塊會被當成空區塊收掉。
+      if (child.matches('input, select, textarea, button, [role="slider"]')) return true;
       if (hasVisibleControl(child)) return true;
     }
     return false;
@@ -684,8 +688,10 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     // 最後才跑：閘門、深度與上面那些 hidden 都定案之後，空區塊才數得準。
     pruneEmptySections();
     staticDial?.draw();
+    staticQuickDock?.sync();
   }
   let staticDial = null;
+  let staticQuickDock = null;
   built = true;
   if (launchMotion === 'static') {
     buildStaticLayout();
@@ -702,6 +708,58 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
   }
   refresh();
   return { refresh, setQualityStatus };
+
+  // 畫面右下角的常駐調整區。
+  //
+  // 裡面是「鏡像」滑桿，不是把面板裡那一列搬出來：參數檔的保存與自動保存、
+  // 「已調整」標記、數值輸入、閘門都只掃 #panel；而 #panel 的 transform 與
+  // backdrop-filter 又會讓它裡面 position: fixed 的東西改成相對面板定位，放不到
+  // 畫面角落。所以真正的控制項原地留著（不放進任何一個看得到的區塊），這裡拖曳
+  // 時走 writeControl 寫回去 —— 跟使用者拖面板那根完全同一條路；反過來重設、
+  // 風格、匯入改了真值時，refresh 呼叫 sync 把這邊對齊。
+  function buildQuickDock(title, entries, lead = null) {
+    const root = element('aside', 'staticQuickDock');
+    root.id = 'staticQuickDock';
+    root.setAttribute('aria-label', `${title}快速調整`);
+    root.append(element('div', 'staticQuickDockTitle', title));
+    // lead：放在滑桿前面的自訂控制項（燈光方向盤）。它本來就是直接讀寫參數
+    // id 的，不靠 #panel，搬過來不需要鏡像。
+    if (lead) root.append(lead);
+    const sliders = element('div', 'staticQuickDockSliders');
+    root.append(sliders);
+    const items = entries.map(([key, label]) => {
+      const source = $(key);
+      const row = element('label', 'staticQuickDockRow');
+      const head = element('span', 'staticQuickDockHead');
+      const name = element('span', '', label);
+      const value = element('output', 'staticQuickDockValue');
+      head.append(name, value);
+      const input = element('input');
+      input.type = 'range';
+      input.min = source.min; input.max = source.max; input.step = source.step;
+      // 鏡像本身不是參數：不能被參數檔掃到，也不能帶 id 跟真值撞名。
+      input.dataset.presetIgnore = '';
+      input.addEventListener('input', () => writeControl(key, input.value));
+      row.append(head, input);
+      sliders.append(row);
+      return { key, input, value };
+    });
+    document.body.append(root);
+    const sync = () => {
+      for (const { key, input, value } of items) {
+        const source = $(key);
+        if (document.activeElement !== input) input.value = source.value;
+        const readout = $(`${key}_v`);
+        value.textContent = readout && !readout.querySelector('input')
+          ? readout.textContent : source.value;
+        const min = Number(input.min || 0), max = Number(input.max || 1);
+        const progress = max > min ? (Number(input.value) - min) / (max - min) * 100 : 0;
+        input.style.setProperty('--range-progress', `${Math.max(0, Math.min(100, progress))}%`);
+      }
+    };
+    sync();
+    return { root, sync };
+  }
 
   // 靜態模組的面板：一頁、由上而下照「東西 → 材質 → 光 → 地板 → 鏡頭 → 背景」排，
   // 只放看得到效果的參數。其餘控制項留在隱藏的分頁裡，參數檔與重設照常讀寫它們。
@@ -772,21 +830,24 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     }
     shapeBlock.append(importBlock);
 
+    // 「邊緣彩虹」（edgeDispersion）不開給使用者：跟「彩虹強度」看起來差不多，
+    // 兩根放在一起只是讓人猜哪一根在做什麼。它仍留在隱藏的分頁裡，風格按鈕
+    // 與參數檔照常讀寫。
     group('玻璃', [
       ['dispersionScale', '彩虹強度'],
-      ['edgeDispersion', '邊緣彩虹'],
       ['ior', '折射率'],
       ['absorbColor', '玻璃顏色'],
       ['absorb', '顏色濃度'],
       ['roughness', '霧面'],
       ['reflect', '反射'],
     ]);
-    const lightBlock = group('燈光', [
+    // 燈光整組（方向盤、燈光強度、明暗對比）是最常一邊看畫面一邊調的，拉到
+    // 畫面右下角常駐（見 buildQuickDock），面板裡不再有燈光區。
+    staticDial = buildLightDial();
+    staticQuickDock = buildQuickDock('燈光', [
       ['studioCardStrength', '燈光強度'],
       ['studioFlag', '明暗對比'],
-    ]);
-    staticDial = buildLightDial();
-    lightBlock.querySelector(':scope > summary').after(staticDial.root);
+    ], staticDial.root);
     group('地板', [
       ['studioShadowStrength', '影子深度'],
       ['studioCaustic', '透光光斑'],
@@ -945,12 +1006,15 @@ function buildPalette(prefix, applyValues) {
 // 跟畫面上看到的方向一致（鏡頭轉了，盤面跟著轉）。半徑是高度：中心是正上方，
 // 外圈是地平線。寫回的仍是那兩根滑桿，參數檔與重設不必知道這個盤的存在。
 function buildLightDial() {
-  const SIZE = 132;
+  // 盤面照實際顯示的尺寸畫：右下角的常駐區在桌面與手機給的大小不同（見
+  // inspector.css 的 .staticQuickDock），寫死一個尺寸會被 CSS 拉伸而糊掉。
+  const FALLBACK_SIZE = 132;
   const root = element('div', 'lightDial');
   const canvas = element('canvas', 'lightDialCanvas');
   canvas.tabIndex = 0;
   canvas.setAttribute('role', 'slider');
   canvas.setAttribute('aria-label', '主光方向與高度');
+  canvas.title = '拖曳光點改變主光方向；越靠近中心，光越從正上方打下來。方向鍵也可以微調。';
   const info = element('div', 'lightDialInfo');
   const readout = element('strong', 'lightDialReadout');
   info.append(
@@ -993,6 +1057,7 @@ function buildLightDial() {
     event.preventDefault();
   });
   function draw() {
+    const SIZE = Math.round(canvas.clientWidth) || FALLBACK_SIZE;
     const dpr = window.devicePixelRatio || 1;
     if (canvas.width !== SIZE * dpr) { canvas.width = SIZE * dpr; canvas.height = SIZE * dpr; }
     const ctx = canvas.getContext('2d');
