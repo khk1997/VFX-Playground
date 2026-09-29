@@ -1,6 +1,6 @@
 'use strict';
 import * as THREE from 'three';
-import { buildInspector } from './inspector.js?v=static-dock-2';
+import { buildInspector } from './inspector.js?v=openpbr-1';
 import { createAdaptiveQuality, QUALITY_TIER_NAMES } from './adaptive-quality.js?v=2';
 import { createGpuProfiler } from './gpu-profiler.js?v=1';
 let inspector = null;
@@ -46,7 +46,7 @@ import {
 } from './runtime-defaults.js?v=static-defaults-1';
 import {
   BACKDROP_SCOPED_KEYS, createMemorySlot, createMotionMemory, motionDefaultsFor,
-} from './runtime-memory.js?v=tint-light-1';
+} from './runtime-memory.js?v=openpbr-1';
 import {
   COLORS, SELECTS, createFormatters, createToggleBindings,
 } from './control-schema.js?v=1';

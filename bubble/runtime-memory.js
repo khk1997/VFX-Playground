@@ -148,6 +148,10 @@ const MOTION_FIXED_OVERRIDES = {
   static: {
     absorbColor: '#ffffff',
     absorb: 4,
+    // OpenPBR 的清玻璃：specular_weight 1、transmission_weight 1。淺底那張表的
+    // transmission 0.97 與全域的 reflect 1.6 都不是這個模組要的起點。
+    reflect: 1,
+    transmission: 1,
   },
 };
 

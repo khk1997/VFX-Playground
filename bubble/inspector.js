@@ -7,7 +7,7 @@ const PAGES = [['shape', '造型'], ['motion', '動態'], ['look', '外觀'], ['
 // 靜態模組的風格。套用時這裡列的每一根都會寫一次（沒給值的回到預設）。
 const STATIC_LOOK_KEYS = [
   'dispersionScale', 'edgeDispersion', 'dispersionAbbe', 'ior', 'roughness',
-  'absorb', 'absorbColor', 'internalBounce', 'studioFlag', 'studioCardStrength',
+  'absorb', 'absorbColor', 'studioFlag', 'studioCardStrength',
 ];
 const STATIC_LOOKS = [
   { id: 'clear', label: '清透', swatch: 'linear-gradient(90deg, #e9f1fb, #c9d9ec)', values: {} },
@@ -28,7 +28,7 @@ const STATIC_LOOKS = [
   },
   {
     id: 'crystal', label: '水晶', swatch: 'linear-gradient(90deg, #ffffff, #b9e2ff, #ffffff)',
-    values: { ior: 1.62, internalBounce: 0.9, dispersionScale: 1.4, edgeDispersion: 4, studioCardStrength: 0.7 },
+    values: { ior: 1.62, dispersionScale: 1.4, edgeDispersion: 4, studioCardStrength: 0.7 },
   },
 ];
 
@@ -833,6 +833,9 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     // 「邊緣彩虹」（edgeDispersion）不開給使用者：跟「彩虹強度」看起來差不多，
     // 兩根放在一起只是讓人猜哪一根在做什麼。它仍留在隱藏的分頁裡，風格按鈕
     // 與參數檔照常讀寫。
+    // 反射是 OpenPBR 的 specular_weight，範圍 0–1（shader 也夾在 1，見
+    // staticGlassShade）。只有靜態頁會跑到這裡，其餘模式的滑桿範圍不動。
+    $('reflect').max = '1';
     group('玻璃', [
       ['dispersionScale', '彩虹強度'],
       ['ior', '折射率'],
@@ -874,7 +877,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       ['lightRimSize', '邊光 大小'], ['lightRimPower', '邊光 強度'],
       ['flagAAzimuth', '黑卡A 方向'], ['flagAElevation', '黑卡A 高度'], ['flagASize', '黑卡A 大小'],
       ['flagBAzimuth', '黑卡B 方向'], ['flagBElevation', '黑卡B 高度'], ['flagBSize', '黑卡B 大小'],
-      ['dispersionAbbe', '阿貝數'], ['internalBounce', '內部反射'],
+      ['dispersionAbbe', '阿貝數'],
       ['transmission', '透射率'], ['fresnel', '邊緣光'],
       ['studioCardGain', '燈的亮度'], ['studioCardFalloff', '燈的衰減'], ['studioCardEdge', '燈的銳利度'], ['studioAmbient', '環境亮度'],
       ['spectralSamples', '光譜取樣'], ['antialiasLevel', '抗鋸齒'],

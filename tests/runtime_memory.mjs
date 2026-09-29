@@ -40,7 +40,8 @@ assert.deepEqual(Object.keys(memory).sort(), [
 for (const motion of MOTION_KEYS) {
   assert.equal(memory.spectralCausticFocus[`${motion}|dark`], 1);
   assert.equal(memory.spectralCausticSeparation[`${motion}|dark`], 1);
-  assert.equal(memory.transmission[`${motion}|light`], 0.97);
+  // 靜態模組是 OpenPBR 的清玻璃（transmission_weight 1），不吃淺底那張表。
+  assert.equal(memory.transmission[`${motion}|light`], motion === 'static' ? 1 : 0.97);
   assert.equal(memory.rayDispersionEnabled[`${motion}|light`], false);
   assert.equal(memory.bloomEnabled[`${motion}|light`], false);
   for (const prefix of EDGE_TINT_TARGETS) {
@@ -58,6 +59,8 @@ for (const motion of MOTION_KEYS) {
     for (const backdrop of ['dark', 'light']) {
       assert.equal(memory.absorbColor[`static|${backdrop}`], '#ffffff');
       assert.equal(memory.absorb[`static|${backdrop}`], 4);
+      assert.equal(memory.reflect[`static|${backdrop}`], 1);
+      assert.equal(memory.transmission[`static|${backdrop}`], 1);
     }
     continue;
   }

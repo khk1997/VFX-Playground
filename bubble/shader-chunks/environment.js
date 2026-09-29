@@ -52,7 +52,9 @@ uniform float uDispersionAbbe;
 uniform float uStudioCaustic;       // 焦散強度：光被玻璃聚到地板上的亮斑
 uniform float uStudioCausticChroma; // 焦散外圈的彩度
 uniform float uStudioFlag;          // 黑旗強度：框外的黑卡，專門用來在淺底製造對比
-uniform float uInternalBounce;      // 內部再彈一次的佔比（OpenPBR 沒有這一項，是取樣策略）
+// 內部再彈一次。靜態模組已不讀它（彈跳的比例完全由出口面的 Fresnel 決定，見
+// shaders.js），uniform 留著只是因為其他模式與參數檔還帶著這個名字。
+uniform float uInternalBounce;
 // ===== 光譜折射 =====
 // OpenPBR: transmission_dispersion_scale。0 = 各波長同路，沒有色散。
 uniform float uDispersionScale;
@@ -689,40 +691,43 @@ vec3 frostedTransmission(vec3 refracted, vec3 exitPoint, vec3 rd, float roughBlu
 // 視線與前表面法線入射。彈跳本來就只補一次，這一層近似在同一個量級。
 // 一個波長的出射方向（見 spectralRefraction）。抽出來是因為迴圈之外還要多算
 // 光譜兩端各一次，用來量相鄰波長之間錯開多少。
-vec3 spectralExitDir(vec3 rd, vec3 N, vec3 exitNormal, vec3 exitDir, float iorBand){
-  vec3 outBand = exitDir;
-  vec3 inBand = refract(rd, N, 1.0 / iorBand);
-  if (dot(inBand, inBand) > 0.0001) {
-    inBand = normalize(inBand);
-    vec3 bounced = normalize(reflect(inBand, exitNormal));
-    vec3 o = refract(inBand, -exitNormal, iorBand);
+// 從玻璃內部沿 inBand 打到出口面 exitNormal 時的出射方向（折射與內反射按 Fresnel
+// 連續混合）。主光路（spectralExitDir）與內部彈跳（spectralBounce）共用。
+vec3 bandExitFromInside(vec3 inBand, vec3 exitNormal, float iorBand){
+  vec3 outBand;
+  vec3 bounced = normalize(reflect(inBand, exitNormal));
+  vec3 o = refract(inBand, -exitNormal, iorBand);
 
-    // 臨界角附近按 Fresnel 連續過渡，不要用「有沒有全內反射」當二元開關。
-    //
-    // 上一版是開關，而那會在畫面上切出硬邊：臨界角 θc = asin(1/n) 是一條等角
-    // 線，在立方體的平面上就是直線，相鄰像素落在兩側時取到的是環境裡完全不同
-    // 的兩塊 —— 表面因此被切成一塊塊三角形，而且色散開得越強越明顯（關掉色散
-    // 就完全消失，這是分辨出來的）。
-    //
-    // 物理上本來就不是開關：透射的 Fresnel 係數在接近 θc 時連續趨近 0，同時
-    // 折射方向連續轉向與表面相切，所以「按 R 混合兩個方向」在 θc 兩側是接得
-    // 起來的 —— R 在那裡已經是 1，混出來就是內反射本身。用完整的 Fresnel
-    // （s 與 p 偏振各半）而不是 Schlick 近似：Schlick 在臨界角附近正是誤差
-    // 最大的地方，而這裡要的就是那一段。
-    float cosI = clamp(abs(dot(inBand, exitNormal)), 0.0, 1.0);
-    float sinT2 = iorBand * iorBand * (1.0 - cosI * cosI);
-    float bandR = 1.0;
-    if (sinT2 < 1.0) {
-      float cosT = sqrt(1.0 - sinT2);
-      float rs = (iorBand * cosI - cosT) / (iorBand * cosI + cosT);
-      float rp = (cosI - iorBand * cosT) / (cosI + iorBand * cosT);
-      bandR = clamp(0.5 * (rs * rs + rp * rp), 0.0, 1.0);
-    }
-    outBand = dot(o, o) > 0.0001
-      ? normalize(mix(normalize(o), bounced, bandR))
-      : bounced;
+  // 臨界角附近按 Fresnel 連續過渡，不要用「有沒有全內反射」當二元開關。
+  //
+  // 上一版是開關，而那會在畫面上切出硬邊：臨界角 θc = asin(1/n) 是一條等角
+  // 線，在立方體的平面上就是直線，相鄰像素落在兩側時取到的是環境裡完全不同
+  // 的兩塊 —— 表面因此被切成一塊塊三角形，而且色散開得越強越明顯（關掉色散
+  // 就完全消失，這是分辨出來的）。
+  //
+  // 物理上本來就不是開關：透射的 Fresnel 係數在接近 θc 時連續趨近 0，同時
+  // 折射方向連續轉向與表面相切，所以「按 R 混合兩個方向」在 θc 兩側是接得
+  // 起來的 —— R 在那裡已經是 1，混出來就是內反射本身。用完整的 Fresnel
+  // （s 與 p 偏振各半）而不是 Schlick 近似：Schlick 在臨界角附近正是誤差
+  // 最大的地方，而這裡要的就是那一段。
+  float cosI = clamp(abs(dot(inBand, exitNormal)), 0.0, 1.0);
+  float sinT2 = iorBand * iorBand * (1.0 - cosI * cosI);
+  float bandR = 1.0;
+  if (sinT2 < 1.0) {
+    float cosT = sqrt(1.0 - sinT2);
+    float rs = (iorBand * cosI - cosT) / (iorBand * cosI + cosT);
+    float rp = (cosI - iorBand * cosT) / (cosI + iorBand * cosT);
+    bandR = clamp(0.5 * (rs * rs + rp * rp), 0.0, 1.0);
   }
+  outBand = dot(o, o) > 0.0001
+    ? normalize(mix(normalize(o), bounced, bandR))
+    : bounced;
   return outBand;
+}
+vec3 spectralExitDir(vec3 rd, vec3 N, vec3 exitNormal, vec3 exitDir, float iorBand){
+  vec3 inBand = refract(rd, N, 1.0 / iorBand);
+  if (dot(inBand, inBand) <= 0.0001) return exitDir;
+  return bandExitFromInside(normalize(inBand), exitNormal, iorBand);
 }
 
 vec3 spectralRefraction(vec3 rd, vec3 N, vec3 exitNormal, vec3 exitPoint,
@@ -795,15 +800,83 @@ vec3 spectralRefraction(vec3 rd, vec3 N, vec3 exitNormal, vec3 exitPoint,
 //
 // transfer 回傳「光穿過這塊玻璃之後還剩多少」，也就是 over 合成裡的 (1 - alpha)，
 // 去背輸出要用它反解 straight color。
+// 內部彈跳的光譜版：光在第一個出口面反射回去、從第二個面出去，每個波長各算一次。
+//
+// 全內反射區（出口面反射率接近 1）裡，畫面幾乎全部來自這一條。它以前不分光
+// （只取一次背景），而彈跳的比例改成完全由 Fresnel 決定之後，那一區的顏色就被
+// 這一份沒有色散的結果整片蓋掉 —— 方體側面那幾塊藍與琥珀色就是這樣不見的。
+// 物理上顏色本來就該在這條路上：全內反射的光不會從第一個面出去。
+//
+// 跟 spectralRefraction 同一個取巧：不重追，第二個出口點與法線沿用呼叫端那一次
+// traceExitSurface，每個波長只重算入射、反射、出射三次方向。反射率低於 0.05 的
+// 地方這一份只佔幾個百分點，就不分光，省下那 N 次取樣；那條分界上最多差出
+// 5% × 色差，看不出來。
+vec3 spectralBounce(vec3 rd, vec3 N, vec3 exitNormal, vec3 bouncePoint,
+                    vec3 bounceNormal, vec3 bounceOut, float bandSpread, float backFres,
+                    float roughBlur, float studioSoften, float roughEdge){
+  if (bandSpread <= 0.0001 || uSpectralSamples <= 1 || backFres < 0.05) {
+    return studioBackdropSampleEdge(bouncePoint, bounceOut, roughBlur, 1.0,
+      studioSoften, roughEdge).rgb;
+  }
+  float bandJitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+  vec3 spectralSum = vec3(0.0);
+  vec3 weightSum = vec3(0.0);
+  vec3 first = bounceOut;
+  vec3 last = bounceOut;
+  for (int i = 0; i < MAX_SPECTRAL_COMPILE; i++) {
+    if (i >= uSpectralSamples) break;
+    float band = (float(i) + bandJitter) / float(uSpectralSamples);
+    float iorBand = bandIOR(band, bandSpread);
+    vec3 outBand = bounceOut;
+    vec3 inBand = refract(rd, N, 1.0 / iorBand);
+    if (dot(inBand, inBand) > 0.0001) {
+      vec3 reflected = normalize(reflect(normalize(inBand), exitNormal));
+      outBand = bandExitFromInside(reflected, bounceNormal, iorBand);
+    }
+    if (i == 0) first = outBand;
+    last = outBand;
+    vec3 w = spectralResponse(band);
+    // 邊寬下限：跟主光路一樣要追上相鄰波長的角距（見 spectralRefraction），這裡
+    // 用上一個樣本到這一個的距離估，不另外多算兩端。
+    float gap = length(last - first) / max(float(i), 1.0);
+    spectralSum += studioBackdropSampleEdge(bouncePoint, outBand, roughBlur, 1.0,
+      studioSoften, max(min(gap, 0.25), roughEdge)).rgb * w;
+    weightSum += w;
+  }
+  return spectralSum / max(weightSum, vec3(1e-4));
+}
+
 vec3 staticGlassShade(vec3 p, vec3 N, vec3 rd, vec3 refractedBg,
                       vec3 transmission, vec3 absorption, out vec3 transfer){
   float cosView = clamp(dot(N, -rd), 0.0, 1.0);
   float f0 = pow((uIOR - 1.0) / (uIOR + 1.0), 2.0);
   float fresView = f0 + (1.0 - f0) * pow(1.0 - cosView, 5.0);
+  // OpenPBR 的 specular_weight：F' = weight·F，範圍 0–1。反射拿走 F'，剩下的
+  // (1 − F') 才進玻璃 —— 反射多一分、透射就少一分。前一版反射乘 uReflect（預設
+  // 1.6）、透射卻只扣 (1 − F)，等於憑空多出六成反射光。
+  float specWeight = clamp(uReflect, 0.0, 1.0);
+  float fresSpec = specWeight * fresView;
+  // OpenPBR 的 transmission_weight：T 的部分走透射，(1 − T) 交給底層（見下面的
+  // baseLobe）。直接讀 uTransmission，不用傳進來的 transmission：那是舊的薄膜
+  // 模型算的，已經乘過一次 (1 − reflectance)，再乘這裡的 (1 − F') 是同一筆
+  // Fresnel 扣兩遍，整顆玻璃因此偏暗。
+  //
   // 只扣入射面的 Fresnel：出口面的反射率已經用在方向的混合上了（見
-  // staticExitDirection），再乘一次是同一筆能量扣兩遍，掠射區會整片變暗。
-  transfer = transmission * absorption * (1.0 - fresView);
+  // staticExitDirection），再乘一次也是同一筆能量扣兩遍，掠射區會整片變暗。
+  float transmissionWeight = clamp(uTransmission, 0.0, 1.0);
+  transfer = vec3(transmissionWeight) * absorption * (1.0 - fresSpec);
   vec3 transmitted = refractedBg * transfer;
+  // 底層：OpenPBR 裡 (1 − transmission_weight) 不是消失，而是交給 base 那一層
+  // （漫射，顏色是 base_color，規格預設 0.8）。透射率調低的玻璃因此會變成乳白，
+  // 而不是變暗。受光用一份很寬的棚景近似漫射的半球積分：沿法線取樣、邊寬撐到
+  // 1.2 rad，跟 roughReflectionEdge 的上限同一個意思 —— 再寬就是整個半球。
+  // 透射率為 1（靜態模組的預設）時整段跳過，不多取樣。
+  vec3 baseLobe = vec3(0.0);
+  if (transmissionWeight < 0.999) {
+    const vec3 OPENPBR_BASE_COLOR = vec3(0.8);
+    vec3 irradiance = studioBackdropSampleEdge(p, N, 0.0, 1.0, 0.0, 1.2).rgb;
+    baseLobe = irradiance * OPENPBR_BASE_COLOR * (1.0 - transmissionWeight) * (1.0 - fresSpec);
+  }
   // 反射必須來自同一個棚景。用 sampleReflection（HDRI／程序化棚燈）的話，反射
   // 與透射會來自兩個不同的場景，物體就對不上它所在的空間；深底更直接整顆變黑。
   //
@@ -819,8 +892,8 @@ vec3 staticGlassShade(vec3 p, vec3 N, vec3 rd, vec3 refractedBg,
   vec3 studioReflection = studioBackdropSampleEdge(
     p, reflDir, uRoughness,
     1.0, reflSpread / (1.0 + reflSpread * 6.0) * 0.75, roughReflectionEdge()
-  ).rgb * uReflect * fresView;
-  vec3 lit = transmitted + studioReflection;
+  ).rgb * fresSpec;
+  vec3 lit = transmitted + baseLobe + studioReflection;
   // HDR 輸出開著（後處理鏈在跑）時什麼都不壓：光暈是靠超過 1 的部分觸發的，
   // 在這裡先壓掉就等於把玻璃上最亮的那幾條交出去。
   if (uHdrOutput > 0.5) return lit;

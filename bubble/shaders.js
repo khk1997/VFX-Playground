@@ -853,9 +853,9 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
         // 權重連續，所以不會再切出硬邊；掠射區反射率趨近 1，那裡就幾乎全部
         // 走這條路，正是厚玻璃內部該有的轉折。
         //
-        // 這一條刻意不做逐波長：它要多一次完整的內部追蹤，再乘上波長數就太貴。
-        // 色散留在主路徑上，彈跳這一份只補結構與明暗。
-        if (uInternalBounce > 0.001 && backFres > 0.004) {
+        // 內部追蹤只做一次；色散在第二個出口逐波長重算方向（見 spectralBounce），
+        // 全內反射區的顏色就是從這裡來的。
+        if (backFres > 0.004) {  // 比例完全交給出口面的 Fresnel，跟 OpenPBR 一樣不打折
           vec3 bounceDir = normalize(reflect(insideDir, exitNormal));
           vec3 bouncePoint;
           vec3 bounceNormal;
@@ -867,13 +867,13 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
               bounceDir, bounceNormal,
               refract(bounceDir, -bounceNormal, uIOR), bounceR
             );
-            vec3 bounceColor = studioBackdropSampleEdge(
-              bouncePoint, bounceOut, roughBlur, 1.0, studioSoften, roughEdge
-            ).rgb;
+            vec3 bounceColor = spectralBounce(rd, N, exitNormal, bouncePoint,  // 逐波長，見 spectralBounce
+              bounceNormal, bounceOut, bandSpread, backFres, roughBlur, studioSoften,
+              roughEdge);
             refractedBg = mix(refractedBg, bounceColor,
-              backFres * clamp(uInternalBounce, 0.0, 1.0));
+              backFres);
             // 多走的那一段光程要算進吸收，厚處才會真的比較濃。
-            pathLength += bouncePath * backFres * clamp(uInternalBounce, 0.0, 1.0);
+            pathLength += bouncePath * backFres;
           }
         }
         refractedBg = frostedTransmission(refractedBg, exitPoint, rd, roughBlur, studioSoften, roughEdge);  // 霧面的另一半
