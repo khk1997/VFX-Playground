@@ -17,7 +17,7 @@ import {
 import {
   MOTION_UNIFORM_MAP, MOTION_SVG_DEMO,
   MOTION_HDRI, MOTION_KEYS, MOTION_TEXT_DEFAULTS, usesShapeField,
-} from './motions/registry.js?v=type-center-1';
+} from './motions/registry.js?v=static-defaults-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import { buildMorphPairs } from './motions/morph.js?v=post-mask-3';
@@ -43,7 +43,7 @@ import {
 import {
   COLOR_DEFAULTS, DEFAULTS, LEGACY_SELECT_VALUES, SELECT_DEFAULTS,
   SPECTRAL_CAUSTIC_DEFAULTS, TOGGLE_DEFAULTS, isFormationMotion,
-} from './runtime-defaults.js?v=tint-light-1';
+} from './runtime-defaults.js?v=static-defaults-1';
 import {
   BACKDROP_SCOPED_KEYS, createMemorySlot, createMotionMemory, motionDefaultsFor,
 } from './runtime-memory.js?v=tint-light-1';
@@ -3672,11 +3672,19 @@ if (!PREVIEW && window.PresetIO) {
     // 那個模式，切回來時 applyMemorySlots 把它們存進那個模式的格子、再把這個模組
     // 原本那一格寫回 P —— 鏡頭、吸收、反射、bloom 這些「按模式記憶」的值就全部
     // 被丟掉，還順手覆寫了另一個模式的記憶、多編兩次 shader。
-    beforeApply: data => (
-      LAUNCH_MOTION && data.values?.motion !== undefined && data.values.motion !== LAUNCH_MOTION
-        ? { ...data, values: { ...data.values, motion: LAUNCH_MOTION } }
-        : data
-    ),
+    beforeApply: data => {
+      let next = data;
+      if (LAUNCH_MOTION && next.values?.motion !== undefined && next.values.motion !== LAUNCH_MOTION) {
+        next = { ...next, values: { ...next.values, motion: LAUNCH_MOTION } };
+      }
+      // 靜態的平面、圓盤、球體、圓柱、圓錐（1–5）已從選單移除；舊參數檔或自動
+      // 保存記著它們時改成方體，不然 select 會落在一個不存在的選項上。
+      const shape = Number(next.values?.staticShape);
+      if (next.values?.staticShape !== undefined && shape >= 1 && shape <= 5) {
+        next = { ...next, values: { ...next.values, staticShape: 0 } };
+      }
+      return next;
+    },
     afterApply: payload => {
       restoreTintMemory(payload);
       updateRampRows();

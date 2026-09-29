@@ -92,32 +92,34 @@ export const MOTIONS = {
       // MOTION_FIXED_OVERRIDES。
       absorb: 4,
       absorbColor: '#ffffff',
+      // 折射率 1.5：一般光學玻璃。全域預設 1.33 是水的值，方體的摺線與色帶在
+      // 1.5 上才有足夠的偏折。
+      ior: 1.5,
     },
     // 幾何選項用數字枚舉（不是字串），這樣才能沿用 bindControls 既有的「數值
     // 滑桿／數字型 select 一律 parseFloat」那條路徑，不必為了一個字串型 select
     // 額外開一條特例（毛細波的 capillaryField／capillaryTexture 也是同樣理由
-    // 用數字枚舉）。0 方體、1 平面、2 圓盤、3 球體、4 圓柱、5 圓錐、6 圓環、
-    // 7 匯入——7 是唯一會讓 shader 改吃形狀場貼圖、而不是程序化 SDF 的值。
+    // 用數字枚舉）。0 方體、6 圓環、7 匯入——7 是唯一會讓 shader 改吃形狀場貼圖、
+    // 而不是程序化 SDF 的值。
+    //
+    // 平面、圓盤、球體、圓柱、圓錐（1–5）不再開給使用者，但編號原樣保留、shader
+    // 裡的 SDF 也還在：編號是參數檔與自動保存的一部分，重排會讓舊檔案指到別的
+    // 造型。舊檔案裡記著 1–5 的，載入時改成方體（見 bubble.js 的 beforeApply）。
     params: [
       {
         key: 'staticShape', label: '幾何形狀', type: 'select', value: 0,
         options: [
           { value: 0, label: '方體 Cube' },
-          { value: 1, label: '平面 Plane' },
-          { value: 2, label: '圓盤 Circle' },
-          { value: 3, label: '球體 UV/Ico Sphere' },
-          { value: 4, label: '圓柱 Cylinder' },
-          { value: 5, label: '圓錐 Cone' },
           { value: 6, label: '圓環 Torus' },
           { value: 7, label: '匯入 SVG／GLB…' },
         ],
       },
       {
-        key: 'boxSize', label: '方塊大小', min: 0.3, max: 1.2, step: 0.01, value: 0.75,
+        key: 'boxSize', label: '方塊大小', min: 0.3, max: 1.2, step: 0.01, value: 1.01,
         gate: 'staticShapeBox',
       },
       {
-        key: 'boxCornerRadius', label: '圓角', min: 0, max: 0.4, step: 0.005, value: 0.2,
+        key: 'boxCornerRadius', label: '圓角', min: 0, max: 0.4, step: 0.005, value: 0.12,
         gate: 'staticShapeBox',
       },
       {

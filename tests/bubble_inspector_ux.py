@@ -301,6 +301,19 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     page.locator('[data-static-look="clear"]').click()
     assert page.locator("#edgeDispersion").input_value() == default_edge
 
+    # 輸出對話框開著時，右下角的燈光區要跟左邊面板一樣收起來，關掉後回來。
+    assert dock.is_visible()
+    page.locator("#exportBtn").evaluate("el => el.click()")
+    page.wait_for_function("document.getElementById('exportDialog').open")
+    assert dock.is_hidden(), "the light dock is showing over the export dialog"
+    page.locator("#exportDialog").evaluate("el => el.close()")
+    page.wait_for_function("!document.getElementById('exportDialog').open")
+    assert dock.is_visible(), "the light dock did not come back after the export dialog closed"
+
+    # 形狀只剩方體、圓環、匯入。
+    shapes = page.locator("#staticShape option").evaluate_all("els => els.map(el => el.value)")
+    assert shapes == ["0", "6", "7"], shapes
+
     # 匯入形狀時才出現檔案按鈕與擠出參數。
     assert page.locator("#shapeBtn").is_hidden()
     page.locator("#staticShape").select_option("7")

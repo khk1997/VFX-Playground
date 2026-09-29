@@ -2,11 +2,11 @@ import { EDGE_TINT_TARGETS, edgeTintKeys } from './edge-tint.js?v=dark-tint-1';
 import {
   MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_DOLLY, MOTION_DEFAULT_LOOP_DURATION,
   MOTION_DEFAULT_RADIUS, MOTION_KEYS, MOTION_OVERRIDES,
-} from './motions/registry.js?v=type-center-1';
+} from './motions/registry.js?v=static-defaults-1';
 import {
   COLOR_DEFAULTS, DEFAULTS, EDGE_TINT_BASE_BY_BACKDROP, EDGE_TINT_STRENGTH_BY_BACKDROP, SELECT_DEFAULTS,
   SPECTRAL_CAUSTIC_DEFAULTS, TOGGLE_DEFAULTS,
-} from './runtime-defaults.js?v=tint-light-1';
+} from './runtime-defaults.js?v=static-defaults-1';
 
 // 按動態模式各自記憶的參數：使用者在某個模式下調過的值會被保留，切回來時
 // 恢復。count/radius/loopDuration/dolly 每個模式的初始值天生就不同，直接來自

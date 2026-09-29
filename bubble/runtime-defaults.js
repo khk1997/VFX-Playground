@@ -1,7 +1,7 @@
 import {
   MOTION_DEFAULT_DOLLY, MOTION_PARAM_DEFAULTS, MOTION_TOGGLE_DEFAULTS,
   MOTION_COLOR_DEFAULTS,
-} from './motions/registry.js?v=type-center-1';
+} from './motions/registry.js?v=static-defaults-1';
 
 /* ===== 參數 ===== */
 export const DEFAULTS = {              // 數值滑桿
@@ -173,7 +173,7 @@ export const DEFAULTS = {              // 數值滑桿
   // 燈位（見 shader-chunks/environment.js 的 studioDir）。方位角 0 = 正對鏡頭的
   // 後方，仰角 90 = 正上方，大小是角半徑（度）。預設值是改動前那五個寫死的方向
   // 向量換算出來的，所以接上滑桿當下外觀不變。
-  lightKeyAzimuth: -29.6, lightKeyElevation: 31.4, lightKeySize: 44.7, lightKeyPower: 1,
+  lightKeyAzimuth: -84, lightKeyElevation: 62, lightKeySize: 44.7, lightKeyPower: 1,
   lightFillAzimuth: 50.3, lightFillElevation: 8.1, lightFillSize: 40.1, lightFillPower: 0.45,
   lightRimAzimuth: 177, lightRimElevation: -17.5, lightRimSize: 17.2, lightRimPower: 0.7,
   flagAAzimuth: 158, flagAElevation: -24.9, flagASize: 39,
