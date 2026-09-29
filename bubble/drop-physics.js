@@ -54,6 +54,31 @@ export function staticShapeBoundsRadius(params) {
   return params.primitiveSize * 1.8 + 0.2;
 }
 
+// 棚景地板的高度：讓靜態的內建造型坐在地板上。
+//
+// 地板原本固定在 -1.15，只對某一個尺寸的方體剛好；圓環、平面這些扁的造型因此
+// 懸在半空將近一個單位，影子沿著側向的主光甩到旁邊，跟物體完全脫開。這些 SDF
+// 都以原點為中心、不帶任何變換（見 geometry.js 的 FEATURE_STATIC_SHAPE），最低點
+// 可以直接照 shader 同一組夾值算出來。留一點點縫，接觸處才不會在地板與玻璃之間
+// 閃爍。
+//
+// 匯入的造型（7）走形狀場，最低點得看那張 SVG，沿用原本的高度。
+export const STUDIO_FLOOR_DEFAULT = -1.15;
+const STUDIO_FLOOR_GAP = 0.02;
+export function staticShapeFloorHeight(params) {
+  const size = Math.max(params.primitiveSize, 0.05);
+  let bottom;
+  switch (params.staticShape) {
+    case 0: bottom = Math.max(params.boxSize, 0.05); break;
+    case 1: case 2: bottom = size * 0.06; break;
+    case 3: bottom = size; break;
+    case 4: case 5: bottom = Math.max(params.primitiveHeight, 0.05); break;
+    case 6: bottom = Math.min(Math.max(params.primitiveTubeRatio, 0.05), 0.9) * size; break;
+    default: return STUDIO_FLOOR_DEFAULT;
+  }
+  return -bottom - STUDIO_FLOOR_GAP;
+}
+
 export function updateDropBounds({
   params,
   count,

@@ -86,6 +86,9 @@
       // 套用後提醒使用者自行載入。
       assetNote = '',
       afterApply = null,
+      // 套用之前改寫檔案內容（回傳新的 data，不要改動傳進來的那一份）。
+      // 用在「有些值不該照檔案走」的情況，例如模組由網址決定、檔案裡記著別的模式。
+      beforeApply = null,
       serializeExtra = null,
       autosave = true,
       storageKey = `vfx:${effect}:last`,
@@ -144,7 +147,8 @@
         throw new Error(`這份參數屬於「${data.effect}」,不能套用到「${effect}」`);
       }
 
-      const incoming = data.values;
+      const prepared = typeof beforeApply === 'function' ? beforeApply(data) || data : data;
+      const incoming = prepared.values;
       const byId = new Map(controls().map(el => [el.id, el]));
       const order = [
         ...applyFirst.filter(id => byId.has(id)),
@@ -168,7 +172,7 @@
         applying = false;
       }
 
-      if (typeof afterApply === 'function') afterApply(data);
+      if (typeof afterApply === 'function') afterApply(prepared);
       save();
 
       const unknown = Object.keys(incoming).filter(id => !byId.has(id));

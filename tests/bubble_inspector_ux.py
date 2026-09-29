@@ -286,15 +286,22 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     assert page.locator("#shapeBtn").is_visible()
     page.locator("#staticShape").select_option("0")
 
-    # 參數檔記著別的模式也不能把模組切走。
+    # 參數檔記著別的模式也不能把模組切走，而且檔案裡「按模式記憶」的值
+    # （cameraFov）要落在這個模組，不能在切走再切回來時被丟掉。
     page.locator(".inspectorUtilities > summary").click()
     page.locator("#presetIO button", has_text="貼上參數").click()
     page.locator("#presetIO textarea").fill(
-        '{"effect":"prism-drops","values":{"motion":"formation","dispersionScale":1.6}}'
+        '{"effect":"prism-drops","values":{"motion":"formation",'
+        '"dispersionScale":1.6,"cameraFov":33}}'
     )
     page.locator("#presetIO button", has_text="套用").click()
     page.wait_for_function("document.querySelector('#dispersionScale').value === '1.6'")
     assert page.locator("#motion").input_value() == "static", "a preset switched the module"
+    assert page.locator("#cameraFov").input_value() == "33", (
+        "a per-mode value from the preset was dropped: "
+        + page.locator("#cameraFov").input_value()
+    )
+    assert "mode=static" in page.url, f"the preset rewrote the module URL: {page.url}"
     page.locator("#resetBtn").click()
     assert not errors, f"static inspector page errors: {errors}"
     context.close()

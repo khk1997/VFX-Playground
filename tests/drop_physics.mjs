@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import {
   contactMergeAmount,
   findClosestDropPair,
+  STUDIO_FLOOR_DEFAULT,
   staticShapeBoundsRadius,
+  staticShapeFloorHeight,
   updateDropBounds,
 } from '../bubble/drop-physics.js';
 
@@ -78,4 +80,18 @@ near(bounds.w, staticShapeBoundsRadius({
 }));
 assert.deepEqual([bounds.x, bounds.y, bounds.z], [0, 0, 0]);
 
-console.log('Contact merge gate, pair physics, and conservative bounds passed');
+// 地板坐在內建造型的最低點下方一點點；夾值跟 geometry.js 的 SDF 一致。
+const floorParams = {
+  boxSize: 0.75, primitiveSize: 0.6, primitiveHeight: 0.75, primitiveTubeRatio: 0.35,
+};
+near(staticShapeFloorHeight({ ...floorParams, staticShape: 0 }), -0.77);
+near(staticShapeFloorHeight({ ...floorParams, staticShape: 1 }), -0.6 * 0.06 - 0.02);
+near(staticShapeFloorHeight({ ...floorParams, staticShape: 3 }), -0.62);
+near(staticShapeFloorHeight({ ...floorParams, staticShape: 5 }), -0.77);
+near(staticShapeFloorHeight({ ...floorParams, staticShape: 6 }), -0.6 * 0.35 - 0.02);
+near(staticShapeFloorHeight({ ...floorParams, staticShape: 6, primitiveTubeRatio: 2 }), -0.6 * 0.9 - 0.02);
+near(staticShapeFloorHeight({ ...floorParams, staticShape: 0, boxSize: 0 }), -0.07);
+// 匯入造型的最低點看 SVG，沿用原本的固定高度。
+assert.equal(staticShapeFloorHeight({ ...floorParams, staticShape: 7 }), STUDIO_FLOOR_DEFAULT);
+
+console.log('Contact merge gate, pair physics, conservative bounds, and studio floor passed');

@@ -31,10 +31,11 @@ import { parseBubbleRuntimeOptions } from './diagnostics.js?v=1';
 import { createMaterialTextureController } from './material-textures.js?v=1';
 import { createEnvironmentLoader, selectMaterialEnvironment } from './environment-loader.js?v=1';
 import { describeShapeImport, loadShapeAsset } from './shape-loader.js?v=1';
-import { createShaderVariantPlanner, VariantMaterialCache } from './shader-variants.js?v=1';
+import { createShaderVariantPlanner, VariantMaterialCache } from './shader-variants.js?v=2';
 import {
-  contactMergeAmount, findClosestDropPair, updateDropBounds,
-} from './drop-physics.js?v=1';
+  contactMergeAmount, findClosestDropPair, staticShapeFloorHeight, updateDropBounds,
+  STUDIO_FLOOR_DEFAULT,
+} from './drop-physics.js?v=2';
 import {
   distributeDetailedAnchors, distributeFormationAnchors, distributePrimaryAnchors,
   formationEdgeScaleFor, scaleShapePoints as scalePoints,
@@ -340,7 +341,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=static-look-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=static-shadow-1';
 import { createPostChain } from './post.js?v=post-mask-3';
 
 const {
@@ -2073,6 +2074,12 @@ function updateDropUniforms(t) {
     microCount,
     microDropData,
   });
+  // 地板跟著靜態造型的最低點走（見 staticShapeFloorHeight）。只有靜態模式編得到
+  // 棚景，其餘模式送什麼都不影響。
+  if (uniforms?.uStudioFloorHeight) {
+    uniforms.uStudioFloorHeight.value = P.motion === 'static'
+      ? staticShapeFloorHeight(P) : STUDIO_FLOOR_DEFAULT;
+  }
 }
 
 function makeBlankEnv() {
@@ -2305,7 +2312,7 @@ function initGL() {
     // 都是同一個棚景的細微變體，而 edgePathBoost 與 staticGlassMix 是研究用的
     // 旋鈕（後者是「退回舊外殼」的 A/B 開關，不是給使用者的選項）。
     uStudioBackdrop: { value: 1 },
-    uStudioFloorHeight: { value: -1.15 },
+    uStudioFloorHeight: { value: STUDIO_FLOOR_DEFAULT },
     uStudioFloorTone: { value: 0.80 },
     uStudioHorizonSoft: { value: 0.035 },
     uStudioShadowStrength: { value: P.studioShadowStrength },
@@ -3658,6 +3665,18 @@ if (!PREVIEW && window.PresetIO) {
     assetNote: 'HDRI 與 SVG / GLB 素材無法存進參數檔，請自行載入',
     saveOn: ['#resetBtn'],
     serializeExtra: serializeTintMemory,
+    // 模組由網址決定。檔案（或自動保存的快照）記著別的模式時，在套用之前就把模式
+    // 換成這個模組，其餘的值才會直接落在這個模組自己的記憶格裡。
+    //
+    // 以前是套完再由 enforceLaunchMotion 切回來：套用時先切到檔案的模式、值寫進
+    // 那個模式，切回來時 applyMemorySlots 把它們存進那個模式的格子、再把這個模組
+    // 原本那一格寫回 P —— 鏡頭、吸收、反射、bloom 這些「按模式記憶」的值就全部
+    // 被丟掉，還順手覆寫了另一個模式的記憶、多編兩次 shader。
+    beforeApply: data => (
+      LAUNCH_MOTION && data.values?.motion !== undefined && data.values.motion !== LAUNCH_MOTION
+        ? { ...data, values: { ...data.values, motion: LAUNCH_MOTION } }
+        : data
+    ),
     afterApply: payload => {
       restoreTintMemory(payload);
       updateRampRows();

@@ -274,9 +274,21 @@ float bandIOR(float band, float strength){
   float lambda = bandWavelength(band);
   float invL2 = 1.0 / (lambda * lambda);
   float b = (uIOR - 1.0) / max(uDispersionAbbe, 0.8) / (INV_LF2 - INV_LC2);
-  // 下限 1.02：折射率掉到 1 以下時 refract() 整個翻過來，掠射端會變成往外彎，
-  // 畫面上是一圈突然反向的假邊。
-  return max(uIOR + b * strength * (invL2 - INV_LD2), 1.02);
+  float dn = b * strength * (invL2 - INV_LD2);
+  // 偏移量要有上限。strength 裡含美術增益（×24）與輪廓加權（最多再 ×(1+邊緣彩虹)），
+  // 乘起來預設值在掠射處的藍端就到 3.2、「稜鏡」到將近 19 —— 藍端整段落進全內反射，
+  // 平均折射率被推高，輪廓附近的放大整個變形。紅端則是另一頭：原本硬夾在 1.02，
+  // 一半的光譜樣本擠在同一個值上，彩虹缺掉半邊。
+  //
+  // 改成兩側各自軟性飽和：小的偏移原樣通過（斜率 1），大的連續地收斂到上限，樣本
+  // 之間的先後順序不變，色帶就不會擠成一條。往下的上限讓 n 停在 1.08 以上，
+  // refract() 不會翻過來；往上給兩倍的空間，保留 1/λ² 那種「冷色拖長尾」的不對稱。
+  float dnDown = max(uIOR - 1.08, 0.01);
+  float dnUp = dnDown * 2.0;
+  float cap = dn > 0.0 ? dnUp : dnDown;
+  float x = abs(dn) / cap;
+  float softened = cap * (1.0 - 2.0 / (exp(2.0 * x) + 1.0));   // cap·tanh(x)
+  return uIOR + sign(dn) * softened;
 }
 
 // 棚燈卡：方向球上的一塊圓盤，邊緣的銳利度自己控制。
@@ -328,79 +340,106 @@ float studioSoftbox(vec3 rd, vec3 dir, float radius, float soft){
 float mapScene(vec3 p);
 
 // 玻璃的影子：從地板點往主光打一條 sphere trace，回傳地板要暗掉多少（逐通道，
-// 0 = 沒有影子），caustic 帶回被玻璃聚進影子裡的光。
+// 0 = 沒有影子），caustic 帶回被玻璃聚進影子裡的光 —— 它是相對於地板本身亮度
+// 的倍率，不是絕對亮度（見呼叫端）。
 //
 // 這是接觸陰影與焦散唯一「知道造型長什麼樣」的來源 —— 影子的形狀是眼睛判斷物體
 // 形狀的主要線索之一。只有鏡頭直接看到的地板會跑這一段（cards 為 0 的那條射線）；
-// 折射與反射的取樣每個波長各要一次，乘上去付不起，而玻璃內部看到的那一小塊地板
-// 本來就讀不出影子的形狀，所以沿用 studioCaustics 與高斯斑的解析近似。
+// 折射與反射的取樣每個波長各要一次，乘上去付不起，所以沿用 studioCaustics 與
+// 高斯斑的解析近似（見 studioBackdropSample）。
 //
 // 不透明物體的影子是「光被擋掉」，玻璃的是「光被彎走」：穿過厚處的光大半照樣
 // 落到地板上，只被吸收染上玻璃的顏色；真正暗下來的是輪廓那一圈 —— 光在那裡掠射
-// 進出，偏折最大，被甩到別處去了。所以碰到物體之後不停，繼續穿過去量厚度：厚度
-// 決定吸收與聚焦，薄弦決定暗邊。原本的版本停在碰到的那一刻，投出的是一塊實心的
-// 灰，像一顆塑膠方塊的影子。
+// 進出，偏折最大，被甩到別處去了。所以碰到物體之後不停，繼續穿過去量它有多深、
+// 有多厚：深度決定暗邊與聚焦，厚度決定吸收。
 //
-// res = min(k·d/t) 是標準的軟陰影：d/t 是射線離表面的角距，半影自然隨距離變寬。
+// 半影是兩段接起來的同一條曲線。輪廓外是標準的 res = min(k·d/t)，d/t 是射線
+// 離表面的角距；輪廓內把「射線在物體裡離表面最遠多深」換成負的角距。兩段在
+// 輪廓上都是 0，一起經過同一條 smoothstep 形狀的曲線，所以半影跨在輪廓兩側、
+// 寬度隨離物體的距離自然變寬。前一版只有輪廓外那一段，射線一穿進去就改用厚度，
+// 輪廓內沒有半影 —— 影子邊怎麼樣都是硬的；遠處再把整塊拉向一個常數冒充糊化，
+// 結果是一張均勻的灰色剪紙。
 vec3 studioGlassShadow(vec3 floorPos, vec3 lightDir, out vec3 caustic){
   caustic = vec3(0.0);
+  float R = max(uBounds.w, 0.001);
+  // 半影寬度跟著主光的大小走：k ≈ 1/tan(半角)。常數 2.2 讓預設那張 44.5° 的
+  // 柔光箱落在 k ≈ 5，也就是前一版手調出來的寬度；夾住兩端，免得極小的燈把
+  // 半影收成一條鋸齒、極大的燈把影子糊到看不見。
+  float k = clamp(2.2 / tan(radians(clamp(uLightKey.z, 2.0, 120.0)) * 0.5), 2.0, 16.0);
   float res = 1.0;
   float t = 0.05;
-  float tNear = 0.05;
+  float prevD = 1e10;
   bool entered = false;
   for (int i = 0; i < MAX_SHADOW_COMPILE; i++){
     float d = mapScene(floorPos + lightDir * t);
-    // k = 5 而不是不透明影子常用的 9：主光是一張四十幾度的大柔光箱，半影本來就寬。
-    float k = 5.0 * d / t;
-    if (k < res){ res = k; tNear = t; }
+    // 最近點不一定落在取樣點上。用前後兩步的距離球交出真正的最近點再算角距
+    // （Inigo Quilez 的 improved soft shadow）；只看取樣點的話，擦邊而過的射線
+    // 量到的 res 偏大，輪廓外的半影到不了 0，跟輪廓內那一側接不起來，影子邊上
+    // 就留一道硬線。
+    float y = d * d / (2.0 * prevD);
+    float closest = sqrt(max(d * d - y * y, 0.0));
+    res = min(res, k * closest / max(t - y, 0.001));
+    prevD = d;
     if (d < 0.002){ entered = true; break; }
     if (t > 12.0) break;
     // 步長上限放寬到 1.2：遠處的地板點要走很長一段才碰得到物體，卡在 0.6 的話
     // 二十步走不完，march 會在半路停住 —— 影子的遠端因此被截成一排鋸齒。
     t += clamp(d, 0.05, 1.2);
   }
-  // 沒碰到：只剩半影。擋住那部分燈的是輪廓外緣的薄玻璃，偏折大、幾乎不透光，
-  // 所以照不透明的方式暗；次方讓它往外收得比線性快，洞口（例如圓環中間）才不會
-  // 比玻璃本身還暗。
-  //
-  // 遠處跟影子本體用同一個糊化量（見下面的 blur），輪廓內外才接得起來；不然影子
-  // 本體淡了、外面那一圈半影還是深的，遠端會留一條黑框。
-  float R = max(uBounds.w, 0.001);
-  if (!entered) {
-    float farOut = smoothstep(0.0, 2.5 * R, tNear);
-    return vec3(pow(1.0 - clamp(res, 0.0, 1.0), 1.5) * mix(1.0, 0.45, farOut * 0.7));
-  }
 
-  // 穿過去。物體裡 d 是負的，|d| 仍是到表面距離的下限，照樣能拿來當步長。
   float tIn = t;
-  t += 0.01;
-  for (int i = 0; i < MAX_SHADOW_COMPILE; i++){
-    float d = mapScene(floorPos + lightDir * t);
-    if (d > 0.0) break;
-    t += max(-d, 0.012);
+  float thickness = 0.0;
+  float depth = 0.0;
+  if (entered) {
+    // 穿過去。物體裡 d 是負的，|d| 仍是到表面距離的下限，照樣能拿來當步長。
+    t += 0.01;
+    for (int i = 0; i < MAX_SHADOW_COMPILE; i++){
+      float d = mapScene(floorPos + lightDir * t);
+      if (d > 0.0) break;
+      t += max(-d, 0.012);
+    }
+    thickness = t - tIn;
+    // 這條射線離輪廓多深：取弦中點到表面的距離。不用 march 途中 |d| 的最大值 ——
+    // 那些取樣點落在哪裡跟著步長跳，相鄰像素量到的最大值忽高忽低，地板上會拉出
+    // 一條條放射狀的紋。凸的造型最深處本來就在弦的中間。
+    depth = max(-mapScene(floorPos + lightDir * (tIn + thickness * 0.5)), 0.0);
+    res = -k * depth / max(tIn, 0.05);
   }
-  float thickness = t - tIn;
+  res = clamp(res, -1.0, 1.0);
+  // 燈被擋掉的比例：輪廓外 0 → 輪廓上 0.5 → 深入輪廓 1。
+  float coverage = 1.0 - 0.25 * (1.0 + res) * (1.0 + res) * (2.0 - res);
 
-  float rimLoss = 1.0 - smoothstep(0.0, 0.28 * R, thickness);
+  // 擋住燈的那片玻璃讓多少光過去。靠輪廓的薄邊偏折最大，光幾乎全被甩走；越深
+  // 越接近本體的透射量。本體也不是全透：兩個面各反射掉一點，其餘被折到別處、
+  // 聚成焦散，真正照原位落下的大約六成 —— 玻璃的影子比塑膠淡，但仍是一塊看得見
+  // 的影子，不是只有一圈描邊。
+  //
+  // 輪廓外的半影（包括圓環的洞口）是被同一圈薄邊擋住的，depth 是 0，正好接上
+  // 輪廓內那一側；而洞口只被擋掉一部分燈，所以比玻璃本體的影子淡 —— 前一版把
+  // 它當不透明物體的半影，洞口反而比玻璃還暗。
+  float rim = 1.0 - smoothstep(0.0, 0.15, depth);
   vec3 absorbCoefficient = -log(clamp(uAbsorbColor, 0.002, 0.999)) / 20.0;
   vec3 tint = exp(-absorbCoefficient * max(uAbsorb, 0.0) * thickness);
-  vec3 through = tint * clamp(uTransmission, 0.0, 1.0) * 0.92 * (1.0 - rimLoss);
+  vec3 through = tint * clamp(uTransmission, 0.0, 1.0) * mix(0.6, 0.12, rim);
 
-  // 厚處把光往中間收，亮核長在影子裡 —— 「暗斑中間有一塊更亮」正是玻璃與不透明
-  // 物體最好認的差別。彩邊長在暗邊往內那一段：跟玻璃本體的色散同一個理由，
-  // 最掠射的那些光分得最開。
-  float focus = smoothstep(0.35 * R, 1.4 * R, thickness);
-  float fringe = rimLoss * (1.0 - rimLoss) * 4.0;
-  vec3 hue = spectralResponse(clamp(thickness / (0.28 * R), 0.0, 1.0));
-  hue /= max(max(hue.r, max(hue.g, hue.b)), 0.001);
-  caustic = (tint * focus * focus * 1.8
-      + mix(vec3(1.0), hue, clamp(uStudioCausticChroma * 2.0, 0.0, 1.0)) * fringe * 0.45)
-    * uStudioCaustic * uLightKey.w;
-  // 離物體越遠，柔光箱的每一點投出的影子錯開越多，厚薄造成的細節就糊成一片
-  // 平均的淡影。沒有這一段，暗邊在十個物體半徑外仍然銳利，影子看起來像一張剪紙。
-  float blur = smoothstep(0.0, 2.5 * R, tIn);
-  caustic *= 1.0 - 0.7 * blur;
-  return mix(vec3(1.0) - through, vec3(0.45), blur * 0.7);
+  if (entered) {
+    // 物體把光往它的中軸收，亮核長在影子最深處 —— 「暗斑中間有一塊更亮」正是
+    // 玻璃與不透明物體最好認的差別。用深度而不是厚度：方體的厚度整片都一樣，
+    // 拿厚度當聚焦量會投出一整塊均勻的亮板。彩邊長在暗邊往內那一段：跟玻璃
+    // 本體的色散同一個理由，最掠射的那些光分得最開。
+    float focus = smoothstep(0.2, 1.0, depth / (0.3 * R));
+    float fringe = rim * (1.0 - rim) * 4.0;
+    vec3 hue = spectralResponse(clamp(depth / 0.12, 0.0, 1.0));
+    hue /= max(max(hue.r, max(hue.g, hue.b)), 0.001);
+    caustic = (tint * focus * focus * 1.8
+        + mix(vec3(1.0), hue, clamp(uStudioCausticChroma * 2.0, 0.0, 1.0)) * fringe * 0.25)
+      * uStudioCaustic * uLightKey.w;
+    // 聚焦的光也會隨距離散開：離物體越遠，柔光箱每一點聚出來的亮核錯開越多。
+    caustic *= 1.0 - 0.6 * smoothstep(0.0, 2.5 * R, tIn);
+  }
+  // 影子是「主光被擋掉」，主光關掉就沒有影子可投。大於 1 的強度不會讓影子更黑
+  // （擋掉的比例不會超過全部），所以夾在 1。
+  return coverage * (vec3(1.0) - through) * clamp(uLightKey.w, 0.0, 1.0);
 }
 
 // 焦散：光穿過玻璃之後被聚到地板上。
@@ -446,7 +485,12 @@ vec3 studioCaustics(vec3 floorPos){
   return (vec3(core) * 0.65 + rim * ring * 1.5) * uStudioCaustic * front * reach;
 }
 
-vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards, float soften){
+// minEdge：棚景裡每一道邊（燈卡、黑旗、地平線）至少要有多寬（弧度，半寬）。
+// soften 是按比例把邊放大，minEdge 是給一個絕對的下限 —— 光譜取樣要的是後者
+// （見 spectralRefraction）：它要每道邊都追上相鄰波長之間的角距，而各道邊原本
+// 的寬度差了好幾倍，用同一個倍率放大的話，最窄的地平線永遠追不上。
+vec4 studioBackdropSampleEdge(vec3 origin, vec3 rd, float extraBlur, float cards,
+                              float soften, float minEdge){
   vec4 paper = backgroundSample(rd, extraBlur);
   // HDRI 背景已經是有結構的環境，不需要也不該再蓋一層假棚景。
   if (uStudioBackdrop < 0.5 || uBgMode == 1) return paper;
@@ -467,20 +511,30 @@ vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards, fl
       float dist = length(fp);
 
       // 接觸陰影。鏡頭直接看到的地板用真正的遮蔽測試，形狀才跟著造型走；
-      // 折射與反射的取樣沿用高斯斑（見 studioOcclusion 的說明）。
+      // 折射與反射的取樣沿用高斯斑（見 studioGlassShadow 的說明）。
+      //
+      // 高斯斑的中心放在影子真正落下的地方：物體中心沿主光方向投到地板上。
+      // 放在物體正下方的話，透過玻璃看到的影子跟旁邊直接看到的那一塊對不上 ——
+      // 主光相當側向，兩者差了一大段。它也照玻璃的方式淡：中間透光，不是實心。
+      vec3 floorPos = origin + rd * tFloor;
+      vec3 keyDir = studioKeyDir();
+      float keyOn = clamp(uLightKey.w, 0.0, 1.0);
       float shadowR = max(uStudioShadowRadius, 0.001);
-      vec3 shadow = vec3(exp(-(dist * dist) / (shadowR * shadowR)));
+      vec2 shadowCenter = uBounds.xz
+        - keyDir.xz * ((uBounds.y - uStudioFloorHeight) / max(keyDir.y, 0.2));
+      float blobDist = length(fp - shadowCenter);
+      vec3 shadow = vec3(exp(-(blobDist * blobDist) / (shadowR * shadowR))
+        * (1.0 - 0.6 * clamp(uTransmission, 0.0, 1.0)) * keyOn);
       vec3 caustic;
       if (cards < 0.5) {
         // 隨距離收掉。主光相當側向，純粹的幾何投影會把影子拖得又長又濃，畫面
         // 重心整個被拉走；而影子真正在講的是「物體就在這裡」，那件事只在物體
         // 附近成立。收掉遠端同時也讓 march 走不完的那一段完全看不到。
         float reach = smoothstep(shadowR * 14.0, shadowR * 5.0, dist);
-        shadow = studioGlassShadow(origin + rd * tFloor, studioKeyDir(), caustic)
-          * reach;
+        shadow = studioGlassShadow(floorPos, keyDir, caustic) * reach;
         caustic *= reach;
       } else {
-        caustic = studioCaustics(origin + rd * tFloor);
+        caustic = studioCaustics(floorPos);
       }
       shadow *= uStudioShadowStrength;
 
@@ -490,14 +544,16 @@ vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards, fl
       vec3 floorCol = col * mix(uStudioFloorTone, 1.0, recede)
         + vec3(uStudioFloorLift * (1.0 - recede * 0.65));
 
-      floorCol *= (vec3(1.0) - shadow);
-      // 焦散加在陰影之後：玻璃把光聚起來，所以亮核就長在自己的影子裡面。
-      floorCol += caustic * (1.0 - recede * 0.5);
+      // 焦散跟陰影一樣是相對於地板本身的倍率。玻璃聚過來的是主光，落在深色的
+      // 紙上就該暗、落在白紙上就該亮；前一版把它當絕對亮度加上去，深底的地板
+      // 本身才零點一出頭，影子裡因此比沒被擋的地板還亮，整塊像一片發光的板子，
+      // 淺底則反過來幾乎看不見。
+      floorCol *= vec3(1.0) - shadow + caustic * (1.5 * (1.0 - recede * 0.5));
 
       // 地平線收得比以前緊。它是畫面裡最長的一條邊，玻璃把它折彎、分色之後
       // 就是輪廓上那幾條色帶的主要來源。
       float horizon = smoothstep(0.0,
-        max(uStudioHorizonSoft, 0.001) * (1.0 + soften * 8.0), -rd.y);
+        max(max(uStudioHorizonSoft, 0.001) * (1.0 + soften * 8.0), minEdge * 2.0), -rd.y);
       col = mix(col, floorCol, horizon);
     }
   }
@@ -517,7 +573,7 @@ vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards, fl
     // 三張卡：主光、補光，加一條細長的邊光。邊緣銳利度由 uStudioCardEdge 控制 ——
     // 這根滑桿改的不是亮度而是「色散看不看得見」，推到 0 就只剩一團柔光，
     // 色帶會跟著消失。
-    float soft = max(uStudioCardEdge, 0.004) * (1.0 + soften * 10.0);
+    float soft = max(max(uStudioCardEdge, 0.004) * (1.0 + soften * 10.0), minEdge);
     float key  = studioSoftbox(rd, studioKeyDir(), radians(uLightKey.z), soft);
     float fill = studioSoftbox(rd, studioDir(uLightFill.xy), radians(uLightFill.z),
       soft * 2.2);
@@ -548,6 +604,10 @@ vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards, fl
 
   return vec4(col, paper.a);
 }
+
+vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards, float soften){
+  return studioBackdropSampleEdge(origin, rd, extraBlur, cards, soften, 0.0);
+}
 // 光譜折射：沿著同一條已經追好的光路，逐波長重算兩次 refract()，取樣同一個
 // 棚景再合回 RGB。
 //
@@ -559,52 +619,90 @@ vec4 studioBackdropSample(vec3 origin, vec3 rd, float extraBlur, float cards, fl
 //
 // 已知的近似：發生全內反射彈跳時，出口面換成了第二個出口，而各波長仍用原始
 // 視線與前表面法線入射。彈跳本來就只補一次，這一層近似在同一個量級。
+// 一個波長的出射方向（見 spectralRefraction）。抽出來是因為迴圈之外還要多算
+// 光譜兩端各一次，用來量相鄰波長之間錯開多少。
+vec3 spectralExitDir(vec3 rd, vec3 N, vec3 exitNormal, vec3 exitDir, float iorBand){
+  vec3 outBand = exitDir;
+  vec3 inBand = refract(rd, N, 1.0 / iorBand);
+  if (dot(inBand, inBand) > 0.0001) {
+    inBand = normalize(inBand);
+    vec3 bounced = normalize(reflect(inBand, exitNormal));
+    vec3 o = refract(inBand, -exitNormal, iorBand);
+
+    // 臨界角附近按 Fresnel 連續過渡，不要用「有沒有全內反射」當二元開關。
+    //
+    // 上一版是開關，而那會在畫面上切出硬邊：臨界角 θc = asin(1/n) 是一條等角
+    // 線，在立方體的平面上就是直線，相鄰像素落在兩側時取到的是環境裡完全不同
+    // 的兩塊 —— 表面因此被切成一塊塊三角形，而且色散開得越強越明顯（關掉色散
+    // 就完全消失，這是分辨出來的）。
+    //
+    // 物理上本來就不是開關：透射的 Fresnel 係數在接近 θc 時連續趨近 0，同時
+    // 折射方向連續轉向與表面相切，所以「按 R 混合兩個方向」在 θc 兩側是接得
+    // 起來的 —— R 在那裡已經是 1，混出來就是內反射本身。用完整的 Fresnel
+    // （s 與 p 偏振各半）而不是 Schlick 近似：Schlick 在臨界角附近正是誤差
+    // 最大的地方，而這裡要的就是那一段。
+    float cosI = clamp(abs(dot(inBand, exitNormal)), 0.0, 1.0);
+    float sinT2 = iorBand * iorBand * (1.0 - cosI * cosI);
+    float bandR = 1.0;
+    if (sinT2 < 1.0) {
+      float cosT = sqrt(1.0 - sinT2);
+      float rs = (iorBand * cosI - cosT) / (iorBand * cosI + cosT);
+      float rp = (cosI - iorBand * cosT) / (cosI + iorBand * cosT);
+      bandR = clamp(0.5 * (rs * rs + rp * rp), 0.0, 1.0);
+    }
+    outBand = dot(o, o) > 0.0001
+      ? normalize(mix(normalize(o), bounced, bandR))
+      : bounced;
+  }
+  return outBand;
+}
+
 vec3 spectralRefraction(vec3 rd, vec3 N, vec3 exitNormal, vec3 exitPoint,
                         vec3 exitDir, float bandSpread, float roughBlur,
                         float studioSoften){
+
+  // 取樣之間要接得起來。光譜是連續的，但這裡只取 uSpectralSamples 個波長，每個
+  // 波長各自折射出一份完整的棚景 —— 棚景的邊（燈卡、黑旗，尤其是地平線）是硬的，
+  // 相鄰兩個波長的出射方向錯開得比那道邊寬的時候，畫面上就是十幾份錯開的邊疊在
+  // 一起：一條一條分開的色帶，而不是連續的彩虹。色散開得越大、邊越硬，段落越明顯。
+  //
+  // 所以每個取樣裡的每道邊至少要跟「相鄰取樣之間的角距」一樣寬 —— 等於把每個
+  // 取樣攤成它代表的那一小段波長，拼起來就是連續光譜的積分。跟 studioSoften 用
+  // 像素 footprint 撐開邊是同一件事，這裡的 footprint 是光譜方向上的。只多兩次
+  // refract 的算術，不多取樣。
+  vec3 dirBlue = spectralExitDir(rd, N, exitNormal, exitDir, bandIOR(0.0, bandSpread));
+  vec3 dirRed = spectralExitDir(rd, N, exitNormal, exitDir, bandIOR(1.0, bandSpread));
+  // 取樣點在波段上的間距是 1/N（band = (i+0.5)/N），兩端之間的角距除以 N 就是它。
+  float gap = length(dirRed - dirBlue) / max(float(uSpectralSamples), 1.0);
+  // 上限：藍端接近全內反射時方向會轉向反射那一側，兩端的角距一下子變很大；
+  // 不夾的話那一圈會整片糊掉，彩虹直接消失。0.25 rad ≈ 14°。
+  float minEdge = min(gap, 0.25);
+
+  // 每個像素把取樣點在自己那一格波長裡錯開一點（分層抖動）。
+  //
+  // 上面的 minEdge 只處理「棚景的邊」。另一個一樣會切出段落的來源是臨界角：
+  // 每個波長的折射率不同，臨界角也不同，強色散時大半個表面都貼著臨界角，
+  // 視線掃過去，十幾個波長一個接一個越過自己的臨界角 —— 每越過一個就是一階。
+  // 那一階是光路本身的轉折，不是背景的邊，撐寬背景救不了。
+  //
+  // 取樣點固定在每格正中央的話，所有像素的階都對齊在同樣幾條等值線上，眼睛看到
+  // 的就是一圈一圈的色帶。每個像素各自在格子裡錯開，階的位置就不再對齊，段落
+  // 變成跟像素一樣細的顆粒，平均起來就是連續的光譜。用 interleaved gradient
+  // noise 而不是白噪音：它在相鄰像素之間分布得很均勻，顆粒感低得多；而且它只看
+  // 螢幕座標、不看時間，靜止的畫面不會閃。
+  float bandJitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
 
   vec3 spectralSum = vec3(0.0);
   vec3 weightSum = vec3(0.0);
   for (int i = 0; i < MAX_SPECTRAL_COMPILE; i++) {
     if (i >= uSpectralSamples) break;
     // band 0 = 藍端，1 = 紅端。折射率由 Cauchy 曲線決定（見 bandIOR）。
-    float band = (float(i) + 0.5) / float(uSpectralSamples);
+    float band = (float(i) + bandJitter) / float(uSpectralSamples);
     float iorBand = bandIOR(band, bandSpread);
-    vec3 outBand = exitDir;
-    vec3 inBand = refract(rd, N, 1.0 / iorBand);
-    if (dot(inBand, inBand) > 0.0001) {
-      inBand = normalize(inBand);
-      vec3 bounced = normalize(reflect(inBand, exitNormal));
-      vec3 o = refract(inBand, -exitNormal, iorBand);
-
-      // 臨界角附近按 Fresnel 連續過渡，不要用「有沒有全內反射」當二元開關。
-      //
-      // 上一版是開關，而那會在畫面上切出硬邊：臨界角 θc = asin(1/n) 是一條等角
-      // 線，在立方體的平面上就是直線，相鄰像素落在兩側時取到的是環境裡完全不同
-      // 的兩塊 —— 表面因此被切成一塊塊三角形，而且色散開得越強越明顯（關掉色散
-      // 就完全消失，這是分辨出來的）。
-      //
-      // 物理上本來就不是開關：透射的 Fresnel 係數在接近 θc 時連續趨近 0，同時
-      // 折射方向連續轉向與表面相切，所以「按 R 混合兩個方向」在 θc 兩側是接得
-      // 起來的 —— R 在那裡已經是 1，混出來就是內反射本身。用完整的 Fresnel
-      // （s 與 p 偏振各半）而不是 Schlick 近似：Schlick 在臨界角附近正是誤差
-      // 最大的地方，而這裡要的就是那一段。
-      float cosI = clamp(abs(dot(inBand, exitNormal)), 0.0, 1.0);
-      float sinT2 = iorBand * iorBand * (1.0 - cosI * cosI);
-      float bandR = 1.0;
-      if (sinT2 < 1.0) {
-        float cosT = sqrt(1.0 - sinT2);
-        float rs = (iorBand * cosI - cosT) / (iorBand * cosI + cosT);
-        float rp = (cosI - iorBand * cosT) / (cosI + iorBand * cosT);
-        bandR = clamp(0.5 * (rs * rs + rp * rp), 0.0, 1.0);
-      }
-      outBand = dot(o, o) > 0.0001
-        ? normalize(mix(normalize(o), bounced, bandR))
-        : bounced;
-    }
+    vec3 outBand = spectralExitDir(rd, N, exitNormal, exitDir, iorBand);
     vec3 w = spectralResponse(band);
-    spectralSum += studioBackdropSample(
-      exitPoint, outBand, roughBlur, 1.0, studioSoften
+    spectralSum += studioBackdropSampleEdge(
+      exitPoint, outBand, roughBlur, 1.0, studioSoften, minEdge
     ).rgb * w;
     weightSum += w;
   }

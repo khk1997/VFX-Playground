@@ -145,7 +145,7 @@ export function createShaderVariantPlanner({
       //
       // 其餘模式給 false 而不是給個數字：那會多一行 #define 進到它們的 shader
       // 前綴，而「原始碼有動、輸出就不保證相同」這件事這個分支已經踩過一次。
-      MAX_SPECTRAL_COMPILE: state.staticGlass ? 16 : false,
+      MAX_SPECTRAL_COMPILE: state.staticGlass ? 32 : false,
       // 地板遮蔽的 march 上限。跟其餘 MAX_*_COMPILE 同一個用法：編譯期只知道
       // 上限，實際步數由場景決定，fxc 才不會把整段展開。
       MAX_SHADOW_COMPILE: state.staticGlass ? 20 : false,
@@ -166,6 +166,15 @@ export function createShaderVariantPlanner({
       defines.FEATURE_PRISM_SATURATION = false;
       defines.FEATURE_SPECTRAL_CAUSTICS = false;
       defines.FEATURE_BEAM_PATTERNS = false;
+      // 玻璃內部的 march 上限。內部彈跳那一段（shaders.js 的 uInternalBounce）
+      // 從出口面反射回來，常常貼著另一個面幾乎平行地走：步長是 -d·0.72，d 就是
+      // 到那個面的距離，一路都很小，28 步走不到出口就放棄，那個像素的彈跳整份
+      // 被丟掉。放棄與否在相鄰像素之間跳來跳去，畫面上就是彈跳亮面邊上那一排
+      // 鋸齒（實測 96 步完全消失）。
+      //
+      // 迴圈不展開，上限只是編譯期常數，編譯量不變；執行期只有那些貼面走的像素
+      // 會多跑，其餘照樣早早 break。
+      defines.MAX_INTERIOR_COMPILE = 64;
     }
 
     if (DIAG.allFeatures) {
