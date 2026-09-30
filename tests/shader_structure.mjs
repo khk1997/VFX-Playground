@@ -27,4 +27,17 @@ assert.ok(ENVIRONMENT_GLSL.split('\n').length > 80, 'environment module boundary
 assert.ok(GEOMETRY_GLSL.split('\n').length > 1000, 'geometry module boundary is unexpectedly small');
 assert.ok(OPTICS_GLSL.split('\n').length > 400, 'optics module boundary is unexpectedly small');
 
+// GLB 的體素距離場（FEATURE_SHAPE_VOLUME）跟 SVG 共用 shapeSoftnessFor。它曾經
+// 只定義在 FEATURE_SHAPE_SVG 裡，選 GLB 時整支 shader 編不過、畫面全黑，而且每個
+// 用得到 GLB 的模式都一樣。定義必須在 SVG 專屬區塊之外、兩者都看得到的地方。
+{
+  const definition = GEOMETRY_GLSL.indexOf('float shapeSoftnessFor(int ch)');
+  const svgOnlyStart = GEOMETRY_GLSL.indexOf('#ifdef FEATURE_SHAPE_SVG');
+  const guard = GEOMETRY_GLSL.lastIndexOf('#if', definition);
+  assert.ok(definition >= 0, 'shapeSoftnessFor must be defined');
+  assert.ok(definition < svgOnlyStart, 'shapeSoftnessFor must not live inside the SVG-only block');
+  assert.ok(GEOMETRY_GLSL.slice(guard, definition).includes('FEATURE_SHAPE_VOLUME'),
+    'shapeSoftnessFor must be compiled for the GLB (volume) shape field too');
+}
+
 console.log('Shader chunks assemble once, in order, with all shader entry points intact');

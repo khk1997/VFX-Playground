@@ -50,6 +50,19 @@ float microDropletDistance(vec3 p, vec4 sphere, vec4 shape){
 //
 // volumeShapeDistance 是 8 次 atlasVoxel（＝8 個 texture2D 加三線性插值），
 // 所以在 SVG 模式下這一刀砍掉的是編譯規模裡最大的一塊。
+// ch 就是通道身分：0＝形狀 A、1＝形狀 B（見 sampleShapeField 的 ch 註解）。
+// 兩顆形狀的距離場本來就各自帶著自己的 ch 走完全程，所以邊緣液化只要在這裡
+// 依 ch 取對應的那一份，兩顆就能各自調粗細，不需要任何額外的分支或取樣。
+//
+// 放在 SVG 區塊外面：GLB 的體素距離場（volumeShapeDistance）也呼叫它。原本定義
+// 在 FEATURE_SHAPE_SVG 裡，選 GLB 時那一塊不編，shader 直接編譯失敗、畫面全黑
+// （所有用 GLB 的模式都是）。
+#if defined(FEATURE_SHAPE_SVG) || defined(FEATURE_SHAPE_VOLUME)
+float shapeSoftnessFor(int ch){
+  return ch == 1 ? uShapeSoftnessB : uShapeSoftness;
+}
+#endif
+
 #ifdef FEATURE_SHAPE_SVG
 // 硬體雙線性只有 C0 連續：梯度在每條 texel 邊界跳一次，格內近似常數。
 // 擠出側壁的法線完全等於這個 xy 梯度，而 edge 不隨 z 變化，於是每格 texel
@@ -91,12 +104,6 @@ float sampleShapeField(vec2 uv, int ch){
 // smoothShape 只在 calcNormal 求梯度時開啟。ray march 只需要一個保守的距離值，
 // 次 texel 的差異不影響步長，因此在 march 迴圈裡用單次雙線性取樣就夠 ——
 // 每步 4 taps 降回 1 tap，實測省下約 7%，畫面差異低於算繪雜訊。
-// ch 就是通道身分：0＝形狀 A、1＝形狀 B（見 sampleShapeField 的 ch 註解）。
-// 兩顆形狀的距離場本來就各自帶著自己的 ch 走完全程，所以邊緣液化只要在這裡
-// 依 ch 取對應的那一份，兩顆就能各自調粗細，不需要任何額外的分支或取樣。
-float shapeSoftnessFor(int ch){
-  return ch == 1 ? uShapeSoftnessB : uShapeSoftness;
-}
 
 float svgShapeDistance(vec3 p, bool smoothShape, int ch){
   vec2 uv = p.xy / 3.0 + 0.5;
