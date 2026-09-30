@@ -427,19 +427,7 @@ vec4 backgroundPixel(vec4 bg){
   return vec4(bg.rgb, uCoverageAlpha > 0.5 ? 0.0 : bg.a);
 }
 
-vec3 clampOutput(vec3 c){
-  if (uHdrOutput > 0.5) {
-    c = max(c, vec3(0.0));
-    if (uHighlightGain > 1.0) {
-      float peak = max(c.r, max(c.g, c.b));
-      // 0.75 起算：低於這裡的完全不動，到 1.0 才吃滿增益。用 smoothstep 而不是
-      // 硬切，否則會在等亮度線上留下一圈看得見的邊。
-      c *= mix(1.0, uHighlightGain, smoothstep(0.75, 1.0, peak));
-    }
-    return c;
-  }
-  return clamp(c, 0.0, 1.0);
-}
+// clampOutput 在 shader-chunks/optics.js（這支檔案有行數上限）。
 
 // 體積吸收：濃度倍率與液體顏色。預設（×1 與 #68b2e7）算出來的係數就是這兩個
 // 控制項出現以前寫死的 vec3(0.045, 0.018, 0.005)，誤差在 8-bit 選色器的捨入
@@ -625,10 +613,13 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
   }
 #endif
 
+#ifdef FEATURE_STATIC_MESH
+  staticMeshPrimary(ro, rd, hit, t, edgeCoverage);  // 匯入的 GLB 直接打三角形（見 optics.js）
+#endif
   if (!hit){ gl_FragColor = backgroundPixel(bg); return; }
 
   vec3 p = ro + rd * t;
-  vec3 N = calcNormal(p);
+  vec3 N = PRIMARY_NORMAL(p);
   FilmMaterial material = thinFilm(p, N, -rd);
   float membraneMode = uMaterialStyle == 1 ? 1.0 : 0.0;
   // 通用玻璃：顏色一律以黑場算出「水滴自身的能量」，最後再 over 疊到實際透射

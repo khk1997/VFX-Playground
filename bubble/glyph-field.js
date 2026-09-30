@@ -12,7 +12,7 @@
 // σ=0.7 微模糊 → RGBA32F），只是把「一張大圖」換成「n 格小圖」。三支工具函式從
 // shape-field.js 匯入而不是複製，理由見那邊的匯出註解。
 import * as THREE from 'three';
-import { subpixelSigned2D, encodeFloat2D, blurField } from './shape-field.js?v=typewriter-1';
+import { subpixelSigned2D, encodeFloat2D, blurField } from './shape-field.js?v=mesh-2';
 
 // 每格的圖集解析度。拉丁字母的筆畫在 64² 下大約 8 texel 寬，配上下面的超取樣
 // 已經足夠讓擠出側壁的法線連續（那是 shape-field.js 那段「梯度階梯」分析的結論）。

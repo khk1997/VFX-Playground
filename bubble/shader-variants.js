@@ -46,6 +46,11 @@ export function createShaderVariantPlanner({
       // 其餘九個模式因此完全不編這一塊，畫面逐位元不變（tests/glass_baseline.py
       // 會驗）。等靜態這條路成立了再決定要不要推廣出去。
       staticGlass: motion === 'static',
+      // 靜態模組匯入 GLB：玻璃直接打三角形（見 optics.js 的 FEATURE_STATIC_MESH）。
+      // 網格還沒載好時 uMeshTriCount 是 0，shader 自己退回距離場，所以這個旗標只看
+      // 設定、不看執行期的資料 —— 變體不會因為載入進度換來換去。
+      staticMesh: motion === 'static' && shapeField && params.shapeSource !== 'svg'
+        && !DIAG.probeStaticNoMesh,
       research: motion === 'research',
       typewriter: motion === 'typewriter',
       microDrops: shapeField
@@ -77,7 +82,8 @@ export function createShaderVariantPlanner({
       'o' + flag(state.thinFilm, 'F') + flag(state.liquidFilm, 'L')
         + flag(state.dispersion, 'D') + flag(state.prismBeam, 'P')
         + flag(state.spectralCaustics, 'K') + flag(state.beamPatterns, 'B')
-        + flag(state.envPmrem, 'E') + flag(state.staticGlass, 'A'),
+        + flag(state.envPmrem, 'E') + flag(state.staticGlass, 'A')
+        + flag(state.staticMesh, 'Q'),
     ].join('.') + diagSalt;
   }
 
@@ -139,6 +145,7 @@ export function createShaderVariantPlanner({
       FEATURE_ENV_PMREM: state.envPmrem ? '' : false,
       FEATURE_BEAM_PATTERNS: state.beamPatterns ? '' : false,
       FEATURE_STATIC_GLASS: state.staticGlass ? '' : false,
+      FEATURE_STATIC_MESH: state.staticMesh ? '' : false,
       // 光譜迴圈的編譯期上限。跟 MAX_MARCH_COMPILE 同一個用法：實際圈數由
       // uSpectralSamples 在執行期決定，編譯期只知道一個上限，fxc 才不會把整段
       // 展開成一份一份的背景取樣（README 那條 154 秒就是這樣來的）。

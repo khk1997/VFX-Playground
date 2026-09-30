@@ -24,7 +24,8 @@ const makePlanner = ({ diag = diagnostics, forced = [], mobile = false, run = nu
   createShaderVariantPlanner({
     getParams: () => params,
     getMotionMemory: () => motionMemory,
-    usesShapeField: motion => ['formation', 'melt', 'morph', 'shatter'].includes(motion),
+    // static 也在：它要借形狀場的匯入管線（見 registry 的 static.usesShapeField）。
+    usesShapeField: motion => ['formation', 'melt', 'morph', 'shatter', 'static'].includes(motion),
     isFormationMotion: motion => motion === 'formation',
     getHasEnvironment: () => true,
     diagnostics: diag,
@@ -67,13 +68,24 @@ assert.equal(procedural.staticGlass, true);
 params.staticShape = 7;
 assert.equal(planner.variantState().staticGlass, true);
 assert.equal(planner.variantState().staticShape, false);
+// 三角網格只給「靜態 + 匯入 + GLB」：SVG 維持距離場，其餘模式要距離場才能做融合。
+params.shapeSource = 'gltf';
+assert.equal(planner.variantState().staticMesh, true);
+assert.equal(planner.shaderFeatures(planner.variantState()).FEATURE_STATIC_MESH, '');
+params.shapeSource = 'svg';
+assert.equal(planner.variantState().staticMesh, false);
+params.staticShape = 0;
+params.shapeSource = 'gltf';
+assert.equal(planner.variantState().staticMesh, false, '內建幾何不走網格');
 params.motion = 'formation';
 params.staticShape = 7;
 assert.equal(planner.variantState().staticGlass, false,
   '其餘模式不得編進靜態玻璃');
+assert.equal(planner.variantState().staticMesh, false, '其餘模式不得走三角網格');
+params.shapeSource = 'svg';
 
 const key = planner.variantKey(formation);
-assert.equal(key, 'gSV--MN----T.oFLDPKBE-');
+assert.equal(key, 'gSV--MN----T.oFLDPKBE--');
 assert.equal(planner.variantKey(formation), key, 'variant keys must be deterministic');
 
 const desktopDefines = planner.shaderFeatures(formation);

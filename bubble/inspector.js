@@ -4,36 +4,6 @@ import { INSTALLING_VISUAL_PRESETS, installingVisualPresetValues } from './visua
 
 const PAGES = [['shape', '造型'], ['motion', '動態'], ['look', '外觀'], ['scene', '場景']];
 
-// 靜態模組的風格。套用時這裡列的每一根都會寫一次（沒給值的回到預設）。
-const STATIC_LOOK_KEYS = [
-  'dispersionScale', 'edgeDispersion', 'dispersionAbbe', 'ior', 'roughness',
-  'absorb', 'absorbColor', 'studioFlag', 'studioCardStrength',
-];
-const STATIC_LOOKS = [
-  { id: 'clear', label: '清透', swatch: 'linear-gradient(90deg, #e9f1fb, #c9d9ec)', values: {} },
-  {
-    id: 'prism', label: '稜鏡',
-    swatch: 'linear-gradient(90deg, #ff5a5a, #ffd24a, #5ce07a, #4ab4ff, #a46bff)',
-    // 原本是彩虹強度 2.2 + 阿貝數 12；阿貝數不再開給使用者（固定 22），兩者在
-    // shader 裡只以比值出現，所以換算成 2.2 × 22 / 12 ≈ 4.03，畫面不變。
-    values: { dispersionScale: 4.03, edgeDispersion: 5, ior: 1.5, studioFlag: 0.85 },
-  },
-  {
-    id: 'frost', label: '霧面', swatch: 'linear-gradient(90deg, #d7dde4, #aeb6c0)',
-    // roughness 是 GGX 的 α = r²（見 environment.js 的 ggxLobeAngle），0.3 附近還
-    // 幾乎是清玻璃；0.55 才是一眼看得出來的霧面。
-    values: { roughness: 0.55, dispersionScale: 0.6, edgeDispersion: 1.5 },
-  },
-  {
-    id: 'tint', label: '有色', swatch: 'linear-gradient(90deg, #7fb6ff, #2f6fd8)',
-    values: { absorbColor: '#3f86e0', absorb: 4.5 },
-  },
-  {
-    id: 'crystal', label: '水晶', swatch: 'linear-gradient(90deg, #ffffff, #b9e2ff, #ffffff)',
-    values: { ior: 1.62, dispersionScale: 1.4, edgeDispersion: 4, studioCardStrength: 0.7 },
-  },
-];
-
 const $ = id => document.getElementById(id);
 const rowOf = id => $(id)?.closest('.row');
 function element(tag, className, text) {
@@ -691,10 +661,12 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     pruneEmptySections();
     staticDial?.draw();
     staticQuickDock?.sync();
+    staticShapeCard?.sync();
     iorPresetSync?.();
   }
   let staticDial = null;
   let staticQuickDock = null;
+  let staticShapeCard = null;
   let iorPresetSync = null;
   built = true;
   if (launchMotion === 'static') {
@@ -747,9 +719,10 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
   // 畫面角落。所以真正的控制項原地留著（不放進任何一個看得到的區塊），這裡拖曳
   // 時走 writeControl 寫回去 —— 跟使用者拖面板那根完全同一條路；反過來重設、
   // 風格、匯入改了真值時，refresh 呼叫 sync 把這邊對齊。
-  function buildQuickDock(title, entries, lead = null) {
+  function buildQuickDock(title, entries, lead = null, id = 'staticQuickDock', parent = document.body,
+                          leadEntries = []) {
     const root = element('aside', 'staticQuickDock');
-    root.id = 'staticQuickDock';
+    root.id = id;
     root.setAttribute('aria-label', `${title}快速調整`);
     root.append(element('div', 'staticQuickDockTitle', title));
     // lead：放在滑桿前面的自訂控制項（燈光方向盤）。它本來就是直接讀寫參數
@@ -757,8 +730,48 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     if (lead) root.append(lead);
     const sliders = element('div', 'staticQuickDockSliders');
     root.append(sliders);
-    const items = entries.map(([key, label]) => {
+    // leadEntries：塞在 lead 旁邊那一欄（方向盤的讀數底下）的鏡像，例如背景色。
+    const leadSlot = lead?.querySelector('.lightDialInfo') ?? sliders;
+    // 鏡像本身不是參數：不能被參數檔掃到，也不能帶 id 跟真值撞名，所以一律
+    // data-preset-ignore、不給 id。
+    const items = [...entries.map(entry => [...entry, sliders]),
+      ...leadEntries.map(entry => [...entry, leadSlot])].map(([key, label, slot]) => {
       const source = $(key);
+      if (source.type === 'color') {
+        // 顏色：標籤在左、色票在右，一列就好（放在方向盤旁邊那一欄，空間很窄）。
+        const row = element('label', 'staticQuickDockRow staticQuickDockColorRow');
+        const name = element('span', 'staticQuickDockHead', label);
+        const mirror = element('input', 'staticQuickDockColor');
+        mirror.type = 'color';
+        mirror.dataset.presetIgnore = '';
+        mirror.setAttribute('aria-label', label);
+        mirror.addEventListener('input', () => writeControl(key, mirror.value));
+        row.append(name, mirror);
+        slot.append(row);
+        return { key, kind: 'color', row, mirror };
+      }
+      if (source.tagName === 'BUTTON') {
+        // 按鈕（例如「選擇 SVG…」）：點鏡像就是點真的那顆，檔案選擇器與後續流程
+        // 完全照舊。
+        const row = element('div', 'staticQuickDockRow staticQuickDockButtonRow');
+        const mirror = element('button', 'inspectorButton staticQuickDockButton');
+        mirror.type = 'button';
+        mirror.dataset.presetIgnore = '';
+        mirror.addEventListener('click', () => source.click());
+        row.append(mirror);
+        slot.append(row);
+        return { key, kind: 'button', row, mirror };
+      }
+      if (source.tagName === 'SELECT') {
+        const row = element('label', 'staticQuickDockRow staticQuickDockSelectRow');
+        const name = element('span', 'staticQuickDockHead', label);
+        const mirror = element('select', 'staticQuickDockSelect');
+        mirror.dataset.presetIgnore = '';
+        mirror.addEventListener('change', () => { writeControl(key, mirror.value); refresh(); });
+        row.append(name, mirror);
+        slot.append(row);
+        return { key, kind: 'select', row, mirror };
+      }
       const row = element('label', 'staticQuickDockRow');
       const head = element('span', 'staticQuickDockHead');
       const name = element('span', '', label);
@@ -767,19 +780,45 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       const input = element('input');
       input.type = 'range';
       input.min = source.min; input.max = source.max; input.step = source.step;
-      // 鏡像本身不是參數：不能被參數檔掃到，也不能帶 id 跟真值撞名。
       input.dataset.presetIgnore = '';
       input.addEventListener('input', () => writeControl(key, input.value));
       row.append(head, input);
-      sliders.append(row);
-      return { key, input, value };
+      slot.append(row);
+      return { key, kind: 'range', row, input, value };
     });
-    document.body.append(root);
+    parent.append(root);
+    // 真的那一列被 gate 收起來（例如方體的圓角在選圓環時）時，鏡像跟著收：造型卡
+    // 的高度因此跟著形狀變，外層的欄位由下往上長，燈光卡不會跟著跳。
+    const gatedOff = source => !!source.closest('.gated-off') || !!source.closest('.row')?.hidden;
     const sync = () => {
-      for (const { key, input, value } of items) {
-        const source = $(key);
+      for (const item of items) {
+        const source = $(item.key);
+        item.row.hidden = gatedOff(source);
+        if (item.kind === 'button') {
+          item.mirror.textContent = source.textContent;
+          item.mirror.disabled = source.disabled;
+          continue;
+        }
+        if (item.kind === 'color') {
+          if (document.activeElement !== item.mirror) item.mirror.value = source.value;
+          continue;
+        }
+        if (item.kind === 'select') {
+          const options = [...source.options].map(o => [o.value, o.text]);
+          const current = [...item.mirror.options].map(o => [o.value, o.text]);
+          if (JSON.stringify(options) !== JSON.stringify(current)) {
+            item.mirror.replaceChildren(...options.map(([value, text]) => {
+              const option = element('option', '', text);
+              option.value = value;
+              return option;
+            }));
+          }
+          item.mirror.value = source.value;
+          continue;
+        }
+        const { input, value } = item;
         if (document.activeElement !== input) input.value = source.value;
-        const readout = $(`${key}_v`);
+        const readout = $(`${item.key}_v`);
         value.textContent = readout && !readout.querySelector('input')
           ? readout.textContent : source.value;
         const min = Number(input.min || 0), max = Number(input.max || 1);
@@ -789,6 +828,30 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     };
     sync();
     return { root, sync };
+  }
+
+  // 右側那一欄（桌面）：造型卡在上、燈光卡在下，由下往上堆。左緣對齊「輸出」、
+  // 右緣對齊「面板」—— 按鈕的寬度跟著字型與語系變，所以量實際位置，不寫死。
+  function buildSideStack() {
+    const stack = element('div', 'staticSideStack');
+    stack.id = 'staticSideStack';
+    document.body.append(stack);
+    const align = () => {
+      const first = $('exportBtn')?.getBoundingClientRect();
+      const last = $('toggleBtn')?.getBoundingClientRect();
+      if (!first?.width || !last?.width) return;
+      stack.style.setProperty('--stack-left', `${Math.round(first.left)}px`);
+      stack.style.setProperty('--stack-right', `${Math.round(window.innerWidth - last.right)}px`);
+      stack.style.setProperty('--stack-top', `${Math.round(Math.max(first.bottom, last.bottom) + 12)}px`);
+    };
+    window.addEventListener('resize', align);
+    if (typeof ResizeObserver === 'function') {
+      const observer = new ResizeObserver(align);
+      for (const id of ['exportBtn', 'playCtl', 'toggleBtn']) if ($(id)) observer.observe($(id));
+    }
+    document.fonts?.ready?.then(align);
+    requestAnimationFrame(align);
+    return stack;
   }
 
   // 靜態模組的面板：一頁、由上而下照「東西 → 材質 → 光 → 地板 → 鏡頭 → 背景」排，
@@ -820,26 +883,6 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       return block;
     };
 
-    // 風格：一鍵換一組玻璃外觀。每一組都是絕對的 —— 沒列到的參數回到這個模式／
-    // 底色的預設，所以連按兩個風格不會疊在一起。
-    const looks = section('風格', null, true);
-    const lookButtons = element('div', 'inspectorStylePresetButtons');
-    const lookStatus = element('output', 'inspectorStatus');
-    lookStatus.setAttribute('aria-live', 'polite');
-    for (const look of STATIC_LOOKS) {
-      const lookButton = button(look.label, () => {
-        for (const key of STATIC_LOOK_KEYS) writeControl(key, look.values[key] ?? colorDefault(key));
-        lookStatus.textContent = `已套用「${look.label}」，下面的參數仍可繼續調整。`;
-        refresh();
-      });
-      lookButton.classList.add('inspectorStylePreset');
-      lookButton.dataset.staticLook = look.id;
-      lookButton.style.setProperty('--preset-swatch', look.swatch);
-      lookButtons.append(lookButton);
-    }
-    looks.append(lookButtons, lookStatus);
-    page.append(looks);
-
     const shapeBlock = group('造型', [
       ['staticShape', '形狀'],
       ['boxSize', '大小'], ['boxCornerRadius', '圓角'],
@@ -859,6 +902,9 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       importBlock.append(row);
     }
     shapeBlock.append(importBlock);
+    // 桌面上造型改到畫面右側的獨立卡片（見 buildSideStack），面板裡這一區藏起來；
+    // 手機的空間已經被頂部燈光區和底部抽屜佔滿，造型留在抽屜裡。
+    shapeBlock.classList.add('staticDesktopMirrored');
 
     // 「邊緣彩虹」（edgeDispersion）不開給使用者：跟「彩虹強度」看起來差不多，
     // 兩根放在一起只是讓人猜哪一根在做什麼。它仍留在隱藏的分頁裡，風格按鈕
@@ -873,22 +919,58 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     //
     // 折射率可以到 2.5，鑽石（2.42）才放得進來。只有靜態頁會跑到這裡。
     $('ior').max = '2.5';
+    // 常調的在上：顏色、濃度、霧面、彩虹、反射；折射率連同底下的材料按鈕放最後。
+    // 材料按鈕跟著折射率那一列走（見下面的 after）。
     const glassBlock = group('玻璃', [
-      ['ior', '折射率'],
-      ['dispersionScale', '彩虹強度'],
       ['absorbColor', '玻璃顏色'],
       ['absorb', '顏色濃度'],
       ['roughness', '霧面'],
+      ['dispersionScale', '彩虹強度'],
       ['reflect', '反射'],
+      ['ior', '折射率'],
     ]);
     rowOf('ior').after(buildIorPresets());
     // 燈光整組（方向盤、燈光強度、明暗對比）是最常一邊看畫面一邊調的，拉到
     // 畫面右下角常駐（見 buildQuickDock），面板裡不再有燈光區。
     staticDial = buildLightDial();
-    staticQuickDock = buildQuickDock('燈光', [
+    const sideStack = buildSideStack();
+    staticShapeCard = buildQuickDock('造型', [
+      ['staticShape', '形狀'],
+      ['boxSize', '大小'], ['boxCornerRadius', '圓角'],
+      ['primitiveSize', '大小'], ['primitiveTubeRatio', '管徑'],
+      ['shapeSource', '檔案類型'], ['shapeQuality', '模型品質'], ['shapeBtn', null],
+      ['shapeAScale', '大小'], ['shapeDepth', '厚度'], ['shapeEdgeBevel', '圓角'],
+    ], null, 'staticShapeCard', sideStack);
+    // 背景色也放進這張卡（方向盤讀數的下面）：它就一兩個色票，單獨在左邊佔一整區
+    // 太浪費。深底是一個背景色，淺底是上下兩個漸層色，跟著底色切換（真的那幾列由
+    // refresh 依底色收起，鏡像照著 hidden 走）。
+    staticQuickDock = buildQuickDock('背景與燈光', [
       ['studioCardStrength', '燈光強度'],
       ['studioFlag', '明暗對比'],
-    ], staticDial.root);
+    ], staticDial.root, 'staticQuickDock', sideStack, [
+      ['bgColor', '背景'],
+      ['lightBgGradientTop', '上方'],
+      ['lightBgGradientBottom', '下方'],
+    ]);
+    // 鏡像要跟著 gate 走，但 gate 不是在 change 事件當下套的：換形狀之後要等 shader
+    // 變體換好、updateUIState 跑完才更新，那時沒有任何事件會再觸發 refresh。只靠
+    // 事件同步的話，切回方體後「選擇 SVG…」會一直掛在卡片上，直到下一次操作。
+    // 所以直接看面板裡 class／hidden 的變化，同一批變化只同步一次。
+    //
+    // 排在 microtask 而不是 requestAnimationFrame：切到「匯入」會在主執行緒上烘焙
+    // SVG 的距離場，那段時間畫格會被往後推好幾秒 —— 排在下一格的同步就跟著晚好幾秒，
+    // 切回方體之後「選擇 SVG…」還掛在卡片上。鏡像卡片在 #panel 外面，同步本身不會
+    // 再觸發這個 observer。
+    let mirrorSyncQueued = false;
+    new MutationObserver(() => {
+      if (mirrorSyncQueued) return;
+      mirrorSyncQueued = true;
+      queueMicrotask(() => {
+        mirrorSyncQueued = false;
+        staticShapeCard?.sync();
+        staticQuickDock?.sync();
+      });
+    }).observe(panel, { subtree: true, attributes: true, attributeFilter: ['class', 'hidden'] });
     group('地板', [
       ['studioShadowStrength', '影子深度'],
       ['studioCaustic', '透光光斑'],
@@ -900,11 +982,14 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       ['cameraRotationX', '垂直角度'],
     ]);
     cameraBlock.append(element('p', 'inspectorNote', '也可以直接在畫面上拖曳旋轉、滾輪縮放。'));
-    group('背景', [
+    // 桌面上背景色在右側「背景與燈光」卡片裡（見 buildQuickDock 的 leadEntries），
+    // 這一區只留給手機的抽屜。
+    const backgroundBlock = group('背景', [
       ['bgColor', '背景顏色'],
       ['lightBgGradientTop', '上方顏色'],
       ['lightBgGradientBottom', '下方顏色'],
     ]);
+    backgroundBlock.classList.add('staticDesktopMirrored');
 
     const advanced = group('進階', [
       ['lightKeyAzimuth', '主光 方向'], ['lightKeyElevation', '主光 高度'],
@@ -1128,7 +1213,10 @@ function buildLightDial() {
     circle(x, y, 7); ctx.fillStyle = '#ffe3a3'; ctx.fill();
     ctx.restore();
     const text = `方向 ${Math.round(az)}° · 高度 ${Math.round(el)}°`;
-    readout.textContent = text;
+    // 拆成兩段：窄的地方（右側卡片）各佔一行，寬的地方照樣排成一行（見 CSS）。
+    const direction = element('span', 'lightDialReadoutPart', `方向 ${Math.round(az)}°`);
+    const elevation = element('span', 'lightDialReadoutPart', `高度 ${Math.round(el)}°`);
+    readout.replaceChildren(direction, element('span', 'lightDialReadoutSep', ' · '), elevation);
     canvas.setAttribute('aria-valuetext', text);
   }
   return { root, draw };

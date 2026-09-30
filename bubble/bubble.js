@@ -1,13 +1,13 @@
 'use strict';
 import * as THREE from 'three';
-import { buildInspector } from './inspector.js?v=abbe-2';
+import { buildInspector } from './inspector.js?v=glass-order-2';
 import { createAdaptiveQuality, QUALITY_TIER_NAMES } from './adaptive-quality.js?v=2';
 import { createGpuProfiler } from './gpu-profiler.js?v=1';
 let inspector = null;
 import { EDGE_TINT_TARGETS, edgeTintKeys, sanitizeEdgeTintValue, readEdgeTintStops, sampleEdgeTint } from './edge-tint.js?v=dark-tint-1';
 import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
-} from './shape-field.js?v=typewriter-1';
+} from './shape-field.js?v=mesh-2';
 import {
   DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
   MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
@@ -31,7 +31,7 @@ import { parseBubbleRuntimeOptions } from './diagnostics.js?v=1';
 import { createMaterialTextureController } from './material-textures.js?v=1';
 import { createEnvironmentLoader, selectMaterialEnvironment } from './environment-loader.js?v=1';
 import { describeShapeImport, loadShapeAsset } from './shape-loader.js?v=1';
-import { createShaderVariantPlanner, VariantMaterialCache } from './shader-variants.js?v=2';
+import { createShaderVariantPlanner, VariantMaterialCache } from './shader-variants.js?v=3';
 import {
   contactMergeAmount, findClosestDropPair, staticShapeFloorHeight, staticShapeShadowRadius,
   updateDropBounds,
@@ -345,7 +345,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=static-shadow-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=mesh-1';
 import { createPostChain } from './post.js?v=post-mask-3';
 
 const {
@@ -2081,10 +2081,52 @@ function updateDropUniforms(t) {
   // 地板跟著靜態造型的最低點走（見 staticShapeFloorHeight）。只有靜態模式編得到
   // 棚景，其餘模式送什麼都不影響。
   if (uniforms?.uStudioFloorHeight) {
-    uniforms.uStudioFloorHeight.value = P.motion === 'static'
-      ? staticShapeFloorHeight(P) : STUDIO_FLOOR_DEFAULT;
+    // 匯入的 GLB 走三角網格時，網格的包圍盒就是模型真正的底部（距離場那條路不知道
+    // SVG／GLB 的最低點，只能用固定高度，物體會浮在半空）。縮放跟 mapScene 的
+    // shapePA 同一組：uShapeScale（呼吸）× uShapeAScale（大小）。
+    const meshFloor = staticMeshActive() && staticMeshBounds
+      ? staticMeshBounds.min[1] * uniforms.uShapeScale.value * uniforms.uShapeAScale.value
+        + uniforms.uShapeRigidOffset.value.y - 0.02
+      : null;
+    uniforms.uStudioFloorHeight.value = P.motion !== 'static' ? STUDIO_FLOOR_DEFAULT
+      : meshFloor ?? staticShapeFloorHeight(P);
     uniforms.uStudioShadowBound.value = P.motion === 'static' ? staticShapeShadowRadius(P) : 0;
   }
+}
+
+// 三角網格的資料貼圖：RGBA32F、不過濾（shader 用 texelFetch 按索引讀）。
+function makeMeshTexture(data, width, rows) {
+  const texture = new THREE.DataTexture(data, width, rows, THREE.RGBAFormat, THREE.FloatType);
+  texture.minFilter = texture.magFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+  return texture;
+}
+function makeBlankMeshTexture() {
+  return makeMeshTexture(new Float32Array(4), 1, 1);
+}
+// 形狀場換了之後把它帶的網格（只有 GLB 有）送進 shader；沒有就歸零、退回距離場。
+let staticMeshBounds = null;
+function applyStaticMesh(mesh) {
+  if (!uniforms) return;
+  staticMeshBounds = mesh?.bounds ?? null;
+  const oldNodes = uniforms.uMeshNodes.value, oldTris = uniforms.uMeshTris.value;
+  if (mesh) {
+    uniforms.uMeshNodes.value = makeMeshTexture(mesh.nodeData, mesh.width, mesh.nodeRows);
+    uniforms.uMeshTris.value = makeMeshTexture(mesh.triData, mesh.width, mesh.triRows);
+    uniforms.uMeshTriCount.value = mesh.triCount;
+  } else {
+    uniforms.uMeshNodes.value = makeBlankMeshTexture();
+    uniforms.uMeshTris.value = makeBlankMeshTexture();
+    uniforms.uMeshTriCount.value = 0;
+  }
+  oldNodes?.dispose();
+  oldTris?.dispose();
+}
+// 網格這一刻是不是真的接手了主射線（變體對、而且資料已經上傳）。
+function staticMeshActive() {
+  return !DIAG.probeStaticNoMesh && P.motion === 'static' && P.staticShape === 7 && P.shapeSource !== 'svg'
+    && (uniforms?.uMeshTriCount.value ?? 0) > 0;
 }
 
 function makeBlankEnv() {
@@ -2190,6 +2232,11 @@ function initGL() {
     uMaxSteps:   { value: adaptiveQuality.snapshot().steps },
     uStaticQualityTier: { value: 0 },
     uStudioShadowBound: { value: 0 },
+    // 靜態模組匯入 GLB 的三角網格（見 mesh-bvh.js、optics.js 的 FEATURE_STATIC_MESH）。
+    // 沒有網格時 uMeshTriCount 是 0，shader 退回距離場。
+    uMeshNodes: { value: makeBlankMeshTexture() },
+    uMeshTris: { value: makeBlankMeshTexture() },
+    uMeshTriCount: { value: 0 },
     // 這兩顆的作用都不是調整取樣數，而是讓 calcNormal 兩條法線路徑的迴圈 trip count
     // 對 fxc 保持未知，迴圈才不會被靜態展開成一份一份的 mapScene（見 shaders.js 的
     // calcNormal）。所以值恆定：四面體 4 個 tap、SVG 分軸中央差分 6 個 tap。
@@ -2515,6 +2562,9 @@ function resolveMaxSteps() {
   if (DIAG.lowsteps) return 32;
   // 多水滴 + 形狀場會增加每一步的取樣成本；60 步仍足以覆蓋保守包圍球，
   // 並避免高 DPR 桌面在 Formation 模式失去即時預覽能力。
+  // 網格接手時主射線不走距離場（見 optics.js 的 staticMeshPrimary），那一段 march
+  // 整個跳過；網格還沒載好時照常走。
+  if (staticMeshActive()) return 0;
   const qualitySteps = adaptiveQuality.snapshot().steps;
   if (usesShapeField(P.motion)) return Math.min(qualitySteps, dragging ? 48 : 60);
   return dragging ? Math.min(qualitySteps, 56) : qualitySteps;
@@ -3051,6 +3101,7 @@ async function importShapeFile(file, kind, { rebuilding = false } = {}) {
     uniforms.uShapeGrid.value = next.grid;
     uniforms.uShapeAtlas.value.copy(next.atlas);
     uniforms.uShapeType.value = kind === 'svg' ? 1 : 2;
+    applyStaticMesh(kind === 'svg' ? null : next.mesh);
     if (old) old.dispose();
     shapeFieldSource = kind;
     // 只有 SVG 內建預設需要記；真正匯入的檔案或 GLB 都跟這個分歧無關，

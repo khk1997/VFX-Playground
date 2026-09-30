@@ -200,26 +200,89 @@
 #exportBtn:hover { background: #28adff !important; }
 #exportBtn[aria-expanded="true"] { background: #007dcc !important; box-shadow: inset 0 0 0 1px #ffffff1f !important; }
 #toggleBtn[aria-expanded="true"] { background: #38383b !important; border-color: #ffffff35 !important; }
-/* 靜態模組：畫面右下角常駐的燈光調整（見 inspector.js 的 buildQuickDock）。 */
+/* 靜態模組：畫面右側那一欄（見 inspector.js 的 buildSideStack），造型卡在上、
+   燈光卡在下。
+   欄位貼著畫面底部、由下往上堆（justify-content: flex-end）：切換形狀讓造型卡
+   變高或變矮時，只有它的上緣在動，燈光卡不會跟著跳。欄位頂端停在按鈕列下方，
+   造型卡放不下時自己捲動，整欄永遠不會蓋到按鈕。
+   左右兩緣由 JS 量「輸出」與「面板」按鈕的實際位置算出來。卡片之間的間距
+   12px，跟欄位到畫面底部的距離一致，看起來是同一組。 */
+.staticSideStack {
+  position: fixed; z-index: 11;
+  top: var(--stack-top, 64px); bottom: 12px;
+  left: var(--stack-left, auto); right: var(--stack-right, 12px);
+  width: auto; min-width: 220px;
+  display: flex; flex-direction: column; justify-content: flex-end; gap: 12px;
+  pointer-events: none;
+}
+.staticSideStack > * { pointer-events: auto; }
 .staticQuickDock {
   --inspector-accent: #7957ff;
-  position: fixed; right: 16px; bottom: 16px; z-index: 11;
-  width: 260px; box-sizing: border-box; padding: 14px 16px 10px;
+  box-sizing: border-box; padding: 16px 16px 12px;
   background: #050505eb; color: #f5f5f7; color-scheme: dark;
   border: 1px solid #ffffff24; border-radius: 20px;
   box-shadow: 0 18px 60px #0005, inset 0 1px 0 #ffffff0a;
   font-family: inherit;
 }
+#staticQuickDock { flex: 0 0 auto; }
+#staticShapeCard { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+#staticShapeCard::-webkit-scrollbar { width: 4px; }
+#staticShapeCard::-webkit-scrollbar-thumb { background: #353535; border-radius: 99px; }
+.staticQuickDockRow[hidden] { display: none !important; }
+/* 卡片內的垂直節奏：每一列之間 16px、標籤到控制項 8px，下拉、按鈕、滑桿一致。
+   原本三種列各有各的間距（10 / 2 / 6px），標籤看起來黏在上一個控制項下緣。 */
+/* 選擇器要比下面那條 .staticQuickDockRow（display: block）重：兩者權重一樣時
+   後寫的會贏，grid 被蓋成 block，gap 就整個失效，標籤直接貼在選單上。 */
+.staticQuickDockRow.staticQuickDockSelectRow { display: grid; gap: 8px; margin-bottom: 16px; }
+.staticQuickDockSelect {
+  width: 100%; height: 34px; padding: 0 30px 0 12px; box-sizing: border-box;
+  border: 1px solid #ffffff24; border-radius: 99px; background: #1c1c1e; color: #f5f5f7;
+  font: inherit; font-size: 13px; cursor: pointer;
+}
+.staticQuickDockButtonRow { margin: -4px 0 16px; }
+/* 方向盤讀數底下的背景色：一列一個色票，標籤在左、色票在右。讀數往上靠，
+   色票接在它下面，整欄跟方向盤垂直置中。 */
+.staticQuickDock .lightDial { align-items: center; }
+.staticQuickDock .lightDialInfo { align-self: stretch; display: flex; flex-direction: column; justify-content: center; gap: 10px; min-width: 0; flex: 1; }
+.staticQuickDockRow.staticQuickDockColorRow {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0;
+}
+.staticQuickDockRow.staticQuickDockColorRow > .staticQuickDockHead { margin: 0; }
+.staticQuickDockColor {
+  flex: 0 0 26px; width: 26px; height: 26px; padding: 2px; box-sizing: border-box;
+  border: 1px solid #ffffff35; border-radius: 50%; background: transparent; cursor: pointer;
+}
+.staticQuickDockColor::-webkit-color-swatch-wrapper { padding: 0; }
+.staticQuickDockColor::-webkit-color-swatch { border: 0; border-radius: 50%; }
+.staticQuickDockColor::-moz-color-swatch { border: 0; border-radius: 50%; }
+.staticQuickDockButton {
+  width: 100%; height: 34px; border: 1px solid #ffffff24 !important; border-radius: 99px !important;
+  background: #1c1c1e !important; color: #f5f5f7 !important; font: inherit; font-size: 13px; cursor: pointer;
+}
+.staticQuickDockButton:hover { background: #2a2a2d !important; }
+/* 桌面上造型搬到右側卡片，面板裡原本那一區藏起來（真的控制項還在裡面）。 */
+@media (min-width: 761px) {
+  #panel .staticDesktopMirrored { display: none !important; }
+  /* 靜態模組的面板內容比較少，窄一點（其他模式維持 380px）。 */
+  #panel.inspector[data-layout="static"] { width: 340px; }
+}
 /* 折射率底下的材料膠囊：沿用 inspectorSegments 的樣子，但四顆要擠在一列。 */
 #panel.inspector .inspectorIorPresets { margin: -8px 0 18px; }
 #panel.inspector .inspectorIorPresets button { padding: 7px 4px; font-size: 12px; white-space: nowrap; }
-.staticQuickDockTitle { margin-bottom: 8px; font-size: 13px; font-weight: 700; letter-spacing: .02em; }
+/* 跟左邊面板的區塊標題同一個級數（見 .inspectorSection > summary h3）。 */
+.staticQuickDockTitle { margin-bottom: 14px; font-size: 15px; font-weight: 600; letter-spacing: -.01em; color: #f5f5f7; }
 /* 方向盤在常駐區裡縮小，說明文字改成滑鼠提示（canvas 的 title），只留讀數。 */
 .staticQuickDock .lightDial { margin: 0 0 8px; gap: 12px; }
-.staticQuickDock .lightDialCanvas { width: 104px; height: 104px; }
+/* 欄寬跟著三顆按鈕走（大約 240–290px），盤面 96px 才留得下旁邊的讀數。 */
+.staticQuickDock .lightDialCanvas { width: 96px; height: 96px; }
+/* 右側卡片比較窄：方向、高度各佔一行，不要在「高度」後面斷開。 */
+.staticQuickDock .lightDialReadout { display: grid; gap: 2px; font-size: 13px; line-height: 1.4; }
+.staticQuickDock .lightDialReadoutSep { display: none; }
 .staticQuickDock .lightDialInfo .inspectorNote { display: none; }
-.staticQuickDockRow { display: block; margin-bottom: 6px; cursor: pointer; }
-.staticQuickDockHead { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: #a1a1a6; }
+.staticQuickDockRow { display: block; margin-bottom: 12px; cursor: pointer; }
+.staticQuickDockRow:last-child { margin-bottom: 4px; }
+.staticQuickDockHead { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: #a1a1a6; margin-bottom: 4px; }
+.staticQuickDockRow.staticQuickDockSelectRow > .staticQuickDockHead { margin-bottom: 0; }
 .staticQuickDockValue { color: #e6e6eb; font-variant-numeric: tabular-nums; }
 .staticQuickDock input[type=range] {
   width: 100%; height: 26px; margin: 0; appearance: none; -webkit-appearance: none;
@@ -236,20 +299,28 @@
 .staticQuickDock input[type=range]::-moz-range-track { height: 5px; border-radius: 99px; background: #303033; }
 .staticQuickDock input[type=range]::-moz-range-progress { height: 5px; border-radius: 99px; background: var(--inspector-accent); }
 .staticQuickDock input[type=range]::-moz-range-thumb { width: 24px; height: 18px; border: 0; border-radius: 99px; background: #f8f8fa; }
-html.preview-mode .staticQuickDock, body[data-bubble-boot] .staticQuickDock { display: none; }
+html.preview-mode .staticSideStack, body[data-bubble-boot] .staticSideStack { display: none; }
 /* 輸出對話框開著時跟左邊的參數面板一樣收起來：輸出畫面上不該有調整用的介面。
    對話框關掉就自己回來（狀態全在 DOM 裡，不需要另外記）。 */
-body:has(#exportDialog[open]) .staticQuickDock { display: none; }
+body:has(#exportDialog[open]) .staticSideStack { display: none; }
 
 @media (max-width: 760px) {
+  #staticQuickDock .lightDialReadout { display: block; font-size: 10px; }
+  #staticQuickDock .lightDialReadoutSep { display: inline; }
   /* 手機的參數面板是從底部拉起的抽屜，最高到畫面 78%；放在頂部按鈕下方才不會
      跟抽屜的任何一個狀態打架。兩根並排，高度壓到最小。 */
-  .staticQuickDock {
-    left: 12px; right: 12px; top: calc(64px + env(safe-area-inset-top, 0px)); bottom: auto; width: auto;
+  .staticSideStack {
+    left: 12px; right: 12px; top: calc(64px + env(safe-area-inset-top, 0px)); bottom: auto;
+    min-width: 0; justify-content: flex-start;
+  }
+  /* 手機的造型與背景色留在底部抽屜裡（面板那兩區沒有藏）。 */
+  #staticShapeCard { display: none; }
+  #staticQuickDock .staticQuickDockColorRow { display: none !important; }
+  #staticQuickDock {
     display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 14px; align-items: center;
     padding: 8px 14px 6px; border-radius: 16px;
   }
-  .staticQuickDockTitle { display: none; }
+  #staticQuickDock .staticQuickDockTitle { display: none; }
   .staticQuickDock .lightDial { margin: 0; flex-direction: column; gap: 2px; }
   .staticQuickDock .lightDialCanvas { width: 76px; height: 76px; }
   .staticQuickDock .lightDialReadout { font-size: 10px; }

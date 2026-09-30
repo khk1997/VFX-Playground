@@ -141,6 +141,140 @@ vec3 exitNormalTetra(vec3 p){
 }
 #endif
 
+// 最後輸出的值域處理（HDR 時保留超過 1 的部分，否則夾到 0–1）。從 shaders.js 搬來。
+vec3 clampOutput(vec3 c){
+  if (uHdrOutput > 0.5) {
+    c = max(c, vec3(0.0));
+    if (uHighlightGain > 1.0) {
+      float peak = max(c.r, max(c.g, c.b));
+      // 0.75 起算：低於這裡的完全不動，到 1.0 才吃滿增益。用 smoothstep 而不是
+      // 硬切，否則會在等亮度線上留下一圈看得見的邊。
+      c *= mix(1.0, uHighlightGain, smoothstep(0.75, 1.0, peak));
+    }
+    return c;
+  }
+  return clamp(c, 0.0, 1.0);
+}
+
+// ===== 靜態模組：直接打 GLB 的三角形 =====
+//
+// 距離場（體素 + 模糊）會把模型的細節磨掉，靜態模組又只展示一顆不變形的物體，所以
+// 玻璃本身改成對三角形求交：主射線的命中點、出口面、內部彈跳都是真正的三角形，
+// 法線用頂點法線插值 —— 跟 Blender 的 smooth shading 同一件事。距離場仍然在，
+// 地板影子要靠它（軟陰影需要「離物體多遠」，三角形給不出這個），網格還沒載好的
+// 那段時間也靠它畫。
+//
+// 資料格式、建樹方式見 bubble/mesh-bvh.js；那邊的 CPU 版走訪跟這裡是同一套演算法，
+// 有 node 測試跟暴力法逐一比對。
+//
+// 座標：網格的頂點跟距離場在同一個「造型本地空間」（見 mapScene 的 shapePA）。射線
+// 用同一組反變換帶進來，方向不正規化，所以求出來的 t 直接就是世界空間的 t。
+//
+// 之後優化的旋鈕都在這裡：MESH_STACK_SIZE（堆疊深度，要 ≥ mesh-bvh.js 的
+// MAX_BVH_DEPTH）、MESH_MAX_VISITS（一條射線最多走訪幾個節點）。
+#ifdef FEATURE_STATIC_MESH
+uniform sampler2D uMeshNodes;
+uniform sampler2D uMeshTris;
+uniform int uMeshTriCount;       // 0 = 網格還沒載好（或建不出來），全部退回距離場
+#define MESH_TEX_WIDTH 2048
+#define MESH_STACK_SIZE 32
+#define MESH_MAX_VISITS 512
+#define MESH_MAX_LEAF 16         // 跟 mesh-bvh.js 的 MESH_MAX_LEAF 一致
+
+bool staticMeshHit = false;
+vec3 staticMeshNormal = vec3(0.0, 0.0, 1.0);
+
+vec4 meshTexel(sampler2D tex, int index){
+  return texelFetch(tex, ivec2(index % MESH_TEX_WIDTH, index / MESH_TEX_WIDTH), 0);
+}
+
+vec3 meshLocalScale(){
+  return max(uShapeRigidScale * uShapeScale * uShapeAScale, vec3(1e-5));
+}
+
+// 射線 origin + dir·t 在 [tMin, tMax) 內最近的三角形。回傳世界空間的 t 與法線。
+bool traceStaticMesh(vec3 origin, vec3 dir, float tMin, float tMax, out float tHit, out vec3 normal){
+  vec3 scale = meshLocalScale();
+  vec3 lo = ((origin - uShapeRigidOffset) * uShapeRigidRot) / scale;
+  vec3 ld = (dir * uShapeRigidRot) / scale;
+  vec3 invDir = 1.0 / mix(ld, vec3(1e-12), vec3(lessThan(abs(ld), vec3(1e-12))));
+  float closest = tMax;
+  int bestTri = -1;
+  float bestU = 0.0, bestV = 0.0;
+  int stack[MESH_STACK_SIZE];
+  int top = 0;
+  stack[top++] = 0;
+  for (int visit = 0; visit < MESH_MAX_VISITS; visit++) {
+    if (top == 0) break;
+    int node = stack[--top];
+    vec4 a = meshTexel(uMeshNodes, node * 2);
+    vec4 b = meshTexel(uMeshNodes, node * 2 + 1);
+    vec3 t0 = (a.xyz - lo) * invDir;
+    vec3 t1 = (b.xyz - lo) * invDir;
+    vec3 tn = min(t0, t1), tf = max(t0, t1);
+    float enter = max(max(tn.x, tn.y), max(tn.z, tMin));
+    float leave = min(min(tf.x, tf.y), min(tf.z, closest));
+    if (enter > leave) continue;
+    int count = int(b.w);
+    if (count > 0) {
+      int first = int(a.w);
+      for (int k = 0; k < MESH_MAX_LEAF; k++) {
+        if (k >= count) break;
+        int tri = (first + k) * 6;
+        vec3 v0 = meshTexel(uMeshTris, tri).xyz;
+        vec3 e1 = meshTexel(uMeshTris, tri + 1).xyz;
+        vec3 e2 = meshTexel(uMeshTris, tri + 2).xyz;
+        vec3 pv = cross(ld, e2);
+        float det = dot(e1, pv);
+        if (abs(det) < 1e-12) continue;
+        float inv = 1.0 / det;
+        vec3 tv = lo - v0;
+        float u = dot(tv, pv) * inv;
+        if (u < 0.0 || u > 1.0) continue;
+        vec3 qv = cross(tv, e1);
+        float v = dot(ld, qv) * inv;
+        if (v < 0.0 || u + v > 1.0) continue;
+        float th = dot(e2, qv) * inv;
+        if (th > tMin && th < closest) { closest = th; bestTri = first + k; bestU = u; bestV = v; }
+      }
+      continue;
+    }
+    // 內部節點：左子節點是下一個（深度優先排列），右子節點索引存在 a.w。
+    if (top + 2 > MESH_STACK_SIZE) continue;
+    stack[top++] = int(a.w);
+    stack[top++] = node + 1;
+  }
+  if (bestTri < 0) return false;
+  int tri = bestTri * 6;
+  vec3 n0 = meshTexel(uMeshTris, tri + 3).xyz;
+  vec3 n1 = meshTexel(uMeshTris, tri + 4).xyz;
+  vec3 n2 = meshTexel(uMeshTris, tri + 5).xyz;
+  vec3 nLocal = n0 * (1.0 - bestU - bestV) + n1 * bestU + n2 * bestV;
+  // 法線的反變換：旋轉回世界、除以縮放（非均勻縮放時法線要用逆轉置）。
+  normal = normalize(uShapeRigidRot * (nLocal / scale));
+  tHit = closest;
+  return true;
+}
+
+// 主射線：網格載好時整個取代距離場的命中。剪影的抗鋸齒暫時沒有（距離場那套
+// nearestAngle 是從 sphere tracing 來的，網格沒有對應的量）；之後要補可以在這裡
+// 用射線到最近三角形邊的角距做覆蓋率。
+void staticMeshPrimary(vec3 ro, vec3 rd, inout bool hit, inout float t, inout float edgeCoverage){
+  if (uMeshTriCount <= 0) return;
+  float th; vec3 n;
+  staticMeshHit = traceStaticMesh(ro, rd, 0.0, 1e6, th, n);
+  hit = staticMeshHit;
+  if (!hit) return;
+  t = th;
+  // 法線朝向鏡頭這一側（不封閉或法線反的模型也照樣是「外面」）。
+  staticMeshNormal = dot(n, rd) > 0.0 ? -n : n;
+  edgeCoverage = 1.0;
+}
+#define PRIMARY_NORMAL(p) (staticMeshHit ? staticMeshNormal : calcNormal(p))
+#else
+#define PRIMARY_NORMAL(p) calcNormal(p)
+#endif
+
 // traceExitSurface 用哪一支算出口法線。預設就是完整的 calcNormal，所以不帶 probe
 // 時展開結果與加入這個巨集之前完全相同。
 #ifndef TRACE_EXIT_NORMAL_FN
@@ -170,6 +304,19 @@ bool traceExitSurface(
   return false;
 #endif
 #ifndef PROBE_NO_TRACE_EXIT
+#ifdef FEATURE_STATIC_MESH
+  // 網格：從入口點沿著玻璃內部的方向打下一個三角形，那就是出口（內部彈跳也走這裡）。
+  // tMin 讓射線不會打到自己出發的那一面。出口法線朝外 = 跟行進方向同一側。
+  if (uMeshTriCount > 0) {
+    float th; vec3 n;
+    bool found = traceStaticMesh(entryPoint, insideDir, 1e-4, uBounds.w * 4.0, th, n);
+    exitPoint = entryPoint + insideDir * th;
+    exitNormal = dot(n, insideDir) < 0.0 ? -n : n;
+    pathLength = found ? th : 0.0;
+    if (!found) { exitPoint = entryPoint; exitNormal = vec3(0.0, 0.0, 1.0); }
+    return found;
+  }
+#endif
   float travel = 0.012;
   float maxTravel = uBounds.w * 2.25;
   bool found = false;

@@ -262,10 +262,11 @@ def check_static(browser, base_url: str) -> dict[str, object]:
         """() => [...document.querySelectorAll('#inspectorPage-static > details > summary h3')]
              .map(node => node.textContent)"""
     )
-    assert sections[:6] == ["風格", "造型", "玻璃", "地板", "鏡頭", "背景"], sections
+    # 風格已經拿掉；造型那一區還在面板裡（手機用），桌面上藏起來、改由右側卡片操作。
+    assert sections[:5] == ["造型", "玻璃", "地板", "鏡頭", "背景"], sections
     # 用 wait_for 而不是 is_visible：開機遮罩撤掉之後面板還會做最後一次 refresh
     # （收合空區塊、套 gate），is_visible 不等待，偶爾會剛好量到那一瞬間。
-    for key in ("staticShape", "ior", "dispersionScale", "studioShadowStrength", "cameraFov"):
+    for key in ("ior", "dispersionScale", "studioShadowStrength", "cameraFov"):
         try:
             page.locator(f"#{key}").wait_for(state="visible", timeout=5_000)
         except Exception:
@@ -274,9 +275,12 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     assert page.locator("#dispersionAbbe").is_hidden(), "the Abbe number should not be on the static panel"
     glass_order = page.evaluate(
         """() => [...document.querySelectorAll('#inspectorPage-static .row input, #inspectorPage-static .row select')]
-             .map(el => el.id).filter(id => ['ior', 'dispersionScale'].includes(id))"""
+             .map(el => el.id).filter(id => ['absorbColor', 'absorb', 'roughness', 'ior', 'reflect', 'dispersionScale'].includes(id))"""
     )
-    assert glass_order == ["ior", "dispersionScale"], glass_order
+    assert glass_order == ["absorbColor", "absorb", "roughness", "dispersionScale", "reflect", "ior"], glass_order
+    # 材料按鈕緊接在折射率那一列後面。
+    assert page.evaluate("() => document.getElementById('ior').closest('.row').nextElementSibling"
+                         ".classList.contains('inspectorIorPresets')"), "the IOR chips should follow the IOR row"
     page.locator('.inspectorIorPresets button[data-ior="2.42"]').click()
     assert page.locator("#ior").input_value() == "2.42", page.locator("#ior").input_value()
     assert page.locator('.inspectorIorPresets button[data-ior="2.42"]').get_attribute("aria-pressed") == "true"
@@ -314,15 +318,38 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     camera = float(page.locator("#cameraRotationY").input_value())
     assert abs(((azimuth - camera) % 360) - 180) < 3, (azimuth, camera)
 
-    # 風格按鈕是絕對的：先套稜鏡再套清透，要回到預設而不是疊在一起。
-    default_edge = page.locator("#edgeDispersion").input_value()
-    page.locator('[data-static-look="prism"]').click()
-    assert page.locator("#edgeDispersion").input_value() != default_edge
-    page.locator('[data-static-look="clear"]').click()
-    assert page.locator("#edgeDispersion").input_value() == default_edge
+    assert page.locator("[data-static-look]").count() == 0, "the style presets should be gone"
 
-    # 輸出對話框開著時，右下角的燈光區要跟左邊面板一樣收起來，關掉後回來。
-    assert dock.is_visible()
+    # 右側欄：左緣對齊「輸出」、右緣對齊「面板」；造型卡在燈光卡上面。
+    shape_card = page.locator("#staticShapeCard")
+    assert shape_card.is_visible(), "the shape card is missing"
+    # 造型與背景兩區在桌面上都搬到右側卡片，面板裡那兩區藏起來。
+    mirrored = page.locator("#panel .staticDesktopMirrored")
+    assert mirrored.count() == 2, mirrored.count()
+    assert all(mirrored.nth(i).is_hidden() for i in range(2)), "the mirrored panel sections should be hidden on desktop"
+    geometry = page.evaluate(
+        """() => Object.fromEntries(['exportBtn', 'toggleBtn', 'staticShapeCard', 'staticQuickDock']
+             .map(id => [id, document.getElementById(id).getBoundingClientRect().toJSON()]))"""
+    )
+    for card in ("staticShapeCard", "staticQuickDock"):
+        assert abs(geometry[card]["left"] - geometry["exportBtn"]["left"]) <= 1, (card, geometry)
+        assert abs(geometry[card]["right"] - geometry["toggleBtn"]["right"]) <= 1, (card, geometry)
+    assert geometry["staticShapeCard"]["bottom"] < geometry["staticQuickDock"]["top"], geometry
+    light_top = geometry["staticQuickDock"]["top"]
+
+    # 背景色併進「背景與燈光」卡片：深底一個色票，改色要寫回真的 bgColor。
+    assert page.locator("#staticQuickDock .staticQuickDockTitle").text_content() == "背景與燈光"
+    color_rows = """() => [...document.querySelectorAll('#staticQuickDock .staticQuickDockColorRow')]
+        .filter(r => !r.hidden).map(r => r.textContent.trim())"""
+    assert page.evaluate(color_rows) == ["背景"], page.evaluate(color_rows)
+    page.locator("#staticQuickDock .staticQuickDockColor").first.evaluate(
+        "el => { el.value = '#223344'; el.dispatchEvent(new Event('input', { bubbles: true })); }")
+    assert page.locator("#bgColor").input_value() == "#223344", page.locator("#bgColor").input_value()
+    assert page.locator("#bgColor").evaluate("el => getComputedStyle(el.closest('details')).display") == "none", \
+        "the panel background section should be hidden on desktop"
+
+    # 輸出對話框開著時，右側欄要跟左邊面板一樣收起來，關掉後回來。
+    assert dock.is_visible(), "the light dock is not visible before opening export"
     page.locator("#exportBtn").evaluate("el => el.click()")
     page.wait_for_function("document.getElementById('exportDialog').open")
     assert dock.is_hidden(), "the light dock is showing over the export dialog"
@@ -330,15 +357,30 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     page.wait_for_function("!document.getElementById('exportDialog').open")
     assert dock.is_visible(), "the light dock did not come back after the export dialog closed"
 
-    # 形狀只剩方體、圓環、匯入。
+    # 形狀只剩方體、圓環、匯入（真的選單與右側卡片的鏡像都是）。
     shapes = page.locator("#staticShape option").evaluate_all("els => els.map(el => el.value)")
     assert shapes == ["0", "6", "7"], shapes
+    mirror_shape = shape_card.locator("select").first
+    assert mirror_shape.locator("option").evaluate_all("els => els.map(el => el.value)") == ["0", "6", "7"]
 
-    # 匯入形狀時才出現檔案按鈕與擠出參數。
-    assert page.locator("#shapeBtn").is_hidden()
-    page.locator("#staticShape").select_option("7")
-    assert page.locator("#shapeBtn").is_visible()
-    page.locator("#staticShape").select_option("0")
+    # 匯入形狀時才出現檔案按鈕與擠出參數；卡片變高，但燈光卡不動。
+    # 等的是頁面自己的狀態（那一列的 hidden），不是 Playwright 的可見性判斷：切形狀
+    # 的頭一兩百毫秒裡 gate 會連續套好幾次，可見性輪詢偶爾會卡在那段抖動裡。
+    #
+    # 逾時給 20 秒：這支測試的瀏覽器沒有 GPU，切到「匯入」要換的 shader 變體在
+    # SwiftShader（CPU）上編，主執行緒會一次卡住將近 7 秒（實測 6.8s；有 GPU 時是
+    # 0.17s）。那段期間 wait_for_function 的輪詢本身也跑不了，5 秒一定逾時。
+    shape_switch_timeout = 20_000
+    button_row_hidden = """() => document.querySelector('#staticShapeCard .staticQuickDockButton')
+        .closest('.staticQuickDockRow').hidden"""
+    page.wait_for_function(button_row_hidden, timeout=shape_switch_timeout)
+    mirror_shape.select_option("7")
+    assert page.locator("#staticShape").input_value() == "7", "the mirror did not reach the real control"
+    page.wait_for_function(f"() => !({button_row_hidden})()", timeout=shape_switch_timeout)
+    moved = page.evaluate("() => document.getElementById('staticQuickDock').getBoundingClientRect().top")
+    assert abs(moved - light_top) <= 1, (moved, light_top)
+    mirror_shape.select_option("0", timeout=shape_switch_timeout)
+    page.wait_for_function(button_row_hidden, timeout=shape_switch_timeout)
 
     # 參數檔記著別的模式也不能把模組切走，而且檔案裡「按模式記憶」的值
     # （cameraFov）要落在這個模組，不能在切走再切回來時被丟掉。

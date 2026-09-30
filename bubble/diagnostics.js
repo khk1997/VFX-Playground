@@ -166,6 +166,8 @@ const DIAG = (() => {
     //   probe-static-no-opt              關掉純效能的捷徑（影子提前跳過、色散單點），
     //                                    用來跟正式版在同一個瀏覽器裡成對比較
     probeStaticNoOpt: set.has('probe-static-no-opt'),
+    //   probe-static-no-mesh             匯入 GLB 時不走三角網格，退回距離場（對照用）
+    probeStaticNoMesh: set.has('probe-static-no-mesh'),
     probeStaticNoShadow: set.has('probe-static-no-shadow'),
     probeStaticNoSpectral: set.has('probe-static-no-spectral'),
     probeStaticNoSpectralBounce: set.has('probe-static-no-spectral-bounce'),

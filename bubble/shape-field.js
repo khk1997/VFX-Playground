@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { MAX_MESH_TRIANGLES, buildMeshBVH } from './mesh-bvh.js?v=2';
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
@@ -525,6 +526,52 @@ export async function svgToField(file, { size = 512, supersample = 3 } = {}) {
   }
 }
 
+// 靜態模組直接打三角形用的網格資料（見 mesh-bvh.js）。跟 collectTriangles 不一樣：
+// 這裡一個三角形都不省（那邊為了烘焙速度抽樣到一萬兩千個左右），而且要帶頂點法線
+// —— 插值出來的平滑表面才跟 Blender 看到的一樣。
+//
+// 座標跟距離場同一個空間：呼叫時 root 已經被 objectToField 置中、縮放過了。
+// 回傳 null 代表不走三角網格（沒有三角形、或多到超過貼圖上限），呼叫端退回距離場。
+export function collectMeshData(root) {
+  root.updateMatrixWorld(true);
+  const meshes = [];
+  let total = 0;
+  root.traverse(obj => {
+    if (!obj.isMesh || !obj.geometry?.attributes?.position) return;
+    const geometry = obj.geometry;
+    const count = geometry.index ? geometry.index.count : geometry.attributes.position.count;
+    total += Math.floor(count / 3);
+    meshes.push(obj);
+  });
+  if (!total || total > MAX_MESH_TRIANGLES) return null;
+  const positions = new Float32Array(total * 9);
+  const normals = new Float32Array(total * 9);
+  const v = new THREE.Vector3(), n = new THREE.Vector3();
+  const normalMatrix = new THREE.Matrix3();
+  let o = 0;
+  for (const obj of meshes) {
+    let geometry = obj.geometry;
+    if (!geometry.attributes.normal) {
+      geometry = geometry.clone();
+      geometry.computeVertexNormals();
+    }
+    const pos = geometry.attributes.position, nor = geometry.attributes.normal, index = geometry.index;
+    normalMatrix.getNormalMatrix(obj.matrixWorld);
+    const count = index ? index.count : pos.count;
+    for (let i = 0; i + 2 < count; i += 3) {
+      for (let k = 0; k < 3; k++) {
+        const vi = index ? index.getX(i + k) : i + k;
+        v.fromBufferAttribute(pos, vi).applyMatrix4(obj.matrixWorld);
+        n.fromBufferAttribute(nor, vi).applyMatrix3(normalMatrix).normalize();
+        positions.set([v.x, v.y, v.z], o + k * 3);
+        normals.set([n.x, n.y, n.z], o + k * 3);
+      }
+      o += 9;
+    }
+  }
+  return buildMeshBVH(positions.subarray(0, o), normals.subarray(0, o));
+}
+
 function collectTriangles(root) {
   root.updateMatrixWorld(true);
   const tris = [];
@@ -671,6 +718,10 @@ export async function objectToField(root, size = 48) {
     const ay = Math.floor(z / cols) * size + y;
     liquidAtlas[ax + ay * atlasW] = liquidField[src];
   }
+  // 三角網格一併帶出去（靜態模組用，其餘模式不讀）。建不出來就是 null，不影響
+  // 距離場這條路。
+  let mesh = null;
+  try { mesh = collectMeshData(root); } catch (error) { console.warn('[bubble] 三角網格建立失敗，改用距離場', error); }
   return {
     texture: encodeFloat2D(liquidAtlas, atlasW, atlasH),
     targets,
@@ -678,6 +729,7 @@ export async function objectToField(root, size = 48) {
     grid: size,
     atlas: new THREE.Vector2(cols, rows),
     oddScanlines,
+    mesh,
   };
 }
 
