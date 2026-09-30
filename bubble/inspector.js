@@ -1,5 +1,5 @@
 import { EDGE_TINT_TARGETS, EDGE_TINT_STOPS, edgeTintParams } from './edge-tint.js';
-import { EDGE_TINT_BASE_BY_BACKDROP, EDGE_TINT_STRENGTH_BY_BACKDROP } from './runtime-defaults.js?v=static-defaults-1';
+import { EDGE_TINT_BASE_BY_BACKDROP, EDGE_TINT_STRENGTH_BY_BACKDROP } from './runtime-defaults.js?v=light-strength-1';
 import { INSTALLING_VISUAL_PRESETS, installingVisualPresetValues } from './visual-presets.js?v=tint-light-1';
 
 const PAGES = [['shape', '造型'], ['motion', '動態'], ['look', '外觀'], ['scene', '場景']];
@@ -14,7 +14,9 @@ const STATIC_LOOKS = [
   {
     id: 'prism', label: '稜鏡',
     swatch: 'linear-gradient(90deg, #ff5a5a, #ffd24a, #5ce07a, #4ab4ff, #a46bff)',
-    values: { dispersionScale: 2.2, edgeDispersion: 5, dispersionAbbe: 12, ior: 1.5, studioFlag: 0.85 },
+    // 原本是彩虹強度 2.2 + 阿貝數 12；阿貝數不再開給使用者（固定 22），兩者在
+    // shader 裡只以比值出現，所以換算成 2.2 × 22 / 12 ≈ 4.03，畫面不變。
+    values: { dispersionScale: 4.03, edgeDispersion: 5, ior: 1.5, studioFlag: 0.85 },
   },
   {
     id: 'frost', label: '霧面', swatch: 'linear-gradient(90deg, #d7dde4, #aeb6c0)',
@@ -689,9 +691,11 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     pruneEmptySections();
     staticDial?.draw();
     staticQuickDock?.sync();
+    iorPresetSync?.();
   }
   let staticDial = null;
   let staticQuickDock = null;
+  let iorPresetSync = null;
   built = true;
   if (launchMotion === 'static') {
     buildStaticLayout();
@@ -708,6 +712,32 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
   }
   refresh();
   return { refresh, setQualityStatus };
+
+  // 折射率的常見材料。設計師不必知道 1.33 是水：點一下就套用，數值剛好對上
+  // 時那一顆會亮起來（拖滑桿、重設、匯入都會經過 refresh 重新對一次）。
+  function buildIorPresets() {
+    const MATERIALS = [['水', 1.33], ['玻璃', 1.5], ['水晶', 1.54], ['鑽石', 2.42]];
+    const root = element('div', 'inspectorSegments inspectorIorPresets');
+    root.setAttribute('role', 'group');
+    root.setAttribute('aria-label', '常見材料的折射率');
+    const buttons = MATERIALS.map(([name, value]) => {
+      const chip = button(`${name} ${value.toFixed(2)}`, () => {
+        writeControl('ior', value);
+        refresh();
+      });
+      chip.dataset.ior = String(value);
+      root.append(chip);
+      return chip;
+    });
+    iorPresetSync = () => {
+      const current = Number($('ior').value);
+      for (const chip of buttons) {
+        chip.setAttribute('aria-pressed', String(Math.abs(current - Number(chip.dataset.ior)) < 0.005));
+      }
+    };
+    iorPresetSync();
+    return root;
+  }
 
   // 畫面右下角的常駐調整區。
   //
@@ -836,14 +866,22 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     // 反射是 OpenPBR 的 specular_weight，範圍 0–1（shader 也夾在 1，見
     // staticGlassShade）。只有靜態頁會跑到這裡，其餘模式的滑桿範圍不動。
     $('reflect').max = '1';
-    group('玻璃', [
-      ['dispersionScale', '彩虹強度'],
+    // 阿貝數不開給使用者：它跟彩虹強度在 shader 裡只以比值出現（見 environment.js
+    // 的 bandIOR），兩根滑桿做的是同一件事，對設計師只是多一個要猜的名詞。固定在
+    // 預設 22，參數本身保留，參數檔與舊檔照常讀寫（舊檔的值見 bubble.js 的
+    // beforeApply，會併進彩虹強度）。
+    //
+    // 折射率可以到 2.5，鑽石（2.42）才放得進來。只有靜態頁會跑到這裡。
+    $('ior').max = '2.5';
+    const glassBlock = group('玻璃', [
       ['ior', '折射率'],
+      ['dispersionScale', '彩虹強度'],
       ['absorbColor', '玻璃顏色'],
       ['absorb', '顏色濃度'],
       ['roughness', '霧面'],
       ['reflect', '反射'],
     ]);
+    rowOf('ior').after(buildIorPresets());
     // 燈光整組（方向盤、燈光強度、明暗對比）是最常一邊看畫面一邊調的，拉到
     // 畫面右下角常駐（見 buildQuickDock），面板裡不再有燈光區。
     staticDial = buildLightDial();
@@ -877,7 +915,6 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       ['lightRimSize', '邊光 大小'], ['lightRimPower', '邊光 強度'],
       ['flagAAzimuth', '黑卡A 方向'], ['flagAElevation', '黑卡A 高度'], ['flagASize', '黑卡A 大小'],
       ['flagBAzimuth', '黑卡B 方向'], ['flagBElevation', '黑卡B 高度'], ['flagBSize', '黑卡B 大小'],
-      ['dispersionAbbe', '阿貝數'],
       ['transmission', '透射率'], ['fresnel', '邊緣光'],
       ['studioCardGain', '燈的亮度'], ['studioCardFalloff', '燈的衰減'], ['studioCardEdge', '燈的銳利度'], ['studioAmbient', '環境亮度'],
       ['spectralSamples', '光譜取樣'], ['antialiasLevel', '抗鋸齒'],

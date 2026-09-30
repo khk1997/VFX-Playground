@@ -3,7 +3,7 @@
 import { MOTION_HDRI, MOTION_TEXT_DEFAULTS } from './motions/registry.js?v=static-defaults-1';
 import {
   DEFAULTS, LEGACY_SELECT_VALUES, SELECT_DEFAULTS, SPECTRAL_CAUSTIC_DEFAULTS,
-} from './runtime-defaults.js?v=static-defaults-1';
+} from './runtime-defaults.js?v=light-strength-1';
 
 export function createPanelBindings(options) {
   const {

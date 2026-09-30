@@ -210,6 +210,9 @@
   box-shadow: 0 18px 60px #0005, inset 0 1px 0 #ffffff0a;
   font-family: inherit;
 }
+/* 折射率底下的材料膠囊：沿用 inspectorSegments 的樣子，但四顆要擠在一列。 */
+#panel.inspector .inspectorIorPresets { margin: -8px 0 18px; }
+#panel.inspector .inspectorIorPresets button { padding: 7px 4px; font-size: 12px; white-space: nowrap; }
 .staticQuickDockTitle { margin-bottom: 8px; font-size: 13px; font-weight: 700; letter-spacing: .02em; }
 /* 方向盤在常駐區裡縮小，說明文字改成滑鼠提示（canvas 的 title），只留讀數。 */
 .staticQuickDock .lightDial { margin: 0 0 8px; gap: 12px; }

@@ -1,4 +1,4 @@
-import { EDGE_TINT_BASE_BY_BACKDROP } from './runtime-defaults.js?v=static-defaults-1';
+import { EDGE_TINT_BASE_BY_BACKDROP } from './runtime-defaults.js?v=light-strength-1';
 
 const POSITIONS = [0, 0.16, 0.29, 0.39, 0.62, 0.82];
 

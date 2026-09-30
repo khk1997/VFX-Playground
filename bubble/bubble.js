@@ -1,6 +1,6 @@
 'use strict';
 import * as THREE from 'three';
-import { buildInspector } from './inspector.js?v=openpbr-1';
+import { buildInspector } from './inspector.js?v=abbe-2';
 import { createAdaptiveQuality, QUALITY_TIER_NAMES } from './adaptive-quality.js?v=2';
 import { createGpuProfiler } from './gpu-profiler.js?v=1';
 let inspector = null;
@@ -44,7 +44,7 @@ import {
 import {
   COLOR_DEFAULTS, DEFAULTS, LEGACY_SELECT_VALUES, SELECT_DEFAULTS,
   SPECTRAL_CAUSTIC_DEFAULTS, TOGGLE_DEFAULTS, isFormationMotion,
-} from './runtime-defaults.js?v=static-defaults-1';
+} from './runtime-defaults.js?v=light-strength-1';
 import {
   BACKDROP_SCOPED_KEYS, createMemorySlot, createMotionMemory, motionDefaultsFor,
 } from './runtime-memory.js?v=openpbr-1';
@@ -3698,6 +3698,17 @@ if (!PREVIEW && window.PresetIO) {
       let next = data;
       if (LAUNCH_MOTION && next.values?.motion !== undefined && next.values.motion !== LAUNCH_MOTION) {
         next = { ...next, values: { ...next.values, motion: LAUNCH_MOTION } };
+      }
+      // 阿貝數已從面板移除、固定 22。舊檔案裡記著別的值時，把它併進彩虹強度：
+      // shader 裡兩者只以「彩虹強度 / 阿貝數」的比值出現，所以
+      // 彩虹強度 × 22 / 阿貝數 畫面完全不變，而且不會留下一個看不到的值在改畫面。
+      const abbe = Number(next.values?.dispersionAbbe);
+      if (next.values?.dispersionAbbe !== undefined && Number.isFinite(abbe) && abbe > 0
+          && Math.abs(abbe - DEFAULTS.dispersionAbbe) > 1e-6) {
+        const scale = Number(next.values.dispersionScale ?? DEFAULTS.dispersionScale);
+        const folded = Math.round(scale * DEFAULTS.dispersionAbbe / abbe * 100) / 100;
+        next = { ...next, values: { ...next.values, dispersionScale: folded,
+          dispersionAbbe: DEFAULTS.dispersionAbbe } };
       }
       // 靜態的平面、圓盤、球體、圓柱、圓錐（1–5）已從選單移除；舊參數檔或自動
       // 保存記著它們時改成方體，不然 select 會落在一個不存在的選項上。

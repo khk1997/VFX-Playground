@@ -186,7 +186,7 @@ export const DEFAULTS = {              // 數值滑桿
   edgeDispersion: 3,
   studioCardGain: 11.0,
   studioAmbient: 0.38,
-  studioCardStrength: 0.55,
+  studioCardStrength: 1,
   studioShadowStrength: 0.40,
   hdriYaw: -45,
   hdriPitch: 20,

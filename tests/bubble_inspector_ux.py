@@ -249,6 +249,9 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.goto(f"{base_url}/bubble/index.html?mode=static&diag=inspector-ux", wait_until="networkidle", timeout=45_000)
     page.wait_for_selector('#panel.inspector[data-layout="static"]')
+    # 開機遮罩（body[data-bubble-boot]）撤掉之前面板是藏著的；只等版面屬性的話，
+    # 機器慢一點時下面的 is_visible 會剛好落在遮罩還在的那一刻，間歇失敗。
+    page.wait_for_function("() => !document.body.hasAttribute('data-bubble-boot')", timeout=90_000)
 
     # 靜態模組是單頁面板：沒有分頁、沒有常用／完整、沒有模式選單。
     assert page.locator(".inspectorTabs").is_hidden()
@@ -260,8 +263,25 @@ def check_static(browser, base_url: str) -> dict[str, object]:
              .map(node => node.textContent)"""
     )
     assert sections[:6] == ["風格", "造型", "玻璃", "地板", "鏡頭", "背景"], sections
-    for key in ("staticShape", "dispersionScale", "studioShadowStrength", "cameraFov"):
-        assert page.locator(f"#{key}").is_visible(), f"{key} is not on the static panel"
+    # 用 wait_for 而不是 is_visible：開機遮罩撤掉之後面板還會做最後一次 refresh
+    # （收合空區塊、套 gate），is_visible 不等待，偶爾會剛好量到那一瞬間。
+    for key in ("staticShape", "ior", "dispersionScale", "studioShadowStrength", "cameraFov"):
+        try:
+            page.locator(f"#{key}").wait_for(state="visible", timeout=5_000)
+        except Exception:
+            raise AssertionError(f"{key} is not on the static panel")
+    # 阿貝數不開給使用者（跟彩虹強度只差一個比值）；折射率底下有常見材料可以點。
+    assert page.locator("#dispersionAbbe").is_hidden(), "the Abbe number should not be on the static panel"
+    glass_order = page.evaluate(
+        """() => [...document.querySelectorAll('#inspectorPage-static .row input, #inspectorPage-static .row select')]
+             .map(el => el.id).filter(id => ['ior', 'dispersionScale'].includes(id))"""
+    )
+    assert glass_order == ["ior", "dispersionScale"], glass_order
+    page.locator('.inspectorIorPresets button[data-ior="2.42"]').click()
+    assert page.locator("#ior").input_value() == "2.42", page.locator("#ior").input_value()
+    assert page.locator('.inspectorIorPresets button[data-ior="2.42"]').get_attribute("aria-pressed") == "true"
+    page.locator('.inspectorIorPresets button[data-ior="1.5"]').click()
+    assert page.locator("#ior").input_value() == "1.5"
     # 邊緣彩虹不開給使用者；燈光強度與明暗對比改成畫面右下角的常駐調整。
     for key in ("edgeDispersion", "studioCardStrength", "studioFlag"):
         assert page.locator(f"#{key}").is_hidden(), f"{key} should not be on the static panel"
