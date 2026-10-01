@@ -1125,6 +1125,10 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       ]);
       if (dropsGate) drops.dataset.gate = dropsGate;
       if ($('edgeDropGroup')) drops.append($('edgeDropGroup'));
+      // 輪廓液滴那三列跟主水滴擠在同一區，舊名「水滴大小」會跟上面那根撞名。
+      relabel('shapeLiquidPosition', '液滴分佈');
+      relabel('shapeLiquidSize', '液滴大小');
+      relabel('shapeLiquidSpeed', '液滴流速');
     }
   }
 }

@@ -658,6 +658,7 @@ export const MOTIONS = {
   },
   weave: {
     label: '穿梭環繞 Weave',
+    studioGlass: true,
     uniform: 3,
     usesShapeField: true,
     gate: 'weave',
@@ -667,9 +668,16 @@ export const MOTIONS = {
     loopDuration: 12,
     dolly: false,
     svgDemo: 'question',
+    overrides: {
+      ...STUDIO_GLASS_OVERRIDES,
+      // 構圖同形狀匯聚（見那邊的說明）。
+      cameraDistance: 9.3,
+      cameraRotationX: -18,
+    },
   },
   melt: {
     label: '融化 Melt',
+    studioGlass: true,
     // 2 是已移除的「脈動呼吸」留下的空號，正好補上。
     uniform: 2,
     usesShapeField: true,
@@ -692,6 +700,11 @@ export const MOTIONS = {
     // 調整過、流速歸零（融化的水滴已經有自己的滴落動畫，輪廓液滴只負責
     // 靜態鑲邊，動起來反而互相干擾）。
     overrides: {
+      ...STUDIO_GLASS_OVERRIDES,
+      // 構圖同形狀匯聚。水滴會往下掉一大段（地板落在水滴縮到消失的那個高度，
+      // 見 bubble.js 的 sweepDropLowest），鏡頭拉遠一點才裝得下整段。
+      cameraDistance: 10.5,
+      cameraRotationX: -15,
       shapeDepth: 0.28,
       shapeEdgeBevel: 0.129,
       edgeDropsEnabled: true,
@@ -730,6 +743,7 @@ export const MOTIONS = {
   },
   jelly: {
     label: '果凍 Jelly',
+    studioGlass: true,
     uniform: 6,
     usesShapeField: true,
     gate: 'jelly',
@@ -744,21 +758,20 @@ export const MOTIONS = {
     svgDemo: 'question',
     // 厚實圓潤才像一塊果凍；薄片擠出被壓扁時看起來是紙在抖，不是膠體在晃。
     overrides: {
+      ...STUDIO_GLASS_OVERRIDES,
       shapeDepth: 0.14,
       shapeEdgeBevel: 0.051,
-      materialStyle: 'universal',
-      rayBeamIntensity: 13.5,
-      rayBeamSeparation: 0.065,
-      rayBeamChroma: 1.3,
-      rayBeamZoom: 5,
-      spectralCausticEnabled: false,
-      cameraDistance: 3.7,
-      cameraRotationX: 9.4,
+      // 舊的 45.6°、距離 3.7 換成 28° 是 6.2，再往後退到 7.8：落地彈跳跳到最高點時
+      // 頂部會出畫面。從上方看才看得到地板；落地彈跳的地板就是它落地的那一面
+      // （造型整段循環的最低點）。
+      cameraDistance: 7.8,
+      cameraRotationX: -18,
       cameraRotationY: 27.9,
     },
   },
   shatter: {
     label: '崩解噴濺 Shatter',
+    studioGlass: true,
     uniform: 4,
     usesShapeField: true,
     gate: 'shatter',
@@ -772,6 +785,12 @@ export const MOTIONS = {
     loopDuration: 4,
     dolly: false,
     svgDemo: 'question',
+    overrides: {
+      ...STUDIO_GLASS_OVERRIDES,
+      // 構圖同形狀匯聚；碎片往外飛，距離多留一點。
+      cameraDistance: 10,
+      cameraRotationX: -18,
+    },
   },
   capillary: {
     label: '毛細波 Capillary Wave', uniform: 7, usesShapeField: true, gate: 'capillary',

@@ -4,7 +4,7 @@ import { createShaderVariantPlanner } from '../bubble/shader-variants.js';
 
 // 走新玻璃模型（OpenPBR 材質 + 棚景）的模式。搬一批就改這一行：其餘地方
 // （shader 變體、面板版面、視角、匯出去背、地板）都讀 registry 的 studioGlass。
-const STUDIO_MODES = ['static', 'typewriter', 'formation', 'morph', 'capillary'];
+const STUDIO_MODES = ['static', 'typewriter', 'formation', 'weave', 'melt', 'morph', 'jelly', 'shatter', 'capillary'];
 // 不在這次搬遷範圍內的模式：安裝中保留舊的材質路徑與那幾層加色外觀。
 const LEGACY_MODES = ['research'];
 
