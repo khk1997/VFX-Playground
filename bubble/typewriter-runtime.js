@@ -5,7 +5,7 @@ import createTypewriterMotion from './motions/typewriter.js?v=typewriter-1';
 import {
   bakeGlyphAtlas, makeBlankGlyphAtlas, parsePhrases, MAX_TYPE_GLYPHS,
   setCustomFont, useSystemFont, clearCustomFont, CUSTOM_FONT_FAMILY_NAME,
-} from './glyph-field.js?v=type-center-1';
+} from './glyph-field.js?v=studio-floor-1';
 
 export function createTypewriterRuntime({ THREE, params: P, getUniforms, requestRender, formatters }) {
   const glyphData = new Float32Array(MAX_TYPE_GLYPHS * 4);
@@ -261,7 +261,15 @@ export function createTypewriterRuntime({ THREE, params: P, getUniforms, request
     setFontState('已還原成內建字體 Menlo');
   }
 
+  // 整行字最低點的世界 y（給棚景地板用）。圖集還沒烘好時是 null。邊緣液化把
+  // 等值面整體往外推（見 geometry.js 的 uTypeSoftness），也要算進去。
+  function inkLowest() {
+    if (!glyphAtlas || !glyphAtlas.inkHalfHeight) return null;
+    return -glyphAtlas.inkHalfHeight * Math.max(0.01, P.typeSize) - Math.max(0, P.typeSoftness);
+  }
+
   return {
+    inkLowest,
     glyphDataTexture,
     makeBlankGlyphAtlas,
     scheduleGlyphRebuild,

@@ -79,6 +79,12 @@ function segmented(labels, onSelect, name) {
   } };
 }
 
+// 打字模式的「文字與造型」：分頁版面與單頁面板都把這幾列獨立成一區，跟時間軸分開。
+const TYPOGRAPHY_KEYS = [
+  'typeText', 'typeSize', 'typeTracking', 'typeDepth', 'typeBevel', 'typeSoftness',
+  'typeCaretWidth', 'typeCaretDepth',
+];
+
 // Move the original controls, preserving IDs, handlers, gates and preset state.
 export function buildInspector({ defaults, modeDefault = () => undefined, launchMotion = null }) {
   const panel = $('panel');
@@ -288,7 +294,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     panes.look.append(waves);
   }
   const typography = section('文字與造型', 'typewriter');
-  for (const key of ['typeText', 'typeSize', 'typeTracking', 'typeDepth', 'typeBevel', 'typeSoftness', 'typeCaretWidth', 'typeCaretDepth']) {
+  for (const key of TYPOGRAPHY_KEYS) {
     typography.append(rowOf(key));
     if (key === 'typeText') typography.append($('typeTextInfo'));
   }
@@ -945,6 +951,11 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     const IMPORT_ENTRIES = [
       ['shapeSource', '檔案類型'], ['shapeQuality', '模型品質'], ['shapeBtn', null],
       ['shapeAScale', '大小'], ['shapeDepth', '厚度'], ['shapeEdgeBevel', '圓角'],
+      // 靜態的玻璃要乾淨的表面，不給邊緣液化；其餘形狀場模式的形狀本來就是液體。
+      ...(isStatic ? [] : [['shapeSoftness', '邊緣液化']]),
+      // 形狀變形的形狀 B（變形後的那一顆）。這幾列的閘門是 morph，其餘模式自然收起。
+      ['morphTargetBtn', null], ['morphTargetResetBtn', null],
+      ['shapeBScale', '形狀 B 大小'], ['shapeSoftnessB', '形狀 B 邊緣液化'],
     ];
     const shapeBlock = group('造型', isStatic ? STATIC_SHAPE_ENTRIES : []);
     // 匯入的 SVG／GLB 借用形狀匯聚那組控制；原本的外層閘門（shape）搬出來後就不在了，
@@ -1088,11 +1099,18 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     // 收掉時 pruneEmptySections 會連標題一起藏起來。
     function buildMotionSections() {
       const gate = motionParamsGate(launchMotion);
+      // 打字的字本身就是造型（沒有形狀場、沒有右側的造型卡），文字與字體獨立成一區，
+      // 放在動態前面。
+      const typography = group('文字', TYPOGRAPHY_KEYS.map(key => [key, null]));
+      // 這幾列搬出了原本有 typewriter 閘門的區塊，閘門要跟著帶過來。
+      // 閘門只看 data-gate；不加 modeBlock，免得下面挑「這個模式的區塊」時把它也搬走。
+      typography.dataset.gate = 'typewriter';
+      if ($('typeTextInfo')) rowOf('typeText')?.after($('typeTextInfo'));
+      if ($('typeFontGroup')) typography.append($('typeFontGroup'));
       const motion = group('動態', [['loopDuration', '循環秒數']]);
       motion.append(...[
         $('typeLoopInfoRow'),
         ...panel.querySelectorAll(`.modeBlock[data-gate="${gate}"]`),
-        $('typeFontGroup'),
         $('shapeMotionGroup'),
       ].filter(Boolean));
       // 造型動態預設是關的（總開關在標題上），內容先收起來，開了再展開看。
@@ -1105,7 +1123,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
         ['wobble', '表面起伏'], ['wobbleScale', '起伏尺度'], ['wobbleSpeed', '起伏動畫'],
         ['microCount', '輪廓細節滴'],
       ]);
-      if (dropsGate) { drops.dataset.gate = dropsGate; drops.classList.add('modeBlock'); }
+      if (dropsGate) drops.dataset.gate = dropsGate;
       if ($('edgeDropGroup')) drops.append($('edgeDropGroup'));
     }
   }

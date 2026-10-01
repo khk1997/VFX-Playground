@@ -442,12 +442,16 @@ vec3 studioGlassShadow(vec3 floorPos, vec3 lightDir, out vec3 caustic){
     // 交距離球，估出來的最近點每一步跳一次，地板上就是一圈一圈沿著輪廓外推的
     // 階梯（問號的影子就是這樣）。所以形狀場退回只看取樣點；它的輪廓邊本來就被
     // 貼圖的三次濾波抹軟了，那道硬線在它身上看不出來。
-#ifdef FEATURE_SHAPE_FIELD
-    res = min(res, k * d / t);
-#else
+    //
+    // 真正精確的距離場只有靜態的內建造型（FEATURE_STATIC_SHAPE，它跟形狀場互斥）。
+    // 打字的字形圖集、水滴之間的 smooth-min 一樣不是歐氏距離，用最近點估計會在
+    // 地板上拉出一圈一圈的弧形暗紋，所以除了它以外一律走只看取樣點的那條。
+#ifdef FEATURE_STATIC_SHAPE
     float y = d * d / (2.0 * prevD);
     float closest = sqrt(max(d * d - y * y, 0.0));
     res = min(res, k * closest / max(t - y, 0.001));
+#else
+    res = min(res, k * d / t);
 #endif
     prevD = d;
     if (d < 0.002){ entered = true; break; }

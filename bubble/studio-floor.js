@@ -15,7 +15,9 @@
 // 要調整的地方：
 // - 取樣密度：FLOOR_SAMPLES。剛體動態是整數圈的正弦，48 點對任何圈數都夠密。
 // - 地板跟物體之間的縫：FLOOR_GAP（太小會在接觸處閃爍）。
-// - 各模式額外往下掉的量（例如融化的水滴）：呼叫端用 extraDrop 傳進來。
+// - 水滴：呼叫端把整段循環掃過一遍的最低點用 dropLowest 傳進來（bubble.js 的
+//   sweepDropLowest），地板取它跟造型最低點兩者較低的那個。
+// - 其他往外推的量（例如表面波紋）：extraDrop。
 
 export const FLOOR_SAMPLES = 48;
 export const FLOOR_GAP = 0.02;
@@ -54,8 +56,14 @@ export function lowestPointOverLoop({ localBounds, rigidAt, scaleAt, samples = F
   return lowest;
 }
 
-// 形狀場模式的地板高度。localBounds 是 null（形狀還沒烘好）時回傳 fallback。
-export function shapeFieldFloorHeight({ localBounds, rigidAt, scaleAt, extraDrop = 0, fallback }) {
-  if (!localBounds || !Number.isFinite(localBounds.min[1])) return fallback;
-  return lowestPointOverLoop({ localBounds, rigidAt, scaleAt }) - extraDrop - FLOOR_GAP;
+// 形狀場模式的地板高度。localBounds 是 null（形狀還沒烘好）時只看水滴；兩者都
+// 沒有時回傳 fallback。
+export function shapeFieldFloorHeight({
+  localBounds, rigidAt, scaleAt, extraDrop = 0, dropLowest = Infinity, fallback,
+}) {
+  const shape = localBounds && Number.isFinite(localBounds.min[1])
+    ? lowestPointOverLoop({ localBounds, rigidAt, scaleAt }) - extraDrop
+    : Infinity;
+  const lowest = Math.min(shape, dropLowest);
+  return Number.isFinite(lowest) ? lowest - FLOOR_GAP : fallback;
 }

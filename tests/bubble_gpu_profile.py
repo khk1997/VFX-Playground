@@ -29,6 +29,10 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=Path("/tmp/vfx-bubble-gpu-profile"))
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--samples", type=int, default=16)
+    parser.add_argument(
+        "--cases", default="",
+        help="Comma separated motion:backdrop pairs (e.g. formation:dark,morph:light) instead of the default set.",
+    )
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     errors: list[str] = []
@@ -56,7 +60,13 @@ def main() -> int:
         assert page.evaluate("typeof window.__bubbleProfileGpu === 'function'")
         facts = browser_facts(page.evaluate("window.__bubbleDiagReport()"))
         assert facts["hardwareAccelerated"], f"hardware GPU required, got {facts['renderer']}"
-        for name, motion, backdrop in CASES:
+        cases_to_run = CASES
+        if args.cases:
+            cases_to_run = tuple(
+                (f"{pair.split(':')[0]}-{pair.split(':')[1]}", *pair.split(':'))
+                for pair in args.cases.split(',') if pair.strip()
+            )
+        for name, motion, backdrop in cases_to_run:
             set_select(page, "#motion", motion)
             set_select(page, "#backdrop", backdrop)
             wait_for_shader(page)

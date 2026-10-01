@@ -55,5 +55,12 @@ for (let trial = 0; trial < 50; trial++) {
 near(shapeFieldFloorHeight({ localBounds: box, rigidAt: () => null, scaleAt: () => 1, extraDrop: 0.3, fallback: -9 }),
   -0.9 - 0.3 - FLOOR_GAP);
 assert.equal(shapeFieldFloorHeight({ localBounds: null, rigidAt: () => null, scaleAt: () => 1, fallback: -1.15 }), -1.15);
+// 水滴比造型低時，地板跟著水滴；比造型高時不影響。
+near(shapeFieldFloorHeight({ localBounds: box, rigidAt: () => null, scaleAt: () => 1, dropLowest: -1.5, fallback: -9 }),
+  -1.5 - FLOOR_GAP);
+near(shapeFieldFloorHeight({ localBounds: box, rigidAt: () => null, scaleAt: () => 1, dropLowest: -0.2, fallback: -9 }),
+  -0.9 - FLOOR_GAP);
+near(shapeFieldFloorHeight({ localBounds: null, rigidAt: () => null, scaleAt: () => 1, dropLowest: -0.7, fallback: -9 }),
+  -0.7 - FLOOR_GAP);
 
 console.log('Studio floor follows the lowest point over the loop');

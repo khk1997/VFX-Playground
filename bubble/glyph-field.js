@@ -330,6 +330,11 @@ export function bakeGlyphAtlas(phrases) {
     inkCenter: Number.isFinite(inkTop) && Number.isFinite(inkBottom)
       ? (0.5 - (inkTop + inkBottom) * 0.5) * TILE_WORLD
       : 0,
+    // 墨跡的半高（格單位）。排版把墨跡中心對到原點，所以整行字的最低點就是
+    // -inkHalfHeight × 字級（棚景的地板要坐在這裡，見 typewriter-runtime）。
+    inkHalfHeight: Number.isFinite(inkTop) && Number.isFinite(inkBottom)
+      ? (inkBottom - inkTop) * 0.5 * TILE_WORLD
+      : 0,
     indexOf,
     count: chars.length,
     truncated,

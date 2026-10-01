@@ -524,6 +524,7 @@ export const MOTIONS = {
   },
   typewriter: {
     label: '打字 Typewriter',
+    studioGlass: true,
     uniform: 10,
     // 字形不走 SVG／GLB 那條匯入管線，而是自己烘一份字形圖集
     // （glyph-field.js）——每個字要能獨立動畫，整句話烘成一張距離場做不到。
@@ -539,28 +540,21 @@ export const MOTIONS = {
     loopDuration: 8,
     dolly: false,
     overrides: {
-      materialStyle: 'universal',
-      // 使用者實測後定案的一整組外觀預設（2026-08-27 存檔匯入）。
-      //
-      // 鏡頭是正視圖。早期版本刻意斜 23.2°，理由是擠出字的正面與背面是兩片平行
+      ...STUDIO_GLASS_OVERRIDES,
+      // 鏡頭水平正對。早期版本刻意斜 23.2°，理由是擠出字的正面與背面是兩片平行
       // 平面、平行界面幾乎不折射，斜一點才看得到側壁的厚度——理由本身成立，但
       // 一行字橫跨的角度差夠大，最右邊的字會比最左邊大一截，整行讀起來是「歪
-      // 的」而不是「有厚度的」。預設改成完全正對，厚度交給使用者自己轉視角去看
-      // （拖曳畫布就能轉，而且是按模式記憶的）。
-      cameraDistance: 5.1,
-      cameraRotationX: 0,
+      // 的」而不是「有厚度的」。所以水平維持正對，只從上方略微往下看，地板與
+      // 影子才看得到（完全平視時地板只剩一條線）。
+      // 舊構圖是 45.6° 視角、距離 5.1；換成 28° 的長焦，字一樣大的距離約 8.6。
+      cameraDistance: 8.6,
+      cameraRotationX: -12,
       cameraRotationY: 0,
       antialiasLevel: 'ultra',
       // 字要看得清楚，鏡頭不繞、表面不晃。
       spin: 0,
       wobble: 0,
       wobbleSpeed: 0.53,
-      transmission: 0.97,
-      roughness: 0.12,
-      fresnel: 0,
-      ior: 1.5,
-      reflect: 2,
-      materialExposure: 0.85,
       shapeSoftness: 0.025,
       meltSizeMax: 0.53,
       meltStretch: 0.1,
@@ -568,28 +562,6 @@ export const MOTIONS = {
       capillaryHeight: 0.09,
       capillaryRings: 3,
       capillarySpeed: 2,
-      dispersionEnabled: true,
-      dispersionSeparation: 0.32,
-      rayBeamIntensity: 2.05,
-      rayBeamSeparation: 0.04,
-      rayBeamChroma: 2.3,
-      rayBeamZoom: 1.5,
-      rayBeamRings: 1.5,
-      rayBeamGlow: 0.28,
-      rayBeamAzimuth: -8,
-      rayBeamElevation: 66,
-      rayBeamFresnelMask: 0.28,
-      rayBeamNoiseMask: 0.42,
-      rayBeamNoiseScale: 1.6,
-      spectralCausticEnabled: true,
-      spectralCausticCol3: '#f9b43e',
-      spectralCausticCol6: '#ff4d4d',
-      spectralCausticIntensity: 6,
-      spectralCausticFlow: 0,
-      hdriYaw: -56,
-      hdriPitch: 0,
-      hdriBlur: 0.18,
-      envRefraction: 0.07,
     },
     params: [
       {
@@ -665,6 +637,7 @@ export const MOTIONS = {
   },
   formation: {
     label: '形狀匯聚 Formation',
+    studioGlass: true,
     uniform: 1,
     usesShapeField: true,
     gate: 'formation',
@@ -675,6 +648,13 @@ export const MOTIONS = {
     loopDuration: 12,
     dolly: false,
     svgDemo: 'question',
+    overrides: {
+      ...STUDIO_GLASS_OVERRIDES,
+      // 舊構圖是全域的 45.6° 視角、距離 5.5；換成 28° 的長焦，主體一樣大的距離
+      // 約 9.3。從上方往下看，地板與影子才看得到。
+      cameraDistance: 9.3,
+      cameraRotationX: -18,
+    },
   },
   weave: {
     label: '穿梭環繞 Weave',
@@ -723,6 +703,7 @@ export const MOTIONS = {
   },
   morph: {
     label: '形狀變形 Morph',
+    studioGlass: true,
     uniform: 5,
     usesShapeField: true,
     gate: 'morph',
@@ -739,8 +720,12 @@ export const MOTIONS = {
     // 長成形狀」那套共用預設不一樣：薄一點、圓角大一點，切口與收頸才不會被
     // 厚實的側壁蓋住。
     overrides: {
+      ...STUDIO_GLASS_OVERRIDES,
       shapeDepth: 0.09,
       shapeEdgeBevel: 0.086,
+      // 構圖同形狀匯聚（見那邊的說明）。
+      cameraDistance: 9.3,
+      cameraRotationX: -18,
     },
   },
   jelly: {

@@ -8,6 +8,8 @@ from pathlib import Path
 from PIL import Image
 from playwright.sync_api import sync_playwright
 
+from bubble_baseline import wait_for_shader
+
 
 # 與 bubble.js 主迴圈裡預覽的起始 simT 相同（loopDuration 的 8%）。
 PREVIEW_START_PHASE = 0.08
@@ -34,11 +36,29 @@ POSTERS = {
 }
 
 
-def boot(page, settle_ms: int) -> None:
+def boot(page, settle_ms: int, wait_glyphs: bool = False) -> None:
     """Wait until the bubble page has finished booting and drawn a settled frame."""
     page.evaluate("() => window.postMessage('vfx-play', '*')")
     page.wait_for_function(
         "() => window.__bubbleDiagReport && !document.body.hasAttribute('data-bubble-boot')",
+        timeout=90_000,
+    )
+    # 打字模式的字形圖集是開機之後才烘的；固定等一段時間的話，機器一慢就只拍到
+    # 游標。烘好時 #typeTextInfo 會寫出「N 句／M 個字形」，等它出現。
+    #
+    # 只在釘住時間之後的那一次等：預覽的起跑時間是模組載入當下用「還沒算出來的」
+    # 循環長度算的（bubble.js 的 simT 初值），第一次讀 loopDuration 也要讀到同一個值，
+    # 等字形烘好再讀就是另一個循環長度、另一個相位了。
+    if not wait_glyphs:
+        page.wait_for_timeout(settle_ms)
+        return
+    # 拍之前 shader 要編完：新玻璃模型的變體比較大，軟體算繪下要編一秒多，那段時間
+    # 畫面停在編譯前的那一幀（打字就只剩游標）。
+    wait_for_shader(page)
+    page.wait_for_function(
+        "() => !document.getElementById('typeTextInfo')"
+        " || document.getElementById('motion')?.value !== 'typewriter'"
+        " || /個字形/.test(document.getElementById('typeTextInfo').textContent)",
         timeout=90_000,
     )
     page.wait_for_timeout(settle_ms)
@@ -73,7 +93,7 @@ def main() -> int:
                     phase = loop * PREVIEW_START_PHASE + PREVIEW_REVEAL_LEAD_S
                     pinned = f"{args.base_url}/{route}&diagTime={round(phase % loop, 4)}"
                     page.goto(pinned, wait_until="domcontentloaded", timeout=90_000)
-                    boot(page, args.settle_ms)
+                    boot(page, args.settle_ms, wait_glyphs=True)
             else:
                 page.wait_for_timeout(1_800)
 

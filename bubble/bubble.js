@@ -1,6 +1,6 @@
 'use strict';
 import * as THREE from 'three';
-import { buildInspector } from './inspector.js?v=studio-glass-2';
+import { buildInspector } from './inspector.js?v=studio-glass-4';
 import { createAdaptiveQuality, QUALITY_TIER_NAMES } from './adaptive-quality.js?v=2';
 import { createGpuProfiler } from './gpu-profiler.js?v=1';
 let inspector = null;
@@ -53,8 +53,8 @@ import {
   COLORS, LINEAR_COLOR_KEYS, SELECTS, createFormatters, createToggleBindings,
 } from './control-schema.js?v=2';
 import { glassTintBox } from './glass-tint.js?v=2';
-import { shapeFieldFloorHeight } from './studio-floor.js?v=1';
-import { createTypewriterRuntime } from './typewriter-runtime.js?v=type-center-1';
+import { FLOOR_GAP, lowestPointOverLoop, shapeFieldFloorHeight } from './studio-floor.js?v=2';
+import { createTypewriterRuntime } from './typewriter-runtime.js?v=studio-floor-1';
 import { createStaticCapillaryRuntime } from './motions/runtime/static-capillary.js?v=1';
 import { createJellyRuntime } from './motions/runtime/jelly.js?v=1';
 import { createResearchRuntime } from './motions/runtime/research.js?v=1';
@@ -1666,18 +1666,7 @@ function updateDropUniforms(t) {
   // 第二組（形狀 B）只在形狀變形模式底下才有意義——其餘模式只有一顆形狀，
   // 沒有「另一顆」可以套第二組參數。跟第一組共用同一個「造型動態」總開關：
   // 開關本身不分組，分的是開了之後兩組各自的數值。
-  shapeRigid2Now = (morphRuntime.active() && P.shapeMotionOn)
-    ? computeShapeRigid({
-      cycles: P.shape2MotionCycles,
-      ease: P.shape2MotionEase,
-      spinX: P.shape2SpinX,
-      spinY: P.shape2SpinY,
-      spinZ: P.shape2SpinZ,
-      breathe: P.shape2Breathe,
-      bob: P.shape2Bob,
-      squash: P.shape2Squash,
-    }, phase)
-    : null;
+  shapeRigid2Now = shapeRigid2At(phase);
   if (shapeRigid2Now) {
     shapeRigid2Euler.set(shapeRigid2Now.angleX, shapeRigid2Now.angleY, shapeRigid2Now.angleZ, 'XYZ');
     shapeRigid2Rot.setFromMatrix4(shapeRigid2Mat4.makeRotationFromEuler(shapeRigid2Euler));
@@ -2089,31 +2078,107 @@ function updateDropUniforms(t) {
 // - 靜態的內建造型：照 SDF 的尺寸算。
 // - 靜態匯入 GLB 走三角網格：網格的包圍盒就是模型真正的底部。縮放跟 mapScene
 //   的 shapePA 同一組：uShapeScale（呼吸）× uShapeAScale（大小）。
+// - 打字：整行字的墨跡底部（文字不動，沒有剛體動態）。
 // - 其餘形狀場：烘焙時記下的範圍，掃過整段循環的剛體動態取最低點，地板不跟著晃。
-//   表面波紋會把表面往外推，多留一個波高。
+//   表面波紋會把表面往外推，多留一個波高；水滴的最低點另外掃（sweepDropLowest）。
 function studioFloorHeight() {
   if (!usesStudioGlass(P.motion)) return STUDIO_FLOOR_DEFAULT;
   if (P.motion === 'static' && P.staticShape !== 7) return staticShapeFloorHeight(P);
+  if (P.motion === 'typewriter') {
+    const ink = typewriterInkLowest();
+    return ink === null ? STUDIO_FLOOR_DEFAULT : ink - FLOOR_GAP;
+  }
   if (staticMeshActive() && staticMeshBounds) {
     return staticMeshBounds.min[1] * uniforms.uShapeScale.value * uniforms.uShapeAScale.value
       + uniforms.uShapeRigidOffset.value.y - 0.02;
   }
   const waves = P.capillaryTexture !== 6 && (P.motion === 'capillary' || P.motion === 'static')
     ? effectiveCapillaryHeight(P.capillaryHeight, P.capillaryRings) : 0;
+  // 形狀變形的形狀 B 也要坐得住：它有自己的大小與（可選的）第二組剛體動態。
+  // 當成一顆「水滴」併進 dropLowest，地板取兩顆形狀與所有水滴裡最低的那個。
+  const shapeB = morphRuntime.active() ? morphTargetBaseField?.localBounds : null;
+  const shapeBLowest = shapeB ? lowestPointOverLoop({
+    localBounds: extrudedBounds(shapeB),
+    rigidAt: phase => shapeRigid2At(phase) ?? shapeRigidAt(phase),
+    scaleAt: phase => (1 + holdBreathScale(phase)) * P.shapeBScale,
+  }) : Infinity;
   return shapeFieldFloorHeight({
     localBounds: shapeLocalBounds(),
     rigidAt: shapeRigidAt,
     scaleAt: phase => (1 + holdBreathScale(phase)) * P.shapeAScale,
     extraDrop: waves,
+    dropLowest: Math.min(dropFloorLowest, shapeBLowest),
     fallback: STUDIO_FLOOR_DEFAULT,
   });
+}
+
+// 水滴在整段循環裡的最低點（給棚景地板用）。水滴的位置跟一長串每幀的狀態綁在
+// 一起，沒有一支「給相位算位置」的純函式，所以直接把每幀那條路
+// （updateDropUniforms）在整段循環上跑一遍。它跨幀的狀態只有慣性用的上一幀位置
+// 與時間：掃之前存下來、掃完還原。其餘狀態不是每幀覆寫，就是依參數快取、結果
+// 固定。掃完 uniform 停在最後一個取樣點，所以呼叫端（frame）緊接著要照常跑這一幀
+// 的 updateDropUniforms —— 這裡不自己補算：補算會把「上一幀」設成這一幀，真正那
+// 一幀算出來的速度就變成 0，慣性形變閃一下。
+//
+// 參數一改就要重掃（panel 的 input／change、換形狀、換模式都會標記），但掃一次
+// 是 DROP_FLOOR_SAMPLES 次完整的水滴更新，所以最多每 DROP_FLOOR_INTERVAL_MS 掃
+// 一次 —— 拖滑桿時地板晚一點跟上，不會讓每一幀都多付這筆錢。
+const DROP_FLOOR_SAMPLES = 64;
+const DROP_FLOOR_INTERVAL_MS = 250;
+let dropFloorLowest = Infinity;
+let dropFloorDirty = true;
+let dropFloorSweptAt = -Infinity;
+function markDropFloorDirty() { dropFloorDirty = true; }
+// 任何控制項一動就重掃：面板、參數檔匯入、快速區的鏡像都會派發 input／change。
+// 「全部重設」直接改 DOM 不派發事件，另外接。用 capture 是因為有些控制項會擋冒泡。
+for (const type of ['input', 'change']) document.addEventListener(type, markDropFloorDirty, true);
+document.getElementById('resetBtn')?.addEventListener('click', () => setTimeout(markDropFloorDirty, 0));
+function refreshDropFloor(now) {
+  if (!dropFloorDirty || !uniforms || now - dropFloorSweptAt < DROP_FLOOR_INTERVAL_MS) return;
+  dropFloorDirty = false;
+  dropFloorSweptAt = now;
+  dropFloorLowest = usesStudioGlass(P.motion) && hasAnyDrops() ? sweepDropLowest() : Infinity;
+}
+// 這一幀有沒有水滴。沒有的模式（毛細波、打字、靜態）不掃：一次掃描是幾十次完整的
+// 更新，打字每次還會重傳字形資料，開機時接連幾個 input 事件就能把預覽卡住一秒多。
+// 匯聚的微滴是中途才長出來的，但它一定有主滴，所以只看這一幀也不會漏。
+function hasAnyDrops() {
+  return Math.round(uniforms.uCount.value) > 0 || Math.round(uniforms.uMicroCount.value) > 0;
+}
+function sweepDropLowest() {
+  const savedPositions = previousDropPositions.map(v => v.clone());
+  const savedT = previousDropT;
+  const loop = Math.max(0.001, P.loopDuration);
+  let lowest = Infinity;
+  for (let s = 0; s < DROP_FLOOR_SAMPLES; s++) {
+    updateDropUniforms(loop * s / DROP_FLOOR_SAMPLES);
+    lowest = Math.min(lowest, currentDropLowest());
+  }
+  savedPositions.forEach((v, i) => previousDropPositions[i].copy(v));
+  previousDropT = savedT;
+  return lowest;
+}
+// 這一幀最低的水滴表面（主滴與微滴）。沒有水滴時是 Infinity。
+function currentDropLowest() {
+  let lowest = Infinity;
+  const count = Math.round(uniforms.uCount.value);
+  for (let i = 0; i < count; i++) {
+    if (dropData[i].w > 0) lowest = Math.min(lowest, dropData[i].y - dropData[i].w);
+  }
+  const micro = Math.round(uniforms.uMicroCount.value);
+  for (let i = 0; i < micro; i++) {
+    const o = i * 4;
+    if (microDropData[o + 3] > 0) lowest = Math.min(lowest, microDropData[o + 1] - microDropData[o + 3]);
+  }
+  return lowest;
 }
 
 // 形狀場烘焙時記下的本地範圍（shape-field.js 的 localBounds）。SVG 是擠出的，
 // 厚度是執行期的 shapeDepth。
 function shapeLocalBounds() {
-  const bounds = shapeField?.localBounds;
-  if (!bounds) return null;
+  return shapeField?.localBounds ? extrudedBounds(shapeField.localBounds) : null;
+}
+function extrudedBounds(bounds) {
   if (!bounds.extruded) return bounds;
   return { min: [bounds.min[0], bounds.min[1], -P.shapeDepth], max: [bounds.max[0], bounds.max[1], P.shapeDepth] };
 }
@@ -2188,7 +2253,7 @@ const {
   glyphDataTexture, makeBlankGlyphAtlas, scheduleGlyphRebuild, ensureGlyphAtlas,
   uploadGlyphAtlas, updateTypewriterUniforms, refreshTypewriterReadouts,
   broadcastLoopDuration, loadCustomFont, resetCustomFont, browseLocalFonts,
-  applyTypedSystemFont,
+  applyTypedSystemFont, inkLowest: typewriterInkLowest,
 } = createTypewriterRuntime({
   THREE,
   params: P,
@@ -2731,6 +2796,22 @@ function shapeRigidAt(phase) {
   if (researchRuntime.active()) return researchRuntime.shapeRigid(phase);
   return usesShapeField(P.motion) ? shapeRigidMotion(phase) : null;
 }
+// 形狀 B 的那一組。第二組只在形狀變形模式底下才有意義——其餘模式只有一顆形狀，
+// 沒有「另一顆」可以套第二組參數。跟第一組共用同一個「造型動態」總開關：開關
+// 本身不分組，分的是開了之後兩組各自的數值。沒開時 B 跟著 A 走（null）。
+function shapeRigid2At(phase) {
+  if (!morphRuntime.active() || !P.shapeMotionOn) return null;
+  return computeShapeRigid({
+    cycles: P.shape2MotionCycles,
+    ease: P.shape2MotionEase,
+    spinX: P.shape2SpinX,
+    spinY: P.shape2SpinY,
+    spinZ: P.shape2SpinZ,
+    breathe: P.shape2Breathe,
+    bob: P.shape2Bob,
+    squash: P.shape2Squash,
+  }, phase);
+}
 
 /* ===== 拖曳旋轉 ===== */
 // 把 rot 寫回鏡頭角度的兩根滑桿。滑桿的 input 會由 panel-bindings 把 rot 設回
@@ -3206,6 +3287,7 @@ async function importShapeFile(file, kind, { rebuilding = false } = {}) {
     uniforms.uShapeAtlas.value.copy(next.atlas);
     uniforms.uShapeType.value = kind === 'svg' ? 1 : 2;
     applyStaticMesh(kind === 'svg' ? null : next.mesh);
+    markDropFloorDirty();  // 水滴的錨點跟著新形狀換了
     if (kind === 'gltf') staticMeshFailedFile = next.mesh ? undefined : (file ?? null);
     if (old) old.dispose();
     shapeFieldSource = kind;
@@ -3638,6 +3720,14 @@ let simT = PREVIEW && LAUNCH_MOTION && LAUNCH_MOTION !== 'static'
 // loopDuration 也一起報出來：海報產生器要靠它算出「預覽開播的那一幀」是第幾秒
 // （見 tests/generate_home_posters.py 的 PREVIEW_START_PHASE），才能把海報釘在
 // 跟 hover 後第一幀相同的相位上。
+// 這一幀畫面上最低的那一點（水滴、微滴、地板），診斷用。棚景的地板要在整段
+// 循環的最低點以下，量的時候讓動畫跑一圈、每隔一段時間呼叫一次取最小值。
+// 帶 t 時先把水滴更新到那個時間點（會寫 uniform、動到慣性的上一幀，只給量測用）。
+window.__bubbleSceneLowest = (t = null) => {
+  if (!uniforms) return null;
+  if (t !== null) updateDropUniforms(t);
+  return { drops: currentDropLowest(), floor: uniforms.uStudioFloorHeight.value, simT };
+};
 window.__bubblePreviewDiag = () => ({
   simT, rafId, extPaused, userPaused, reducedMotionPaused,
   shapeConverting, hidden: document.hidden, paused: isPaused(),
@@ -3660,6 +3750,7 @@ function frame(now) {
   simT = (simT + dt * previewTimeScale) % Math.max(0.001, P.loopDuration);
   // 診斷：釘死動畫時間，讓兩個 shader 變體能在同一幀上做逐像素比對。
   if (DIAG_TIME !== null) simT = DIAG_TIME;
+  refreshDropFloor(now);  // 要排在這一幀的 updateDropUniforms 前面（見該函式）
   updateDropUniforms(simT);
 
   // 放開手之後的慣性滑行。這段也要寫回滑桿：鏡頭角度、方位盤（盤面跟著鏡頭轉）
