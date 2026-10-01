@@ -1,7 +1,7 @@
 import { EDGE_TINT_TARGETS, edgeTintKeys } from './edge-tint.js?v=dark-tint-1';
 import {
   MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_DOLLY, MOTION_DEFAULT_LOOP_DURATION,
-  MOTION_DEFAULT_RADIUS, MOTION_KEYS, MOTION_OVERRIDES,
+  MOTION_DEFAULT_RADIUS, MOTION_KEYS, MOTION_OVERRIDES, usesStudioGlass,
 } from './motions/registry.js?v=studio-glass-1';
 import {
   COLOR_DEFAULTS, DEFAULTS, EDGE_TINT_BASE_BY_BACKDROP, EDGE_TINT_STRENGTH_BY_BACKDROP, SELECT_DEFAULTS,
@@ -140,20 +140,21 @@ export function createMemorySlot(params) {
 // 於是「記憶格的初值」跟「motionDefaultsFor 算出來的預設」對不起來——面板的
 // 「已調整」標記與重設都讀後者，一進淺底就會把這幾根標成已調整。合併成一張表，
 // 兩邊只剩一個來源。
-// 某個模式不分底色都要的起點，優先於上面兩張表。靜態模組的玻璃預設是純白：
-// 淺底那張表會把吸收色換成背景色、吸收降到 1.35，那是給水滴模式的白底調校，
-// 放在靜態的展示玻璃上就是一開箱帶著顏色。濃度先給到 4，使用者一換顏色就看得
-// 出來；純白本身不吸收，所以預設外觀仍是無色的。
-const MOTION_FIXED_OVERRIDES = {
-  static: {
-    absorbColor: '#ffffff',
-    absorb: 4,
-    // OpenPBR 的清玻璃：specular_weight 1、transmission_weight 1。淺底那張表的
-    // transmission 0.97 與全域的 reflect 1.6 都不是這個模組要的起點。
-    reflect: 1,
-    transmission: 1,
-  },
+// 某個模式不分底色都要的起點，優先於上面兩張表。新玻璃模型（registry 的
+// studioGlass）的玻璃預設是純白：淺底那張表會把吸收色換成背景色、吸收降到
+// 1.35，那是給舊材質路徑的白底調校，放在新模型的玻璃上就是一開箱帶著顏色。
+// 濃度先給到 4，使用者一換顏色就看得出來；純白本身不吸收，所以預設外觀仍是無色的。
+const STUDIO_GLASS_FIXED = {
+  absorbColor: '#ffffff',
+  absorb: 4,
+  // OpenPBR 的清玻璃：specular_weight 1、transmission_weight 1。淺底那張表的
+  // transmission 0.97 與全域的 reflect 1.6 都不是新模型要的起點。
+  reflect: 1,
+  transmission: 1,
 };
+const MOTION_FIXED_OVERRIDES = Object.fromEntries(
+  MOTION_KEYS.filter(usesStudioGlass).map(motion => [motion, STUDIO_GLASS_FIXED]),
+);
 
 const BACKDROP_OVERRIDES = {
   dark: {

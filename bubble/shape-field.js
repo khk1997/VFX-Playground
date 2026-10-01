@@ -502,6 +502,18 @@ export async function svgToField(file, { size = 512, supersample = 3 } = {}) {
     // 而上面的 targets 已自行翻轉過 Y，兩者因此互為鏡像 —— 水滴飛向正立的
     // 錨點，長出來的表面卻是倒的。這裡只為貼圖翻轉列序，讓貼圖與 targets
     // 一致採用「世界 +Y 朝上」，與 GLB 路徑的 atlas 方向也就一致了。
+    // 形狀在本地座標裡實際佔到的範圍（棚景的地板要坐在它的底部，見
+    // studio-floor.js）。座標換算跟上面的 targets 同一組；z 是擠出方向，厚度是
+    // 執行期的 shapeDepth，這裡不知道，留給呼叫端補（extruded）。
+    const localBounds = { min: [Infinity, Infinity, 0], max: [-Infinity, -Infinity, 0], extruded: true };
+    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+      if (field[x + y * size] >= 0) continue;
+      const wx = (x / (size - 1) - 0.5) * SVG_WORLD, wy = (0.5 - y / (size - 1)) * SVG_WORLD;
+      if (wx < localBounds.min[0]) localBounds.min[0] = wx;
+      if (wx > localBounds.max[0]) localBounds.max[0] = wx;
+      if (wy < localBounds.min[1]) localBounds.min[1] = wy;
+      if (wy > localBounds.max[1]) localBounds.max[1] = wy;
+    }
     const texField = new Float32Array(size * size);
     for (let y = 0; y < size; y++) {
       const src = y * size;
@@ -516,6 +528,7 @@ export async function svgToField(file, { size = 512, supersample = 3 } = {}) {
       edgeDrops: edgeDropSets[0],
       edgeDropSets,
       cavityTargets: [],
+      localBounds,
       // 烘焙解析度。SVG 模式只用它推導盒外 epsilon 與法線微分半徑；
       // volumeShapeDistance 只在 uShapeType == 2 時呼叫，設值不影響 GLB。
       grid: size,
@@ -712,11 +725,20 @@ export async function objectToField(root, size = 48) {
   // 被過度模糊後侵蝕成孔洞。表面著色的柔順度交由 voxel-aware normal 保留。
   const liquidField = blurSignedVolume(field, size, 2);
   const liquidAtlas = new Float32Array(atlasW * atlasH).fill(24);
+  // 平滑過後真正畫出來的那一層的範圍（座標換算同 targets），給棚景的地板用。
+  const localBounds = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
   for (let z = 0; z < size; z++) for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
     const src = x + size * (y + size * z);
     const ax = (z % cols) * size + x;
     const ay = Math.floor(z / cols) * size + y;
     liquidAtlas[ax + ay * atlasW] = liquidField[src];
+    if (liquidField[src] < 0) {
+      const local = [x, y, z].map(v => (v / (size - 1) - 0.5) * 2.1);
+      for (let i = 0; i < 3; i++) {
+        if (local[i] < localBounds.min[i]) localBounds.min[i] = local[i];
+        if (local[i] > localBounds.max[i]) localBounds.max[i] = local[i];
+      }
+    }
   }
   // 三角網格一併帶出去（靜態模組用，其餘模式不讀）。建不出來就是 null，不影響
   // 距離場這條路。
@@ -730,6 +752,7 @@ export async function objectToField(root, size = 48) {
     atlas: new THREE.Vector2(cols, rows),
     oddScanlines,
     mesh,
+    localBounds,
   };
 }
 

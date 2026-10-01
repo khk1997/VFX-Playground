@@ -1,7 +1,7 @@
 import { EDGE_TINT_TARGETS, EDGE_TINT_STOPS, edgeTintParams } from './edge-tint.js';
 import { EDGE_TINT_BASE_BY_BACKDROP, EDGE_TINT_STRENGTH_BY_BACKDROP } from './runtime-defaults.js?v=glass-tint-1';
 import { INSTALLING_VISUAL_PRESETS, installingVisualPresetValues } from './visual-presets.js?v=tint-light-1';
-import { usesStudioGlass } from './motions/registry.js?v=studio-glass-1';
+import { motionParamsGate, usesShapeField, usesStudioGlass } from './motions/registry.js?v=studio-glass-1';
 
 const PAGES = [['shape', '造型'], ['motion', '動態'], ['look', '外觀'], ['scene', '場景']];
 
@@ -900,9 +900,16 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     return stack;
   }
 
-  // 靜態模組的面板：一頁、由上而下照「東西 → 材質 → 光 → 地板 → 鏡頭 → 背景」排，
-  // 只放看得到效果的參數。其餘控制項留在隱藏的分頁裡，參數檔與重設照常讀寫它們。
+  // 新玻璃模型（registry 的 studioGlass）的面板：一頁、由上而下照「東西 → 材質 →
+  // 動態 → 水滴 → 地板 → 鏡頭 → 背景」排，只放看得到效果的參數。其餘控制項留在
+  // 隱藏的分頁裡，參數檔與重設照常讀寫它們。
+  //
+  // 各模式自己的那一段（動態、水滴）不在這裡逐一列：舊的分頁版面已經用閘門把
+  // 每個模式的區塊標好了（.modeBlock[data-gate=<模式>]、#shapeMotionGroup、水滴那一
+  // 組……），這裡把它們整塊搬進來，閘門照樣收掉別的模式的部分。新增一個模式的
+  // 參數只要在 registry 加 params，不必回來改這裡。
   function buildStudioLayout() {
+    const isStatic = launchMotion === 'static';
     panel.dataset.layout = 'studio';
     tabs.hidden = true;
     depthHeading.hidden = true;
@@ -929,19 +936,22 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       return block;
     };
 
-    const shapeBlock = group('造型', [
+    // 造型：靜態先選內建幾何或「匯入」，其餘形狀場模式一律是匯入的 SVG／GLB。
+    const STATIC_SHAPE_ENTRIES = [
       ['staticShape', '形狀'],
       ['boxSize', '大小'], ['boxCornerRadius', '圓角'],
       ['primitiveSize', '大小'], ['primitiveHeight', '高度'], ['primitiveTubeRatio', '管徑'],
-    ]);
-    // 匯入的 SVG／GLB 借用形狀匯聚那組控制；原本的外層閘門（shape）搬出來後就不在了，
-    // 所以自己包一層 staticShapeImport。
-    const importBlock = element('div');
-    importBlock.dataset.gate = 'staticShapeImport';
-    for (const [key, label] of [
+    ];
+    const IMPORT_ENTRIES = [
       ['shapeSource', '檔案類型'], ['shapeQuality', '模型品質'], ['shapeBtn', null],
       ['shapeAScale', '大小'], ['shapeDepth', '厚度'], ['shapeEdgeBevel', '圓角'],
-    ]) {
+    ];
+    const shapeBlock = group('造型', isStatic ? STATIC_SHAPE_ENTRIES : []);
+    // 匯入的 SVG／GLB 借用形狀匯聚那組控制；原本的外層閘門（shape）搬出來後就不在了，
+    // 所以自己包一層 shapeImport。
+    const importBlock = element('div');
+    importBlock.dataset.gate = 'shapeImport';
+    for (const [key, label] of IMPORT_ENTRIES) {
       const row = rowOf(key);
       if (!row) continue;
       if (label) relabel(key, label);
@@ -986,13 +996,11 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     // 畫面右下角常駐（見 buildQuickDock），面板裡不再有燈光區。
     staticDial = buildLightDial();
     const sideStack = buildSideStack();
-    studioShapeCard = buildQuickDock('造型', [
-      ['staticShape', '形狀'],
-      ['boxSize', '大小'], ['boxCornerRadius', '圓角'],
-      ['primitiveSize', '大小'], ['primitiveTubeRatio', '管徑'],
-      ['shapeSource', '檔案類型'], ['shapeQuality', '模型品質'], ['shapeBtn', null],
-      ['shapeAScale', '大小'], ['shapeDepth', '厚度'], ['shapeEdgeBevel', '圓角'],
-    ], null, 'studioShapeCard', sideStack);
+    // 卡片上不放「高度」：圓柱與圓錐已經不在選單裡了（見 registry 的 staticShape）。
+    studioShapeCard = usesShapeField(launchMotion) ? buildQuickDock('造型', [
+      ...(isStatic ? STATIC_SHAPE_ENTRIES.filter(([key]) => key !== 'primitiveHeight') : []),
+      ...IMPORT_ENTRIES,
+    ], null, 'studioShapeCard', sideStack) : null;
     // 背景色也放進這張卡（方向盤讀數的下面）：它就一兩個色票，單獨在左邊佔一整區
     // 太浪費。深底是一個背景色，淺底是上下兩個漸層色，跟著底色切換（真的那幾列由
     // refresh 依底色收起，鏡像照著 hidden 走）。
@@ -1023,15 +1031,18 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
         studioQuickDock?.sync();
       });
     }).observe(panel, { subtree: true, attributes: true, attributeFilter: ['class', 'hidden'] });
+    if (!isStatic) buildMotionSections();
     group('地板', [
       ['studioShadowStrength', '影子深度'],
       ['studioCaustic', '透光光斑'],
     ]);
+    // 會動的模式另有鏡頭的環繞與推軌；靜態是一張靜止的展示照，不給。
     const cameraBlock = group('鏡頭', [
       ['cameraFov', '視角'],
       ['cameraDistance', '距離'],
       ['cameraRotationY', '水平角度'],
       ['cameraRotationX', '垂直角度'],
+      ...(isStatic ? [] : [['spin', '自動環繞'], ['dollyEnabled', '前後推軌']]),
     ]);
     cameraBlock.append(element('p', 'inspectorNote', '也可以直接在畫面上拖曳旋轉、滾輪縮放。'));
     // 桌面上背景色在右側「背景與燈光」卡片裡（見 buildQuickDock 的 leadEntries），
@@ -1070,6 +1081,32 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       const top = node.parentElement === page;
       node.classList.toggle('inspectorSection', top);
       node.classList.toggle('inspectorSubsection', !top);
+    }
+
+    // 「動態」與「水滴」：把舊版面裡標好閘門的區塊整塊搬進來（理由見上面的說明）。
+    // 搬進來的區塊不分是哪個模式的，閘門會收掉不屬於這個模式的那些；整區都被
+    // 收掉時 pruneEmptySections 會連標題一起藏起來。
+    function buildMotionSections() {
+      const gate = motionParamsGate(launchMotion);
+      const motion = group('動態', [['loopDuration', '循環秒數']]);
+      motion.append(...[
+        $('typeLoopInfoRow'),
+        ...panel.querySelectorAll(`.modeBlock[data-gate="${gate}"]`),
+        $('typeFontGroup'),
+        $('shapeMotionGroup'),
+      ].filter(Boolean));
+      // 造型動態預設是關的（總開關在標題上），內容先收起來，開了再展開看。
+      if ($('shapeMotionGroup') && !$('shapeMotionOn')?.checked) $('shapeMotionGroup').open = false;
+      // 水滴那一組在舊版面是整組掛一個閘門（不是每一列），搬出來之後要照抄過來。
+      const dropsGate = $('count')?.closest('details.group')?.dataset.gate;
+      const drops = group('水滴', [
+        ['count', '水滴數量'], ['radius', '水滴大小'], ['viscosity', '黏性融合'],
+        ['surfaceTension', '表面張力'], ['inertiaDeform', '慣性形變'], ['spread', '漂浮範圍'],
+        ['wobble', '表面起伏'], ['wobbleScale', '起伏尺度'], ['wobbleSpeed', '起伏動畫'],
+        ['microCount', '輪廓細節滴'],
+      ]);
+      if (dropsGate) { drops.dataset.gate = dropsGate; drops.classList.add('modeBlock'); }
+      if ($('edgeDropGroup')) drops.append($('edgeDropGroup'));
     }
   }
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { EDGE_TINT_TARGETS, edgeTintKeys } from '../bubble/edge-tint.js';
-import { MOTION_KEYS } from '../bubble/motions/registry.js';
+import { MOTION_KEYS, usesStudioGlass } from '../bubble/motions/registry.js';
 import {
   BACKDROP_SCOPED_KEYS,
   MOTION_SCOPED_KEYS,
@@ -40,8 +40,8 @@ assert.deepEqual(Object.keys(memory).sort(), [
 for (const motion of MOTION_KEYS) {
   assert.equal(memory.spectralCausticFocus[`${motion}|dark`], 1);
   assert.equal(memory.spectralCausticSeparation[`${motion}|dark`], 1);
-  // 靜態模組是 OpenPBR 的清玻璃（transmission_weight 1），不吃淺底那張表。
-  assert.equal(memory.transmission[`${motion}|light`], motion === 'static' ? 1 : 0.97);
+  // 新玻璃模型是 OpenPBR 的清玻璃（transmission_weight 1），不吃淺底那張表。
+  assert.equal(memory.transmission[`${motion}|light`], usesStudioGlass(motion) ? 1 : 0.97);
   assert.equal(memory.rayDispersionEnabled[`${motion}|light`], false);
   assert.equal(memory.bloomEnabled[`${motion}|light`], false);
   for (const prefix of EDGE_TINT_TARGETS) {
@@ -53,14 +53,14 @@ for (const motion of MOTION_KEYS) {
   // 歷史包袱，預設就該跟淺底背景同色——不然一開箱就是一顆藍色的球浮在白色
   // 背景上。兩個底色各自記一格，調淺底不會污染已經定案的深底外觀。
   //
-  // 靜態模組例外：展示用的玻璃兩個底色都從純白、濃度 4 起步（見 runtime-memory
-  // 的 MOTION_FIXED_OVERRIDES）。
-  if (motion === 'static') {
+  // 新玻璃模型例外：兩個底色都從純白、濃度 4 起步（見 runtime-memory 的
+  // MOTION_FIXED_OVERRIDES）。
+  if (usesStudioGlass(motion)) {
     for (const backdrop of ['dark', 'light']) {
-      assert.equal(memory.absorbColor[`static|${backdrop}`], '#ffffff');
-      assert.equal(memory.absorb[`static|${backdrop}`], 4);
-      assert.equal(memory.reflect[`static|${backdrop}`], 1);
-      assert.equal(memory.transmission[`static|${backdrop}`], 1);
+      assert.equal(memory.absorbColor[`${motion}|${backdrop}`], '#ffffff');
+      assert.equal(memory.absorb[`${motion}|${backdrop}`], 4);
+      assert.equal(memory.reflect[`${motion}|${backdrop}`], 1);
+      assert.equal(memory.transmission[`${motion}|${backdrop}`], 1);
     }
     continue;
   }

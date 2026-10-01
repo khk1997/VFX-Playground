@@ -404,6 +404,43 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     return {"singlePage": True, "modeLocked": True}
 
 
+def check_studio_motion(browser, base_url: str) -> dict[str, object]:
+    """A moving studio-glass mode gets the same single page, plus its own motion section."""
+    context = browser.new_context(viewport={"width": 1100, "height": 900}, reduced_motion="reduce")
+    page = context.new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.goto(f"{base_url}/bubble/index.html?mode=capillary&diag=inspector-ux", wait_until="networkidle", timeout=45_000)
+    page.wait_for_selector('#panel.inspector[data-layout="studio"]')
+    page.wait_for_function("() => !document.body.hasAttribute('data-bubble-boot')", timeout=90_000)
+    assert page.locator(".inspectorTabs").is_hidden()
+    visible_sections = page.evaluate(
+        """() => [...document.querySelectorAll('#inspectorPage-studio > details')]
+            .filter(node => !node.classList.contains('is-emptyHidden') && !node.closest('.gated-off'))
+            .map(node => node.querySelector(':scope > summary h3').textContent)"""
+    )
+    # 造型在右側卡片（桌面）；毛細波沒有水滴，「水滴」整區要被閘門收掉。
+    for name in ("玻璃", "動態", "地板", "鏡頭", "進階"):
+        assert name in visible_sections, f"missing studio section {name}: {visible_sections}"
+    assert "水滴" not in visible_sections, visible_sections
+    motion = page.locator("#inspectorPage-studio > details", has_text="動態")
+    for key in ("loopDuration", "capillaryHeight", "capillaryRings", "capillarySpeed"):
+        assert motion.locator(f"#{key}").count() == 1, f"{key} is not in the motion section"
+    # 舊的加色外觀不在這一頁。
+    for key in ("rayDispersionEnabled", "spectralCausticEnabled", "filmEnabled", "materialExposure"):
+        assert page.locator(f"#inspectorPage-studio #{key}").count() == 0, f"{key} leaked into the studio page"
+    # 造型卡片是匯入那一組，不是靜態的內建幾何。
+    card = page.locator("#studioShapeCard")
+    assert card.is_visible()
+    labels = card.locator(".studioQuickDockRow:not([hidden])").all_inner_texts()
+    assert not any("形狀" in text for text in labels), labels
+    assert any("檔案類型" in text for text in labels), labels
+    assert page.locator("#cameraFov").input_value() == "28"
+    assert not errors, f"capillary inspector page errors: {errors}"
+    context.close()
+    return {"singlePage": True, "motionSection": True}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:4173")
@@ -414,6 +451,7 @@ def main() -> int:
             "desktop": check_desktop(browser, args.base_url),
             "mobile": check_mobile(browser, args.base_url),
             "static": check_static(browser, args.base_url),
+            "studioMotion": check_studio_motion(browser, args.base_url),
         }
         browser.close()
     print(results)

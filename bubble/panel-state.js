@@ -26,6 +26,8 @@ export function createPanelStateController({
     staticShapeCylOrCone: () => P.staticShape === 4 || P.staticShape === 5,
     staticShapeTorus: () => P.staticShape === 6,
     staticShapeImport: () => P.staticShape === 7,
+    // 匯入 SVG／GLB 那組控制：靜態要先選「匯入」，其餘形狀場模式一律是匯入的。
+    shapeImport: () => staticUsesImportedShape(),
     capillaryTextureOn: () => Math.round(P.capillaryTexture) !== 6,
     bloomOn: () => P.bloomEnabled,
     streaksOn: () => P.streaksEnabled,

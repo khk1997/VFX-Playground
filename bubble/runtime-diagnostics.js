@@ -465,7 +465,9 @@ window.__bubbleDiagReport = function () {
         uDispersionAbbe: runtime().uniforms.uDispersionAbbe.value,
         uSpectralSamples: runtime().uniforms.uSpectralSamples.value,
         uLightKey: runtime().uniforms.uLightKey.value.toArray(),
-      } : '(非靜態模式)',
+        uStudioFloorHeight: runtime().uniforms.uStudioFloorHeight.value,
+        uBounds: runtime().uniforms.uBounds.value.toArray(),
+      } : '(舊材質路徑)',
       // 打字模式的排版狀態。字沒出現時第一個要看的就是這幾個值：可見字數（.w）、
       // 字距、字級，以及射線邊界有沒有涵蓋整行。
       打字: runtime().uniforms && P.motion === 'typewriter' ? {

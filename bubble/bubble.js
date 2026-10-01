@@ -1,6 +1,6 @@
 'use strict';
 import * as THREE from 'three';
-import { buildInspector } from './inspector.js?v=studio-glass-1';
+import { buildInspector } from './inspector.js?v=studio-glass-2';
 import { createAdaptiveQuality, QUALITY_TIER_NAMES } from './adaptive-quality.js?v=2';
 import { createGpuProfiler } from './gpu-profiler.js?v=1';
 let inspector = null;
@@ -53,6 +53,7 @@ import {
   COLORS, LINEAR_COLOR_KEYS, SELECTS, createFormatters, createToggleBindings,
 } from './control-schema.js?v=2';
 import { glassTintBox } from './glass-tint.js?v=2';
+import { shapeFieldFloorHeight } from './studio-floor.js?v=1';
 import { createTypewriterRuntime } from './typewriter-runtime.js?v=type-center-1';
 import { createStaticCapillaryRuntime } from './motions/runtime/static-capillary.js?v=1';
 import { createJellyRuntime } from './motions/runtime/jelly.js?v=1';
@@ -62,12 +63,12 @@ import { createShatterRuntime } from './motions/runtime/shatter.js?v=1';
 import { createWeaveRuntime } from './motions/runtime/weave.js?v=1';
 import { createMorphRuntime } from './motions/runtime/morph.js?v=1';
 import { createFormationRuntime } from './motions/runtime/formation.js?v=1';
-import { buildExtendedMotionControls } from './panel-builder.js?v=1';
-import { createPanelStateController } from './panel-state.js?v=4';
+import { buildExtendedMotionControls } from './panel-builder.js?v=2';
+import { createPanelStateController } from './panel-state.js?v=5';
 import { createPanelBindings } from './panel-bindings.js?v=2';
 import { createExportRuntime } from './export-runtime.js?v=4';
 import { createCompileDiagnostics } from './compile-diagnostics.js?v=1';
-import { createRuntimeDiagnostics } from './runtime-diagnostics.js?v=2';
+import { createRuntimeDiagnostics } from './runtime-diagnostics.js?v=3';
 
 // 提高 PMREM 高粗糙度的最低預過濾解析度，避免 16×16 tile 造成方格反射。
 patchEnvMapResolution();
@@ -1656,16 +1657,7 @@ function updateDropUniforms(t) {
   // 只有走 SDF 的模式才有造型可動；不用形狀場的模式維持 null，
   // applyShapeRigid 在那些模式底下自然是恆等變換。
   //
-  // 果凍走自己那條阻尼彈簧，不疊「造型動態」那組週期性旋轉／呼吸（理由見
-  // motions/runtime/jelly.js）。
-  if (jellyRuntime.active()) {
-    // 原地戳擊與落地彈跳兩條分支都在模組裡選（見 motions/runtime/jelly.js）。
-    shapeRigidNow = jellyRuntime.shapeRigid(phase);
-  } else if (researchRuntime.active()) {
-    shapeRigidNow = researchRuntime.shapeRigid(phase);
-  } else {
-    shapeRigidNow = usesShapeField(P.motion) ? shapeRigidMotion(phase) : null;
-  }
+  shapeRigidNow = shapeRigidAt(phase);
   if (shapeRigidNow) {
     shapeRigidEuler.set(shapeRigidNow.angleX, shapeRigidNow.angleY, shapeRigidNow.angleZ, 'XYZ');
     shapeRigidRot.setFromMatrix4(shapeRigidMat4.makeRotationFromEuler(shapeRigidEuler));
@@ -2085,21 +2077,45 @@ function updateDropUniforms(t) {
     microCount,
     microDropData,
   });
-  // 地板跟著靜態造型的最低點走（見 staticShapeFloorHeight）。只有靜態模式編得到
-  // 棚景，其餘模式送什麼都不影響。
   if (uniforms?.uStudioFloorHeight) {
-    // 匯入的 GLB 走三角網格時，網格的包圍盒就是模型真正的底部（距離場那條路不知道
-    // SVG／GLB 的最低點，只能用固定高度，物體會浮在半空）。縮放跟 mapScene 的
-    // shapePA 同一組：uShapeScale（呼吸）× uShapeAScale（大小）。
-    const meshFloor = staticMeshActive() && staticMeshBounds
-      ? staticMeshBounds.min[1] * uniforms.uShapeScale.value * uniforms.uShapeAScale.value
-        + uniforms.uShapeRigidOffset.value.y - 0.02
-      : null;
-    uniforms.uStudioFloorHeight.value = P.motion !== 'static' ? STUDIO_FLOOR_DEFAULT
-      : meshFloor ?? staticShapeFloorHeight(P);
+    uniforms.uStudioFloorHeight.value = studioFloorHeight();
     uniforms.uStudioShadowBound.value = P.motion === 'static' ? staticShapeShadowRadius(P) : 0;
   }
   updateGlassTintBox();
+}
+
+// 棚景地板的高度：物體坐在地板上（見 studio-floor.js）。沒有棚景的模式送什麼都
+// 不影響。
+// - 靜態的內建造型：照 SDF 的尺寸算。
+// - 靜態匯入 GLB 走三角網格：網格的包圍盒就是模型真正的底部。縮放跟 mapScene
+//   的 shapePA 同一組：uShapeScale（呼吸）× uShapeAScale（大小）。
+// - 其餘形狀場：烘焙時記下的範圍，掃過整段循環的剛體動態取最低點，地板不跟著晃。
+//   表面波紋會把表面往外推，多留一個波高。
+function studioFloorHeight() {
+  if (!usesStudioGlass(P.motion)) return STUDIO_FLOOR_DEFAULT;
+  if (P.motion === 'static' && P.staticShape !== 7) return staticShapeFloorHeight(P);
+  if (staticMeshActive() && staticMeshBounds) {
+    return staticMeshBounds.min[1] * uniforms.uShapeScale.value * uniforms.uShapeAScale.value
+      + uniforms.uShapeRigidOffset.value.y - 0.02;
+  }
+  const waves = P.capillaryTexture !== 6 && (P.motion === 'capillary' || P.motion === 'static')
+    ? effectiveCapillaryHeight(P.capillaryHeight, P.capillaryRings) : 0;
+  return shapeFieldFloorHeight({
+    localBounds: shapeLocalBounds(),
+    rigidAt: shapeRigidAt,
+    scaleAt: phase => (1 + holdBreathScale(phase)) * P.shapeAScale,
+    extraDrop: waves,
+    fallback: STUDIO_FLOOR_DEFAULT,
+  });
+}
+
+// 形狀場烘焙時記下的本地範圍（shape-field.js 的 localBounds）。SVG 是擠出的，
+// 厚度是執行期的 shapeDepth。
+function shapeLocalBounds() {
+  const bounds = shapeField?.localBounds;
+  if (!bounds) return null;
+  if (!bounds.extruded) return bounds;
+  return { min: [bounds.min[0], bounds.min[1], -P.shapeDepth], max: [bounds.max[0], bounds.max[1], P.shapeDepth] };
 }
 
 // 漸層玻璃色鋪在造型的包圍盒上（見 glass-tint.js 的 glassTintBox）。造型大小、
@@ -2702,6 +2718,18 @@ function sampleRenderQuality(now) {
   adaptiveQuality.sample(now, {
     blocked: powerSaveThrottled || dragging || isExporting() || shapeConverting || variantSwapInFlight,
   });
+}
+
+/* ===== 造型的剛體變換 ===== */
+// 某個相位的造型剛體變換。每幀的 uniform（updateDropUniforms）與棚景地板
+// （studioFloorHeight 要掃整段循環）都讀這一支，兩邊才不會各算各的。
+//
+// 果凍走自己那條阻尼彈簧，不疊「造型動態」那組週期性旋轉／呼吸（理由見
+// motions/runtime/jelly.js）；原地戳擊與落地彈跳兩條分支都在模組裡選。
+function shapeRigidAt(phase) {
+  if (jellyRuntime.active()) return jellyRuntime.shapeRigid(phase);
+  if (researchRuntime.active()) return researchRuntime.shapeRigid(phase);
+  return usesShapeField(P.motion) ? shapeRigidMotion(phase) : null;
 }
 
 /* ===== 拖曳旋轉 ===== */

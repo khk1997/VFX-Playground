@@ -33,6 +33,30 @@ import { edgeTintParams } from '../edge-tint.js';
 //                  是「每個模式的值天生就不一樣」，這裡是「大多數模式相同，
 //                  少數模式需要覆寫」，不必為了一個模式的特例把同樣的數字
 //                  在五個模式裡各抄一次。
+// 新玻璃模型（studioGlass）的模式共用的起點。每個模式的 overrides 先展開這一份，
+// 再寫自己的差異，所以「新模型的玻璃長什麼樣」只有這一處。
+//
+// - 材質：通用玻璃、OpenPBR 的清玻璃（反射 1、透射 1、折射率 1.5），吸收色純白、
+//   濃度 4 —— 純白不吸收，預設是無色的，一換顏色就讀得出厚薄。淺底也是這組，見
+//   runtime-memory 的 MOTION_FIXED_OVERRIDES。
+// - 舊的加色外觀（光譜焦散、藝術色散）關掉；shader 也不編它們（shader-variants.js）。
+// - 光暈：新模型的高光與色帶是 HDR 的，預設關著（那是很重的美術決定），但門檻先
+//   抬高，按下去時不會用全域那組門檻把整顆炸成白球。
+// - 長焦構圖：視角 28°。距離跟著主體大小走，各模式自己給。
+export const STUDIO_GLASS_OVERRIDES = {
+  materialStyle: 'universal',
+  spectralCausticEnabled: false,
+  dispersionEnabled: false,
+  bloomEnabled: false,
+  bloomThreshold: 1.75,
+  bloomIntensity: 0.4,
+  bloomRadius: 0.6,
+  cameraFov: 28,
+  absorb: 4,
+  absorbColor: '#ffffff',
+  ior: 1.5,
+};
+
 export const MOTIONS = {
   static: {
     label: '靜態 Static',
@@ -53,25 +77,10 @@ export const MOTIONS = {
     // 搬過來的，不是隨手填的。材質底子沿用毛細波那組（通用玻璃 + 稜光棚燈），
     // 其餘為這顆landing 畫面各自調整。
     overrides: {
-      materialStyle: 'universal',
-      // 稜光光芒那組參數已經拿掉：靜態模式改走折射分光之後就不編那一塊了
-      // （見 shader-variants.js 的 studioGlass），留著只是一組不會被讀的數字。
-      spectralCausticEnabled: false,
-      dispersionEnabled: false,
-      // 後處理光暈只對這個模式預設打開。玻璃的高光與色帶在新模型裡是 HDR 的，
-      // 沒有光暈它們就只是一條很亮的線；有了才會像參考影片那樣發光。這是模式
-      // 層級的覆寫，其餘九個模式的預設完全不動。
-      // 光暈預設關著。新模型的高光與色帶是 HDR 的，開起來會發光（那是參考
-      // 影片的樣子），但那是一個很重的美術決定，留給使用者自己按。下面三個
-      // 形狀值仍然覆寫：按下去的時候才不會用全域那組門檻把整顆炸成白球
-      // （淺底的背景紙本身就在 0.85，門檻低於它就是這個下場）。
-      bloomEnabled: false,
-      bloomThreshold: 1.75,
-      bloomIntensity: 0.4,
-      bloomRadius: 0.6,
-      // 長焦構圖：視角收到 28 度、距離拉到 9.5。主體比原本更滿，但透視比原本
-      // 更平 —— 廣角拉近會把最靠近鏡頭的那個角撐得特別大，玻璃的線條因此變誇張。
-      cameraFov: 28,
+      ...STUDIO_GLASS_OVERRIDES,
+      // 長焦構圖（視角見 STUDIO_GLASS_OVERRIDES）、距離拉到 9.5。主體比原本更滿，
+      // 但透視比原本更平 —— 廣角拉近會把最靠近鏡頭的那個角撐得特別大，玻璃的
+      // 線條因此變誇張。
       cameraDistance: 9.5,
       // 圓角放大到 0.042（全域是 0.025）。這不是外觀偏好，是這個材質能不能顯色的
       // 前提：平行的兩面把光折進去再折出來，淨偏折是零，所以擠出的 SVG 上色散
@@ -93,14 +102,6 @@ export const MOTIONS = {
       capillaryHeight: 0,
       capillaryRings: 2,
       capillarySpeed: 1,
-      // 體積吸收。玻璃預設純白（不吸收），濃度先給到 4：使用者一換顏色，厚處
-      // 與薄處的差別就讀得出來。淺底也要是這組，見 runtime-memory 的
-      // MOTION_FIXED_OVERRIDES。
-      absorb: 4,
-      absorbColor: '#ffffff',
-      // 折射率 1.5：一般光學玻璃。全域預設 1.33 是水的值，方體的摺線與色帶在
-      // 1.5 上才有足夠的偏折。
-      ior: 1.5,
     },
     // 幾何選項用數字枚舉（不是字串），這樣才能沿用 bindControls 既有的「數值
     // 滑桿／數字型 select 一律 parseFloat」那條路徑，不必為了一個字串型 select
@@ -789,18 +790,18 @@ export const MOTIONS = {
   },
   capillary: {
     label: '毛細波 Capillary Wave', uniform: 7, usesShapeField: true, gate: 'capillary',
+    studioGlass: true,
     // 毛細波只作用在 SVG／GLB 距離場本體，不生成主滴、微滴或輪廓液滴。
     count: 0, radius: 0.24, loopDuration: 4, dolly: false,
     overrides: {
+      ...STUDIO_GLASS_OVERRIDES,
       shapeEdgeBevel: 0.051,
-      materialStyle: 'universal',
-      rayBeamIntensity: 13.5,
-      rayBeamSeparation: 0.065,
-      rayBeamChroma: 1.3,
-      rayBeamZoom: 5,
-      spectralCausticEnabled: false,
-      cameraDistance: 3.7,
-      cameraRotationX: 9.4,
+      // 舊構圖是 45.6° 視角、距離 3.7。換成 28° 的長焦時，主體要一樣大，距離就是
+      // 3.7 × tan(22.8°) / tan(14°) ≈ 6.2。
+      cameraDistance: 6.2,
+      // 從上方往下看，地板與影子才看得到（舊構圖幾乎是平視，地板只剩一條線）。
+      // 比靜態的 -40° 平一點：問號是扁的擠出體，壓太低會只剩一個側面。
+      cameraRotationX: -20,
       cameraRotationY: 27.9,
     },
     // 「程序紋理」是這一整組的總開關：選「無」時表面完全不產生偏移，其餘每一條
@@ -846,6 +847,8 @@ export const MOTIONS = {
           { value: 5, label: 'Magic' },
         ],
       },
+      // 波向與扭曲是細調：預設收起來，面板第一眼只看到波的大小、密度與速度。
+      { type: 'subgroup', label: '波向與扭曲', open: false, gate: 'capillaryTextureOn' },
       {
         key: 'capillaryDirectionX', label: '波向 X', min: -1, max: 1, step: 0.05, value: 0.4,
         gate: 'capillaryTextureOn',
@@ -922,6 +925,10 @@ export const MOTION_COLOR_DEFAULTS = Object.fromEntries(
 
 export const usesShapeField = motion => Boolean(MOTIONS[motion]?.usesShapeField);
 export const usesStudioGlass = motion => Boolean(MOTIONS[motion]?.studioGlass);
+// 一個模式自己那組參數（params）在面板上的閘門。毛細波的那組表面波紋控制跟靜態、
+// 安裝中共用（capillaryTextureUI），其餘就是模式自己的 gate。panel-builder 產生
+// 區塊、單頁面板挑區塊都讀這一支。
+export const motionParamsGate = motion => (motion === 'capillary' ? 'capillaryTextureUI' : MOTIONS[motion]?.gate);
 
 // UI 面板的 data-gate → 判斷式。除了每個模式自己的 gate，另外有一個涵蓋全部
 // 需要形狀的模式的 'shape'。

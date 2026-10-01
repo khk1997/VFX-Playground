@@ -1,6 +1,6 @@
 'use strict';
 
-import { MOTION_PARAMS } from './motions/registry.js?v=studio-glass-1';
+import { MOTION_PARAMS, motionParamsGate } from './motions/registry.js?v=studio-glass-1';
 
 function buildMotionSubgroup(param, block) {
   const details = document.createElement('details');
@@ -37,7 +37,7 @@ export function buildExtendedMotionControls() {
     if (!params.length) continue;
     const block = document.createElement('div');
     block.className = 'modeBlock';
-    block.dataset.gate = motion === 'capillary' ? 'capillaryTextureUI' : motion;
+    block.dataset.gate = motionParamsGate(motion);
     let container = block;
     for (const param of params) {
       if (param.type === 'subgroup') {
