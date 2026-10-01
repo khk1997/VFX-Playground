@@ -220,12 +220,12 @@
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
   });
-  // 「保留地板影子」只對靜態模式的去背有意義：其餘模式沒有地板，不透明輸出則
-  // 影子本來就在場景裡。
+  // 「保留地板影子」只對新玻璃模型的去背有意義：舊模型沒有地板，不透明輸出則
+  // 影子本來就在場景裡。玻璃模型由 panel-state.js 標在 body 上。
   function syncShadowOption() {
-    const motion = document.getElementById('motion')?.value;
     document.getElementById('exportShadowField').hidden =
-      document.getElementById('exportBackground').value !== 'transparent' || motion !== 'static';
+      document.getElementById('exportBackground').value !== 'transparent'
+      || document.body.dataset.glassModel !== 'studio';
   }
   document.getElementById('exportBackground').addEventListener('change', () => {
     syncShadowOption();

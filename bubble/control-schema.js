@@ -1,6 +1,6 @@
 import { EDGE_TINT_TARGETS, EDGE_TINT_STOPS } from './edge-tint.js?v=dark-tint-1';
-import { MOTION_UNIFORM_MAP } from './motions/registry.js?v=static-defaults-1';
-import { GLASS_TINT_MODES } from './glass-tint.js?v=1';
+import { MOTION_UNIFORM_MAP } from './motions/registry.js?v=studio-glass-1';
+import { GLASS_TINT_MODES } from './glass-tint.js?v=2';
 
 // select 字串 → int uniform
 export const SELECTS = {

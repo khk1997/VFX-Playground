@@ -1,7 +1,7 @@
 'use strict';
 
 import { EDGE_TINT_TARGETS, edgeTintParams } from './edge-tint.js?v=dark-tint-1';
-import { motionGates, usesShapeField } from './motions/registry.js?v=static-defaults-1';
+import { motionGates, usesShapeField, usesStudioGlass } from './motions/registry.js?v=studio-glass-1';
 
 export function createPanelStateController({
   params: P,
@@ -99,6 +99,8 @@ export function createPanelStateController({
   function updateUIState() {
     syncBorrowedRows();
     applyGates();
+    // 不能 import 的傳統 script（bubble-export-ui.js）從這裡讀目前的玻璃模型。
+    document.body.dataset.glassModel = usesStudioGlass(P.motion) ? 'studio' : 'legacy';
     const setFeatureState = (id, enabled) => {
       const group = document.getElementById(id);
       if (!group) return;

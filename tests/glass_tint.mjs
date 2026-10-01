@@ -23,10 +23,10 @@ assert.ok(DEFAULTS.absorbGradientMid >= 0 && DEFAULTS.absorbGradientMid <= 1);
 assert.ok(DEFAULTS.absorbGradientSoftness > 0 && DEFAULTS.absorbGradientSoftness <= 1);
 
 // 內建造型：範圍就是 SDF 的包圍盒，以原點為中心。
-assert.deepEqual(glassTintBox({ params: base, bounds }), { min: [-0.8, -0.8, -0.8], max: [0.8, 0.8, 0.8] });
+assert.deepEqual(glassTintBox({ shapeExtents: staticShapeHalfExtents(base), bounds }), { min: [-0.8, -0.8, -0.8], max: [0.8, 0.8, 0.8] });
 const torus = { ...base, staticShape: 6 };
 const minor = 0.35 * 0.9;
-assert.deepEqual(glassTintBox({ params: torus, bounds }).max, [0.9 + minor, minor, 0.9 + minor]);
+assert.deepEqual(glassTintBox({ shapeExtents: staticShapeHalfExtents(torus), bounds }).max, [0.9 + minor, minor, 0.9 + minor]);
 
 // 地板跟漸層讀同一份半尺寸：坐在地板上的那一面就是漸層的底端。
 for (const staticShape of [0, 1, 2, 3, 4, 5, 6]) {
@@ -35,13 +35,12 @@ for (const staticShape of [0, 1, 2, 3, 4, 5, 6]) {
 }
 
 // 匯入走三角網格：網格包圍盒 × 縮放 + 位移。
-const imported = { ...base, staticShape: 7 };
 const mesh = { min: [-1, -2, -0.5], max: [1, 2, 0.5], scale: 0.5, offset: [0, 0.1, 0] };
-assert.deepEqual(glassTintBox({ params: imported, mesh, bounds }), {
+assert.deepEqual(glassTintBox({ mesh, bounds }), {
   min: [-0.5, -0.9, -0.25], max: [0.5, 1.1, 0.25],
 });
 // 沒有網格（SVG、網格建不出來）：退回包圍球。
-assert.deepEqual(glassTintBox({ params: imported, bounds }), {
+assert.deepEqual(glassTintBox({ bounds }), {
   min: [-1.9, -1.8, -1.7], max: [2.1, 2.2, 2.3],
 });
 
@@ -51,7 +50,7 @@ assert.match(FRAG, /volumeAbsorption = glassVolumeAbsorption\(pathLength, tintDe
 assert.match(FRAG, /tintDepth \+= glassTintDepth\(exitPoint, bouncePoint/);
 assert.match(FRAG, /tint = glassSegmentAbsorption\(floorPos/);
 assert.ok(!/absorbCoefficient = -log/.test(FRAG), '吸收係數只能在 glass-tint.js 定義一次');
-const staticBlock = FRAG.indexOf('#ifdef FEATURE_STATIC_GLASS\nuniform int   uGlassTintMode');
-assert.ok(staticBlock >= 0, '漸層的 uniform 與函式要包在 FEATURE_STATIC_GLASS 裡');
+const staticBlock = FRAG.indexOf('#ifdef FEATURE_STUDIO_GLASS\nuniform int   uGlassTintMode');
+assert.ok(staticBlock >= 0, '漸層的 uniform 與函式要包在 FEATURE_STUDIO_GLASS 裡');
 
 console.log('Glass tint modes, ranges, and shader wiring passed');

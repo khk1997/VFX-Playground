@@ -1,6 +1,6 @@
 'use strict';
 import * as THREE from 'three';
-import { buildInspector } from './inspector.js?v=glass-tint-1';
+import { buildInspector } from './inspector.js?v=studio-glass-1';
 import { createAdaptiveQuality, QUALITY_TIER_NAMES } from './adaptive-quality.js?v=2';
 import { createGpuProfiler } from './gpu-profiler.js?v=1';
 let inspector = null;
@@ -16,8 +16,8 @@ import {
 } from './default-shapes.js?v=svg-shape-76';
 import {
   MOTION_UNIFORM_MAP, MOTION_SVG_DEMO,
-  MOTION_HDRI, MOTION_KEYS, MOTION_TEXT_DEFAULTS, usesShapeField,
-} from './motions/registry.js?v=static-defaults-1';
+  MOTION_HDRI, MOTION_KEYS, MOTION_TEXT_DEFAULTS, usesShapeField, usesStudioGlass,
+} from './motions/registry.js?v=studio-glass-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import { buildMorphPairs } from './motions/morph.js?v=post-mask-3';
@@ -31,9 +31,10 @@ import { parseBubbleRuntimeOptions } from './diagnostics.js?v=1';
 import { createMaterialTextureController } from './material-textures.js?v=1';
 import { createEnvironmentLoader, selectMaterialEnvironment } from './environment-loader.js?v=1';
 import { describeShapeImport, loadShapeAsset } from './shape-loader.js?v=1';
-import { createShaderVariantPlanner, VariantMaterialCache } from './shader-variants.js?v=3';
+import { createShaderVariantPlanner, VariantMaterialCache } from './shader-variants.js?v=4';
 import {
-  contactMergeAmount, findClosestDropPair, staticShapeFloorHeight, staticShapeShadowRadius,
+  contactMergeAmount, findClosestDropPair, staticShapeFloorHeight, staticShapeHalfExtents,
+  staticShapeShadowRadius,
   updateDropBounds,
   STUDIO_FLOOR_DEFAULT,
 } from './drop-physics.js?v=4';
@@ -51,7 +52,7 @@ import {
 import {
   COLORS, LINEAR_COLOR_KEYS, SELECTS, createFormatters, createToggleBindings,
 } from './control-schema.js?v=2';
-import { glassTintBox } from './glass-tint.js?v=1';
+import { glassTintBox } from './glass-tint.js?v=2';
 import { createTypewriterRuntime } from './typewriter-runtime.js?v=type-center-1';
 import { createStaticCapillaryRuntime } from './motions/runtime/static-capillary.js?v=1';
 import { createJellyRuntime } from './motions/runtime/jelly.js?v=1';
@@ -62,11 +63,11 @@ import { createWeaveRuntime } from './motions/runtime/weave.js?v=1';
 import { createMorphRuntime } from './motions/runtime/morph.js?v=1';
 import { createFormationRuntime } from './motions/runtime/formation.js?v=1';
 import { buildExtendedMotionControls } from './panel-builder.js?v=1';
-import { createPanelStateController } from './panel-state.js?v=3';
+import { createPanelStateController } from './panel-state.js?v=4';
 import { createPanelBindings } from './panel-bindings.js?v=2';
-import { createExportRuntime } from './export-runtime.js?v=3';
+import { createExportRuntime } from './export-runtime.js?v=4';
 import { createCompileDiagnostics } from './compile-diagnostics.js?v=1';
-import { createRuntimeDiagnostics } from './runtime-diagnostics.js?v=1';
+import { createRuntimeDiagnostics } from './runtime-diagnostics.js?v=2';
 
 // 提高 PMREM 高粗糙度的最低預過濾解析度，避免 16×16 tile 造成方格反射。
 patchEnvMapResolution();
@@ -339,7 +340,7 @@ const LOOP_SCALED_KEYS = [
   'researchIconPhaseOffset', 'researchIconBirthStagger',
 ];
 // 首頁卡片裡靜態模組額外後退的倍率（見 previewCameraDistance）。
-const STATIC_PREVIEW_PULLBACK = 1.1;
+const STUDIO_PREVIEW_PULLBACK = 1.1;
 
 function refreshLoopScaledReadouts() {
   for (const key of LOOP_SCALED_KEYS) {
@@ -856,6 +857,7 @@ const {
   getParams: () => P,
   getMotionMemory: () => motionMemory,
   usesShapeField,
+  usesStudioGlass,
   isFormationMotion,
   getHasEnvironment: () => !!(uniforms && uniforms.uHasEnv.value === 1),
   diagnostics: DIAG,
@@ -1614,20 +1616,20 @@ function updateNegativeDrops(phase, fidelityAbsorb = 0) {
 // 這幾根走不了 bindControls 的通用路徑 —— 那條路是「一根滑桿對一個純量 uniform」，
 // 而這裡是四根對一個 vec4。每幀重打包而不是在 input 事件裡寫：成本是五次
 // Vector4.set，比為它們各自接一條事件線便宜，也不會有漏接某一根的可能。
-// 視角。只有靜態模式讀 cameraFov，其餘模式維持原本寫死的 0.42。
+// 視角。只有新玻璃模型（registry 的 studioGlass）讀 cameraFov，其餘模式維持原本寫死的 0.42。
 //
 // 不是保守，是算術：tan(45.6°/2) = 0.42045，跟 0.42 差在第四位，而那個差足以讓
 // 其餘九個模式的每一幀都動（回歸測試逐位元比，整批都紅了）。沒有哪個角度能讓
 // tan 剛好還原成那個常數，所以乾脆讓它們繼續讀常數。
-function staticTanHalfFov() {
-  return P.motion === 'static' ? Math.tan(P.cameraFov * Math.PI / 360) : 0.42;
+function studioTanHalfFov() {
+  return usesStudioGlass(P.motion) ? Math.tan(P.cameraFov * Math.PI / 360) : 0.42;
 }
 
 function syncStudioLights() {
   if (!uniforms || !uniforms.uLightKey) return;
   // 視角：暫停路徑不走 frame()，所以這裡也要設一次，否則靜態模式拉「鏡頭視角」
   // 完全沒反應（跟燈位同一個坑）。匯出預覽有自己的 fov，那條路不由這裡管。
-  if (!getExportPreviewSettings()) uniforms.uTanHalfFov.value = staticTanHalfFov();
+  if (!getExportPreviewSettings()) uniforms.uTanHalfFov.value = studioTanHalfFov();
   uniforms.uLightKey.value.set(
     P.lightKeyAzimuth, P.lightKeyElevation, P.lightKeySize, P.lightKeyPower);
   uniforms.uLightFill.value.set(
@@ -2103,11 +2105,11 @@ function updateDropUniforms(t) {
 // 漸層玻璃色鋪在造型的包圍盒上（見 glass-tint.js 的 glassTintBox）。造型大小、
 // 匯入的檔案、呼吸縮放都會改它，所以跟地板一樣每幀跟著走；單色時不必算。
 function updateGlassTintBox() {
-  if (!uniforms?.uGlassTintMin || P.motion !== 'static' || P.absorbGradient === 'off') return;
+  if (!uniforms?.uGlassTintMin || !usesStudioGlass(P.motion) || P.absorbGradient === 'off') return;
   const meshScale = uniforms.uShapeScale.value * uniforms.uShapeAScale.value;
   const offset = uniforms.uShapeRigidOffset.value;
   const { min, max } = glassTintBox({
-    params: P,
+    shapeExtents: P.motion === 'static' && P.staticShape !== 7 ? staticShapeHalfExtents(P) : null,
     mesh: staticMeshActive() && staticMeshBounds ? {
       min: staticMeshBounds.min, max: staticMeshBounds.max,
       scale: meshScale, offset: [offset.x, offset.y, offset.z],
@@ -2254,7 +2256,7 @@ function initGL() {
     uCompositionOffsetX: { value: 0 },
     uCompositionOffsetY: { value: 0 },
     uMaxSteps:   { value: adaptiveQuality.snapshot().steps },
-    uStaticQualityTier: { value: 0 },
+    uGlassQualityTier: { value: 0 },
     uStudioShadowBound: { value: 0 },
     // 靜態模組匯入 GLB 的三角網格（見 mesh-bvh.js、optics.js 的 FEATURE_STATIC_MESH）。
     // 沒有網格時 uMeshTriCount 是 0，shader 退回距離場。
@@ -2418,7 +2420,7 @@ function initGL() {
     uStudioFlag: { value: P.studioFlag },
     uDispersionScale: { value: P.dispersionScale },
     uSpectralSamples: { value: P.spectralSamples },
-    uStaticGlassMix: { value: 1.0 },
+    uStudioGlassMix: { value: 1.0 },
     uLightShow:  { value: P.lightShow },
     uLightClarity: { value: P.lightClarity },
     uLightDepth: { value: P.lightDepth },
@@ -2584,8 +2586,8 @@ function resize() {
 // 於是 Formation 模式拖曳時完全沒有降級。現在只有這一個決策點。
 // 靜態玻璃的畫質等級跟 raymarch 步數同一個時機更新（兩個呼叫點都緊接在
 // resolveMaxSteps 後面）。輸出不走這裡，由 export-runtime 自己設成 0。
-function syncStaticQualityTier() {
-  uniforms.uStaticQualityTier.value = adaptiveQuality.snapshot().tierIndex;
+function syncGlassQualityTier() {
+  uniforms.uGlassQualityTier.value = adaptiveQuality.snapshot().tierIndex;
 }
 
 function resolveMaxSteps() {
@@ -3400,7 +3402,7 @@ function requestPausedRender() {
         Math.max(1, canvas.clientHeight || document.documentElement.clientHeight),
       );
       uniforms.uMaxSteps.value = resolveMaxSteps();
-      syncStaticQualityTier();
+      syncGlassQualityTier();
       // 暫停路徑不走 frame()，所以 frame() 裡那些「每幀從 P 打包」的 uniform
       // 也得在這裡補一次。靜態模式本來就是暫停的，漏掉這行的話燈位滑桿會完全
       // 沒反應 —— 值進了 P，但沒有人把它打包進 vec4。
@@ -3708,7 +3710,7 @@ function frame(now) {
   // 方體會塞滿整張卡片。卡片（660×570）比作品頁窄，再往後退一成，右後方的
   // 地板影子才不會被切掉。
   let previewCameraDistance = !PREVIEW ? P.cameraDistance
-    : P.motion === 'static' ? P.cameraDistance * STATIC_PREVIEW_PULLBACK
+    : usesStudioGlass(P.motion) ? P.cameraDistance * STUDIO_PREVIEW_PULLBACK
     : 4.95;
   // 打字模式的寬度是由字串長度決定的，不是固定的——一個固定鏡距沒辦法同時服務
   // 「LIQUID」跟一整句話。而且預覽框（660×570）比作品頁窄得多，同樣的距離在
@@ -3760,12 +3762,12 @@ function frame(now) {
     ? settingsCenter(settingsValue(getExportPreviewSettings(), 'centerY')) : compositionOffsetY;
   uniforms.uTanHalfFov.value = getExportPreviewSettings()
     ? Math.tan(Math.max(10, Math.min(120, Number(getExportPreviewSettings().fov) || 42)) * Math.PI / 360)
-    : staticTanHalfFov();
+    : studioTanHalfFov();
   uniforms.uTime.value = simT;
   syncStudioLights();
   syncEdgeDropMotion(simT);
   uniforms.uMaxSteps.value = resolveMaxSteps();
-  syncStaticQualityTier();
+  syncGlassQualityTier();
   renderComposite();
   // 只在第一幀標記一次；之後 diagTiming.第一幀完成ms 已有值就不再量。
 

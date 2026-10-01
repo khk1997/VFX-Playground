@@ -13,8 +13,6 @@
 //   加一組標籤。
 // - 範圍的來源：glassTintBox。
 
-import { staticShapeHalfExtents } from './drop-physics.js?v=4';
-
 // select 的值 → shader 的 uGlassTintMode。0 一律是「單色」，shader 走原本的公式。
 // 軸向用世界座標：靜態的造型不動也不轉（轉的是鏡頭），世界軸就是物體自己的軸，
 // 漸層會黏在物體上。
@@ -22,16 +20,16 @@ export const GLASS_TINT_MODES = { off: 0, vertical: 1, horizontal: 2, depth: 3 }
 
 // 漸層鋪滿的範圍：造型的世界座標包圍盒 { min: [x, y, z], max: [x, y, z] }。
 //
-// - 內建造型：照 SDF 的夾值算（staticShapeHalfExtents），以原點為中心。
+// - 靜態的內建造型：呼叫端傳 shapeExtents（drop-physics.js 的 staticShapeHalfExtents），
+//   以原點為中心。其餘模式沒有內建造型，傳 null。
 // - 匯入的 GLB 走三角網格時：網格自己的包圍盒，縮放與位移跟 mapScene 的 shapePA
 //   同一組（uShapeScale × uShapeAScale，加上 uShapeRigidOffset）。靜態不套剛體旋轉。
 // - 其餘（SVG、網格建不出來的 GLB）：不知道確切範圍，退回 raymarch 用的包圍球
 //   （中心 ± 半徑）。那顆球刻意放寬過，漸層因此會比物體本身寬一點、兩端的顏色
 //   不會完全到底。要更準就得從形狀場量出真正的範圍。
-export function glassTintBox({ params, mesh = null, bounds }) {
-  const extents = params.staticShape === 7 ? null : staticShapeHalfExtents(params);
-  if (extents) {
-    return { min: extents.map(v => -v), max: extents };
+export function glassTintBox({ shapeExtents = null, mesh = null, bounds }) {
+  if (shapeExtents) {
+    return { min: shapeExtents.map(v => -v), max: shapeExtents };
   }
   if (mesh) {
     const { min, max, scale, offset } = mesh;

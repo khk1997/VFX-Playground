@@ -2,6 +2,7 @@ export function createShaderVariantPlanner({
   getParams,
   getMotionMemory,
   usesShapeField,
+  usesStudioGlass,
   isFormationMotion,
   getHasEnvironment,
   diagnostics,
@@ -43,9 +44,9 @@ export function createShaderVariantPlanner({
       // 形狀場」而排除了匯入造型（值 7），而新的玻璃模型兩種都要吃到：這個模組
       // 的賣點就是自己丟 SVG／GLB 進來，只有內建幾何漂亮等於沒做。
       //
-      // 其餘九個模式因此完全不編這一塊，畫面逐位元不變（tests/glass_baseline.py
-      // 會驗）。等靜態這條路成立了再決定要不要推廣出去。
-      staticGlass: motion === 'static',
+      // 哪些模式走這條路由 registry 的 studioGlass 決定；沒標的模式完全不編這一塊，
+      // 畫面逐位元不變（tests/glass_baseline.py 會驗）。
+      studioGlass: usesStudioGlass(motion),
       // 靜態模組匯入 GLB：玻璃直接打三角形（見 optics.js 的 FEATURE_STATIC_MESH）。
       // 網格還沒載好時 uMeshTriCount 是 0，shader 自己退回距離場，所以這個旗標只看
       // 設定、不看執行期的資料 —— 變體不會因為載入進度換來換去。
@@ -82,7 +83,7 @@ export function createShaderVariantPlanner({
       'o' + flag(state.thinFilm, 'F') + flag(state.liquidFilm, 'L')
         + flag(state.dispersion, 'D') + flag(state.prismBeam, 'P')
         + flag(state.spectralCaustics, 'K') + flag(state.beamPatterns, 'B')
-        + flag(state.envPmrem, 'E') + flag(state.staticGlass, 'A')
+        + flag(state.envPmrem, 'E') + flag(state.studioGlass, 'A')
         + flag(state.staticMesh, 'Q'),
     ].join('.') + diagSalt;
   }
@@ -144,7 +145,7 @@ export function createShaderVariantPlanner({
       FEATURE_SPECTRAL_CAUSTICS: state.spectralCaustics ? '' : false,
       FEATURE_ENV_PMREM: state.envPmrem ? '' : false,
       FEATURE_BEAM_PATTERNS: state.beamPatterns ? '' : false,
-      FEATURE_STATIC_GLASS: state.staticGlass ? '' : false,
+      FEATURE_STUDIO_GLASS: state.studioGlass ? '' : false,
       FEATURE_STATIC_MESH: state.staticMesh ? '' : false,
       // 光譜迴圈的編譯期上限。跟 MAX_MARCH_COMPILE 同一個用法：實際圈數由
       // uSpectralSamples 在執行期決定，編譯期只知道一個上限，fxc 才不會把整段
@@ -152,10 +153,10 @@ export function createShaderVariantPlanner({
       //
       // 其餘模式給 false 而不是給個數字：那會多一行 #define 進到它們的 shader
       // 前綴，而「原始碼有動、輸出就不保證相同」這件事這個分支已經踩過一次。
-      MAX_SPECTRAL_COMPILE: state.staticGlass ? 32 : false,
+      MAX_SPECTRAL_COMPILE: state.studioGlass ? 32 : false,
       // 地板遮蔽的 march 上限。跟其餘 MAX_*_COMPILE 同一個用法：編譯期只知道
       // 上限，實際步數由場景決定，fxc 才不會把整段展開。
-      MAX_SHADOW_COMPILE: state.staticGlass ? 20 : false,
+      MAX_SHADOW_COMPILE: state.studioGlass ? 20 : false,
     };
 
     // 靜態模式不編舊的外觀層。這不是精簡，是它們與新模型互相衝突：
@@ -166,7 +167,7 @@ export function createShaderVariantPlanner({
     //   飽和的色帶，不是一層淡彩加一條細帶。
     //
     // 順帶把靜態變體的編譯量降回來：這幾塊是整支 shader 裡最大的幾段。
-    if (state.staticGlass) {
+    if (state.studioGlass) {
       defines.FEATURE_THIN_FILM = false;
       defines.FEATURE_DISPERSION = false;
       defines.FEATURE_PRISM_BEAM = false;

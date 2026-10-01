@@ -21,6 +21,11 @@ import { edgeTintParams } from '../edge-tint.js';
 //                  （見 default-shapes.js）。只有需要形狀的模式才有意義。值取的是
 //                  形狀本身的名字（question／ice），不是模式名——同一顆形狀可能
 //                  被多個模式共用，用模式名當值會誤導。
+//   studioGlass    走新的玻璃模型與棚景（OpenPBR 材質、光譜折射、地板／燈卡／影子，
+//                  見 shader-chunks/environment.js 的 FEATURE_STUDIO_GLASS）。沒標的模式
+//                  走舊的材質路徑與那幾層加色外觀（薄膜、RAY 色散、光芒、焦散）。
+//                  面板也跟著它走：新模型用單頁面板（見 inspector.js 的
+//                  buildStudioLayout），舊的用「常用／完整」分頁。
 //   overrides      稀疏表：「擠出外形／輪廓液滴」那組參數（shapeDepth、
 //                  edgeDropsEnabled…）原本是全域共用一份 DEFAULTS，只有某個
 //                  模式需要不一樣的預設時才在這裡列一筆，沒列到的鍵繼續沿用
@@ -37,6 +42,7 @@ export const MOTIONS = {
     // 改走程序化 SDF（見 shaders.js 的 FEATURE_STATIC_SHAPE），不會兩個一起畫。
     usesShapeField: true,
     gate: 'static',
+    studioGlass: true,
     // 沒有水滴、沒有動態——純粹展示材質本身在一個簡單體積上的樣子。
     count: 0,
     radius: 0.24,
@@ -49,7 +55,7 @@ export const MOTIONS = {
     overrides: {
       materialStyle: 'universal',
       // 稜光光芒那組參數已經拿掉：靜態模式改走折射分光之後就不編那一塊了
-      // （見 shader-variants.js 的 staticGlass），留著只是一組不會被讀的數字。
+      // （見 shader-variants.js 的 studioGlass），留著只是一組不會被讀的數字。
       spectralCausticEnabled: false,
       dispersionEnabled: false,
       // 後處理光暈只對這個模式預設打開。玻璃的高光與色帶在新模型裡是 HDR 的，
@@ -915,6 +921,7 @@ export const MOTION_COLOR_DEFAULTS = Object.fromEntries(
 );
 
 export const usesShapeField = motion => Boolean(MOTIONS[motion]?.usesShapeField);
+export const usesStudioGlass = motion => Boolean(MOTIONS[motion]?.studioGlass);
 
 // UI 面板的 data-gate → 判斷式。除了每個模式自己的 gate，另外有一個涵蓋全部
 // 需要形狀的模式的 'shape'。
@@ -922,5 +929,6 @@ export function motionGates(currentMotion) {
   const gates = {};
   for (const [key, m] of entries) gates[m.gate] = () => currentMotion() === key;
   gates.shape = () => usesShapeField(currentMotion());
+  gates.studioGlass = () => usesStudioGlass(currentMotion());
   return gates;
 }

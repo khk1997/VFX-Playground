@@ -23,7 +23,7 @@ vec3 absorbCoefficientOf(vec3 color){
   return -log(clamp(color, 0.002, 0.999)) / 20.0;
 }
 
-#ifdef FEATURE_STATIC_GLASS
+#ifdef FEATURE_STUDIO_GLASS
 uniform int   uGlassTintMode;           // 0 單色、1 上下、2 左右、3 前後
 uniform vec3  uAbsorbColorB;            // 漸層的第二個顏色
 uniform float uAbsorbGradientMid;       // 交界在範圍裡的位置（0–1）

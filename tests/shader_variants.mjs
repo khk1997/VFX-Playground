@@ -27,6 +27,7 @@ const makePlanner = ({ diag = diagnostics, forced = [], mobile = false, run = nu
     // static 也在：它要借形狀場的匯入管線（見 registry 的 static.usesShapeField）。
     usesShapeField: motion => ['formation', 'melt', 'morph', 'shatter', 'static'].includes(motion),
     isFormationMotion: motion => motion === 'formation',
+    usesStudioGlass: motion => motion === 'static',
     getHasEnvironment: () => true,
     diagnostics: diag,
     forceFeatures: forced,
@@ -62,11 +63,11 @@ assert.equal(planner.staticUsesImportedShape(), false);
 assert.equal(procedural.shapeField, false);
 assert.equal(procedural.staticShape, true);
 assert.equal(procedural.capillaryTexture, true);
-assert.equal(procedural.staticGlass, true);
-// staticGlass 必須涵蓋匯入造型，staticShape 則刻意不涵蓋：前者問的是「要不要編
+assert.equal(procedural.studioGlass, true);
+// studioGlass 必須涵蓋匯入造型，staticShape 則刻意不涵蓋：前者問的是「要不要編
 // 新的玻璃光學」，後者問的是「有沒有形狀場」，兩個問題在值 7 上的答案相反。
 params.staticShape = 7;
-assert.equal(planner.variantState().staticGlass, true);
+assert.equal(planner.variantState().studioGlass, true);
 assert.equal(planner.variantState().staticShape, false);
 // 三角網格只給「靜態 + 匯入 + GLB」：SVG 維持距離場，其餘模式要距離場才能做融合。
 params.shapeSource = 'gltf';
@@ -79,7 +80,7 @@ params.shapeSource = 'gltf';
 assert.equal(planner.variantState().staticMesh, false, '內建幾何不走網格');
 params.motion = 'formation';
 params.staticShape = 7;
-assert.equal(planner.variantState().staticGlass, false,
+assert.equal(planner.variantState().studioGlass, false,
   '其餘模式不得編進靜態玻璃');
 assert.equal(planner.variantState().staticMesh, false, '其餘模式不得走三角網格');
 params.shapeSource = 'svg';

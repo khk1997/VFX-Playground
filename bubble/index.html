@@ -296,21 +296,21 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
     <div class="row"><label>體積吸收</label><input type="range" id="absorb" min="0" max="10" step="0.05" value="1"><span class="val" id="absorb_v"></span></div>
     <div class="row"><label>吸收色</label><input type="color" id="absorbColor" value="#68b2e7"><span class="val"></span></div>
     <!-- 漸層玻璃色只有靜態用（見 glass-tint.js）。靜態面板把方向選單換成一排按鈕。 -->
-    <div class="row" data-gate="static"><label>漸層</label><select id="absorbGradient">
+    <div class="row" data-gate="studioGlass"><label>漸層</label><select id="absorbGradient">
       <option value="off">單色</option>
       <option value="vertical">上下</option>
       <option value="horizontal">左右</option>
       <option value="depth">前後</option>
     </select><span class="val"></span></div>
-    <div class="row" data-gate="static glassGradientOn"><label>漸層顏色</label><input type="color" id="absorbColorB" value="#4f86ff"><span class="val"></span></div>
-    <div class="row" data-gate="static glassGradientOn"><label>漸層位置</label><input type="range" id="absorbGradientMid" min="0" max="1" step="0.01" value="0.5"><span class="val" id="absorbGradientMid_v"></span></div>
-    <div class="row" data-gate="static glassGradientOn"><label>漸層柔和度</label><input type="range" id="absorbGradientSoftness" min="0.05" max="1" step="0.01" value="1"><span class="val" id="absorbGradientSoftness_v"></span></div>
-    <div class="row" data-gate="!static"><label>材質曝光</label><input type="range" id="materialExposure" min="0.25" max="2.5" step="0.05" value="1"><span class="val" id="materialExposure_v"></span></div>
+    <div class="row" data-gate="studioGlass glassGradientOn"><label>漸層顏色</label><input type="color" id="absorbColorB" value="#4f86ff"><span class="val"></span></div>
+    <div class="row" data-gate="studioGlass glassGradientOn"><label>漸層位置</label><input type="range" id="absorbGradientMid" min="0" max="1" step="0.01" value="0.5"><span class="val" id="absorbGradientMid_v"></span></div>
+    <div class="row" data-gate="studioGlass glassGradientOn"><label>漸層柔和度</label><input type="range" id="absorbGradientSoftness" min="0.05" max="1" step="0.01" value="1"><span class="val" id="absorbGradientSoftness_v"></span></div>
+    <div class="row" data-gate="!studioGlass"><label>材質曝光</label><input type="range" id="materialExposure" min="0.25" max="2.5" step="0.05" value="1"><span class="val" id="materialExposure_v"></span></div>
     <div class="row"><label>粗糙度</label><input type="range" id="roughness" min="0" max="1" step="0.01" value="0"><span class="val" id="roughness_v"></span></div>
     <div class="row"><label>邊緣光</label><input type="range" id="fresnel" min="0" max="3" step="0.05" value="0.8"><span class="val" id="fresnel_v"></span></div>
     <div class="row"><label>折射率</label><input type="range" id="ior" min="1.0" max="1.8" step="0.01" value="1.33"><span class="val" id="ior_v"></span></div>
 
-    <details class="subgroup" id="staticGlassGroup" data-gate="static">
+    <details class="subgroup" id="studioGlassGroup" data-gate="studioGlass">
       <summary><h4>玻璃 Glass</h4></summary>
       <div class="effectBlock effectBlock--physical">
         <div class="row"><label>彩虹強度</label><input type="range" id="dispersionScale" min="0" max="5" step="0.01" value="1"><span class="val" id="dispersionScale_v"></span></div>
@@ -350,7 +350,7 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
       <p class="note">彩虹是真的把背景分波長折射出來的，所以它需要背景有東西可以分：「對比（黑卡）」拉高會讓色帶更明顯，拉到 0 幾乎就看不到了。阿貝數是玻璃的材料常數（冕牌 59、火石 30、重火石 20），越小色散越強。</p>
     </details>
 
-    <details class="subgroup" id="dispersionGroup" data-gate="!static">
+    <details class="subgroup" id="dispersionGroup" data-gate="!studioGlass">
       <summary><h4>色散 Dispersion</h4><span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="dispersionMaster"><span class="switchTrack" aria-hidden="true"></span></span></summary>
       <div class="effectBlock effectBlock--physical" id="rayDispersionGroup">
         <div class="effectTitle"><span>RAY</span> 模擬色散<span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="rayDispersionEnabled" checked><span class="switchTrack" aria-hidden="true"></span></span></div>
@@ -428,7 +428,7 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
     </details>
 
 
-    <details class="subgroup" id="thinFilmGroup" data-gate="!static">
+    <details class="subgroup" id="thinFilmGroup" data-gate="!studioGlass">
       <summary><h4>薄膜外觀 Thin Film</h4><span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="filmEnabled"><span class="switchTrack" aria-hidden="true"></span></span></summary>
       <div class="row"><label>上色模式</label><select id="colorMode"><option value="spectral">光譜（物理）</option><option value="ramp">自訂漸層</option></select><span class="val"></span></div>
       <div class="row"><label>薄膜厚度</label><input type="range" id="thickness" min="120" max="760" step="5" value="250"><span class="val" id="thickness_v"></span></div>
@@ -504,7 +504,7 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
 
   <details class="group">
     <summary><h3>鏡頭 Camera</h3></summary>
-    <div class="row" data-gate="static"><label>鏡頭視角</label><input type="range" id="cameraFov" min="12" max="90" step="0.5" value="45.6"><span class="val" id="cameraFov_v"></span></div>
+    <div class="row" data-gate="studioGlass"><label>鏡頭視角</label><input type="range" id="cameraFov" min="12" max="90" step="0.5" value="45.6"><span class="val" id="cameraFov_v"></span></div>
     <div class="row"><label>鏡頭距離</label><input type="range" id="cameraDistance" min="2.8" max="10" step="0.05" value="5.5"><span class="val" id="cameraDistance_v"></span></div>
     <div class="row"><label>水平視角</label><input type="range" id="cameraRotationY" min="-180" max="180" step="0.1" value="29.8"><span class="val" id="cameraRotationY_v"></span></div>
     <div class="row"><label>垂直視角</label><input type="range" id="cameraRotationX" min="-90" max="90" step="0.1" value="9.7"><span class="val" id="cameraRotationX_v"></span></div>
@@ -555,7 +555,7 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
     <div class="row"><label>HDRI 水平</label><input type="range" id="hdriYaw" min="-180" max="180" step="1" value="0"><span class="val" id="hdriYaw_v"></span></div>
     <div class="row"><label>HDRI 垂直</label><input type="range" id="hdriPitch" min="-90" max="90" step="1" value="0"><span class="val" id="hdriPitch_v"></span></div>
     <div class="row"><label>HDRI 模糊</label><input type="range" id="hdriBlur" min="0" max="1" step="0.01" value="0.11"><span class="val" id="hdriBlur_v"></span></div>
-    <div class="row" data-gate="!static"><label>環境折射</label><input type="range" id="envRefraction" min="0" max="1" step="0.01" value="0"><span class="val" id="envRefraction_v"></span></div>
+    <div class="row" data-gate="!studioGlass"><label>環境折射</label><input type="range" id="envRefraction" min="0" max="1" step="0.01" value="0"><span class="val" id="envRefraction_v"></span></div>
     <div class="row"><button id="hdriBtn">更換 HDRI…</button></div>
     <div id="hdriState" class="note">通用玻璃預設 HDRI：photo_studio2_london_hall_1k.hdr</div>
     <input type="file" id="hdriInput" accept=".hdr,image/*" hidden>
@@ -669,7 +669,7 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
   </form>
 </dialog>
 
-<script src="./bubble-export-ui.js?v=10"></script>
+<script src="./bubble-export-ui.js?v=11"></script>
 
 <script type="importmap">
 { "imports": {

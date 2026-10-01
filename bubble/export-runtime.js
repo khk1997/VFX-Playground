@@ -1,6 +1,7 @@
 'use strict';
 
 import { buildStoredZip, downloadBlob, nextPaint, pixelsToPng } from './export-utils.js?v=1';
+import { usesStudioGlass } from './motions/registry.js?v=studio-glass-1';
 
 export function createExportRuntime(options) {
   const {
@@ -53,7 +54,7 @@ function applyExportCamera(time, width, height, fov, scale, settings = null) {
   syncEdgeDropMotion(time);
   getUniforms().uMaxSteps.value = 88;
   // 輸出一律用最高畫質：自動降級是給即時預覽的，成品不該跟著當下的 fps 變。
-  getUniforms().uStaticQualityTier.value = 0;
+  getUniforms().uGlassQualityTier.value = 0;
 }
 
 function settingsValue(settings, key) {
@@ -186,11 +187,11 @@ async function runExport(settings) {
   //（uMembraneOverWhite 分支），背景照樣透得過來。通用玻璃維持原本的「黑場 +
   // 反預乘」，它的顏色本來就不依附背景。
   const membraneOverWhite = transparentExport && P.materialStyle === 'membrane';
-  // 靜態玻璃改走雙背景去背（見 matteExportPixels）。兩張都照一般的不透明輸出
+  // 新玻璃模型改走雙背景去背（見 matteExportPixels）。兩張都照一般的不透明輸出
   // 來算，後處理與 HDR 的行為就跟畫面上一模一樣；背景紙要是一張均勻的紙，
   // 牆面與地板的抬底、地板的壓暗、淺底的漸層都拿掉 —— 不然它們兩張都有，
   // 會被當成玻璃自己的東西，成品上浮出一整片灰色的地板。
-  const staticMatte = transparentExport && !membraneOverWhite && P.motion === 'static';
+  const staticMatte = transparentExport && !membraneOverWhite && usesStudioGlass(P.motion);
   getUniforms().uTransparentBackground.value = transparentExport && !staticMatte ? 1 : 0;
   getUniforms().uMembraneOverWhite.value = membraneOverWhite ? 1 : 0;
   getUniforms().uBgMode.value = settings.background === 'scene' ? SELECTS.bgMode.map[P.bgMode] : 0;

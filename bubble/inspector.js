@@ -1,6 +1,7 @@
 import { EDGE_TINT_TARGETS, EDGE_TINT_STOPS, edgeTintParams } from './edge-tint.js';
 import { EDGE_TINT_BASE_BY_BACKDROP, EDGE_TINT_STRENGTH_BY_BACKDROP } from './runtime-defaults.js?v=glass-tint-1';
 import { INSTALLING_VISUAL_PRESETS, installingVisualPresetValues } from './visual-presets.js?v=tint-light-1';
+import { usesStudioGlass } from './motions/registry.js?v=studio-glass-1';
 
 const PAGES = [['shape', '造型'], ['motion', '動態'], ['look', '外觀'], ['scene', '場景']];
 
@@ -672,19 +673,19 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     // 最後才跑：閘門、深度與上面那些 hidden 都定案之後，空區塊才數得準。
     pruneEmptySections();
     staticDial?.draw();
-    staticQuickDock?.sync();
-    staticShapeCard?.sync();
+    studioQuickDock?.sync();
+    studioShapeCard?.sync();
     iorPresetSync?.();
     glassTintSync?.();
   }
   let staticDial = null;
-  let staticQuickDock = null;
-  let staticShapeCard = null;
+  let studioQuickDock = null;
+  let studioShapeCard = null;
   let iorPresetSync = null;
   let glassTintSync = null;
   built = true;
-  if (launchMotion === 'static') {
-    buildStaticLayout();
+  if (usesStudioGlass(launchMotion)) {
+    buildStudioLayout();
     // 單頁面板沒有「常用／完整」之分；不寫回 localStorage，其餘模式的深度照舊。
     setControlDepth('complete', false);
   } else {
@@ -764,16 +765,16 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
   // 畫面角落。所以真正的控制項原地留著（不放進任何一個看得到的區塊），這裡拖曳
   // 時走 writeControl 寫回去 —— 跟使用者拖面板那根完全同一條路；反過來重設、
   // 風格、匯入改了真值時，refresh 呼叫 sync 把這邊對齊。
-  function buildQuickDock(title, entries, lead = null, id = 'staticQuickDock', parent = document.body,
+  function buildQuickDock(title, entries, lead = null, id = 'studioQuickDock', parent = document.body,
                           leadEntries = []) {
-    const root = element('aside', 'staticQuickDock');
+    const root = element('aside', 'studioQuickDock');
     root.id = id;
     root.setAttribute('aria-label', `${title}快速調整`);
-    root.append(element('div', 'staticQuickDockTitle', title));
+    root.append(element('div', 'studioQuickDockTitle', title));
     // lead：放在滑桿前面的自訂控制項（燈光方向盤）。它本來就是直接讀寫參數
     // id 的，不靠 #panel，搬過來不需要鏡像。
     if (lead) root.append(lead);
-    const sliders = element('div', 'staticQuickDockSliders');
+    const sliders = element('div', 'studioQuickDockSliders');
     root.append(sliders);
     // leadEntries：塞在 lead 旁邊那一欄（方向盤的讀數底下）的鏡像，例如背景色。
     const leadSlot = lead?.querySelector('.lightDialInfo') ?? sliders;
@@ -784,9 +785,9 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       const source = $(key);
       if (source.type === 'color') {
         // 顏色：標籤在左、色票在右，一列就好（放在方向盤旁邊那一欄，空間很窄）。
-        const row = element('label', 'staticQuickDockRow staticQuickDockColorRow');
-        const name = element('span', 'staticQuickDockHead', label);
-        const mirror = element('input', 'staticQuickDockColor');
+        const row = element('label', 'studioQuickDockRow studioQuickDockColorRow');
+        const name = element('span', 'studioQuickDockHead', label);
+        const mirror = element('input', 'studioQuickDockColor');
         mirror.type = 'color';
         mirror.dataset.presetIgnore = '';
         mirror.setAttribute('aria-label', label);
@@ -798,8 +799,8 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       if (source.tagName === 'BUTTON') {
         // 按鈕（例如「選擇 SVG…」）：點鏡像就是點真的那顆，檔案選擇器與後續流程
         // 完全照舊。
-        const row = element('div', 'staticQuickDockRow staticQuickDockButtonRow');
-        const mirror = element('button', 'inspectorButton staticQuickDockButton');
+        const row = element('div', 'studioQuickDockRow studioQuickDockButtonRow');
+        const mirror = element('button', 'inspectorButton studioQuickDockButton');
         mirror.type = 'button';
         mirror.dataset.presetIgnore = '';
         mirror.addEventListener('click', () => source.click());
@@ -808,19 +809,19 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
         return { key, kind: 'button', row, mirror };
       }
       if (source.tagName === 'SELECT') {
-        const row = element('label', 'staticQuickDockRow staticQuickDockSelectRow');
-        const name = element('span', 'staticQuickDockHead', label);
-        const mirror = element('select', 'staticQuickDockSelect');
+        const row = element('label', 'studioQuickDockRow studioQuickDockSelectRow');
+        const name = element('span', 'studioQuickDockHead', label);
+        const mirror = element('select', 'studioQuickDockSelect');
         mirror.dataset.presetIgnore = '';
         mirror.addEventListener('change', () => { writeControl(key, mirror.value); refresh(); });
         row.append(name, mirror);
         slot.append(row);
         return { key, kind: 'select', row, mirror };
       }
-      const row = element('label', 'staticQuickDockRow');
-      const head = element('span', 'staticQuickDockHead');
+      const row = element('label', 'studioQuickDockRow');
+      const head = element('span', 'studioQuickDockHead');
       const name = element('span', '', label);
-      const value = element('output', 'staticQuickDockValue');
+      const value = element('output', 'studioQuickDockValue');
       head.append(name, value);
       const input = element('input');
       input.type = 'range';
@@ -878,8 +879,8 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
   // 右側那一欄（桌面）：造型卡在上、燈光卡在下，由下往上堆。左緣對齊「輸出」、
   // 右緣對齊「面板」—— 按鈕的寬度跟著字型與語系變，所以量實際位置，不寫死。
   function buildSideStack() {
-    const stack = element('div', 'staticSideStack');
-    stack.id = 'staticSideStack';
+    const stack = element('div', 'studioSideStack');
+    stack.id = 'studioSideStack';
     document.body.append(stack);
     const align = () => {
       const first = $('exportBtn')?.getBoundingClientRect();
@@ -901,8 +902,8 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
 
   // 靜態模組的面板：一頁、由上而下照「東西 → 材質 → 光 → 地板 → 鏡頭 → 背景」排，
   // 只放看得到效果的參數。其餘控制項留在隱藏的分頁裡，參數檔與重設照常讀寫它們。
-  function buildStaticLayout() {
-    panel.dataset.layout = 'static';
+  function buildStudioLayout() {
+    panel.dataset.layout = 'studio';
     tabs.hidden = true;
     depthHeading.hidden = true;
     depthPicker.group.hidden = true;
@@ -910,7 +911,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     for (const pane of Object.values(panes)) pane.hidden = true;
 
     const page = element('section', 'inspectorPage');
-    page.id = 'inspectorPage-static';
+    page.id = 'inspectorPage-studio';
     header.after(page);
     const relabel = (key, text) => {
       const label = rowOf(key)?.querySelector('label');
@@ -949,13 +950,13 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     shapeBlock.append(importBlock);
     // 桌面上造型改到畫面右側的獨立卡片（見 buildSideStack），面板裡這一區藏起來；
     // 手機的空間已經被頂部燈光區和底部抽屜佔滿，造型留在抽屜裡。
-    shapeBlock.classList.add('staticDesktopMirrored');
+    shapeBlock.classList.add('studioDesktopMirrored');
 
     // 「邊緣彩虹」（edgeDispersion）不開給使用者：跟「彩虹強度」看起來差不多，
     // 兩根放在一起只是讓人猜哪一根在做什麼。它仍留在隱藏的分頁裡，風格按鈕
     // 與參數檔照常讀寫。
     // 反射是 OpenPBR 的 specular_weight，範圍 0–1（shader 也夾在 1，見
-    // staticGlassShade）。只有靜態頁會跑到這裡，其餘模式的滑桿範圍不動。
+    // studioGlassShade）。只有靜態頁會跑到這裡，其餘模式的滑桿範圍不動。
     $('reflect').max = '1';
     // 阿貝數不開給使用者：它跟彩虹強度在 shader 裡只以比值出現（見 environment.js
     // 的 bandIOR），兩根滑桿做的是同一件事，對設計師只是多一個要猜的名詞。固定在
@@ -985,20 +986,20 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     // 畫面右下角常駐（見 buildQuickDock），面板裡不再有燈光區。
     staticDial = buildLightDial();
     const sideStack = buildSideStack();
-    staticShapeCard = buildQuickDock('造型', [
+    studioShapeCard = buildQuickDock('造型', [
       ['staticShape', '形狀'],
       ['boxSize', '大小'], ['boxCornerRadius', '圓角'],
       ['primitiveSize', '大小'], ['primitiveTubeRatio', '管徑'],
       ['shapeSource', '檔案類型'], ['shapeQuality', '模型品質'], ['shapeBtn', null],
       ['shapeAScale', '大小'], ['shapeDepth', '厚度'], ['shapeEdgeBevel', '圓角'],
-    ], null, 'staticShapeCard', sideStack);
+    ], null, 'studioShapeCard', sideStack);
     // 背景色也放進這張卡（方向盤讀數的下面）：它就一兩個色票，單獨在左邊佔一整區
     // 太浪費。深底是一個背景色，淺底是上下兩個漸層色，跟著底色切換（真的那幾列由
     // refresh 依底色收起，鏡像照著 hidden 走）。
-    staticQuickDock = buildQuickDock('背景與燈光', [
+    studioQuickDock = buildQuickDock('背景與燈光', [
       ['studioCardStrength', '燈光強度'],
       ['studioFlag', '明暗對比'],
-    ], staticDial.root, 'staticQuickDock', sideStack, [
+    ], staticDial.root, 'studioQuickDock', sideStack, [
       ['bgColor', '背景'],
       ['lightBgGradientTop', '上方'],
       ['lightBgGradientBottom', '下方'],
@@ -1018,8 +1019,8 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       mirrorSyncQueued = true;
       queueMicrotask(() => {
         mirrorSyncQueued = false;
-        staticShapeCard?.sync();
-        staticQuickDock?.sync();
+        studioShapeCard?.sync();
+        studioQuickDock?.sync();
       });
     }).observe(panel, { subtree: true, attributes: true, attributeFilter: ['class', 'hidden'] });
     group('地板', [
@@ -1040,7 +1041,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       ['lightBgGradientTop', '上方顏色'],
       ['lightBgGradientBottom', '下方顏色'],
     ]);
-    backgroundBlock.classList.add('staticDesktopMirrored');
+    backgroundBlock.classList.add('studioDesktopMirrored');
 
     const advanced = group('進階', [
       ['lightKeyAzimuth', '主光 方向'], ['lightKeyElevation', '主光 高度'],
@@ -1184,7 +1185,7 @@ function buildPalette(prefix, applyValues) {
 // 外圈是地平線。寫回的仍是那兩根滑桿，參數檔與重設不必知道這個盤的存在。
 function buildLightDial() {
   // 盤面照實際顯示的尺寸畫：右下角的常駐區在桌面與手機給的大小不同（見
-  // inspector.css 的 .staticQuickDock），寫死一個尺寸會被 CSS 拉伸而糊掉。
+  // inspector.css 的 .studioQuickDock），寫死一個尺寸會被 CSS 拉伸而糊掉。
   const FALLBACK_SIZE = 132;
   const root = element('div', 'lightDial');
   const canvas = element('canvas', 'lightDialCanvas');

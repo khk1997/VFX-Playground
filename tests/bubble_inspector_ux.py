@@ -248,7 +248,7 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     page.goto(f"{base_url}/bubble/index.html?mode=static&diag=inspector-ux", wait_until="networkidle", timeout=45_000)
-    page.wait_for_selector('#panel.inspector[data-layout="static"]')
+    page.wait_for_selector('#panel.inspector[data-layout="studio"]')
     # 開機遮罩（body[data-bubble-boot]）撤掉之前面板是藏著的；只等版面屬性的話，
     # 機器慢一點時下面的 is_visible 會剛好落在遮罩還在的那一刻，間歇失敗。
     page.wait_for_function("() => !document.body.hasAttribute('data-bubble-boot')", timeout=90_000)
@@ -257,9 +257,9 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     assert page.locator(".inspectorTabs").is_hidden()
     assert page.locator(".inspectorDepthPicker").is_hidden()
     assert page.locator("#motion").is_hidden()
-    assert page.locator("#inspectorPage-static").is_visible()
+    assert page.locator("#inspectorPage-studio").is_visible()
     sections = page.evaluate(
-        """() => [...document.querySelectorAll('#inspectorPage-static > details > summary h3')]
+        """() => [...document.querySelectorAll('#inspectorPage-studio > details > summary h3')]
              .map(node => node.textContent)"""
     )
     # 風格已經拿掉；造型那一區還在面板裡（手機用），桌面上藏起來、改由右側卡片操作。
@@ -274,7 +274,7 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     # 阿貝數不開給使用者（跟彩虹強度只差一個比值）；折射率底下有常見材料可以點。
     assert page.locator("#dispersionAbbe").is_hidden(), "the Abbe number should not be on the static panel"
     glass_order = page.evaluate(
-        """() => [...document.querySelectorAll('#inspectorPage-static .row input, #inspectorPage-static .row select')]
+        """() => [...document.querySelectorAll('#inspectorPage-studio .row input, #inspectorPage-studio .row select')]
              .map(el => el.id).filter(id => ['absorbColor', 'absorb', 'roughness', 'ior', 'reflect', 'dispersionScale'].includes(id))"""
     )
     assert glass_order == ["absorbColor", "absorb", "roughness", "dispersionScale", "reflect", "ior"], glass_order
@@ -293,7 +293,7 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     assert page.locator("#absorb").input_value() == "4"
 
     # 右下角的鏡像滑桿：拖它要寫回真正的參數（連同自動保存），重設要讓它跟著回去。
-    dock = page.locator("#staticQuickDock")
+    dock = page.locator("#studioQuickDock")
     assert dock.is_visible(), "the quick light dock is missing"
     mirror = dock.locator("input[type=range]").first
     mirror.evaluate("el => { el.value = '0.9'; el.dispatchEvent(new Event('input', { bubbles: true })); }")
@@ -304,12 +304,12 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     # 重設鈕此刻收在尚未展開的工具區裡，直接派發點擊。
     page.locator("#resetBtn").evaluate("el => el.click()")
     page.wait_for_function(
-        "document.querySelector('#staticQuickDock input[type=range]').value"
+        "document.querySelector('#studioQuickDock input[type=range]').value"
         " === document.querySelector('#studioCardStrength').value"
     )
 
     # 主光用方位盤調：往正上方拖是逆光，也就是跟鏡頭方位差 180°。
-    dial = page.locator("#staticQuickDock .lightDialCanvas")
+    dial = page.locator("#studioQuickDock .lightDialCanvas")
     assert dial.is_visible(), "the light dial is missing from the quick dock"
     dial.scroll_into_view_if_needed()
     box = dial.bounding_box()
@@ -321,28 +321,28 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     assert page.locator("[data-static-look]").count() == 0, "the style presets should be gone"
 
     # 右側欄：左緣對齊「輸出」、右緣對齊「面板」；造型卡在燈光卡上面。
-    shape_card = page.locator("#staticShapeCard")
+    shape_card = page.locator("#studioShapeCard")
     assert shape_card.is_visible(), "the shape card is missing"
     # 造型與背景兩區在桌面上都搬到右側卡片，面板裡那兩區藏起來。
-    mirrored = page.locator("#panel .staticDesktopMirrored")
+    mirrored = page.locator("#panel .studioDesktopMirrored")
     assert mirrored.count() == 2, mirrored.count()
     assert all(mirrored.nth(i).is_hidden() for i in range(2)), "the mirrored panel sections should be hidden on desktop"
     geometry = page.evaluate(
-        """() => Object.fromEntries(['exportBtn', 'toggleBtn', 'staticShapeCard', 'staticQuickDock']
+        """() => Object.fromEntries(['exportBtn', 'toggleBtn', 'studioShapeCard', 'studioQuickDock']
              .map(id => [id, document.getElementById(id).getBoundingClientRect().toJSON()]))"""
     )
-    for card in ("staticShapeCard", "staticQuickDock"):
+    for card in ("studioShapeCard", "studioQuickDock"):
         assert abs(geometry[card]["left"] - geometry["exportBtn"]["left"]) <= 1, (card, geometry)
         assert abs(geometry[card]["right"] - geometry["toggleBtn"]["right"]) <= 1, (card, geometry)
-    assert geometry["staticShapeCard"]["bottom"] < geometry["staticQuickDock"]["top"], geometry
-    light_top = geometry["staticQuickDock"]["top"]
+    assert geometry["studioShapeCard"]["bottom"] < geometry["studioQuickDock"]["top"], geometry
+    light_top = geometry["studioQuickDock"]["top"]
 
     # 背景色併進「背景與燈光」卡片：深底一個色票，改色要寫回真的 bgColor。
-    assert page.locator("#staticQuickDock .staticQuickDockTitle").text_content() == "背景與燈光"
-    color_rows = """() => [...document.querySelectorAll('#staticQuickDock .staticQuickDockColorRow')]
+    assert page.locator("#studioQuickDock .studioQuickDockTitle").text_content() == "背景與燈光"
+    color_rows = """() => [...document.querySelectorAll('#studioQuickDock .studioQuickDockColorRow')]
         .filter(r => !r.hidden).map(r => r.textContent.trim())"""
     assert page.evaluate(color_rows) == ["背景"], page.evaluate(color_rows)
-    page.locator("#staticQuickDock .staticQuickDockColor").first.evaluate(
+    page.locator("#studioQuickDock .studioQuickDockColor").first.evaluate(
         "el => { el.value = '#223344'; el.dispatchEvent(new Event('input', { bubbles: true })); }")
     assert page.locator("#bgColor").input_value() == "#223344", page.locator("#bgColor").input_value()
     assert page.locator("#bgColor").evaluate("el => getComputedStyle(el.closest('details')).display") == "none", \
@@ -371,13 +371,13 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     # SwiftShader（CPU）上編，主執行緒會一次卡住將近 7 秒（實測 6.8s；有 GPU 時是
     # 0.17s）。那段期間 wait_for_function 的輪詢本身也跑不了，5 秒一定逾時。
     shape_switch_timeout = 20_000
-    button_row_hidden = """() => document.querySelector('#staticShapeCard .staticQuickDockButton')
-        .closest('.staticQuickDockRow').hidden"""
+    button_row_hidden = """() => document.querySelector('#studioShapeCard .studioQuickDockButton')
+        .closest('.studioQuickDockRow').hidden"""
     page.wait_for_function(button_row_hidden, timeout=shape_switch_timeout)
     mirror_shape.select_option("7")
     assert page.locator("#staticShape").input_value() == "7", "the mirror did not reach the real control"
     page.wait_for_function(f"() => !({button_row_hidden})()", timeout=shape_switch_timeout)
-    moved = page.evaluate("() => document.getElementById('staticQuickDock').getBoundingClientRect().top")
+    moved = page.evaluate("() => document.getElementById('studioQuickDock').getBoundingClientRect().top")
     assert abs(moved - light_top) <= 1, (moved, light_top)
     mirror_shape.select_option("0", timeout=shape_switch_timeout)
     page.wait_for_function(button_row_hidden, timeout=shape_switch_timeout)

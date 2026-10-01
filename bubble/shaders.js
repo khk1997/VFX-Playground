@@ -548,7 +548,7 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
   vec3 rd = uRot * normalize(vec3(uv * tanHalfFov, -1.0));
 
   // 物體背後的背景畫布：不吃粗糙度（那是物體表面的性質，不是背景的）。
-#ifdef FEATURE_STATIC_GLASS
+#ifdef FEATURE_STUDIO_GLASS
   // 鏡頭這條射線從 ro 出發，所以棚景的地板交點也要用 ro（見 studioBackdropSample）。
   // 棚景關掉時 studioBackdropSample 原樣回傳 backgroundSample，是精確的恆等。
   vec4 bg = studioBackdropSample(ro, rd, 0.0, 0.0, 0.0);
@@ -580,7 +580,7 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
 
   float t = max(0.0, -qb - qh);
   bool hit = false;
-#ifdef FEATURE_STATIC_GLASS
+#ifdef FEATURE_STUDIO_GLASS
   // 剪影的覆蓋率。SDF 的 hit/miss 是二元的，一個像素一個樣本，所以輪廓完全沒有
   // 抗鋸齒 —— 把 1x 與超取樣的同一幀相減，誤差最集中的就是這條線。
   //
@@ -595,7 +595,7 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
     if (i >= uMaxSteps) break;
     vec3 p = ro + rd * t;
     float d = mapScene(p);
-#ifdef FEATURE_STATIC_GLASS
+#ifdef FEATURE_STUDIO_GLASS
     float angle = d / max(t, 0.0001);
     if (angle < nearestAngle){ nearestAngle = angle; nearestT = t; }
 #endif
@@ -604,7 +604,7 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
     if (t > tEnd) break;
   }
 
-#ifdef FEATURE_STATIC_GLASS
+#ifdef FEATURE_STUDIO_GLASS
   if (!hit){
     // 一個像素的角張角。落在一格以內就當部分覆蓋，照常往下算繪，最後用覆蓋率
     // 跟背景混合 —— 邊緣像素的著色本來就該是掠射角的玻璃，這裡拿到的就是它。
@@ -735,11 +735,11 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
         vec3 exitDir = refract(insideDir, -exitNormal, uIOR);
         // 第一個出口全內反射時（refract 回傳零向量）兩條路：靜態走連續的
         // Fresnel 混合，其餘模式沿用原本「再追一次出口」的補一次彈跳。
-#ifdef FEATURE_STATIC_GLASS
-        // 靜態：連續的 Fresnel 混合，理由與作法見 staticExitDirection。
+#ifdef FEATURE_STUDIO_GLASS
+        // 靜態：連續的 Fresnel 混合，理由與作法見 glassExitDirection。
         {
           float exitR;
-          exitDir = staticExitDirection(insideDir, exitNormal, exitDir, exitR);
+          exitDir = glassExitDirection(insideDir, exitNormal, exitDir, exitR);
           tintDepth = glassTintDepth(p, exitPoint, pathLength);
           backFres = exitR;   // 下游的透射率要跟方向的混合讀同一個值
           backRim = pow(1.0 - clamp(abs(dot(insideDir, exitNormal)), 0.0, 1.0),
@@ -778,7 +778,7 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
         transmissionDir = exitDir;
         // A：折射進來的背景依粗糙度預濾波。這是「霧面玻璃」最主要的視覺來源——
         // 畫面九成以上的內容走這條路徑，接上這裡滑桿才真的有感。
-#ifdef FEATURE_STATIC_GLASS
+#ifdef FEATURE_STUDIO_GLASS
         // 折射出去的那條射線是從出口點出發的，不是鏡頭。用 exitPoint 求地板交點，
         // 折射影像裡的地平線才會跟玻璃的厚度一起錯開 —— 那個錯位就是厚度感本身。
         // footprint 隨光程成長：走得越久、被彎得越多，同一個像素涵蓋的立體角越大。
@@ -840,16 +840,16 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
 #else
         refractedBg = backgroundSample(exitDir, roughBlur).rgb;
 #endif
-#ifdef FEATURE_STATIC_GLASS
+#ifdef FEATURE_STUDIO_GLASS
         // 內部再彈一次。這是先前為了消掉臨界角硬邊而拿掉的那層結構，用連續的
         // 方式補回來：不是「全內反射才彈」，而是永遠彈，再按出口的反射率
-        // （backFres，就是 staticExitDirection 算出來的那個值）決定它佔多少。
+        // （backFres，就是 glassExitDirection 算出來的那個值）決定它佔多少。
         // 權重連續，所以不會再切出硬邊；掠射區反射率趨近 1，那裡就幾乎全部
         // 走這條路，正是厚玻璃內部該有的轉折。
         //
         // 內部追蹤只做一次；色散在第二個出口逐波長重算方向（見 spectralBounce），
         // 全內反射區的顏色就是從這裡來的。
-        if (backFres > STATIC_BOUNCE_MIN_FRESNEL) {  // 比例完全交給出口面的 Fresnel，不打折
+        if (backFres > GLASS_BOUNCE_MIN_FRESNEL) {  // 比例完全交給出口面的 Fresnel，不打折
           vec3 bounceDir = normalize(reflect(insideDir, exitNormal));
           vec3 bouncePoint;
           vec3 bounceNormal;
@@ -857,7 +857,7 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
           if (traceExitSurface(exitPoint, bounceDir, bouncePoint, bounceNormal,
               bouncePath)) {
             float bounceR;
-            vec3 bounceOut = staticExitDirection(
+            vec3 bounceOut = glassExitDirection(
               bounceDir, bounceNormal,
               refract(bounceDir, -bounceNormal, uIOR), bounceR
             );
@@ -2233,14 +2233,14 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
   // 這一行是精確的恆等運算。
   finalColor = clampOutput(finalColor * beamAbsorb);
 
-#ifdef FEATURE_STATIC_GLASS
+#ifdef FEATURE_STUDIO_GLASS
   // 靜態模式的玻璃合成。上面那一整條路徑對它是死路（brightBg 恆為 0，見該處
-  // 說明），所以這裡整個換掉；理由與式子見 staticGlassShade。
-  vec3 staticGlassTransfer = vec3(0.0);
+  // 說明），所以這裡整個換掉；理由與式子見 studioGlassShade。
+  vec3 studioGlassTransfer = vec3(0.0);
   finalColor = clampOutput(mix(finalColor,
-    staticGlassShade(p, N, rd, refractedBg, material.transmission,
-      volumeAbsorption, staticGlassTransfer),
-    clamp(uStaticGlassMix, 0.0, 1.0)));
+    studioGlassShade(p, N, rd, refractedBg, material.transmission,
+      volumeAbsorption, studioGlassTransfer),
+    clamp(uStudioGlassMix, 0.0, 1.0)));
 #endif
 
   float outputAlpha = 1.0;
@@ -2264,13 +2264,13 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
     // 而不是把 if 包進 #ifdef：下面是一條 if/else if 鏈，切斷它會把液態薄膜
     // 那一支一起帶走。
     bool exportHandled = false;
-#ifdef FEATURE_STATIC_GLASS
+#ifdef FEATURE_STUDIO_GLASS
     // 靜態玻璃的去背。這裡不能沿用下面那條通用玻璃的路徑：它是從
     // universalOwnEnergy 反解的，而那份自身能量屬於已經被換掉的暗底外殼 ——
     // 照著解出來，匯出的 PNG 會是舊模型，跟畫面上看到的不是同一顆玻璃。
     //
     // 新模型本來就是標準的 over 合成：畫面 = 自身能量 + 背景 × 透過率。透過率
-    // 是上面算好的 staticGlassTransfer，也就是 (1 - alpha)，所以把已知的背景
+    // 是上面算好的 studioGlassTransfer，也就是 (1 - alpha)，所以把已知的背景
     // 減掉再除以覆蓋率就得到 straight color。這跟液態薄膜對白底反乘是同一招，
     // 差別只在這裡的背景是 bg 而不是寫死的白。
     //
@@ -2278,7 +2278,7 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
     // 反解出來的顏色裡了。
     {
       float transferLum = dot(
-        clamp(staticGlassTransfer, 0.0, 1.0), vec3(0.2126, 0.7152, 0.0722)
+        clamp(studioGlassTransfer, 0.0, 1.0), vec3(0.2126, 0.7152, 0.0722)
       );
       outputAlpha = clamp(1.0 - transferLum, 0.03, 1.0);
       finalColor = clamp(
@@ -2335,7 +2335,7 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
       finalColor = clamp(finalColor / max(outputAlpha, 0.001), 0.0, 1.0);
     }
   }
-#ifdef FEATURE_STATIC_GLASS
+#ifdef FEATURE_STUDIO_GLASS
   // 剪影的部分覆蓋：不透明輸出混回背景，去背輸出則直接乘進 alpha。
   finalColor = mix(bg.rgb, finalColor, edgeCoverage);
   outputAlpha *= edgeCoverage;

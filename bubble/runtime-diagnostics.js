@@ -1,5 +1,7 @@
 'use strict';
 
+import { usesStudioGlass } from './motions/registry.js?v=studio-glass-1';
+
 export function createRuntimeDiagnostics(options) {
   const {
     params: P, preview: PREVIEW, diagnostics: DIAG, diagTimingEnabled: DIAG_TIMING,
@@ -448,11 +450,11 @@ window.__bubbleDiagReport = function () {
         uMaterialStyle: runtime().uniforms.uMaterialStyle.value,
         uRayBeamPattern: runtime().uniforms.uRayBeamPattern.value,
       } : '(未初始化)',
-      // 靜態模式的玻璃光學（見 shader-chunks/environment.js 的 FEATURE_STATIC_GLASS）。
+      // 新玻璃模型的光學（見 shader-chunks/environment.js 的 FEATURE_STUDIO_GLASS）。
       // 這一組的共同特徵是「改了看不出來」很難跟「根本沒寫進去」分辨 —— 棚景的
       // 地板參數尤其如此，因為它們只作用在畫面下半的一小塊。攤出執行期實際值，
       // 滑桿沒反應時第一眼就能分清是綁線壞了還是效果太弱。
-      靜態玻璃: runtime().uniforms && P.motion === 'static' ? {
+      靜態玻璃: runtime().uniforms && usesStudioGlass(P.motion) ? {
         uStudioBackdrop: runtime().uniforms.uStudioBackdrop.value,
         uStudioAmbient: runtime().uniforms.uStudioAmbient.value,
         uStudioCardStrength: runtime().uniforms.uStudioCardStrength.value,

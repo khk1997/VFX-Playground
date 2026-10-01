@@ -1,4 +1,4 @@
-export const ENVIRONMENT_GLSL = `// ===== 程序化棚景（只有靜態模式編譯，見 FEATURE_STATIC_GLASS）=====
+export const ENVIRONMENT_GLSL = `// ===== 程序化棚景（只有靜態模式編譯，見 FEATURE_STUDIO_GLASS）=====
 //
 // 為什麼玻璃需要一個有結構的背景，而不只是換個底色：色散是「同一條視線的不同
 // 波長落在背景的不同位置」，所以背景在那個角度差之內必須有東西不一樣。純色畫布
@@ -15,7 +15,7 @@ export const ENVIRONMENT_GLSL = `// ===== 程序化棚景（只有靜態模式�
 // 就已經是有結構的環境。
 //
 // 宣告連同下面的實作一起關在旗標裡，其餘九個模式連這幾行都不會編到。
-#ifdef FEATURE_STATIC_GLASS
+#ifdef FEATURE_STUDIO_GLASS
 uniform float uStudioBackdrop;      // 0 = 沿用原本的純色／漸層背景
 uniform float uStudioFloorHeight;   // 地板平面的 y
 uniform float uStudioFloorTone;     // 地板相對背景紙的明度（<1 壓暗）
@@ -58,9 +58,9 @@ uniform float uInternalBounce;
 // 內部反射的最低出口反射率：低於它就不追彈跳。探針 probe-static-no-bounce 把它
 // 拉到 2（反射率不可能超過 1），整段彈跳連同內部追蹤就都不跑。
 #ifdef PROBE_STATIC_NO_BOUNCE
-#define STATIC_BOUNCE_MIN_FRESNEL 2.0
+#define GLASS_BOUNCE_MIN_FRESNEL 2.0
 #else
-#define STATIC_BOUNCE_MIN_FRESNEL 0.004
+#define GLASS_BOUNCE_MIN_FRESNEL 0.004
 #endif
 // ===== 光譜折射 =====
 // OpenPBR: transmission_dispersion_scale。0 = 各波長同路，沒有色散。
@@ -68,16 +68,16 @@ uniform float uDispersionScale;
 // 光譜取樣數。1 等於關閉；越多色帶越連續，但每一個都是一次背景取樣。
 uniform int   uSpectralSamples;
 // 自動畫質等級（0 = high、1 = balanced、2 = low，見 adaptive-quality.js）。high
-// 什麼都不動；往下依序關掉最貴、但少了也最不顯眼的幾項（見 staticSpectralSamples、
+// 什麼都不動；往下依序關掉最貴、但少了也最不顯眼的幾項（見 glassSpectralSamples、
 // spectralBounce 與地板影子）。輸出一律用 0。
-uniform int   uStaticQualityTier;
+uniform int   uGlassQualityTier;
 // 地板影子判斷用的緊包圍球半徑（見 drop-physics.js 的 staticShapeShadowRadius）。
 // 0 = 沒有精確值，改用 uBounds.w。
 uniform float uStudioShadowBound;
 // 新玻璃合成的混合量。1 = 完全走新模型，0 = 完全退回原本的暗底外殼，
 // 中間值用來做並排比較（這是研究分支，能退回去才能判斷改動是不是進步）。
-uniform float uStaticGlassMix;
-#endif // FEATURE_STATIC_GLASS
+uniform float uStudioGlassMix;
+#endif // FEATURE_STUDIO_GLASS
 // 環境：程序化棚燈（無 HDRI 時的預設反射來源）；rough 越大光斑越柔散
 vec3 proceduralEnv(vec3 d, float rough){
   vec3 col = mix(vec3(0.015, 0.02, 0.03), vec3(0.05, 0.06, 0.08), d.y * 0.5 + 0.5);
@@ -198,7 +198,7 @@ vec4 backgroundSample(vec3 rd, float extraBlur){
   return vec4(uBgColor, uTransparentBackground == 1 ? 0.0 : 1.0);
 }
 
-#ifdef FEATURE_STATIC_GLASS
+#ifdef FEATURE_STUDIO_GLASS
 // 程序化棚景（見這個檔案開頭 uStudioBackdrop 那段說明）。只有靜態模式編它，
 // 其餘九個模式的 backgroundSample 逐字不變。
 //
@@ -237,7 +237,7 @@ vec4 backgroundSample(vec3 rd, float extraBlur){
 //
 // 代價是厚玻璃少了「內部再彈一次才穿出去」那層結構 —— 那層結構本來就是靠第二次
 // traceExitSurface 換來的，而它正是不連續的來源。
-vec3 staticExitDirection(vec3 insideDir, vec3 exitNormal, vec3 refracted,
+vec3 glassExitDirection(vec3 insideDir, vec3 exitNormal, vec3 refracted,
                          out float exitR){
   vec3 bounced = normalize(reflect(insideDir, exitNormal));
   float cosI = clamp(abs(dot(insideDir, exitNormal)), 0.0, 1.0);
@@ -309,8 +309,8 @@ float bandIOR(float band, float strength){
 
 // 實際使用的光譜取樣數。low 畫質最多 6 個：少掉的是色帶的細緻度，抖動仍讓它
 // 連續（見 spectralRefraction 的 bandJitter），不會退回一段一段。
-int staticSpectralSamples(){
-  return uStaticQualityTier >= 2 ? min(uSpectralSamples, 6) : uSpectralSamples;
+int glassSpectralSamples(){
+  return uGlassQualityTier >= 2 ? min(uSpectralSamples, 6) : uSpectralSamples;
 }
 
 // 棚燈卡：方向球上的一塊圓盤，邊緣的銳利度自己控制。
@@ -608,7 +608,7 @@ vec4 studioBackdropSampleEdge(vec3 origin, vec3 rd, float extraBlur, float cards
         shadow = vec3(0.0);
         caustic = vec3(0.0);
 #ifndef PROBE_STATIC_NO_SHADOW
-        if (uStaticQualityTier >= 2) {
+        if (uGlassQualityTier >= 2) {
           // low 畫質：不 march，退回折射取樣那一份高斯斑與解析焦散。
           shadow = blobShadow;
           caustic = studioCaustics(floorPos);
@@ -824,7 +824,7 @@ vec3 spectralRefraction(vec3 rd, vec3 N, vec3 exitNormal, vec3 exitPoint,
   vec3 dirBlue = spectralExitDir(rd, N, exitNormal, exitDir, bandIOR(0.0, bandSpread));
   vec3 dirRed = spectralExitDir(rd, N, exitNormal, exitDir, bandIOR(1.0, bandSpread));
   // 取樣點在波段上的間距是 1/N（band = (i+0.5)/N），兩端之間的角距除以 N 就是它。
-  float gap = length(dirRed - dirBlue) / max(float(staticSpectralSamples()), 1.0);
+  float gap = length(dirRed - dirBlue) / max(float(glassSpectralSamples()), 1.0);
   // 上限：藍端接近全內反射時方向會轉向反射那一側，兩端的角距一下子變很大；
   // 不夾的話那一圈會整片糊掉，彩虹直接消失。0.25 rad ≈ 14°。
   // 霧面的錐跟這個取樣間距是兩回事，取大的那個：霧面糊掉的是整個影像（色帶
@@ -859,9 +859,9 @@ vec3 spectralRefraction(vec3 rd, vec3 N, vec3 exitNormal, vec3 exitPoint,
   vec3 spectralSum = vec3(0.0);
   vec3 weightSum = vec3(0.0);
   for (int i = 0; i < MAX_SPECTRAL_COMPILE; i++) {
-    if (i >= staticSpectralSamples()) break;
+    if (i >= glassSpectralSamples()) break;
     // band 0 = 藍端，1 = 紅端。折射率由 Cauchy 曲線決定（見 bandIOR）。
-    float band = (float(i) + bandJitter) / float(staticSpectralSamples());
+    float band = (float(i) + bandJitter) / float(glassSpectralSamples());
     float iorBand = bandIOR(band, bandSpread);
     vec3 outBand = spectralExitDir(rd, N, exitNormal, exitDir, iorBand);
     vec3 w = spectralResponse(band);
@@ -906,7 +906,7 @@ vec3 spectralBounce(vec3 rd, vec3 N, vec3 exitNormal, vec3 bouncePoint,
 #ifdef PROBE_STATIC_NO_SPECTRAL_BOUNCE
   if (true) {
 #else
-  if (uStaticQualityTier >= 1 || bandSpread <= 0.0001 || uSpectralSamples <= 1
+  if (uGlassQualityTier >= 1 || bandSpread <= 0.0001 || uSpectralSamples <= 1
       || backFres < 0.05) {
 #endif
     return studioBackdropSampleEdge(bouncePoint, bounceOut, roughBlur, 1.0,
@@ -937,8 +937,8 @@ vec3 spectralBounce(vec3 rd, vec3 N, vec3 exitNormal, vec3 bouncePoint,
   vec3 first = bounceOut;
   vec3 last = bounceOut;
   for (int i = 0; i < MAX_SPECTRAL_COMPILE; i++) {
-    if (i >= staticSpectralSamples()) break;
-    float band = (float(i) + bandJitter) / float(staticSpectralSamples());
+    if (i >= glassSpectralSamples()) break;
+    float band = (float(i) + bandJitter) / float(glassSpectralSamples());
     float iorBand = bandIOR(band, bandSpread);
     vec3 outBand = bounceOut;
     vec3 inBand = refract(rd, N, 1.0 / iorBand);
@@ -959,7 +959,7 @@ vec3 spectralBounce(vec3 rd, vec3 N, vec3 exitNormal, vec3 bouncePoint,
   return spectralSum / max(weightSum, vec3(1e-4));
 }
 
-vec3 staticGlassShade(vec3 p, vec3 N, vec3 rd, vec3 refractedBg,
+vec3 studioGlassShade(vec3 p, vec3 N, vec3 rd, vec3 refractedBg,
                       vec3 transmission, vec3 absorption, out vec3 transfer){
   float cosView = clamp(dot(N, -rd), 0.0, 1.0);
   float f0 = pow((uIOR - 1.0) / (uIOR + 1.0), 2.0);
@@ -975,7 +975,7 @@ vec3 staticGlassShade(vec3 p, vec3 N, vec3 rd, vec3 refractedBg,
   // Fresnel 扣兩遍，整顆玻璃因此偏暗。
   //
   // 只扣入射面的 Fresnel：出口面的反射率已經用在方向的混合上了（見
-  // staticExitDirection），再乘一次也是同一筆能量扣兩遍，掠射區會整片變暗。
+  // glassExitDirection），再乘一次也是同一筆能量扣兩遍，掠射區會整片變暗。
   float transmissionWeight = clamp(uTransmission, 0.0, 1.0);
   transfer = vec3(transmissionWeight) * absorption * (1.0 - fresSpec);
   vec3 transmitted = refractedBg * transfer;
@@ -1036,6 +1036,6 @@ vec3 staticGlassShade(vec3 p, vec3 N, vec3 rd, vec3 refractedBg,
   return lit * (mapped / peak);
 }
 
-#endif // FEATURE_STATIC_GLASS
+#endif // FEATURE_STUDIO_GLASS
 
 `;

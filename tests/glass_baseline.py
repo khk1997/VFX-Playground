@@ -210,9 +210,12 @@ def capture_case(page: Page, base_url: str, case, output: Path) -> dict:
     captured = page.evaluate(
         "key => window.__bubbleDiagRenderAndCapture(key)", name
     )
+    # 擷取與自動保存一起清掉。自動保存按模組分格（vfx:prism-drops:<mode>:last），
+    # 留著的話，重複使用 --profile 時下一次跑的第一次造訪會先還原上一次的狀態
+    # （例如淺底關掉的稜光），整批深底的 hash 都跟著變。
     page.evaluate(
         "() => Object.keys(localStorage)"
-        ".filter(k => k.startsWith('vfx:diagpix:'))"
+        ".filter(k => k.startsWith('vfx:diagpix:') || k.startsWith('vfx:prism-drops:'))"
         ".forEach(k => localStorage.removeItem(k))"
     )
     if "錯誤" in captured:
