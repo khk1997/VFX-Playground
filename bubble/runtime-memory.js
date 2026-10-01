@@ -6,7 +6,7 @@ import {
 import {
   COLOR_DEFAULTS, DEFAULTS, EDGE_TINT_BASE_BY_BACKDROP, EDGE_TINT_STRENGTH_BY_BACKDROP, SELECT_DEFAULTS,
   SPECTRAL_CAUSTIC_DEFAULTS, TOGGLE_DEFAULTS,
-} from './runtime-defaults.js?v=glass-tint-1';
+} from './runtime-defaults.js?v=no-membrane-1';
 
 // 按動態模式各自記憶的參數：使用者在某個模式下調過的值會被保留，切回來時
 // 恢復。count/radius/loopDuration/dolly 每個模式的初始值天生就不同，直接來自

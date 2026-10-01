@@ -10,7 +10,7 @@ const params = {
   shapeSource: 'svg',
   formationFrontOn: true,
   filmEnabled: true,
-  materialStyle: 'membrane',
+  materialStyle: 'universal',
   dispersionEnabled: true,
   rayDispersionEnabled: true,
   spectralCausticEnabled: true,
@@ -44,7 +44,6 @@ assert.equal(formation.shapeVolume, false);
 assert.equal(formation.formationCut, true);
 assert.equal(formation.dissolveField, true);
 assert.equal(formation.microDrops, true);
-assert.equal(formation.liquidFilm, true);
 assert.equal(formation.spectralCaustics, true);
 assert.equal(formation.beamPatterns, true);
 assert.equal(formation.envPmrem, true);
@@ -53,7 +52,6 @@ const melt = planner.variantState('melt');
 assert.equal(melt.shapeField, true);
 assert.equal(melt.formationCut, false);
 assert.equal(melt.microDrops, true);
-assert.equal(melt.liquidFilm, false, 'prewarm state must read motion-scoped material memory');
 assert.equal(melt.spectralCaustics, false, 'prewarm state must read motion-scoped caustic memory');
 
 params.motion = 'static';
@@ -86,7 +84,7 @@ assert.equal(planner.variantState().staticMesh, false, '其餘模式不得走三
 params.shapeSource = 'svg';
 
 const key = planner.variantKey(formation);
-assert.equal(key, 'gSV--MN----T.oFLDPKBE--');
+assert.equal(key, 'gSV--MN----T.oFDPKBE--');
 assert.equal(planner.variantKey(formation), key, 'variant keys must be deterministic');
 
 const desktopDefines = planner.shaderFeatures(formation);
@@ -94,7 +92,7 @@ assert.equal(desktopDefines.MAX_REFLECTION_SAMPLES, 8);
 assert.equal(desktopDefines.FEATURE_SHAPE_FIELD, '');
 assert.equal(desktopDefines.FEATURE_SHAPE_VOLUME, false);
 assert.equal(desktopDefines.FEATURE_FORMATION_CUT, '');
-assert.equal(desktopDefines.FEATURE_LIQUID_FILM, '');
+assert.equal(desktopDefines.FEATURE_LIQUID_FILM, undefined, 'the liquid-film material is gone');
 assert.equal(makePlanner({ mobile: true }).shaderFeatures(formation).MAX_REFLECTION_SAMPLES, 4);
 
 const forcedPlanner = makePlanner({ forced: ['FEATURE_SHAPE_VOLUME'], run: 23 });

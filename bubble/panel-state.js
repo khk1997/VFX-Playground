@@ -137,15 +137,6 @@ export function createPanelStateController({
     const backgroundColor = document.getElementById('bgColor');
     backgroundColor.disabled = !colorBackground;
     backgroundColor.closest('.row').style.opacity = colorBackground ? 1 : 0.4;
-    document.getElementById('membraneDepth').disabled = true;
-    document.getElementById('membraneDepthRow').style.display = 'none';
-    for (const key of [
-      'membraneBaseColor', 'membraneVeilColor', 'membraneReflectionColor',
-      'membraneCardColor', 'membraneShadeColor',
-    ]) {
-      document.getElementById(key).disabled = true;
-      document.getElementById(key + 'Row').style.display = 'none';
-    }
     for (const prefix of EDGE_TINT_TARGETS) {
       const multi = P[`${prefix}MultiTint`];
       for (const suffix of ['Tint', 'TintEdge', 'TintColor']) {

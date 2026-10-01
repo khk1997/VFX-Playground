@@ -59,7 +59,6 @@ export function createShaderVariantPlanner({
           || motion === 'melt' || motion === 'morph'),
       negativeField: shapeField,
       thinFilm: !!params.filmEnabled,
-      liquidFilm: scoped('materialStyle') === 'membrane',
       dispersion: !!params.dispersionEnabled,
       prismBeam: !!params.rayDispersionEnabled,
       spectralCaustics: !!scoped('spectralCausticEnabled'),
@@ -80,7 +79,7 @@ export function createShaderVariantPlanner({
         + flag(state.staticShape, 'X') + flag(state.research, 'H')
         + flag(state.typewriter, 'Y') + flag(state.shapeMorph, 'R')
         + flag(state.formationCut, 'T'),
-      'o' + flag(state.thinFilm, 'F') + flag(state.liquidFilm, 'L')
+      'o' + flag(state.thinFilm, 'F')
         + flag(state.dispersion, 'D') + flag(state.prismBeam, 'P')
         + flag(state.spectralCaustics, 'K') + flag(state.beamPatterns, 'B')
         + flag(state.envPmrem, 'E') + flag(state.studioGlass, 'A')
@@ -137,8 +136,6 @@ export function createShaderVariantPlanner({
       NORMAL_TAPS_TETRA: '',
       NORMAL_TAPS_SVG: state.svgNormals ? '' : false,
       FEATURE_THIN_FILM: state.thinFilm ? '' : false,
-      FEATURE_LIQUID_FILM: state.liquidFilm ? '' : false,
-      FEATURE_LIQUID_FILM_DEPTH: state.liquidFilm ? '' : false,
       FEATURE_DISPERSION: state.dispersion ? '' : false,
       FEATURE_PRISM_BEAM: state.prismBeam ? '' : false,
       FEATURE_PRISM_SATURATION: state.prismBeam ? '' : false,
@@ -209,8 +206,6 @@ export function createShaderVariantPlanner({
     const late = DIAG.probeNoLateShading;
     if (late || DIAG.probeNoPrismBeam) defines.FEATURE_PRISM_BEAM = false;
     if (late || DIAG.probeNoPrismSaturation) defines.FEATURE_PRISM_SATURATION = false;
-    if (late || DIAG.probeNoLiquidFilmMaterial) defines.FEATURE_LIQUID_FILM = false;
-    if (late || DIAG.probeNoThinFilmDepth) defines.FEATURE_LIQUID_FILM_DEPTH = false;
     if (late || DIAG.probeNoDispersionSpectral) defines.FEATURE_DISPERSION = false;
     if (late || DIAG.probeNoSpectralCaustics) defines.FEATURE_SPECTRAL_CAUSTICS = false;
     if (DIAG.probeNoEnvPmrem) defines.FEATURE_ENV_PMREM = false;

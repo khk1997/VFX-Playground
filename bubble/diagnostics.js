@@ -148,11 +148,9 @@ const DIAG = (() => {
     // 後段著色的 8 個單獨隔離探針（第七、八項不在 main() 的後段，但同屬這一輪）。
     // 每個只關一個功能，其餘完全維持基底。
     probeNoPrismBeam: set.has('probe-no-prism-beam'),
-    probeNoLiquidFilmMaterial: set.has('probe-no-liquid-film-material'),
     probeNoPrismSaturation: set.has('probe-no-prism-saturation'),
     probeNoDispersionSpectral: set.has('probe-no-dispersion-spectral'),
     probeNoSpectralCaustics: set.has('probe-no-spectral-caustics'),
-    probeNoThinFilmDepth: set.has('probe-no-thin-film-depth'),
     probeNoEnvPmrem: set.has('probe-no-env-pmrem'),
     probeNoRefractionFilm: set.has('probe-no-refraction'),
     probeNoWobble: set.has('probe-no-wobble'),

@@ -165,7 +165,6 @@ async function runExport(settings) {
     maxSteps: getUniforms().uMaxSteps.value,
     bgMode: getUniforms().uBgMode.value,
     transparent: getUniforms().uTransparentBackground.value,
-    membraneOverWhite: getUniforms().uMembraneOverWhite.value,
     bgColor: getUniforms().uBgColor.value.clone(),
     lightGradient: getUniforms().uLightBgGradientEnabled.value,
     wallLift: getUniforms().uStudioWallLift.value,
@@ -181,21 +180,15 @@ async function runExport(settings) {
   });
   target.texture.generateMipmaps = false;
   const transparentExport = settings.background === 'transparent';
-  // 液態薄膜的膜身是「透過白底看到的顏色」，而且亮底顯色路徑是由背景亮度開的
-  // 閘 —— 把背景抽成黑的等於連材質模型一起換掉，成品會整片變淡、跟畫面對不上。
-  // 改成保留白底把顏色算完，再由 shader 對白底反乘出 straight alpha
-  //（uMembraneOverWhite 分支），背景照樣透得過來。通用玻璃維持原本的「黑場 +
-  // 反預乘」，它的顏色本來就不依附背景。
-  const membraneOverWhite = transparentExport && P.materialStyle === 'membrane';
+  // 舊材質路徑（通用玻璃）走「黑場 + 反預乘」，它的顏色本來就不依附背景。
   // 新玻璃模型改走雙背景去背（見 matteExportPixels）。兩張都照一般的不透明輸出
   // 來算，後處理與 HDR 的行為就跟畫面上一模一樣；背景紙要是一張均勻的紙，
   // 牆面與地板的抬底、地板的壓暗、淺底的漸層都拿掉 —— 不然它們兩張都有，
   // 會被當成玻璃自己的東西，成品上浮出一整片灰色的地板。
-  const staticMatte = transparentExport && !membraneOverWhite && usesStudioGlass(P.motion);
+  const staticMatte = transparentExport && usesStudioGlass(P.motion);
   getUniforms().uTransparentBackground.value = transparentExport && !staticMatte ? 1 : 0;
-  getUniforms().uMembraneOverWhite.value = membraneOverWhite ? 1 : 0;
   getUniforms().uBgMode.value = settings.background === 'scene' ? SELECTS.bgMode.map[P.bgMode] : 0;
-  if (transparentExport && !membraneOverWhite) getUniforms().uBgColor.value.setHex(0x000000, THREE.LinearSRGBColorSpace);
+  if (transparentExport) getUniforms().uBgColor.value.setHex(0x000000, THREE.LinearSRGBColorSpace);
   if (staticMatte) {
     getUniforms().uLightBgGradientEnabled.value = 0;
     getUniforms().uStudioWallLift.value = 0;
@@ -253,7 +246,6 @@ async function runExport(settings) {
     getUniforms().uMaxSteps.value = saved.maxSteps;
     getUniforms().uBgMode.value = saved.bgMode;
     getUniforms().uTransparentBackground.value = saved.transparent;
-    getUniforms().uMembraneOverWhite.value = saved.membraneOverWhite;
     getUniforms().uBgColor.value.copy(saved.bgColor);
     getUniforms().uLightBgGradientEnabled.value = saved.lightGradient;
     getUniforms().uStudioWallLift.value = saved.wallLift;

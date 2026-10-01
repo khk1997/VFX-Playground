@@ -154,9 +154,6 @@ export const DEFAULTS = {              // 數值滑桿
   bloomIntensity: 0.6,
   bloomRadius: 0.7,
   materialExposure: 1,
-  // 液態薄膜專用的低頻塑形：0 回到純透明膜，1 完整加入厚度暗部、膜褶遮蔽
-  // 與非對稱反射卡。通用玻璃模式不讀取這個值。
-  membraneDepth: 0.65,
   // 水的折射率約 1.33，玻璃約 1.5；預設維持原本水滴的手感，改高會讓邊緣
   // 反射（Fresnel）變強、折射彎曲角度變陡，看起來更像玻璃而不是水珠。
   ior: 1.33,
@@ -468,7 +465,8 @@ export const SELECT_DEFAULTS = {
 // 這裡根本讀不到原值。
 export const LEGACY_SELECT_VALUES = {
   motion: { pulse: 'formation' },
-  materialStyle: { glass: 'universal' },
+  // 液態薄膜（membrane）已整個移除；舊參數檔記著它的，改成通用玻璃。
+  materialStyle: { glass: 'universal', membrane: 'universal' },
 };
 export const TOGGLE_DEFAULTS = {
   edgeDropsEnabled: false,
@@ -555,14 +553,6 @@ export const COLOR_DEFAULTS  = {
   // 這個漸層。頂到底：近白 → 冷調柔灰，是常見的攝影棚無縫背景紙配色。
   lightBgGradientTop: LIGHT_BACKDROP_COLOR,
   lightBgGradientBottom: '#c9ccd1',
-  // 液態薄膜原本各自寫死一個偏藍紫色常數的 5 處，現在各自開一個選色器直接
-  // 取代常數，選色器選什麼顏色，畫面上那一處就是那個顏色。預設值都是原本
-  // 那個常數本身，維持改動前的外觀。
-  membraneBaseColor: '#7a9ec7',
-  membraneVeilColor: '#b8e6ff',
-  membraneReflectionColor: '#94b8e6',
-  membraneCardColor: '#94c7ff',
-  membraneShadeColor: '#85b8e6',
   ...Object.fromEntries(SPECTRAL_CAUSTIC_DEFAULTS.map(
     (color, index) => [`spectralCausticCol${index}`, color],
   )),

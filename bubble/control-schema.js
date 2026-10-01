@@ -65,11 +65,6 @@ export const COLORS = {
   // 後處理的顏色不對應 uniform（它們是 post.js 每幀讀的），uniform 名稱留空，
   // 由下面兩處的特例分支處理。
   bloomTint: '',
-  membraneBaseColor: 'uMembraneBaseColor',
-  membraneVeilColor: 'uMembraneVeilColor',
-  membraneReflectionColor: 'uMembraneReflectionColor',
-  membraneCardColor: 'uMembraneCardColor',
-  membraneShadeColor: 'uMembraneShadeColor',
 };
 // 值為 uniform 名稱（直接寫 0/1），或一個套用函式 —— 輪廓液滴的開關不是
 // 布林 uniform，而是把 uEdgeDropCount 歸零，這樣關閉液滴時仍保留邊緣圓角
@@ -223,7 +218,6 @@ export function createFormatters(P, { effectiveCapillaryHeight, shatterSegmentSe
   absorbGradientMid: v => Math.round(v * 100) + '%',
   absorbGradientSoftness: v => Math.round(v * 100) + '%',
   materialExposure: v => 'x' + v.toFixed(2),
-  membraneDepth: v => Math.round(v * 100) + '%',
   ior: v => v.toFixed(2),
   hdriYaw: v => v.toFixed(0) + '°',
   hdriPitch: v => v.toFixed(0) + '°',

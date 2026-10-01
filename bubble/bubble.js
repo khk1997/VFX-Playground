@@ -27,11 +27,11 @@ import {
 } from './motions/extended/index.js?v=extended-motions-4';
 import { PMREMGenerator } from './vendor/PMREMGenerator.js';
 import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
-import { parseBubbleRuntimeOptions } from './diagnostics.js?v=1';
+import { parseBubbleRuntimeOptions } from './diagnostics.js?v=2';
 import { createMaterialTextureController } from './material-textures.js?v=1';
 import { createEnvironmentLoader, selectMaterialEnvironment } from './environment-loader.js?v=1';
 import { describeShapeImport, loadShapeAsset } from './shape-loader.js?v=1';
-import { createShaderVariantPlanner, VariantMaterialCache } from './shader-variants.js?v=4';
+import { createShaderVariantPlanner, VariantMaterialCache } from './shader-variants.js?v=5';
 import {
   contactMergeAmount, findClosestDropPair, staticShapeFloorHeight, staticShapeHalfExtents,
   staticShapeShadowRadius,
@@ -45,13 +45,13 @@ import {
 import {
   COLOR_DEFAULTS, DEFAULTS, LEGACY_SELECT_VALUES, SELECT_DEFAULTS,
   SPECTRAL_CAUSTIC_DEFAULTS, TOGGLE_DEFAULTS, isFormationMotion,
-} from './runtime-defaults.js?v=glass-tint-1';
+} from './runtime-defaults.js?v=no-membrane-1';
 import {
   BACKDROP_SCOPED_KEYS, createMemorySlot, createMotionMemory, motionDefaultsFor,
 } from './runtime-memory.js?v=openpbr-1';
 import {
   COLORS, LINEAR_COLOR_KEYS, SELECTS, createFormatters, createToggleBindings,
-} from './control-schema.js?v=2';
+} from './control-schema.js?v=3';
 import { glassTintBox } from './glass-tint.js?v=2';
 import { FLOOR_GAP, lowestPointOverLoop, shapeFieldFloorHeight } from './studio-floor.js?v=2';
 import { createTypewriterRuntime } from './typewriter-runtime.js?v=studio-floor-1';
@@ -64,10 +64,10 @@ import { createWeaveRuntime } from './motions/runtime/weave.js?v=1';
 import { createMorphRuntime } from './motions/runtime/morph.js?v=1';
 import { createFormationRuntime } from './motions/runtime/formation.js?v=1';
 import { buildExtendedMotionControls } from './panel-builder.js?v=2';
-import { createPanelStateController } from './panel-state.js?v=5';
+import { createPanelStateController } from './panel-state.js?v=6';
 import { createPanelBindings } from './panel-bindings.js?v=2';
-import { createExportRuntime } from './export-runtime.js?v=4';
-import { createCompileDiagnostics } from './compile-diagnostics.js?v=1';
+import { createExportRuntime } from './export-runtime.js?v=5';
+import { createCompileDiagnostics } from './compile-diagnostics.js?v=2';
 import { createRuntimeDiagnostics } from './runtime-diagnostics.js?v=3';
 
 // 提高 PMREM 高粗糙度的最低預過濾解析度，避免 16×16 tile 造成方格反射。
@@ -352,7 +352,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=glass-tint-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=no-membrane-1';
 import { createPostChain } from './post.js?v=post-mask-3';
 
 const {
@@ -2516,11 +2516,6 @@ function initGL() {
     uBgColor:    { value: new THREE.Color().setStyle(P.bgColor, THREE.LinearSRGBColorSpace) },
     uLightBgGradientTop: { value: new THREE.Color().setStyle(P.lightBgGradientTop, THREE.LinearSRGBColorSpace) },
     uLightBgGradientBottom: { value: new THREE.Color().setStyle(P.lightBgGradientBottom, THREE.LinearSRGBColorSpace) },
-    uMembraneBaseColor: { value: new THREE.Color(P.membraneBaseColor) },
-    uMembraneVeilColor: { value: new THREE.Color(P.membraneVeilColor) },
-    uMembraneReflectionColor: { value: new THREE.Color(P.membraneReflectionColor) },
-    uMembraneCardColor: { value: new THREE.Color(P.membraneCardColor) },
-    uMembraneShadeColor: { value: new THREE.Color(P.membraneShadeColor) },
     uEnvRefraction: { value: P.envRefraction },
     uReflect:    { value: P.reflect },
     uTransmission: { value: P.transmission },
@@ -2537,7 +2532,6 @@ function initGL() {
     uGlassTintMin: { value: new THREE.Vector3(-1, -1, -1) },
     uGlassTintMax: { value: new THREE.Vector3(1, 1, 1) },
     uMaterialExposure: { value: P.materialExposure },
-    uMembraneDepth: { value: P.membraneDepth },
     uRoughness:  { value: P.roughness },
     uIOR:        { value: P.ior },
     uReflectionSampleCount: { value: adaptiveQuality.snapshot().reflectionSamples },
@@ -2577,7 +2571,6 @@ function initGL() {
     uMorphBreak: { value: new THREE.Vector4(0.6, 1.5, 0, 4) },
     uMorphNecking: { value: new THREE.Vector2(0.12, 0.55) },
     uMorphActive: { value: new THREE.Vector2(1, 1) },
-    uMembraneOverWhite: { value: 0 },
     uShapeScale: { value: 1 },
     uShapeAScale: { value: 1 },
     uShapeBScale: { value: 1 },
@@ -3949,8 +3942,7 @@ if (!PREVIEW && window.PresetIO) {
       'spectralCausticEnabled', 'rampCount',
     ],
     exclude: [
-      'materialStyle', 'membraneDepth', 'membraneBaseColor', 'membraneVeilColor',
-      'membraneReflectionColor', 'membraneCardColor', 'membraneShadeColor',
+      'materialStyle',
     ],
     assetNote: 'HDRI 與 SVG / GLB 素材無法存進參數檔，請自行載入',
     saveOn: ['#resetBtn'],
