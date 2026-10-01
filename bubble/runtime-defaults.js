@@ -114,6 +114,10 @@ export const DEFAULTS = {              // 數值滑桿
   // —— 光程長的地方變暗偏青、邊緣薄的地方仍然清透，那是眼睛判斷「這東西有
   // 厚度」的主要線索。
   absorb: 1,
+  // 漸層玻璃色（靜態，見 glass-tint.js）：交界的位置與過渡帶寬度，都是佔造型
+  // 範圍的比例。預設鋪滿整個範圍、交界在正中間，就是一條從頭到尾的線性過渡。
+  absorbGradientMid: 0.5,
+  absorbGradientSoftness: 1,
   // 後處理。全部預設關閉（bloomEnabled 在 TOGGLE_DEFAULTS），關閉時整條鏈直接
   // 跳過，畫面逐位元等於加入後處理之前 —— 見 renderComposite。
   //
@@ -444,6 +448,8 @@ export const SELECT_DEFAULTS = {
   motion: 'static',
   shapeSource: 'svg',
   shapeQuality: 'balanced',
+  // 預設單色，畫面跟沒有這個功能之前一樣。
+  absorbGradient: 'off',
   // 虛擬光譜焦散的空間 mapping。wave 保留既有 preset 外觀。
   spectralCausticMapping: 'wave',
   // 抗鋸齒程度：全螢幕 raymarch shader 沒有多邊形邊緣可以靠 MSAA 磨平（見 initGL
@@ -538,6 +544,9 @@ export const COLOR_DEFAULTS  = {
   // absorbCoefficient）。這個值配上濃度 ×1，算出來就是這兩個控制項出現以前
   // 寫死的吸收係數，所以預設外觀不變。
   absorbColor: '#68b2e7',
+  // 漸層的第二個顏色。靜態的顏色 1 預設純白（不吸收），所以一打開漸層就是
+  // 「從清透到藍」，看得出漸層在哪裡。
+  absorbColorB: '#4f86ff',
   // 淺底 icon 的體積色，與清透底色混合；明暗反射由材質獨立塑形。
   lightIconColor: '#d9f3ff',
   lightIconRimColor: '#3aa9df',

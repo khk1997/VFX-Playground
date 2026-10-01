@@ -1,4 +1,5 @@
 import { ENVIRONMENT_GLSL } from './shader-chunks/environment.js';
+import { GLASS_TINT_GLSL } from './shader-chunks/glass-tint.js';
 import { GEOMETRY_GLSL } from './shader-chunks/geometry.js';
 import { OPTICS_GLSL } from './shader-chunks/optics.js';
 
@@ -536,7 +537,7 @@ float causticOctaves(vec3 p, float detail){
   return 0.5 * snoise(p) + 0.25 * detail * snoise(p * 2.02);
 }
 
-${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
+${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
   vec2 uv = (vUv * 2.0 - 1.0);
   uv.x *= uResolution.x / uResolution.y;
   // 桌面維持英雄鏡置中；手機依可用視覺區上移，避免主體被底部控制面板切掉。
@@ -677,6 +678,7 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
   vec3 exitPoint = p;
   vec3 exitNormal = -N;
   float pathLength = 0.0;
+  vec3 tintDepth = vec3(0.0);  // 漸層玻璃色逐段累加的光學深度（見 glass-tint.js）
   bool hasExitSurface = false;
 #ifdef FEATURE_RESEARCH
   bool researchIconHit = false;
@@ -738,6 +740,7 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
         {
           float exitR;
           exitDir = staticExitDirection(insideDir, exitNormal, exitDir, exitR);
+          tintDepth = glassTintDepth(p, exitPoint, pathLength);
           backFres = exitR;   // 下游的透射率要跟方向的混合讀同一個值
           backRim = pow(1.0 - clamp(abs(dot(insideDir, exitNormal)), 0.0, 1.0),
             3.0) * uFresnel;
@@ -865,6 +868,7 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
               backFres);
             // 多走的那一段光程要算進吸收，厚處才會真的比較濃。
             pathLength += bouncePath * backFres;
+            tintDepth += glassTintDepth(exitPoint, bouncePoint, bouncePath * backFres);
           }
         }
         refractedBg = frostedTransmission(refractedBg, exitPoint, rd, roughBlur, studioSoften, roughEdge);  // 霧面的另一半
@@ -1015,8 +1019,7 @@ ${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
         //
         // clamp 的兩端各有理由：0 會讓 log 發散成 -inf，1 則是完全不吸收 ——
         // 純白因此等於把這個效果關掉，濃度滑桿再拉也沒有作用，那是對的語意。
-        vec3 absorbCoefficient = -log(clamp(uAbsorbColor, 0.002, 0.999)) / 20.0;
-        volumeAbsorption = exp(-absorbCoefficient * max(uAbsorb, 0.0) * pathLength);
+        volumeAbsorption = glassVolumeAbsorption(pathLength, tintDepth);  // 漸層色見 glass-tint.js
 
         // 背面使用低成本 2-octave 厚度場，產生內部彩色折線與融合區層次。
         //

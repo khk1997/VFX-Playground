@@ -86,19 +86,33 @@ export function staticShapeShadowRadius(params) {
   }
   return 0;
 }
+// 內建造型在三個軸上的半尺寸（以原點為中心的包圍盒），夾值跟 geometry.js 的
+// SDF 一致。地板高度（-y）跟玻璃漸層色的範圍（見 glass-tint.js）都從這裡讀，
+// 改了造型的夾值只要改這一處。匯入的造型（7）回傳 null：它的範圍得看檔案。
+// 表面波紋與幾何擾動推出去的那一點點不算進來。
+export function staticShapeHalfExtents(params) {
+  const size = Math.max(params.primitiveSize, 0.05);
+  const height = Math.max(params.primitiveHeight, 0.05);
+  switch (params.staticShape) {
+    case 0: {
+      const half = Math.max(params.boxSize, 0.05);
+      return [half, half, half];
+    }
+    case 1: case 2: return [size, size * 0.06, size];
+    case 3: return [size, size, size];
+    case 4: case 5: return [size, height, size];
+    case 6: {
+      const minor = Math.min(Math.max(params.primitiveTubeRatio, 0.05), 0.9) * size;
+      return [size + minor, minor, size + minor];
+    }
+    default: return null;
+  }
+}
+
 const STUDIO_FLOOR_GAP = 0.02;
 export function staticShapeFloorHeight(params) {
-  const size = Math.max(params.primitiveSize, 0.05);
-  let bottom;
-  switch (params.staticShape) {
-    case 0: bottom = Math.max(params.boxSize, 0.05); break;
-    case 1: case 2: bottom = size * 0.06; break;
-    case 3: bottom = size; break;
-    case 4: case 5: bottom = Math.max(params.primitiveHeight, 0.05); break;
-    case 6: bottom = Math.min(Math.max(params.primitiveTubeRatio, 0.05), 0.9) * size; break;
-    default: return STUDIO_FLOOR_DEFAULT;
-  }
-  return -bottom - STUDIO_FLOOR_GAP;
+  const extents = staticShapeHalfExtents(params);
+  return extents ? -extents[1] - STUDIO_FLOOR_GAP : STUDIO_FLOOR_DEFAULT;
 }
 
 export function updateDropBounds({

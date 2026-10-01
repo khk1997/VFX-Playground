@@ -1,6 +1,6 @@
 'use strict';
 import * as THREE from 'three';
-import { buildInspector } from './inspector.js?v=glass-order-2';
+import { buildInspector } from './inspector.js?v=glass-tint-1';
 import { createAdaptiveQuality, QUALITY_TIER_NAMES } from './adaptive-quality.js?v=2';
 import { createGpuProfiler } from './gpu-profiler.js?v=1';
 let inspector = null;
@@ -36,7 +36,7 @@ import {
   contactMergeAmount, findClosestDropPair, staticShapeFloorHeight, staticShapeShadowRadius,
   updateDropBounds,
   STUDIO_FLOOR_DEFAULT,
-} from './drop-physics.js?v=3';
+} from './drop-physics.js?v=4';
 import {
   distributeDetailedAnchors, distributeFormationAnchors, distributePrimaryAnchors,
   formationEdgeScaleFor, scaleShapePoints as scalePoints,
@@ -44,13 +44,14 @@ import {
 import {
   COLOR_DEFAULTS, DEFAULTS, LEGACY_SELECT_VALUES, SELECT_DEFAULTS,
   SPECTRAL_CAUSTIC_DEFAULTS, TOGGLE_DEFAULTS, isFormationMotion,
-} from './runtime-defaults.js?v=light-strength-1';
+} from './runtime-defaults.js?v=glass-tint-1';
 import {
   BACKDROP_SCOPED_KEYS, createMemorySlot, createMotionMemory, motionDefaultsFor,
 } from './runtime-memory.js?v=openpbr-1';
 import {
-  COLORS, SELECTS, createFormatters, createToggleBindings,
-} from './control-schema.js?v=1';
+  COLORS, LINEAR_COLOR_KEYS, SELECTS, createFormatters, createToggleBindings,
+} from './control-schema.js?v=2';
+import { glassTintBox } from './glass-tint.js?v=1';
 import { createTypewriterRuntime } from './typewriter-runtime.js?v=type-center-1';
 import { createStaticCapillaryRuntime } from './motions/runtime/static-capillary.js?v=1';
 import { createJellyRuntime } from './motions/runtime/jelly.js?v=1';
@@ -61,8 +62,8 @@ import { createWeaveRuntime } from './motions/runtime/weave.js?v=1';
 import { createMorphRuntime } from './motions/runtime/morph.js?v=1';
 import { createFormationRuntime } from './motions/runtime/formation.js?v=1';
 import { buildExtendedMotionControls } from './panel-builder.js?v=1';
-import { createPanelStateController } from './panel-state.js?v=2';
-import { createPanelBindings } from './panel-bindings.js?v=1';
+import { createPanelStateController } from './panel-state.js?v=3';
+import { createPanelBindings } from './panel-bindings.js?v=2';
 import { createExportRuntime } from './export-runtime.js?v=3';
 import { createCompileDiagnostics } from './compile-diagnostics.js?v=1';
 import { createRuntimeDiagnostics } from './runtime-diagnostics.js?v=1';
@@ -349,7 +350,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=mesh-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=glass-tint-1';
 import { createPostChain } from './post.js?v=post-mask-3';
 
 const {
@@ -2096,6 +2097,25 @@ function updateDropUniforms(t) {
       : meshFloor ?? staticShapeFloorHeight(P);
     uniforms.uStudioShadowBound.value = P.motion === 'static' ? staticShapeShadowRadius(P) : 0;
   }
+  updateGlassTintBox();
+}
+
+// 漸層玻璃色鋪在造型的包圍盒上（見 glass-tint.js 的 glassTintBox）。造型大小、
+// 匯入的檔案、呼吸縮放都會改它，所以跟地板一樣每幀跟著走；單色時不必算。
+function updateGlassTintBox() {
+  if (!uniforms?.uGlassTintMin || P.motion !== 'static' || P.absorbGradient === 'off') return;
+  const meshScale = uniforms.uShapeScale.value * uniforms.uShapeAScale.value;
+  const offset = uniforms.uShapeRigidOffset.value;
+  const { min, max } = glassTintBox({
+    params: P,
+    mesh: staticMeshActive() && staticMeshBounds ? {
+      min: staticMeshBounds.min, max: staticMeshBounds.max,
+      scale: meshScale, offset: [offset.x, offset.y, offset.z],
+    } : null,
+    bounds: { center: [dropBounds.x, dropBounds.y, dropBounds.z], radius: dropBounds.w },
+  });
+  uniforms.uGlassTintMin.value.fromArray(min);
+  uniforms.uGlassTintMax.value.fromArray(max);
 }
 
 // 三角網格的資料貼圖：RGBA32F、不過濾（shader 用 texelFetch 按索引讀）。
@@ -2426,6 +2446,13 @@ function initGL() {
     uHighlightGain: { value: 1 },
     uAbsorb: { value: P.absorb },
     uAbsorbColor: { value: new THREE.Color().setStyle(P.absorbColor, THREE.LinearSRGBColorSpace) },
+    // 漸層玻璃色（見 shader-chunks/glass-tint.js）。範圍每幀由 updateGlassTintBox 更新。
+    uGlassTintMode: { value: SELECTS.absorbGradient.map[P.absorbGradient] },
+    uAbsorbColorB: { value: new THREE.Color().setStyle(P.absorbColorB, THREE.LinearSRGBColorSpace) },
+    uAbsorbGradientMid: { value: P.absorbGradientMid },
+    uAbsorbGradientSoftness: { value: P.absorbGradientSoftness },
+    uGlassTintMin: { value: new THREE.Vector3(-1, -1, -1) },
+    uGlassTintMax: { value: new THREE.Vector3(1, 1, 1) },
     uMaterialExposure: { value: P.materialExposure },
     uMembraneDepth: { value: P.membraneDepth },
     uRoughness:  { value: P.roughness },
@@ -2757,10 +2784,7 @@ function syncPanelToUniforms() {
     // 吸收色不是「一道光的顏色」而是「每個通道剩下多少」的比例，所以要的是選色
     // 器上那三個原始數值，不能讓 three 的色彩管理把它當 sRGB 轉成線性（那會把
     // 比例整個扭掉）。同 uBgColor 的作法。
-    else if (key === 'absorbColor' || key === 'researchIconTintColor'
-      || key === 'researchShellTintColor'
-      || key === 'lightIconColor' || key === 'lightIconRimColor'
-      || key === 'lightBgGradientTop' || key === 'lightBgGradientBottom') {
+    else if (LINEAR_COLOR_KEYS.has(key)) {
       uniforms[COLORS[key]].value.setStyle(P[key], THREE.LinearSRGBColorSpace);
     }
     else uniforms[COLORS[key]].value.set(P[key]);
@@ -3381,6 +3405,7 @@ function requestPausedRender() {
       // 也得在這裡補一次。靜態模式本來就是暫停的，漏掉這行的話燈位滑桿會完全
       // 沒反應 —— 值進了 P，但沒有人把它打包進 vec4。
       syncStudioLights();
+      updateGlassTintBox();  // 同上：造型大小改了，漸層範圍要跟著
       renderComposite();
       updateExportCameraPreview();
     }

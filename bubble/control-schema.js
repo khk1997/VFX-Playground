@@ -1,5 +1,6 @@
 import { EDGE_TINT_TARGETS, EDGE_TINT_STOPS } from './edge-tint.js?v=dark-tint-1';
 import { MOTION_UNIFORM_MAP } from './motions/registry.js?v=static-defaults-1';
+import { GLASS_TINT_MODES } from './glass-tint.js?v=1';
 
 // select 字串 → int uniform
 export const SELECTS = {
@@ -18,6 +19,8 @@ export const SELECTS = {
   },
   motion:    { uniform: 'uMotion',    map: MOTION_UNIFORM_MAP },
   shapeSource: { uniform: 'uShapeType', map: { svg: 1, gltf: 2 } },
+  // 靜態的漸層玻璃色方向（見 glass-tint.js）。off = 單色。
+  absorbGradient: { uniform: 'uGlassTintMode', map: GLASS_TINT_MODES },
   // 僅控制下一次 GLB 烘焙尺寸，沒有對應 shader uniform。
   shapeQuality: { uniform: '', map: { performance: 48, balanced: 80, high: 128 } },
   // 超取樣倍率，沒有對應 shader uniform——直接乘進 renderer 的 pixel ratio
@@ -37,11 +40,22 @@ export const SELECTS = {
     none: 0, reinhard: 1, aces: 2, agx: 3, khronosNeutral: 4, filmic: 5,
   } },
 };
+// 照選色器上的原始數值送進 shader、不做 sRGB → 線性轉換的顏色。這些不是「一道光
+// 的顏色」：吸收色是每個通道剩下多少的比例，背景與 icon 色是直接拿來合成的值，
+// 讓 three 的色彩管理轉一次會把它們整個扭掉。初始化（syncPanelToUniforms）與
+// 拖曳（panel-bindings）都讀這一份。背景色有自己的 setBgColorUniform，不在這裡。
+export const LINEAR_COLOR_KEYS = new Set([
+  'absorbColor', 'absorbColorB',
+  'researchIconTintColor', 'researchShellTintColor',
+  'lightIconColor', 'lightIconRimColor',
+  'lightBgGradientTop', 'lightBgGradientBottom',
+]);
 export const COLORS = {
   ...Object.fromEntries(EDGE_TINT_TARGETS.flatMap(prefix =>
     EDGE_TINT_STOPS.map((_, i) => [`${prefix}TintStopColor${i}`, '']))),
   bgColor: 'uBgColor',
   absorbColor: 'uAbsorbColor',
+  absorbColorB: 'uAbsorbColorB',
   lightIconColor: 'uLightIconColor',
   lightIconRimColor: 'uLightIconRimColor',
   lightBgGradientTop: 'uLightBgGradientTop',
@@ -206,6 +220,8 @@ export function createFormatters(P, { effectiveCapillaryHeight, shatterSegmentSe
   reflect: v => 'x' + v.toFixed(2),
   transmission: v => v.toFixed(2),
   absorb: v => '×' + v.toFixed(2),
+  absorbGradientMid: v => Math.round(v * 100) + '%',
+  absorbGradientSoftness: v => Math.round(v * 100) + '%',
   materialExposure: v => 'x' + v.toFixed(2),
   membraneDepth: v => Math.round(v * 100) + '%',
   ior: v => v.toFixed(2),

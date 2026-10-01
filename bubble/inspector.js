@@ -1,5 +1,5 @@
 import { EDGE_TINT_TARGETS, EDGE_TINT_STOPS, edgeTintParams } from './edge-tint.js';
-import { EDGE_TINT_BASE_BY_BACKDROP, EDGE_TINT_STRENGTH_BY_BACKDROP } from './runtime-defaults.js?v=light-strength-1';
+import { EDGE_TINT_BASE_BY_BACKDROP, EDGE_TINT_STRENGTH_BY_BACKDROP } from './runtime-defaults.js?v=glass-tint-1';
 import { INSTALLING_VISUAL_PRESETS, installingVisualPresetValues } from './visual-presets.js?v=tint-light-1';
 
 const PAGES = [['shape', '造型'], ['motion', '動態'], ['look', '外觀'], ['scene', '場景']];
@@ -675,11 +675,13 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     staticQuickDock?.sync();
     staticShapeCard?.sync();
     iorPresetSync?.();
+    glassTintSync?.();
   }
   let staticDial = null;
   let staticQuickDock = null;
   let staticShapeCard = null;
   let iorPresetSync = null;
+  let glassTintSync = null;
   built = true;
   if (launchMotion === 'static') {
     buildStaticLayout();
@@ -721,6 +723,37 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     };
     iorPresetSync();
     return root;
+  }
+
+  // 玻璃顏色的單色／漸層切換。真的控制項是 #absorbGradient 那個下拉（參數檔、
+  // 重設、閘門都認它），這裡換成一排按鈕放在那一列的位置，兩個色票的標籤跟著
+  // 方向改成「上方／下方」這類讀法，跟背景色的上下兩個色票一致。
+  //
+  // 加一種方向：GLASS_TINT_LABELS 加一組，其餘見 glass-tint.js 開頭。
+  function buildGlassTint() {
+    const GLASS_TINT_LABELS = {
+      off: ['玻璃顏色', ''],
+      vertical: ['上方顏色', '下方顏色'],
+      horizontal: ['左側顏色', '右側顏色'],
+      depth: ['前方顏色', '後方顏色'],
+    };
+    const source = rowOf('absorbGradient');
+    source.hidden = true;
+    const picker = segmented(
+      [['off', '單色'], ['vertical', '上下'], ['horizontal', '左右'], ['depth', '前後']],
+      value => { writeControl('absorbGradient', value); refresh(); },
+      '玻璃顏色的漸層方向',
+    );
+    const row = element('div', 'row inspectorGlassTint');
+    row.append(element('label', '', '玻璃顏色'), picker.group);
+    glassTintSync = () => {
+      const mode = $('absorbGradient').value;
+      picker.select(mode);
+      const [first, second] = GLASS_TINT_LABELS[mode] ?? GLASS_TINT_LABELS.off;
+      rowOf('absorbColor').querySelector('label').textContent = mode === 'off' ? '顏色' : first;
+      rowOf('absorbColorB').querySelector('label').textContent = second;
+    };
+    return row;
   }
 
   // 畫面右下角的常駐調整區。
@@ -933,8 +966,13 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     $('ior').max = '2.5';
     // 常調的在上：顏色、濃度、霧面、彩虹、反射；折射率連同底下的材料按鈕放最後。
     // 材料按鈕跟著折射率那一列走（見下面的 after）。
+    // 玻璃顏色：單色或漸層（見 buildGlassTint）。漸層那三列靠 glassGradientOn
+    // 閘門收放，單色時面板跟以前一模一樣。
     const glassBlock = group('玻璃', [
-      ['absorbColor', '玻璃顏色'],
+      ['absorbGradient', null],
+      ['absorbColor', null],
+      ['absorbColorB', null],
+      ['absorbGradientMid', '漸層位置'],
       ['absorb', '顏色濃度'],
       ['roughness', '霧面'],
       ['dispersionScale', '彩虹強度'],
@@ -942,6 +980,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       ['ior', '折射率'],
     ]);
     rowOf('ior').after(buildIorPresets());
+    rowOf('absorbGradient').after(buildGlassTint());
     // 燈光整組（方向盤、燈光強度、明暗對比）是最常一邊看畫面一邊調的，拉到
     // 畫面右下角常駐（見 buildQuickDock），面板裡不再有燈光區。
     staticDial = buildLightDial();
@@ -1013,6 +1052,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       ['flagAAzimuth', '黑卡A 方向'], ['flagAElevation', '黑卡A 高度'], ['flagASize', '黑卡A 大小'],
       ['flagBAzimuth', '黑卡B 方向'], ['flagBElevation', '黑卡B 高度'], ['flagBSize', '黑卡B 大小'],
       ['transmission', '透射率'], ['fresnel', '邊緣光'],
+      ['absorbGradientSoftness', '漸層柔和度'],
       ['studioCardGain', '燈的亮度'], ['studioCardFalloff', '燈的衰減'], ['studioCardEdge', '燈的銳利度'], ['studioAmbient', '環境亮度'],
       ['spectralSamples', '光譜取樣'], ['antialiasLevel', '抗鋸齒'],
     ], false);

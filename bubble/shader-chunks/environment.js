@@ -488,8 +488,9 @@ vec3 studioGlassShadow(vec3 floorPos, vec3 lightDir, out vec3 caustic){
   // 輪廓內那一側；而洞口只被擋掉一部分燈，所以比玻璃本體的影子淡 —— 前一版把
   // 它當不透明物體的半影，洞口反而比玻璃還暗。
   float rim = 1.0 - smoothstep(0.0, 0.15, depth);
-  vec3 absorbCoefficient = -log(clamp(uAbsorbColor, 0.002, 0.999)) / 20.0;
-  vec3 tint = exp(-absorbCoefficient * max(uAbsorb, 0.0) * thickness);
+  // 跟玻璃本體同一組吸收（見 glass-tint.js）：漸層玻璃的影子也是漸層的。
+  vec3 tint = glassSegmentAbsorption(floorPos + lightDir * tIn,
+    floorPos + lightDir * (tIn + thickness), thickness);
   vec3 through = tint * clamp(uTransmission, 0.0, 1.0) * mix(0.6, 0.12, rim);
 
   if (entered) {

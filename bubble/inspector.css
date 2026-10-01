@@ -268,6 +268,9 @@
 }
 /* 折射率底下的材料膠囊：沿用 inspectorSegments 的樣子，但四顆要擠在一列。 */
 #panel.inspector .inspectorIorPresets { margin: -8px 0 18px; }
+/* 玻璃顏色的單色／漸層切換：一列裡標籤在左、四顆按鈕在右（見 inspector.js 的 buildGlassTint）。 */
+#panel.inspector .inspectorGlassTint .inspectorSegments { flex: 1; min-width: 0; margin: 0; padding: 3px; }
+#panel.inspector .inspectorGlassTint .inspectorSegments button { padding: 7px 2px; font-size: 12px; white-space: nowrap; }
 #panel.inspector .inspectorIorPresets button { padding: 7px 4px; font-size: 12px; white-space: nowrap; }
 /* 跟左邊面板的區塊標題同一個級數（見 .inspectorSection > summary h3）。 */
 .staticQuickDockTitle { margin-bottom: 14px; font-size: 15px; font-weight: 600; letter-spacing: -.01em; color: #f5f5f7; }

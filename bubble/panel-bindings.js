@@ -3,7 +3,8 @@
 import { MOTION_HDRI, MOTION_TEXT_DEFAULTS } from './motions/registry.js?v=static-defaults-1';
 import {
   DEFAULTS, LEGACY_SELECT_VALUES, SELECT_DEFAULTS, SPECTRAL_CAUSTIC_DEFAULTS,
-} from './runtime-defaults.js?v=light-strength-1';
+} from './runtime-defaults.js?v=glass-tint-1';
+import { LINEAR_COLOR_KEYS } from './control-schema.js?v=2';
 
 export function createPanelBindings(options) {
   const {
@@ -231,10 +232,7 @@ function bindControls() {
       if (!uName) { /* LUT / 後處理顏色不直接對應 uniform */ }
       else if (key === 'bgColor') setBgColorUniform(el.value);
       // 見上面 applyAllUniforms 裡同一個特例的說明。
-      else if (key === 'absorbColor' || key === 'researchIconTintColor'
-      || key === 'researchShellTintColor'
-      || key === 'lightIconColor' || key === 'lightIconRimColor'
-      || key === 'lightBgGradientTop' || key === 'lightBgGradientBottom') {
+      else if (LINEAR_COLOR_KEYS.has(key)) {
         if (getUniforms()) getUniforms()[uName].value.setStyle(el.value, THREE.LinearSRGBColorSpace);
       }
       else if (getUniforms()) getUniforms()[uName].value.set(el.value);

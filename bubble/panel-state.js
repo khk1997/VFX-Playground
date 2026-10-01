@@ -17,6 +17,7 @@ export function createPanelStateController({
     svg: () => P.shapeSource === 'svg',
     glb: () => P.shapeSource !== 'svg',
     glbQuality: () => P.shapeSource !== 'svg' && glbQualityMatters(),
+    glassGradientOn: () => P.absorbGradient !== 'off',
     jellyPoke: () => P.jellyStyle === 'poke',
     jellyBounce: () => P.jellyStyle === 'bounce',
     capillaryTextureUI: () => P.motion === 'capillary' || P.motion === 'static',
