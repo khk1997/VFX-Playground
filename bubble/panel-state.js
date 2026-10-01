@@ -6,6 +6,7 @@ import { motionGates, usesShapeField } from './motions/registry.js?v=static-defa
 export function createPanelStateController({
   params: P,
   staticUsesImportedShape,
+  glbQualityMatters = () => true,
   pageBackgroundCss,
   getDispersionMaster,
   refreshInspector,
@@ -15,6 +16,7 @@ export function createPanelStateController({
     shape: () => usesShapeField(P.motion) && staticUsesImportedShape(),
     svg: () => P.shapeSource === 'svg',
     glb: () => P.shapeSource !== 'svg',
+    glbQuality: () => P.shapeSource !== 'svg' && glbQualityMatters(),
     jellyPoke: () => P.jellyStyle === 'poke',
     jellyBounce: () => P.jellyStyle === 'bounce',
     capillaryTextureUI: () => P.motion === 'capillary' || P.motion === 'static',

@@ -61,7 +61,7 @@ import { createWeaveRuntime } from './motions/runtime/weave.js?v=1';
 import { createMorphRuntime } from './motions/runtime/morph.js?v=1';
 import { createFormationRuntime } from './motions/runtime/formation.js?v=1';
 import { buildExtendedMotionControls } from './panel-builder.js?v=1';
-import { createPanelStateController } from './panel-state.js?v=1';
+import { createPanelStateController } from './panel-state.js?v=2';
 import { createPanelBindings } from './panel-bindings.js?v=1';
 import { createExportRuntime } from './export-runtime.js?v=3';
 import { createCompileDiagnostics } from './compile-diagnostics.js?v=1';
@@ -2849,9 +2849,32 @@ const {
   syncMotionUrl,
 });
 
+// 靜態模式匯入 GLB 時，玻璃本身直接打三角網格（見 optics.js 的 FEATURE_STATIC_MESH），
+// 距離場只剩地板影子與網格載好前的過場在用。影子本來就是軟的，48³ 就夠，所以
+// 這時不讓「模型品質」決定解析度、選單也收起來 —— 128³ 要烘好幾秒，烘出來的細節
+// 卻沒有地方看得到。
+//
+// 網格建不出來（三角形超過上限、BVH 失敗）時整顆玻璃退回距離場，品質又變成
+// 畫面的全部：記下是哪個檔案失敗的，那個檔案就照使用者選的品質烘、選單也回來。
+// undefined = 目前沒有失敗紀錄；null 是內建造型（importShapeFile 的 file = null）。
+const STATIC_MESH_SHADOW_GRID = 48;
+let staticMeshFailedFile;
+function staticMeshCarriesGlb() {
+  // 先看有沒有失敗紀錄：沒有的話不碰 userShapeFiles —— 面板的閘門在模組初始化時
+  // 就會呼叫到這裡，那時它還在暫時死區裡。
+  return P.motion === 'static' && !DIAG.probeStaticNoMesh
+    && (staticMeshFailedFile === undefined || staticMeshFailedFile !== (userShapeFiles.gltf ?? null));
+}
+function glbGridSize() {
+  return staticMeshCarriesGlb()
+    ? STATIC_MESH_SHADOW_GRID
+    : SELECTS.shapeQuality.map[P.shapeQuality] || 80;
+}
+
 const { applyGates, updateUIState } = createPanelStateController({
   params: P,
   staticUsesImportedShape,
+  glbQualityMatters: () => !staticMeshCarriesGlb(),
   pageBackgroundCss,
   getDispersionMaster: () => dispersionMasterOn,
   refreshInspector: () => inspector?.refresh(),
@@ -2986,6 +3009,8 @@ let shapeEnsurePending = false;
 // 所以判斷「目前是什麼」時，烘焙途中要看這一份即將產出的結果，而不是已載入的。
 let shapeImportingKind = null;
 let shapeImportingVariant = null;
+// 烘焙中這一份的 GLB 解析度（0 = 不是 GLB），用途同 shapeImportingKind。
+let shapeImportingGrid = 0;
 // 使用者自己匯入的檔案，依來源分開記住。有記錄就不再套用內建預設。
 const userShapeFiles = { svg: null, gltf: null };
 // 目前載入的內建 SVG 展示形狀是哪一版（'default' 問號／'melt' 冰塊）。只有在
@@ -3051,10 +3076,12 @@ function scheduleGLBRebuild() {
   if (P.shapeSource !== 'gltf') return;
   // 靜態模式選內建幾何時根本沒有形狀場，烘出來也沒人看得到。
   if (!staticUsesImportedShape()) return;
+  const grid = glbGridSize();
+  // 靜態交給三角網格時品質不影響解析度（見 glbGridSize），手上那份已經是要的就不重烘。
+  if (!shapeConverting && shapeFieldSource === 'gltf' && shapeField?.grid === grid) return;
   clearTimeout(shapeRebuildTimer);
   // 立刻使正在進行的舊品質結果失效；短暫 debounce 避免快速連切時重複開工。
   shapeImportRequestId++;
-  const grid = SELECTS.shapeQuality.map[P.shapeQuality] || 80;
   const qualityLabel = document.querySelector('#shapeQuality option:checked')?.textContent
     || `${grid}³`;
   shapeState.textContent = `品質已切換，準備重新生成 ${qualityLabel}…`;
@@ -3072,12 +3099,12 @@ async function importShapeFile(file, kind, { rebuilding = false } = {}) {
   // 每個模式各自預設的內建 SVG 展示形狀（見 motions/registry.js 的 svgDemo）。
   // 只在還沒匯入真正檔案時採用；GLB 沒有這個分歧，一律是內建環形。
   const svgVariant = MOTION_SVG_DEMO[P.motion] || 'question';
-  const glbGridSize = SELECTS.shapeQuality.map[P.shapeQuality] || 80;
+  const gridSize = glbGridSize();
   const { builtin, label, status } = describeShapeImport({
     file,
     kind,
     svgVariant,
-    gridSize: glbGridSize,
+    gridSize,
     rebuilding,
     defaultSvgName: DEFAULT_SVG_NAME,
     meltSvgName: MELT_DEFAULT_SVG_NAME,
@@ -3089,13 +3116,15 @@ async function importShapeFile(file, kind, { rebuilding = false } = {}) {
   shapeConverting = true;
   shapeImportingKind = kind;
   shapeImportingVariant = (builtin && kind === 'svg') ? svgVariant : null;
+  shapeImportingGrid = kind === 'gltf' ? gridSize : 0;
   syncLoop();
+  let imported = false;
   try {
     const next = await loadShapeAsset({
       file,
       kind,
       svgVariant,
-      gridSize: glbGridSize,
+      gridSize,
       mobile: mobileRenderQuery.matches,
       svgToField,
       gltfToField,
@@ -3123,6 +3152,7 @@ async function importShapeFile(file, kind, { rebuilding = false } = {}) {
     uniforms.uShapeAtlas.value.copy(next.atlas);
     uniforms.uShapeType.value = kind === 'svg' ? 1 : 2;
     applyStaticMesh(kind === 'svg' ? null : next.mesh);
+    if (kind === 'gltf') staticMeshFailedFile = next.mesh ? undefined : (file ?? null);
     if (old) old.dispose();
     shapeFieldSource = kind;
     // 只有 SVG 內建預設需要記；真正匯入的檔案或 GLB 都跟這個分歧無關，
@@ -3139,7 +3169,12 @@ async function importShapeFile(file, kind, { rebuilding = false } = {}) {
     const topologyNote = kind === 'gltf' && next.oddScanlines > 0
       ? `；已修復 ${next.oddScanlines} 條非封閉掃描線`
       : '';
-    const qualityNote = kind === 'gltf' ? `；${glbGridSize}³` : '';
+    const meshNote = P.motion === 'static' && next.mesh
+      ? `；三角網格 ${next.mesh.triCount.toLocaleString()} 面（影子 ${gridSize}³）`
+      : P.motion === 'static' && kind === 'gltf' && !DIAG.probeStaticNoMesh
+        ? `；模型太大，改用體素近似 ${gridSize}³` : '';
+    const qualityNote = kind !== 'gltf' ? '' : meshNote || `；${gridSize}³`;
+    imported = true;
     const builtinNote = builtin ? '（內建預設，可自行匯入取代）' : '';
     shapeState.textContent = `${kind === 'svg' ? 'SVG' : '3D 模型'} 已就緒：${label}${qualityNote}${topologyNote}${builtinNote}`;
   } catch (error) {
@@ -3151,9 +3186,13 @@ async function importShapeFile(file, kind, { rebuilding = false } = {}) {
       shapeConverting = false;
       shapeImportingKind = null;
       shapeImportingVariant = null;
+      shapeImportingGrid = 0;
       updateUIState();
       syncLoop();
-      if (shapeEnsurePending) {
+      // 剛發現這個檔案的網格建不出來時，要照使用者選的品質再烘一次（見
+      // glbGridSize）；ensureShapeForCurrentSource 自己會比對解析度。失敗的匯入
+      // 不補做，否則同一個壞檔案會一直重試。
+      if (shapeEnsurePending || imported) {
         shapeEnsurePending = false;
         ensureShapeForCurrentSource();
       }
@@ -3194,7 +3233,11 @@ function ensureShapeForCurrentSource() {
   const currentVariant = converting ? shapeImportingVariant : builtinSvgVariant;
   const sourceChanged = currentKind !== P.shapeSource;
   const variantChanged = usingBuiltinSvg && currentVariant !== desiredSvgVariant;
-  if (!sourceChanged && !variantChanged) return;
+  // 進出靜態模式時 GLB 的解析度會變（見 glbGridSize）：靜態用 48³ 烘的那份拿去
+  // 給匯聚、融化用會整個糊掉，反過來則是白烘了一份高解析度。
+  const currentGrid = converting ? shapeImportingGrid : shapeField?.grid;
+  const gridChanged = P.shapeSource === 'gltf' && currentGrid !== glbGridSize();
+  if (!sourceChanged && !variantChanged && !gridChanged) return;
   // 烘焙中不併行開第二份：兩者都是幾秒的 CPU 工作，同時跑只會互相拖慢。
   // 改成記下待辦，等當前這份收工後在 finally 裡補做，否則在烘焙途中切換來源
   // 會被整個吞掉 —— 畫面停在上一個來源的距離場，且沒有任何東西會再觸發。
@@ -3564,9 +3607,15 @@ function frame(now) {
   if (DIAG_TIME !== null) simT = DIAG_TIME;
   updateDropUniforms(simT);
 
-  if (!dragging) {
+  // 放開手之後的慣性滑行。這段也要寫回滑桿：鏡頭角度、方位盤（盤面跟著鏡頭轉）
+  // 和自動保存都讀滑桿，只改 rot 的話它們會停在放手那一刻。水平角跟拖曳一樣限在
+  // ±180°，滑桿的範圍也是這樣。
+  if (!dragging && (vel.x !== 0 || vel.y !== 0)) {
     vel.x *= 0.94; vel.y *= 0.94;
-    rot.x += vel.x; rot.y += vel.y;
+    if (Math.abs(vel.x) < 1e-5 && Math.abs(vel.y) < 1e-5) { vel.x = 0; vel.y = 0; }
+    rot.x = Math.max(-1.2, Math.min(1.2, rot.x + vel.x));
+    rot.y = Math.max(-Math.PI, Math.min(Math.PI, rot.y + vel.y));
+    syncCameraRotationControls();
   }
   rot.x = Math.max(-1.2, Math.min(1.2, rot.x));
 
