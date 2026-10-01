@@ -132,6 +132,10 @@ const P = { ...DEFAULTS, ...MOTION_TEXT_DEFAULTS, ...SELECT_DEFAULTS, ...TOGGLE_
 // 認不得的值一律當作沒帶——網址是使用者能亂改的東西，不該讓它把 P.motion 寫成
 // 一個下拉選單裡不存在的字串。
 const LAUNCH_MOTION = MOTION_KEYS.includes(LAUNCH_MODE) ? LAUNCH_MODE : null;
+// 自動保存按模組分格：共用一格的話，在一個分頁調過靜態，另一個分頁開融化就會
+// 把靜態的鏡頭、材質整份還原過去。沒帶 ?mode= 的頁面沿用舊的 key。
+const LEGACY_AUTOSAVE_KEY = 'vfx:prism-drops:last';
+const AUTOSAVE_KEY = LAUNCH_MOTION ? `vfx:prism-drops:${LAUNCH_MOTION}:last` : LEGACY_AUTOSAVE_KEY;
 const extendedMotions = createExtendedMotionRuntime(P);
 
 // 材質目前統一為通用玻璃。保留單一 profile，供 HDRI 匯入與重設共用。
@@ -2672,6 +2676,22 @@ function sampleRenderQuality(now) {
 }
 
 /* ===== 拖曳旋轉 ===== */
+// 把 rot 寫回鏡頭角度的兩根滑桿。滑桿的 input 會由 panel-bindings 把 rot 設回
+// 「四捨五入到 0.1° 的值」，所以派發完要把精確值放回去 —— 不然慣性滑行到最後
+// 每格只轉不到半格，會一直被捨回原位，看起來像是突然停住。
+function syncCameraRotationControls() {
+  const exact = { x: rot.x, y: rot.y };
+  for (const [id, value] of [['cameraRotationX', exact.x], ['cameraRotationY', exact.y]]) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const text = (value * 180 / Math.PI).toFixed(1);
+    if (el.value === text) continue;
+    el.value = text;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  rot.x = exact.x; rot.y = exact.y;
+}
+
 function bindPointer() {
   // 拖曳旋轉的互動標記只掛在畫布上：拖曳中本來就不節流，這裡真正的目的是讓
   // 放開手之後有一段緩衝——慣性旋轉還會滑行一小段，那段需要維持流暢。
@@ -2694,10 +2714,7 @@ function bindPointer() {
     lastX = e.clientX; lastY = e.clientY;
     rot.y = Math.max(-Math.PI, Math.min(Math.PI, rot.y + dx * 0.006));
     rot.x = Math.max(-1.2, Math.min(1.2, rot.x + dy * 0.006));
-    const rotationX = document.getElementById('cameraRotationX');
-    const rotationY = document.getElementById('cameraRotationY');
-    if (rotationX) { rotationX.value = (rot.x * 180 / Math.PI).toFixed(1); rotationX.dispatchEvent(new Event('input', { bubbles: true })); }
-    if (rotationY) { rotationY.value = (rot.y * 180 / Math.PI).toFixed(1); rotationY.dispatchEvent(new Event('input', { bubbles: true })); }
+    syncCameraRotationControls();
     vel.y = dx * 0.006; vel.x = dy * 0.006;
   });
   const end = e => {
@@ -2875,7 +2892,11 @@ document.getElementById('resetBtn').addEventListener('click', () => {
 // 手動匯出／匯入的 JSON 不受影響，只清除 PresetIO 的自動保存快照。
 const homeButton = document.getElementById('homeBtn');
 const clearAutoSavedPreset = () => {
-  try { localStorage.removeItem('vfx:prism-drops:last'); } catch (_) {}
+  // 舊版所有模組共用 vfx:prism-drops:last，一併清掉，免得它在沒帶 ?mode= 時被還原。
+  try {
+    localStorage.removeItem(AUTOSAVE_KEY);
+    localStorage.removeItem(LEGACY_AUTOSAVE_KEY);
+  } catch (_) {}
 };
 homeButton?.addEventListener('click', clearAutoSavedPreset);
 window.addEventListener('pageshow', event => {
@@ -3720,6 +3741,7 @@ if (LAUNCH_MOTION) {
 if (!PREVIEW && window.PresetIO) {
   const presetIO = window.PresetIO.init({
     effect: 'prism-drops',
+    storageKey: AUTOSAVE_KEY,
     panel: '#panel',
     mount: '#presetIO',
     // 模式類控件必須先套用：切換動態模式會連帶覆寫水滴數量，

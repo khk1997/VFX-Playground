@@ -1016,8 +1016,11 @@ vec3 staticGlassShade(vec3 p, vec3 N, vec3 rd, vec3 refractedBg,
   // 關掉後處理時自己收高光。棚燈卡是背景紙的好幾倍亮，原本只把「超過 1」的部分
   // 除回去，1 到 6 全部落在 0.86–1.0 之間，正對著燈的那一面就剪成一整片純白。
   //
-  // 這裡改成一條有肩部的曲線：膝點以下原樣不動，以上用指數收斂到 1，但尾巴拉得
-  // 夠長，燈卡的衰減在玻璃上才看得出漸層。膝點跟著背景紙走 —— 深底的紙很暗，
+  // 這裡改成一條有肩部的曲線：膝點以下原樣不動，以上收斂到 1，但尾巴拉得夠長，
+  // 燈卡的衰減在玻璃上才看得出漸層。用 Khronos PBR Neutral 的有理式
+  // （post.js 的 tonePBRNeutral 同一條）：膝點上的斜率正好是 1，跟膝點以下接得
+  // 平順。之前的 1 - exp(-x / 4room) 在膝點斜率只剩 1/4，亮度往上爬時會在那一圈
+  // 突然折平，玻璃上看得到一道等亮度的折線。膝點跟著背景紙走 —— 深底的紙很暗，
   // 膝點可以壓到 0.6，給高光留很大的空間；淺底的紙本身就接近 1，膝點抬到紙的
   // 上面，透射過來的背景紙才不會被壓灰、看起來比旁邊的紙暗一截。
   //
@@ -1028,7 +1031,7 @@ vec3 staticGlassShade(vec3 p, vec3 N, vec3 rd, vec3 refractedBg,
   float peak = max(lit.r, max(lit.g, lit.b));
   if (peak <= knee) return lit;
   float room = 1.0 - knee;
-  float mapped = knee + room * (1.0 - exp(-(peak - knee) / (room * 4.0)));
+  float mapped = 1.0 - room * room / (peak - knee + room);
   return lit * (mapped / peak);
 }
 

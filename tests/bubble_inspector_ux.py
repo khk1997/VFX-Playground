@@ -299,7 +299,7 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     mirror.evaluate("el => { el.value = '0.9'; el.dispatchEvent(new Event('input', { bubbles: true })); }")
     assert page.locator("#studioCardStrength").input_value() == "0.9"
     page.wait_for_function(
-        "(JSON.parse(localStorage.getItem('vfx:prism-drops:last') || '{}').values || {}).studioCardStrength === '0.9'"
+        "(JSON.parse(localStorage.getItem('vfx:prism-drops:static:last') || '{}').values || {}).studioCardStrength === '0.9'"
     )
     # 重設鈕此刻收在尚未展開的工具區裡，直接派發點擊。
     page.locator("#resetBtn").evaluate("el => el.click()")

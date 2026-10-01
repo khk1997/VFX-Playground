@@ -31,12 +31,24 @@ function readControl(id) {
 // 滑桿只停在 step 的整數倍上，而預設值不保證落在格子上：邊緣光的淺底預設是
 // 0.12，滑桿的間距是 0.05，瀏覽器會把它吸到 0.1。差這半格不是使用者調的，
 // 照嚴格相等去比會讓一堆參數一進頁面就掛上「已調整」。
+//
+// 所以先把預設值照瀏覽器的規則吸到格子上再比。只給半格的容差不夠：預設剛好落在
+// 兩格正中間時（補光強度 0.45、間距 0.02 → 0.46），差值是 0.010000000000000009，
+// 浮點誤差讓它剛好超過半格。
 function differsFromDefault(control, baseline) {
   const current = control.type === 'checkbox' ? control.checked : control.value;
   if (typeof baseline !== 'number') return current !== baseline;
   const step = Number.parseFloat(control.step);
-  const tolerance = Number.isFinite(step) && step > 0 ? step / 2 : 1e-9;
-  return Math.abs(Number(current) - baseline) > tolerance;
+  if (!(Number.isFinite(step) && step > 0)) return Math.abs(Number(current) - baseline) > 1e-9;
+  const min = Number.parseFloat(control.min);
+  const base = Number.isFinite(min) ? min : 0;
+  const max = Number.parseFloat(control.max);
+  // 正中間時瀏覽器取大的那格；(0.45 - 0) / 0.02 算出來是 22.499999999999996，
+  // 補一點點才會跟瀏覽器一樣進位。
+  let snapped = base + Math.round((baseline - base) / step + 1e-7) * step;
+  if (Number.isFinite(max)) snapped = Math.min(snapped, max);
+  snapped = Math.max(snapped, base);
+  return Math.abs(Number(current) - snapped) > step * 1e-3;
 }
 function title(group, text) {
   group.querySelector(':scope > summary h3, :scope > summary h4').textContent = text;
@@ -1154,6 +1166,7 @@ function buildLightDial() {
     cam: Number($('cameraRotationY').value),
   });
   const snap = value => Math.round(value * 2) / 2;
+  const clampElevation = value => Math.max(0, Math.min(89, value));
   function setFromPointer(event) {
     const box = canvas.getBoundingClientRect();
     const dx = event.clientX - box.left - box.width / 2;
@@ -1161,7 +1174,7 @@ function buildLightDial() {
     const r = Math.min(1, Math.hypot(dx, dy) / (box.width / 2 - 10));
     const angle = Math.atan2(dx, dy) * 180 / Math.PI;
     writeControl('lightKeyAzimuth', snap(wrap(angle + read().cam)));
-    writeControl('lightKeyElevation', snap(Math.max(0, Math.min(89, 90 * (1 - r)))));
+    writeControl('lightKeyElevation', snap(clampElevation(90 * (1 - r))));
   }
   canvas.addEventListener('pointerdown', event => {
     if (event.button !== 0) return;
@@ -1176,8 +1189,10 @@ function buildLightDial() {
     const step = event.shiftKey ? 15 : 5;
     if (event.key === 'ArrowLeft') writeControl('lightKeyAzimuth', wrap(az - step));
     else if (event.key === 'ArrowRight') writeControl('lightKeyAzimuth', wrap(az + step));
-    else if (event.key === 'ArrowUp') writeControl('lightKeyElevation', Math.min(89, el + step));
-    else if (event.key === 'ArrowDown') writeControl('lightKeyElevation', Math.max(-89, el - step));
+    // 高度跟拖曳一樣只走 0–89：盤面畫不出地平線以下，方向鍵壓到負值時光點停在
+    // 外圈不動，讀數卻一直往下掉。滑桿本身仍可以設到負的。
+    else if (event.key === 'ArrowUp') writeControl('lightKeyElevation', clampElevation(el + step));
+    else if (event.key === 'ArrowDown') writeControl('lightKeyElevation', clampElevation(el - step));
     else return;
     event.preventDefault();
   });
