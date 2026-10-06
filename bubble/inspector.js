@@ -1413,6 +1413,10 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     title($('bloomGroup'), '光暈');
     relabel('bloomIntensity', '光暈強度');
     relabel('bloomRadius', '光暈範圍');
+    // 兩根都是 0–1，拉滿對應強度 0.07、範圍 0.6（換算在 bubble.js 的
+    // bloomIntensityFor／bloomRadiusFor）。
+    $('bloomIntensity').max = '1';
+    $('bloomRadius').max = '1';
     for (const key of ['bloomThreshold', 'bloomKnee', 'bloomClamp', 'bloomTint']) {
       const row = rowOf(key);
       if (row) { row.hidden = true; row.classList.add('studioRetiredRow'); }

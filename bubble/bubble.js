@@ -1,6 +1,6 @@
 'use strict';
 import * as THREE from 'three';
-import { buildInspector } from './inspector.js?v=bloom-5';
+import { buildInspector } from './inspector.js?v=bloom-scale-1';
 import { createAdaptiveQuality, QUALITY_TIER_NAMES } from './adaptive-quality.js?v=2';
 import { createGpuProfiler } from './gpu-profiler.js?v=1';
 let inspector = null;
@@ -3445,6 +3445,22 @@ function studioBloomSettings(transparent) {
   };
 }
 
+// 新玻璃模型的光暈滑桿是 0–1，拉滿對應強度 0.07、範圍 0.6。棚拍玻璃的燈箱反射
+// 遠超過白，升採鏈的權重又是一層一層連乘，舊的 0–3／0–1 刻度後半段整片都是爆白，
+// 能用的只有最前面一小段；換算之後整根滑桿都落在好看的區間。
+// 去背輸出照同一個換算（studioBloomSettings 在去背時是 null，所以這裡另外判斷）。
+// 安裝中與舊路徑維持原本的刻度。
+const STUDIO_BLOOM_INTENSITY_MAX = 0.07;
+const STUDIO_BLOOM_RADIUS_MAX = 0.6;
+function bloomIntensityFor(value) {
+  if (!usesStudioGlass(P.motion)) return value;
+  return Math.min(1, Math.max(0, value)) * STUDIO_BLOOM_INTENSITY_MAX;
+}
+function bloomRadiusFor(value) {
+  if (!usesStudioGlass(P.motion)) return value;
+  return Math.min(1, Math.max(0, value)) * STUDIO_BLOOM_RADIUS_MAX;
+}
+
 function postActive() {
   return P.bloomEnabled || P.streaksEnabled
     || P.postExposure !== 1 || P.postToneMap !== 'none' || P.highlightGain !== 1
@@ -3486,8 +3502,8 @@ function renderComposite(target = null, superSample = 1) {
     // 方向都不一樣，沒有單一代表值，給 0 維持原本的絕對門檻。
     // 去背輸出的背景是全透明，同樣是 0。新玻璃模型的門檻已經把紙算進去了。
     backdrop: studio ? 0 : backdropLevel(transparent),
-    intensity: P.bloomEnabled ? P.bloomIntensity : 0,
-    radius: P.bloomRadius,
+    intensity: P.bloomEnabled ? bloomIntensityFor(P.bloomIntensity) : 0,
+    radius: bloomRadiusFor(P.bloomRadius),
     exposure: P.postExposure,
     toneMap: SELECTS.postToneMap.map[P.postToneMap],
     streaks: P.streaksEnabled,
