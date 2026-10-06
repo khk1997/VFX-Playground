@@ -85,6 +85,21 @@ const TYPOGRAPHY_KEYS = [
   'typeCaretWidth', 'typeCaretDepth',
 ];
 
+// 單頁面板「燈光」區：三盞燈各自的方向、高度、大小、強度，兩張黑卡的方向、高度、
+// 大小，最後是全部燈共用的設定。
+const LIGHT_ENTRIES = [
+  ['lightKeyAzimuth', '主光 方向'], ['lightKeyElevation', '主光 高度'],
+  ['lightKeySize', '主光 大小'], ['lightKeyPower', '主光 強度'],
+  ['lightFillAzimuth', '補光 方向'], ['lightFillElevation', '補光 高度'],
+  ['lightFillSize', '補光 大小'], ['lightFillPower', '補光 強度'],
+  ['lightRimAzimuth', '邊光 方向'], ['lightRimElevation', '邊光 高度'],
+  ['lightRimSize', '邊光 大小'], ['lightRimPower', '邊光 強度'],
+  ['flagAAzimuth', '黑卡A 方向'], ['flagAElevation', '黑卡A 高度'], ['flagASize', '黑卡A 大小'],
+  ['flagBAzimuth', '黑卡B 方向'], ['flagBElevation', '黑卡B 高度'], ['flagBSize', '黑卡B 大小'],
+  ['studioCardGain', '燈的亮度'], ['studioCardFalloff', '燈的衰減'],
+  ['studioCardEdge', '燈的銳利度'], ['studioAmbient', '環境亮度'],
+];
+
 // Move the original controls, preserving IDs, handlers, gates and preset state.
 export function buildInspector({ defaults, modeDefault = () => undefined, launchMotion = null }) {
   const panel = $('panel');
@@ -569,6 +584,11 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       // [role="slider"]：自己畫的控制項（例如燈光方向盤是一張 canvas）也算。
       // 靜態模組的燈光區只剩方向盤時，少了這一條整塊會被當成空區塊收掉。
       if (child.matches('input, select, textarea, button, [role="slider"]')) return true;
+      // 標題上有開關的子區塊（例如光暈的總開關）在 pruneEmptySections 裡會留成一列
+      // 開關，所以對外層來說它就是一個看得到的控制項 —— 不算的話，光暈關著時整個
+      // 「後期」區會被當成空的收掉，開關也跟著不見。
+      if (child.tagName === 'DETAILS'
+        && child.querySelector(':scope > summary input, :scope > summary button')) return true;
       if (hasVisibleControl(child)) return true;
     }
     return false;
@@ -1003,6 +1023,15 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     ]);
     rowOf('ior').after(buildIorPresets());
     rowOf('absorbGradient').after(buildGlassTint());
+    // 玻璃的細項：調了看得出差別，但不是每次都要動，預設收起來放在玻璃區最底下。
+    const glassDetail = section('玻璃細調', null, false);
+    for (const [key, label] of [
+      ['transmission', '透射率'], ['fresnel', '邊緣光'], ['absorbGradientSoftness', '漸層柔和度'],
+    ]) {
+      relabel(key, label);
+      glassDetail.append(rowOf(key));
+    }
+    glassBlock.append(glassDetail);
     // 燈光整組（方向盤、燈光強度、明暗對比）是最常一邊看畫面一邊調的，拉到
     // 畫面右下角常駐（見 buildQuickDock），面板裡不再有燈光區。
     staticDial = buildLightDial();
@@ -1047,6 +1076,9 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       ['studioShadowStrength', '影子深度'],
       ['studioCaustic', '透光光斑'],
     ]);
+    // 每一盞燈與黑卡的位置、大小、強度，以及全部燈共用的設定。常用的那三樣
+    // （主光方向、燈光強度、明暗對比）在右下的「背景與燈光」卡片上。
+    group('燈光', LIGHT_ENTRIES, false);
     // 會動的模式另有鏡頭的環繞與推軌；靜態是一張靜止的展示照，不給。
     const cameraBlock = group('鏡頭', [
       ['cameraFov', '視角'],
@@ -1065,21 +1097,8 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     ]);
     backgroundBlock.classList.add('studioDesktopMirrored');
 
-    const advanced = group('進階', [
-      ['lightKeyAzimuth', '主光 方向'], ['lightKeyElevation', '主光 高度'],
-      ['lightKeySize', '主光 大小'], ['lightKeyPower', '主光 強度'],
-      ['lightFillAzimuth', '補光 方向'], ['lightFillElevation', '補光 高度'],
-      ['lightFillSize', '補光 大小'], ['lightFillPower', '補光 強度'],
-      ['lightRimAzimuth', '邊光 方向'], ['lightRimElevation', '邊光 高度'],
-      ['lightRimSize', '邊光 大小'], ['lightRimPower', '邊光 強度'],
-      ['flagAAzimuth', '黑卡A 方向'], ['flagAElevation', '黑卡A 高度'], ['flagASize', '黑卡A 大小'],
-      ['flagBAzimuth', '黑卡B 方向'], ['flagBElevation', '黑卡B 高度'], ['flagBSize', '黑卡B 大小'],
-      ['transmission', '透射率'], ['fresnel', '邊緣光'],
-      ['absorbGradientSoftness', '漸層柔和度'],
-      ['studioCardGain', '燈的亮度'], ['studioCardFalloff', '燈的衰減'], ['studioCardEdge', '燈的銳利度'], ['studioAmbient', '環境亮度'],
-      ['spectralSamples', '光譜取樣'], ['antialiasLevel', '抗鋸齒'],
-    ], false);
-    advanced.append($('bloomGroup'));
+    group('畫質', [['spectralSamples', '光譜取樣'], ['antialiasLevel', '抗鋸齒']], false);
+    group('後期', [], false).append($('bloomGroup'));
 
     // 存檔、提示與整個模組的重設。
     $('resetBtn').textContent = '全部重設';

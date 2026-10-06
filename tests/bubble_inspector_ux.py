@@ -263,7 +263,8 @@ def check_static(browser, base_url: str) -> dict[str, object]:
              .map(node => node.textContent)"""
     )
     # 風格已經拿掉；造型那一區還在面板裡（手機用），桌面上藏起來、改由右側卡片操作。
-    assert sections[:5] == ["造型", "玻璃", "地板", "鏡頭", "背景"], sections
+    # 舊的「進階」拆成燈光、畫質、後期；透射率與邊緣光收進玻璃區的「玻璃細調」。
+    assert sections == ["造型", "玻璃", "地板", "燈光", "鏡頭", "背景", "畫質", "後期", "更多與管理"], sections
     # 用 wait_for 而不是 is_visible：開機遮罩撤掉之後面板還會做最後一次 refresh
     # （收合空區塊、套 gate），is_visible 不等待，偶爾會剛好量到那一瞬間。
     for key in ("ior", "dispersionScale", "studioShadowStrength", "cameraFov"):
@@ -420,7 +421,7 @@ def check_studio_motion(browser, base_url: str) -> dict[str, object]:
             .map(node => node.querySelector(':scope > summary h3').textContent)"""
     )
     # 造型在右側卡片（桌面）；毛細波沒有水滴，「水滴」整區要被閘門收掉。
-    for name in ("玻璃", "動態", "地板", "鏡頭", "進階"):
+    for name in ("玻璃", "動態", "地板", "燈光", "鏡頭", "畫質", "後期"):
         assert name in visible_sections, f"missing studio section {name}: {visible_sections}"
     assert "水滴" not in visible_sections, visible_sections
     motion = page.locator("#inspectorPage-studio > details", has_text="動態")
