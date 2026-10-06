@@ -69,7 +69,8 @@ def check_desktop(browser, base_url: str) -> dict[str, object]:
     header_height = page.locator(".inspectorHeader").bounding_box()["height"]
     assert header_height < 210, f"desktop inspector header is still too tall: {header_height}"
     assert page.locator(".inspectorContext").count() == 1
-    assert page.locator(".inspectorUtilities #presetIO").count() == 1
+    # 參數檔在桌面上搬進右上角的 ⋯；真的重設鈕仍在面板裡（⋯ 的「全部重設」按的就是它）。
+    assert page.locator("#moreMenu #presetIO").count() == 1
     assert page.locator(".inspectorUtilities #resetBtn").count() == 1
     assert panel.get_attribute("data-control-depth") == "concise"
     assert page.locator("#inspectorPage-look details:has(#postExposure)").is_hidden()
@@ -264,24 +265,40 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     )
     # 風格已經拿掉；造型那一區還在面板裡（手機用），桌面上藏起來、改由右側卡片操作。
     # 舊的「進階」拆成燈光與後期；透射率回到玻璃區、邊緣光與光譜取樣不開給使用者，
-    # 抗鋸齒在右上角的 AA。
+    # 抗鋸齒是右上角的「畫質」。「更多與管理」在桌面上搬進右上角的 ⋯（面板裡那一區
+    # 只留給手機）。
     assert sections == ["造型", "玻璃", "地板", "燈光", "鏡頭", "背景", "後期", "更多與管理"], sections
+    assert page.locator("#panel .inspectorTopBarMirrored").is_hidden()
     assert page.locator("#inspectorPage-studio #fresnel").count() == 0
     assert page.locator("#inspectorPage-studio #spectralSamples").count() == 0
-    # 右上角由右而左：面板、輸出、AA；靜態沒有播放鍵。右側卡片欄對齊 AA 的左緣。
-    top = page.evaluate("""() => Object.fromEntries(['aaBtn', 'exportBtn', 'toggleBtn', 'playCtl'].map(id => {
+    # 右上角由右而左：面板、⋯、輸出、畫質；靜態沒有播放鍵。
+    top = page.evaluate("""() => Object.fromEntries(['qualityBtn', 'exportBtn', 'moreBtn', 'toggleBtn', 'playCtl'].map(id => {
         const el = document.getElementById(id);
         const r = el.getBoundingClientRect();
         return [id, getComputedStyle(el).display === 'none' ? null : { left: r.left, right: r.right }];
     }))""")
     assert top["playCtl"] is None, "the static module should have no play button"
-    assert top["aaBtn"]["right"] < top["exportBtn"]["left"] < top["exportBtn"]["right"] < top["toggleBtn"]["left"], top
-    page.locator("#aaBtn").click()
-    page.locator("#aaMenu button", has_text="最高").click()
+    assert (top["qualityBtn"]["right"] < top["exportBtn"]["left"] < top["exportBtn"]["right"]
+            < top["moreBtn"]["left"] < top["moreBtn"]["right"] < top["toggleBtn"]["left"]), top
+    page.locator("#qualityBtn").click()
+    page.locator("#qualityMenu button", has_text="最高").click()
     assert page.locator("#antialiasLevel").input_value() == "ultra"
-    assert page.locator("#aaMenu").is_hidden()
-    page.locator("#aaBtn").click()
-    page.locator("#aaMenu button", has_text="中").click()
+    assert page.locator("#qualityMenu").is_hidden()
+    page.locator("#qualityBtn").click()
+    page.locator("#qualityMenu button", has_text="中").click()
+    # ⋯：參數檔整個搬進選單；全部重設要按兩次（第一次只換成確認）。用 JS 點：無頭
+    # 瀏覽器是軟體算繪，Playwright 等「兩幀不動」就會超過確認的那幾秒。
+    page.locator("#moreBtn").click()
+    assert page.locator("#moreMenu #presetIO").count() == 1
+    assert page.locator("#moreMenu button", has_text="複製參數").is_visible()
+    page.locator("#absorb").evaluate("el => { el.value = '7'; el.dispatchEvent(new Event('input', { bubbles: true })); }")
+    danger = page.locator("#moreMenu .topMenuDanger")
+    danger.evaluate("el => el.click()")
+    assert page.locator("#absorb").input_value() == "7", "the first click must only ask for confirmation"
+    assert danger.text_content() == "再按一次確認重設"
+    danger.evaluate("el => el.click()")
+    assert page.locator("#absorb").input_value() == "4", "the confirmed reset did not run"
+    assert page.locator("#moreMenu").is_hidden()
     # 用 wait_for 而不是 is_visible：開機遮罩撤掉之後面板還會做最後一次 refresh
     # （收合空區塊、套 gate），is_visible 不等待，偶爾會剛好量到那一瞬間。
     for key in ("ior", "dispersionScale", "studioShadowStrength", "cameraFov"):
@@ -338,7 +355,7 @@ def check_static(browser, base_url: str) -> dict[str, object]:
 
     assert page.locator("[data-static-look]").count() == 0, "the style presets should be gone"
 
-    # 右側欄：左緣對齊 AA、右緣對齊「面板」；造型卡在燈光卡上面。
+    # 右側欄：左緣對齊「輸出」、右緣對齊「面板」（中間是 ⋯）；造型卡在燈光卡上面。
     shape_card = page.locator("#studioShapeCard")
     assert shape_card.is_visible(), "the shape card is missing"
     # 造型與背景兩區在桌面上都搬到右側卡片，面板裡那兩區藏起來。
@@ -347,11 +364,11 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     assert mirrored.count() == 3, mirrored.count()
     assert all(mirrored.nth(i).is_hidden() for i in range(3)), "the mirrored panel sections should be hidden on desktop"
     geometry = page.evaluate(
-        """() => Object.fromEntries(['aaBtn', 'toggleBtn', 'studioShapeCard', 'studioQuickDock']
+        """() => Object.fromEntries(['exportBtn', 'toggleBtn', 'studioShapeCard', 'studioQuickDock']
              .map(id => [id, document.getElementById(id).getBoundingClientRect().toJSON()]))"""
     )
     for card in ("studioShapeCard", "studioQuickDock"):
-        assert abs(geometry[card]["left"] - geometry["aaBtn"]["left"]) <= 1, (card, geometry)
+        assert abs(geometry[card]["left"] - geometry["exportBtn"]["left"]) <= 1, (card, geometry)
         assert abs(geometry[card]["right"] - geometry["toggleBtn"]["right"]) <= 1, (card, geometry)
     assert geometry["studioShapeCard"]["bottom"] < geometry["studioQuickDock"]["top"], geometry
     light_top = geometry["studioQuickDock"]["top"]
@@ -405,7 +422,7 @@ def check_static(browser, base_url: str) -> dict[str, object]:
 
     # 參數檔記著別的模式也不能把模組切走，而且檔案裡「按模式記憶」的值
     # （cameraFov）要落在這個模組，不能在切走再切回來時被丟掉。
-    page.locator(".inspectorUtilities > summary").click()
+    page.locator("#moreBtn").click()
     page.locator("#presetIO button", has_text="貼上參數").click()
     page.locator("#presetIO textarea").fill(
         '{"effect":"prism-drops","values":{"motion":"formation",'
@@ -419,7 +436,8 @@ def check_static(browser, base_url: str) -> dict[str, object]:
         + page.locator("#cameraFov").input_value()
     )
     assert "mode=static" in page.url, f"the preset rewrote the module URL: {page.url}"
-    page.locator("#resetBtn").click()
+    page.keyboard.press("Escape")
+    page.locator("#resetBtn").evaluate("el => el.click()")
     assert not errors, f"static inspector page errors: {errors}"
     context.close()
     return {"singlePage": True, "modeLocked": True}
@@ -457,9 +475,9 @@ def check_studio_motion(browser, base_url: str) -> dict[str, object]:
     assert not any("形狀" in text for text in labels), labels
     assert any("檔案類型" in text for text in labels), labels
     assert page.locator("#cameraFov").input_value() == "28"
-    # 會動的模組：播放鍵在 AA 左邊（跟輸出換了位置）。
+    # 會動的模組：播放鍵在畫質左邊（跟輸出換了位置）。
     play = page.locator("#playCtl").bounding_box()
-    aa = page.locator("#aaBtn").bounding_box()
+    aa = page.locator("#qualityBtn").bounding_box()
     export = page.locator("#exportBtn").bounding_box()
     assert play["x"] + play["width"] < aa["x"] < export["x"], (play, aa, export)
     # 「面板」收起時右側卡片要一起收（往右滑出、點不到），打開時一起回來。

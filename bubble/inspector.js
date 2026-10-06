@@ -269,6 +269,8 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
   $('resetBtn').textContent = '重設目前模式';
   const utilities = section('更多與管理', null, false);
   utilities.classList.add('inspectorUtilities');
+  // 桌面上這些在右上角的 ⋯ 選單裡（見 buildTopBar），面板這一區只留給手機。
+  utilities.classList.add('inspectorTopBarMirrored');
   utilities.append(share, tips, reset);
   panes.scene.append(utilities);
 
@@ -728,8 +730,8 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
   let iorPresetSync = null;
   let glassTintSync = null;
   let antialiasSync = null;
+  let alignSideStack = null;
   built = true;
-  buildTopBar();
   if (usesStudioGlass(launchMotion)) {
     buildStudioLayout();
     // 單頁面板沒有「常用／完整」之分；不寫回 localStorage，其餘模式的深度照舊。
@@ -743,6 +745,9 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     setControlDepth(controlDepth, false);
     selectPage(initialPage);
   }
+  // 排在面板之後：面板會把參數檔（#presetIO）搬到它在頁面上的位置，右上角的 ⋯
+  // 要記住的是那個位置，手機寬度時才搬得回去。
+  buildTopBar();
   refresh();
   return { refresh, setQualityStatus };
 
@@ -923,72 +928,146 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     return { root, sync };
   }
 
-  // 右上角那一組（桌面）：由右而左「面板、輸出、AA、播放」。
+  // 右上角那一組（桌面）：由右而左「面板、⋯、輸出、畫質、播放」。
   //
-  // - AA 是抗鋸齒（#antialiasLevel，超取樣倍率）：小按鈕，點開是四個等級的選單。
-  //   面板裡不再有「畫質」區；光譜取樣不開給使用者。
+  // - 畫質：抗鋸齒（#antialiasLevel，超取樣倍率），點開是四個等級的選單。面板裡
+  //   不再有「畫質」區；光譜取樣不開給使用者。
+  // - ⋯：參數檔（複製、貼上、下載、開啟）、操作提示、全部重設 —— 偶爾才用、跟畫面
+  //   本身無關的操作。參數檔就是原本面板裡那個 #presetIO，整個搬進選單，行為不變。
+  //   面板底部的「更多與管理」在桌面上藏起來；手機沒有這一組按鈕，留在抽屜裡。
   // - 靜態模組是一張靜止的展示照，沒有播放鍵（body[data-still-module]，見 CSS）。
   // - 位置照各按鈕的實際寬度排（layoutTopBar），不寫死 right：字型、語系、有沒有
   //   播放鍵都會改變寬度。共用的 switch2-theme.css 給的是另一種排法（其他頁面還在用），
-  //   這裡只在液態玻璃頁面覆寫。手機的按鈕在底部導覽列裡，不走這一套。
+  //   這裡只在液態玻璃頁面覆寫。
   function buildTopBar() {
     if (launchMotion === 'static') document.body.dataset.stillModule = '';
-    const source = $('antialiasLevel');
-    const aa = button('AA', () => setMenuOpen(menu.hidden));
-    aa.id = 'aaBtn';
-    aa.type = 'button';
-    aa.setAttribute('aria-haspopup', 'menu');
-    aa.setAttribute('aria-controls', 'aaMenu');
-    aa.setAttribute('aria-expanded', 'false');
-    const menu = element('div', 'aaMenu');
-    menu.id = 'aaMenu';
-    menu.setAttribute('role', 'menu');
-    menu.hidden = true;
-    menu.append(element('div', 'aaMenuTitle', '抗鋸齒'));
-    const items = [...source.options].map(option => {
-      const item = button(option.textContent.replace(/（.*?）/, ''), () => {
-        writeControl('antialiasLevel', option.value);
-        setMenuOpen(false);
-        refresh();
-      });
-      item.setAttribute('role', 'menuitemradio');
-      item.dataset.value = option.value;
-      menu.append(item);
-      return item;
-    });
-    menu.append(element('p', 'aaMenuNote', '越高邊緣越平滑，但越吃效能。'));
-    $('exportBtn').before(aa);
-    document.body.append(menu);
-    function setMenuOpen(open) {
-      menu.hidden = !open;
-      aa.setAttribute('aria-expanded', String(open));
-      if (!open) return;
-      const box = aa.getBoundingClientRect();
-      menu.style.top = `${Math.round(box.bottom + 8)}px`;
-      menu.style.right = `${Math.round(window.innerWidth - box.right)}px`;
+    const desktop = window.matchMedia('(min-width: 761px)');
+    const menus = [];
+    // 右上角的下拉選單：按鈕開關、Esc 或點到外面就關，一次只開一個。
+    function topMenu(id, label, title, build) {
+      const trigger = button(label, () => setOpen(panel.hidden));
+      trigger.id = `${id}Btn`;
+      trigger.classList.add('topBarButton');
+      trigger.setAttribute('aria-haspopup', 'menu');
+      trigger.setAttribute('aria-controls', `${id}Menu`);
+      trigger.setAttribute('aria-expanded', 'false');
+      const panel = element('div', 'topMenu');
+      panel.id = `${id}Menu`;
+      panel.setAttribute('role', 'menu');
+      panel.hidden = true;
+      panel.append(element('div', 'topMenuTitle', title));
+      document.body.append(panel);
+      const menu = { trigger, panel, setOpen, onOpen: null };
+      function setOpen(open) {
+        if (open) for (const other of menus) if (other !== menu) other.setOpen(false);
+        panel.hidden = !open;
+        trigger.setAttribute('aria-expanded', String(open));
+        if (!open) return;
+        const box = trigger.getBoundingClientRect();
+        panel.style.top = `${Math.round(box.bottom + 8)}px`;
+        panel.style.right = `${Math.round(window.innerWidth - box.right)}px`;
+        menu.onOpen?.();
+      }
+      menus.push(menu);
+      build(menu);
+      return menu;
     }
     document.addEventListener('keydown', event => {
-      if (event.key === 'Escape' && !menu.hidden) setMenuOpen(false);
+      if (event.key === 'Escape') for (const menu of menus) menu.setOpen(false);
     });
     document.addEventListener('pointerdown', event => {
-      if (!menu.hidden && !menu.contains(event.target) && !aa.contains(event.target)) setMenuOpen(false);
+      for (const menu of menus) {
+        if (menu.panel.hidden || menu.panel.contains(event.target) || menu.trigger.contains(event.target)) continue;
+        menu.setOpen(false);
+      }
     }, true);
+
+    // 畫質（抗鋸齒）。
+    const source = $('antialiasLevel');
+    let qualityItems = [];
+    const quality = topMenu('quality', '畫質', '畫質（邊緣平滑度）', menu => {
+      qualityItems = [...source.options].map(option => {
+        const item = button(option.textContent.replace(/（.*?）/, ''), () => {
+          writeControl('antialiasLevel', option.value);
+          menu.setOpen(false);
+          refresh();
+        });
+        item.setAttribute('role', 'menuitemradio');
+        item.dataset.value = option.value;
+        menu.panel.append(item);
+        return item;
+      });
+      menu.panel.append(element('p', 'topMenuNote', '越高邊緣越平滑，但越吃效能；畫面不順時往低調。'));
+    });
     antialiasSync = () => {
       const current = source.value;
-      for (const item of items) item.setAttribute('aria-checked', String(item.dataset.value === current));
-      const label = items.find(item => item.dataset.value === current)?.textContent ?? '';
-      aa.title = `抗鋸齒：${label}`;
-      aa.setAttribute('aria-label', `抗鋸齒：${label}`);
+      for (const item of qualityItems) item.setAttribute('aria-checked', String(item.dataset.value === current));
+      const label = qualityItems.find(item => item.dataset.value === current)?.textContent ?? '';
+      quality.trigger.title = `畫質：${label}`;
+      quality.trigger.setAttribute('aria-label', `畫質：${label}`);
     };
     antialiasSync();
 
-    const desktop = window.matchMedia('(min-width: 761px)');
+    // ⋯：參數檔、操作提示、全部重設。
+    const presetIO = $('presetIO');
+    const presetHome = presetIO ? { parent: presetIO.parentNode, next: presetIO.nextSibling } : null;
+    let presetSlot = null;
+    const more = topMenu('more', '⋯', '參數與重設', menu => {
+      menu.trigger.setAttribute('aria-label', '更多：參數檔、操作提示、重設');
+      menu.trigger.title = '參數檔、操作提示、重設';
+      presetSlot = element('div', 'topMenuPresets');
+      const tipsToggle = button('操作提示', () => { tips.hidden = !tips.hidden; });
+      tipsToggle.classList.add('topMenuItem');
+      const tips = element('div', 'topMenuTips');
+      tips.hidden = true;
+      // 「全部重設」要按兩次：第一次只是把按鈕換成確認，幾秒內沒按就還原。
+      const reset = button('全部重設', () => {
+        if (!('armed' in reset.dataset)) {
+          reset.dataset.armed = '';
+          reset.textContent = '再按一次確認重設';
+          clearTimeout(reset.timer);
+          reset.timer = setTimeout(disarm, 5000);
+          return;
+        }
+        disarm();
+        menu.setOpen(false);
+        $('resetBtn').click();
+      });
+      const disarm = () => { delete reset.dataset.armed; reset.textContent = '全部重設'; };
+      reset.classList.add('topMenuItem', 'topMenuDanger');
+      menu.panel.append(presetSlot, element('hr', 'topMenuRule'), tipsToggle, tips,
+        element('hr', 'topMenuRule'), reset);
+      // 操作提示照目前模式顯示：提示文字本身在面板裡，靠閘門分模式，打開時抄一份。
+      menu.onOpen = () => {
+        disarm();
+        tips.hidden = true;
+        tips.replaceChildren(...[...document.querySelectorAll('#panel .hint')]
+          .filter(hint => !hint.closest('.gated-off') && hint.closest('.inspectorUtilities, [data-gate]'))
+          .map(hint => {
+            const copy = element('p', 'topMenuTip');
+            copy.innerHTML = hint.innerHTML;
+            return copy;
+          }));
+      };
+    });
+    // 桌面：參數檔搬進選單；手機：回到面板底部。跨過寬度的時候跟著搬。
+    function placePresets() {
+      if (!presetIO || !presetSlot) return;
+      if (desktop.matches) presetSlot.append(presetIO);
+      else presetHome.parent.insertBefore(presetIO, presetHome.next);
+    }
+    placePresets();
+
+    $('exportBtn').before(quality.trigger);
+    $('exportBtn').after(more.trigger);
+
     const GAP = 8;
     // 由右而左排：面板的位置由共用主題決定，其餘一顆接一顆往左排。
     function layoutTopBar() {
-      const order = ['exportBtn', 'aaBtn', 'playCtl'].map(id => $(id)).filter(Boolean);
+      const order = ['moreBtn', 'exportBtn', 'qualityBtn', 'playCtl'].map(id => $(id)).filter(Boolean);
       if (!desktop.matches) {
         for (const el of order) el.style.removeProperty('right');
+        for (const menu of menus) menu.setOpen(false);
         return;
       }
       const toggle = $('toggleBtn').getBoundingClientRect();
@@ -998,14 +1077,15 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
         el.style.setProperty('right', `${Math.round(right)}px`, 'important');
         right += el.getBoundingClientRect().width + GAP;
       }
+      alignSideStack?.();
     }
     layoutTopBar();
     window.addEventListener('resize', layoutTopBar);
-    desktop.addEventListener?.('change', layoutTopBar);
+    desktop.addEventListener?.('change', () => { placePresets(); layoutTopBar(); });
     document.fonts?.ready?.then(layoutTopBar);
     if (typeof ResizeObserver === 'function') {
       const observer = new ResizeObserver(layoutTopBar);
-      for (const id of ['toggleBtn', 'exportBtn', 'aaBtn', 'playCtl']) if ($(id)) observer.observe($(id));
+      for (const id of ['toggleBtn', 'moreBtn', 'exportBtn', 'qualityBtn', 'playCtl']) if ($(id)) observer.observe($(id));
     }
   }
 
@@ -1067,9 +1147,9 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     stack.id = 'studioSideStack';
     document.body.append(stack);
     const align = () => {
-      // 欄位左緣對齊右上角那一組的「AA」（見 layoutTopBar）；播放鍵在它更左邊，
-      // 不算進來，不然有沒有播放鍵（靜態沒有）欄寬就不一樣。
-      const first = ($('aaBtn') ?? $('exportBtn'))?.getBoundingClientRect();
+      // 欄位從「輸出」的左緣到「面板」的右緣（中間是 ⋯）。畫質與播放鍵在它更左邊，
+      // 不算進來：有沒有播放鍵（靜態沒有）、畫質的字寬都不該改變卡片的寬度。
+      const first = $('exportBtn')?.getBoundingClientRect();
       const last = $('toggleBtn')?.getBoundingClientRect();
       if (!first?.width || !last?.width) return;
       stack.style.setProperty('--stack-left', `${Math.round(first.left)}px`);
@@ -1077,9 +1157,11 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       stack.style.setProperty('--stack-top', `${Math.round(Math.max(first.bottom, last.bottom) + 12)}px`);
     };
     window.addEventListener('resize', align);
+    // 右上角的按鈕重排只改位置、不改大小，ResizeObserver 看不到，由 layoutTopBar 通知。
+    alignSideStack = align;
     if (typeof ResizeObserver === 'function') {
       const observer = new ResizeObserver(align);
-      for (const id of ['aaBtn', 'exportBtn', 'playCtl', 'toggleBtn']) if ($(id)) observer.observe($(id));
+      for (const id of ['qualityBtn', 'exportBtn', 'moreBtn', 'playCtl', 'toggleBtn']) if ($(id)) observer.observe($(id));
     }
     document.fonts?.ready?.then(align);
     requestAnimationFrame(align);
