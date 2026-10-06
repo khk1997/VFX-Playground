@@ -278,9 +278,12 @@
     flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
   }
   #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection:not([open]) { flex-shrink: 0; }
-  /* 展開的卡片至少留幾列的高度：等比例縮短時，內容少的卡（例如打開的後期）也會被縮
-     到只剩一條縫。不夠的部分由內容多的卡去縮。 */
-  #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection[open] { min-height: 220px; }
+  /* 後期內容少（光暈開關＋兩根滑桿），整張不縮，打開光暈一定看得到兩根滑桿。
+     不夠的高度由內容多的卡（玻璃、鏡頭）去縮，但至少留兩列，不會縮成一條縫。
+     不能每張都給固定的大最低高度：三張都展開時加起來會超過欄位，最後一張被推到
+     右側卡片的底線外。 */
+  #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection.studioPostCard { flex-shrink: 0; }
+  #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection[open]:not(.studioPostCard) { min-height: 80px; }
   #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection::-webkit-scrollbar { width: 4px; }
   #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection::-webkit-scrollbar-thumb { background: #353535; border-radius: 99px; }
   #panel.inspector[data-split] .inspectorHeader {

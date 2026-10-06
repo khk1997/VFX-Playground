@@ -1399,7 +1399,10 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
 
     // 光譜取樣不開給使用者，用預設值（畫質分級另外會壓低）。抗鋸齒是右上角的
     // 「AA」按鈕（見 buildAntialiasButton）。
-    group('後期', [], false).append($('bloomGroup'));
+    // 後期預設展開：只有光暈一組，收著的話要點兩下（展開、開光暈）才調得到。
+    const postBlock = group('後期', []);
+    postBlock.append($('bloomGroup'));
+    postBlock.classList.add('studioPostCard');
     // 光暈只留開關、強度與範圍。門檻、門檻柔度、最大亮度照背景自動決定，光暈色固定
     // 白光（見 bubble.js 的 studioBloomSettings）；參數本身保留，參數檔照常讀寫。
     // 後期只剩光暈這一組，不必再收一層：展開跟著開關走，打開光暈兩根滑桿就出現。
