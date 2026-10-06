@@ -1161,6 +1161,33 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     }, true);
     syncLightPopover();
   }
+  // 右側卡片跟左邊面板一樣可以收合：點標題（或在標題上按 Enter／空白鍵）切換，
+  // 收起來只剩標題列。標題列裡的按鈕（背景與燈光的「細調」）自己處理點擊，不連帶
+  // 收合。收起背景與燈光時，浮在旁邊的燈光細調一起關掉 —— 它是跟著那張卡看的。
+  function makeDockCollapsible(root) {
+    const title = root.querySelector('.studioQuickDockTitle');
+    root.classList.add('is-collapsible');
+    title.setAttribute('role', 'button');
+    title.tabIndex = 0;
+    title.setAttribute('aria-expanded', 'true');
+    const toggle = () => {
+      const collapsed = root.classList.toggle('is-collapsed');
+      title.setAttribute('aria-expanded', String(!collapsed));
+      if (collapsed && root.id === 'studioQuickDock') {
+        const fine = root.querySelector('.studioQuickDockToggle[aria-expanded="true"]');
+        fine?.click();
+      }
+    };
+    title.addEventListener('click', event => {
+      if (event.target.closest('button') !== null && event.target !== title) return;
+      toggle();
+    });
+    title.addEventListener('keydown', event => {
+      if (event.target !== title || (event.key !== 'Enter' && event.key !== ' ')) return;
+      event.preventDefault();
+      toggle();
+    });
+  }
   function syncLightPopover() {
     if (!lightPopover) return;
     const light = STUDIO_LIGHTS.find(item => item.id === lightPopover.getSelected()) ?? STUDIO_LIGHTS[0];
@@ -1347,6 +1374,9 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       ['lightBgGradientBottom', '下方'],
     ]);
     buildLightPopover(sideStack, currentLight);
+    for (const card of [studioShapeCard, studioFloorCard, studioQuickDock]) {
+      if (card) makeDockCollapsible(card.root);
+    }
     // 鏡像要跟著 gate 走，但 gate 不是在 change 事件當下套的：換形狀之後要等 shader
     // 變體換好、updateUIState 跑完才更新，那時沒有任何事件會再觸發 refresh。只靠
     // 事件同步的話，切回方體後「選擇 SVG…」會一直掛在卡片上，直到下一次操作。

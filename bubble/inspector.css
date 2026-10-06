@@ -288,16 +288,31 @@
   #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection::-webkit-scrollbar-thumb { background: #353535; border-radius: 99px; }
   #panel.inspector[data-split] .inspectorHeader {
     position: static; margin: 0; padding: 16px 18px 12px;
-    background: #050505eb; border: 1px solid #ffffff24; border-bottom: 1px solid #ffffff12;
+    background: #050505; border: 1px solid #ffffff24; border-bottom: 1px solid #ffffff12;
     border-radius: 20px 20px 0 0;
   }
   #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection {
     margin: 0 !important; padding: 14px 18px 10px !important;
-    background: #050505eb; border: 1px solid #ffffff24 !important; border-radius: 20px;
+    background: #050505; border: 1px solid #ffffff24 !important; border-radius: 20px;
     box-shadow: 0 18px 60px #0005, inset 0 1px 0 #ffffff0a;
   }
   #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection.is-firstCard {
     border-top: 0 !important; border-radius: 0 0 20px 20px; padding-top: 16px !important;
+  }
+  /* 捲動時標題釘在卡片頂端，內容從它底下捲過去。標題往上、往左右吃掉卡片的內距，
+     背景才蓋得到卡片邊緣；跟內容的間距改用 padding（margin 那一段是透明的，捲過去
+     的內容會從縫裡露出來）。卡片本身是 overflow 容器，圓角會把標題的背景裁掉。
+     卡片本身因此也是不透明的 #050505：半透明的卡片在淺底上會透出背景，釘住的
+     標題（必須不透明，才蓋得住底下捲過去的字）就成了一條比卡片暗的色帶。
+     top 是負的內距：sticky 的基準是捲動容器扣掉內距之後的那一框，給 0 會停在內距
+     下緣，上面露出一條捲過去的內容。 */
+  #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection > summary {
+    position: sticky; top: -14px; z-index: 2;
+    margin: -14px -18px 0; padding: 14px 18px 14px;
+    background: #050505;
+  }
+  #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection.is-firstCard > summary {
+    top: -16px; margin-top: -16px; padding-top: 16px;
   }
 }
 /* 面板底部的「更多與管理」：桌面上在 ⋯ 選單裡，這一區只留給手機。 */
@@ -335,13 +350,18 @@ body:has(#panel.collapsed) .studioSideStack > * { pointer-events: none; }
 .studioQuickDock {
   --inspector-accent: #7957ff;
   box-sizing: border-box; padding: 14px 16px 10px;
-  background: #050505eb; color: #f5f5f7; color-scheme: dark;
+  background: #050505; color: #f5f5f7; color-scheme: dark;
   border: 1px solid #ffffff24; border-radius: 20px;
   box-shadow: 0 18px 60px #0005, inset 0 1px 0 #ffffff0a;
   font-family: inherit;
 }
 #studioQuickDock, #studioFloorCard { flex: 0 0 auto; }
 #studioShapeCard { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+/* 造型卡內容多時自己捲動，標題同樣釘在頂端（做法見左邊面板的 summary）。 */
+#studioShapeCard > .studioQuickDockTitle {
+  position: sticky; top: -14px; z-index: 2;
+  margin: -14px -16px 0; padding: 14px 16px 10px; background: #050505;
+}
 #studioShapeCard::-webkit-scrollbar { width: 4px; }
 #studioShapeCard::-webkit-scrollbar-thumb { background: #353535; border-radius: 99px; }
 .studioQuickDockRow[hidden] { display: none !important; }
@@ -391,7 +411,24 @@ body:has(#panel.collapsed) .studioSideStack > * { pointer-events: none; }
 /* 跟左邊面板的區塊標題同一個級數（見 .inspectorSection > summary h3）。 */
 .studioQuickDockTitle { margin-bottom: 10px; font-size: 15px; font-weight: 600; letter-spacing: -.01em; color: #f5f5f7; }
 /* 背景與燈光卡的標題列右邊放「細調」，不多佔一列。 */
-#studioQuickDock .studioQuickDockTitle { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+#studioQuickDock .studioQuickDockTitle { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+#studioQuickDock .studioQuickDockToggle { margin-left: auto; }
+/* 右側卡片的收合：標題前面的三角形跟左邊面板同一套（見下面的 summary::before）。
+   收起來只留標題列。 */
+.studioQuickDock.is-collapsible > .studioQuickDockTitle {
+  display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;
+}
+.studioQuickDock.is-collapsible > .studioQuickDockTitle::before {
+  content: "▸"; flex: 0 0 auto; font-size: 14px; line-height: 1; color: #8e8e93;
+  transform: rotate(90deg); transition: transform .15s ease;
+}
+.studioQuickDock.is-collapsed > .studioQuickDockTitle::before { transform: none; }
+.studioQuickDock.is-collapsed > :not(.studioQuickDockTitle) { display: none !important; }
+.studioQuickDock.is-collapsed > .studioQuickDockTitle { margin-bottom: 4px !important; }
+.studioQuickDock.is-collapsible > .studioQuickDockTitle:focus-visible { outline: 2px solid #a38aff; outline-offset: 3px; border-radius: 6px; }
+/* 左邊面板的三角形原本 10px，配 15px 的標題太小；左右一起放大到 14px。 */
+#panel.inspector .inspectorPage .inspectorSection > summary::before { font-size: 14px; line-height: 1; }
+#panel.inspector .inspectorPage .inspectorSection > summary { gap: 8px; }
 .studioQuickDockToggle {
   border: 1px solid #ffffff24 !important; border-radius: 99px !important; padding: 3px 10px;
   background: transparent !important; color: #c7c7cc !important; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer;
