@@ -209,6 +209,18 @@
   font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap;
 }
 #moreBtn { padding: 0; font-size: 18px; letter-spacing: .05em; line-height: 1; }
+/* 深底／淺底開關：字在左、開關在右，打開（淺底）時開關亮起來。 */
+.topBarSwitch { display: inline-flex; align-items: center; gap: 8px; padding: 0 10px 0 12px; }
+.topBarSwitchTrack {
+  position: relative; width: 28px; height: 16px; border-radius: 99px; background: #3a3a3c;
+  transition: background .2s ease;
+}
+.topBarSwitchTrack::after {
+  content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%;
+  background: #f5f5f7; transition: transform .2s ease;
+}
+.topBarSwitch[aria-checked="true"] .topBarSwitchTrack { background: #7957ff; }
+.topBarSwitch[aria-checked="true"] .topBarSwitchTrack::after { transform: translateX(12px); }
 .topBarButton:hover { transform: translateY(-1px); }
 .topBarButton[aria-expanded="true"] { background: #38383b !important; border-color: #ffffff35 !important; }
 .topMenu {
@@ -248,25 +260,37 @@
    上面（.is-firstCard，由 inspector.js 的 splitSync 標），兩者看起來是同一張。
    手機的抽屜維持一整塊。 */
 @media (min-width: 761px) {
+  /* 卡片固定在欄位裡、各自捲動（跟右側那一欄一樣）：面板本身不捲。放不下時展開的
+     卡片照各自的內容多寡等比例縮短、在卡片內捲；收起來的卡片只剩標題，不縮。 */
   #panel.inspector[data-split] {
     background: transparent !important; border: 0 !important; border-radius: 0 !important;
     box-shadow: none !important; padding: 0 !important;
     backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+    display: flex; flex-direction: column; overflow: hidden !important;
   }
+  #panel.inspector[data-split] .inspectorHeader { flex: 0 0 auto; }
+  #panel.inspector[data-split] #inspectorPage-studio {
+    flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 12px;
+  }
+  #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection {
+    flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  }
+  #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection:not([open]) { flex-shrink: 0; }
+  #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection::-webkit-scrollbar { width: 4px; }
+  #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection::-webkit-scrollbar-thumb { background: #353535; border-radius: 99px; }
   #panel.inspector[data-split] .inspectorHeader {
     position: static; margin: 0; padding: 16px 18px 12px;
     background: #050505eb; border: 1px solid #ffffff24; border-bottom: 1px solid #ffffff12;
     border-radius: 20px 20px 0 0;
   }
   #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection {
-    margin: 0 0 12px !important; padding: 14px 18px 10px !important;
+    margin: 0 !important; padding: 14px 18px 10px !important;
     background: #050505eb; border: 1px solid #ffffff24 !important; border-radius: 20px;
     box-shadow: 0 18px 60px #0005, inset 0 1px 0 #ffffff0a;
   }
   #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection.is-firstCard {
     border-top: 0 !important; border-radius: 0 0 20px 20px; padding-top: 16px !important;
   }
-  #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection:last-child { margin-bottom: 0 !important; }
 }
 /* 面板底部的「更多與管理」：桌面上在 ⋯ 選單裡，這一區只留給手機。 */
 @media (min-width: 761px) { #panel .inspectorTopBarMirrored { display: none !important; } }

@@ -724,6 +724,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     iorPresetSync?.();
     glassTintSync?.();
     antialiasSync?.();
+    backdropSync?.();
   }
   let staticDial = null;
   let lightPopover = null;
@@ -734,6 +735,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
   let iorPresetSync = null;
   let glassTintSync = null;
   let antialiasSync = null;
+  let backdropSync = null;
   let alignSideStack = null;
   built = true;
   if (usesStudioGlass(launchMotion)) {
@@ -932,7 +934,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     return { root, sync };
   }
 
-  // 右上角那一組（桌面）：由右而左「面板、⋯、輸出、畫質、播放」。
+  // 右上角那一組（桌面）：由右而左「面板、⋯、輸出、畫質、深淺底、播放」。
   //
   // - 畫質：抗鋸齒（#antialiasLevel，超取樣倍率），點開是四個等級的選單。面板裡
   //   不再有「畫質」區；光譜取樣不開給使用者。
@@ -1062,13 +1064,35 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     }
     placePresets();
 
+    // 深底／淺底：一顆開關（打開＝淺底）。真的控制項是 #backdrop 那個下拉，切換走
+    // writeControl，兩個底色各自記憶的那些參數照原本的路換過去。面板頂端的「預覽
+    // 底色」在桌面上藏起來，手機沒有這一組按鈕，留在抽屜裡。
+    const backdropSource = $('backdrop');
+    const backdropSwitch = button('', () => {
+      writeControl('backdrop', backdropSource.value === 'light' ? 'dark' : 'light');
+      refresh();
+    });
+    backdropSwitch.id = 'backdropBtn';
+    backdropSwitch.classList.add('topBarButton', 'topBarSwitch');
+    backdropSwitch.setAttribute('role', 'switch');
+    backdropSwitch.title = '淺底（關掉是深底）';
+    backdropSwitch.append(element('span', 'topBarSwitchLabel', '淺底'), element('span', 'topBarSwitchTrack'));
+    rowOf('backdrop')?.classList.add('inspectorTopBarMirrored');
+    backdropSync = () => {
+      const light = backdropSource.value === 'light';
+      backdropSwitch.setAttribute('aria-checked', String(light));
+      backdropSwitch.setAttribute('aria-label', light ? '淺底（點一下換成深底）' : '深底（點一下換成淺底）');
+    };
+    backdropSync();
+
     $('exportBtn').before(quality.trigger);
+    quality.trigger.before(backdropSwitch);
     $('exportBtn').after(more.trigger);
 
     const GAP = 8;
     // 由右而左排：面板的位置由共用主題決定，其餘一顆接一顆往左排。
     function layoutTopBar() {
-      const order = ['moreBtn', 'exportBtn', 'qualityBtn', 'playCtl'].map(id => $(id)).filter(Boolean);
+      const order = ['moreBtn', 'exportBtn', 'qualityBtn', 'backdropBtn', 'playCtl'].map(id => $(id)).filter(Boolean);
       if (!desktop.matches) {
         for (const el of order) el.style.removeProperty('right');
         for (const menu of menus) menu.setOpen(false);
@@ -1089,7 +1113,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     document.fonts?.ready?.then(layoutTopBar);
     if (typeof ResizeObserver === 'function') {
       const observer = new ResizeObserver(layoutTopBar);
-      for (const id of ['toggleBtn', 'moreBtn', 'exportBtn', 'qualityBtn', 'playCtl']) if ($(id)) observer.observe($(id));
+      for (const id of ['toggleBtn', 'moreBtn', 'exportBtn', 'qualityBtn', 'backdropBtn', 'playCtl']) if ($(id)) observer.observe($(id));
     }
   }
 

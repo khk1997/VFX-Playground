@@ -154,11 +154,14 @@ def check_desktop(browser, base_url: str) -> dict[str, object]:
     dark_shell = page.locator("#researchShellTint").input_value()
     dark_icon = page.locator("#researchIconTint").input_value()
     assert dark_shell != dark_icon, "preset collapsed shell and icon tuning"
-    page.locator("#backdrop").select_option("light")
+    # 深淺底在桌面上是右上角的開關（面板頂端那個下拉藏起來了）。
+    page.locator("#backdropBtn").click()
+    assert page.locator("#backdrop").input_value() == "light"
     prism.click()
     light_shell = page.locator("#researchShellTint").input_value()
     assert light_shell != dark_shell, "preset did not distinguish light and dark tuning"
-    page.locator("#backdrop").select_option("dark")
+    page.locator("#backdropBtn").click()
+    assert page.locator("#backdrop").input_value() == "dark"
     page.wait_for_timeout(100)
     assert page.locator("#researchShellTint").input_value() == dark_shell, "dark preset memory was not restored"
 
@@ -268,7 +271,7 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     # 抗鋸齒是右上角的「畫質」。「更多與管理」在桌面上搬進右上角的 ⋯（面板裡那一區
     # 只留給手機）。
     assert sections == ["造型", "玻璃", "地板", "燈光", "鏡頭", "背景", "後期", "更多與管理"], sections
-    assert page.locator("#panel .inspectorTopBarMirrored").is_hidden()
+    assert page.locator("#panel .inspectorUtilities.inspectorTopBarMirrored").is_hidden()
     assert page.locator("#inspectorPage-studio #fresnel").count() == 0
     assert page.locator("#inspectorPage-studio #spectralSamples").count() == 0
     # 右上角由右而左：面板、⋯、輸出、畫質；靜態沒有播放鍵。
@@ -379,6 +382,26 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     assert cards[0]["first"] and not any(card["first"] for card in cards[1:]), cards
     for upper, lower in zip(cards, cards[1:]):
         assert abs(lower["top"] - upper["bottom"] - 12) <= 1, (upper, lower)
+    # 卡片固定在欄位裡：滾輪只捲游標下那張卡，面板本身與其他卡不動。
+    glass = page.locator("#inspectorPage-studio > .inspectorSection.is-firstCard")
+    camera_top = page.locator("#inspectorPage-studio > .inspectorSection", has_text="鏡頭").bounding_box()["y"]
+    box = glass.bounding_box()
+    page.mouse.move(box["x"] + 150, box["y"] + 150)
+    page.mouse.wheel(0, 300)
+    page.wait_for_function(
+        "document.querySelector('#inspectorPage-studio > .inspectorSection.is-firstCard').scrollTop > 0")
+    assert page.evaluate("document.getElementById('panel').scrollTop") == 0, "the whole panel scrolled"
+    assert page.locator("#inspectorPage-studio > .inspectorSection", has_text="鏡頭").bounding_box()["y"] == camera_top
+    glass.evaluate("el => { el.scrollTop = 0; }")
+    # 深底／淺底是右上角的開關（面板頂端的「預覽底色」在桌面上藏起來）。
+    assert page.locator("#backdrop").evaluate("el => getComputedStyle(el.closest('.row')).display") == "none"
+    switch = page.locator("#backdropBtn")
+    assert switch.get_attribute("aria-checked") == "false"
+    switch.click()
+    assert page.locator("#backdrop").input_value() == "light"
+    assert switch.get_attribute("aria-checked") == "true"
+    switch.click()
+    assert page.locator("#backdrop").input_value() == "dark"
     geometry = page.evaluate(
         """() => Object.fromEntries(['exportBtn', 'toggleBtn', 'studioShapeCard', 'studioQuickDock']
              .map(id => [id, document.getElementById(id).getBoundingClientRect().toJSON()]))"""
