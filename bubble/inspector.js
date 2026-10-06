@@ -1161,7 +1161,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     }, true);
     syncLightPopover();
   }
-  // 右側卡片跟左邊面板一樣可以收合：點標題（或在標題上按 Enter／空白鍵）切換，
+  // 右側卡片跟左邊面板一樣可以收合（預設收起）：點標題（或在標題上按 Enter／空白鍵）切換，
   // 收起來只剩標題列。標題列裡的按鈕（背景與燈光的「細調」）自己處理點擊，不連帶
   // 收合。收起背景與燈光時，浮在旁邊的燈光細調一起關掉 —— 它是跟著那張卡看的。
   function makeDockCollapsible(root) {
@@ -1169,7 +1169,9 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     root.classList.add('is-collapsible');
     title.setAttribute('role', 'button');
     title.tabIndex = 0;
-    title.setAttribute('aria-expanded', 'true');
+    // 跟左邊面板一樣預設收起。
+    root.classList.add('is-collapsed');
+    title.setAttribute('aria-expanded', 'false');
     const toggle = () => {
       const collapsed = root.classList.toggle('is-collapsed');
       title.setAttribute('aria-expanded', String(!collapsed));
@@ -1210,6 +1212,8 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       stack.style.setProperty('--stack-left', `${Math.round(first.left)}px`);
       stack.style.setProperty('--stack-right', `${Math.round(window.innerWidth - last.right)}px`);
       stack.style.setProperty('--stack-top', `${Math.round(Math.max(first.bottom, last.bottom) + 12)}px`);
+      // 左側卡片跟這一欄同寬（見 inspector.css 的 [data-split]）。
+      document.body.style.setProperty('--studio-side-width', `${Math.round(Math.max(220, last.right - first.left))}px`);
     };
     window.addEventListener('resize', align);
     // 右上角的按鈕重排只改位置、不改大小，ResizeObserver 看不到，由 layoutTopBar 通知。
@@ -1234,16 +1238,15 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
   function buildStudioLayout() {
     const isStatic = launchMotion === 'static';
     panel.dataset.layout = 'studio';
-    // 靜態的面板拆成一張張卡片（桌面，見 inspector.css 的 [data-split]），跟右側那一欄
-    // 同樣的卡片與間距。標題列接在第一張看得到的卡片上面，所以要標出是哪一張。
-    if (isStatic) {
-      panel.dataset.split = '';
-      splitSync = () => {
-        const sections = [...page.children].filter(node => node.classList.contains('inspectorSection'));
-        const first = sections.find(node => getComputedStyle(node).display !== 'none');
-        for (const node of sections) node.classList.toggle('is-firstCard', node === first);
-      };
-    }
+    // 新玻璃模式的面板都拆成一張張卡片（桌面，見 inspector.css 的 [data-split]），跟
+    // 右側那一欄同樣的卡片、間距與寬度。標題列接在第一張看得到的卡片上面，所以要標出
+    // 是哪一張（打字的第一張是「文字」，其餘是「玻璃」）。
+    panel.dataset.split = '';
+    splitSync = () => {
+      const sections = [...page.children].filter(node => node.classList.contains('inspectorSection'));
+      const first = sections.find(node => getComputedStyle(node).display !== 'none');
+      for (const node of sections) node.classList.toggle('is-firstCard', node === first);
+    };
     tabs.hidden = true;
     depthHeading.hidden = true;
     depthPicker.group.hidden = true;
@@ -1257,7 +1260,8 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       const label = rowOf(key)?.querySelector('label');
       if (label) label.textContent = text;
     };
-    const group = (text, entries, open = true) => {
+    // 每個分類預設收起：一進來只看到分類標題，比較乾淨，要調哪一區再點開。
+    const group = (text, entries, open = false) => {
       const block = section(text, null, open);
       for (const [key, label] of entries) {
         const row = rowOf(key);
@@ -1408,7 +1412,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     // （主光方向、燈光強度、明暗對比）在右下的「背景與燈光」卡片上。
     // 桌面上這些都在右下卡片：方位盤選燈調方向與高度，「細調」調大小、強度與共用
     // 設定。這一區只留給手機的抽屜（手機的卡片太小，沒有選燈與細調）。
-    group('燈光', LIGHT_ENTRIES, false).classList.add('studioDesktopMirrored');
+    group('燈光', LIGHT_ENTRIES).classList.add('studioDesktopMirrored');
     // 會動的模式另有鏡頭的環繞與推軌；靜態是一張靜止的展示照，不給。
     const cameraBlock = group('鏡頭', [
       ['cameraFov', '視角'],
@@ -1429,7 +1433,6 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
 
     // 光譜取樣不開給使用者，用預設值（畫質分級另外會壓低）。抗鋸齒是右上角的
     // 「AA」按鈕（見 buildAntialiasButton）。
-    // 後期預設展開：只有光暈一組，收著的話要點兩下（展開、開光暈）才調得到。
     const postBlock = group('後期', []);
     postBlock.append($('bloomGroup'));
     postBlock.classList.add('studioPostCard');

@@ -311,6 +311,11 @@
     margin: -14px -18px 0; padding: 14px 18px 14px;
     background: #050505;
   }
+  /* 收起時只剩標題列：標題的下內距（給捲動用的）拿掉，卡片下內距改成跟上內距一樣，
+     字才會在卡片裡垂直置中。 */
+  #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection:not([open]) { padding-bottom: 14px !important; }
+  #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection.is-firstCard:not([open]) { padding-bottom: 16px !important; }
+  #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection:not([open]) > summary { padding-bottom: 0; }
   #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection.is-firstCard > summary {
     top: -16px; margin-top: -16px; padding-top: 16px;
   }
@@ -362,6 +367,7 @@ body:has(#panel.collapsed) .studioSideStack > * { pointer-events: none; }
   position: sticky; top: -14px; z-index: 2;
   margin: -14px -16px 0; padding: 14px 16px 10px; background: #050505;
 }
+#studioShapeCard.is-collapsed > .studioQuickDockTitle { padding-bottom: 0; }
 #studioShapeCard::-webkit-scrollbar { width: 4px; }
 #studioShapeCard::-webkit-scrollbar-thumb { background: #353535; border-radius: 99px; }
 .studioQuickDockRow[hidden] { display: none !important; }
@@ -401,6 +407,41 @@ body:has(#panel.collapsed) .studioSideStack > * { pointer-events: none; }
   #panel .studioDesktopMirrored { display: none !important; }
   /* 靜態模組的面板內容比較少，窄一點（其他模式維持 380px）。 */
   #panel.inspector[data-layout="studio"] { width: 340px; }
+  /* 標題區只留大標題：英文副標與「預覽 · 品質」標籤收掉（品質狀態仍在 DOM 裡更新，
+     右上角的「畫質」選單才是調它的地方）。 */
+  #panel.inspector[data-layout="studio"] .inspectorHeader .sub,
+  #panel.inspector[data-layout="studio"] .inspectorHeader .inspectorDepth { display: none !important; }
+  #panel.inspector[data-layout="studio"] .inspectorIdentity { margin-bottom: 0; }
+  /* 左側卡片跟右側那一欄同寬（寬度由 inspector.js 的 buildSideStack 量出來）。
+     窄下來之後，一列放不下的兩處改成換行：玻璃顏色的標籤在上、四顆按鈕在下；
+     折射率的材料膠囊排成兩欄。 */
+  #panel.inspector[data-split] { width: var(--studio-side-width, 340px); }
+  #panel.inspector[data-split] .inspectorGlassTint { flex-wrap: wrap; row-gap: 8px; }
+  #panel.inspector[data-split] .inspectorGlassTint > label { flex: 1 1 100%; }
+  #panel.inspector[data-split] .inspectorGlassTint .inspectorSegments { flex: 1 1 100%; }
+  /* 下拉選單那種列（標籤 102px、選單、空的數值欄 46px）在窄卡片裡選單只剩一個字寬。
+     跟右側造型卡一樣改成標籤在上、選單整列寬；空的數值欄不佔位。 */
+  #panel.inspector[data-split] .row:has(> .mobile-select-shell) { flex-wrap: wrap; row-gap: 8px; }
+  #panel.inspector[data-split] .row:has(> .mobile-select-shell) > label { flex: 1 1 100%; }
+  #panel.inspector[data-split] .row:has(> .mobile-select-shell) > .mobile-select-shell { flex: 1 1 100%; }
+  #panel.inspector[data-split] .row:has(> .mobile-select-shell) > .val:empty { display: none; }
+  /* 舊版面的特效區塊（例如水滴裡的「輪廓液滴」）自帶漸層底、內距、DROP 標籤與
+     overflow: hidden，在窄卡片裡內容比區塊寬，被往左捲掉一截。新玻璃的卡片不用這種
+     框：拿掉底色與標籤（標題跟底下的開關列重複），只留一條分隔線。 */
+  #panel.inspector[data-split] #inspectorPage-studio .effectBlock {
+    margin: 4px 0 0; padding: 14px 0 0; overflow: visible;
+    background: none !important; border: 0 !important; border-top: 1px solid #ffffff12 !important;
+    border-radius: 0; box-shadow: none !important;
+  }
+  #panel.inspector[data-split] #inspectorPage-studio .effectBlock::before,
+  #panel.inspector[data-split] #inspectorPage-studio .effectBlock::after { display: none !important; }
+  #panel.inspector[data-split] #inspectorPage-studio .effectBlock > .effectTitle { display: none; }
+  /* 開關列（標籤、開關、「開啟／關閉」文字）在窄卡片裡文字會超出內距。開關本身就
+     看得出狀態，文字拿掉、開關靠右（跟光暈標題上的開關一樣的位置）。 */
+  #panel.inspector[data-split] .row.toggleRow > .val { display: none; }
+  #panel.inspector[data-split] .row.toggleRow > label { flex: 1 1 auto; }
+  #panel.inspector[data-split] .row.toggleRow > .switchTrack { margin-left: auto; }
+  #panel.inspector[data-split] .inspectorIorPresets { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; }
 }
 /* 折射率底下的材料膠囊：沿用 inspectorSegments 的樣子，但四顆要擠在一列。 */
 #panel.inspector .inspectorIorPresets { margin: -8px 0 18px; }
@@ -424,7 +465,8 @@ body:has(#panel.collapsed) .studioSideStack > * { pointer-events: none; }
 }
 .studioQuickDock.is-collapsed > .studioQuickDockTitle::before { transform: none; }
 .studioQuickDock.is-collapsed > :not(.studioQuickDockTitle) { display: none !important; }
-.studioQuickDock.is-collapsed > .studioQuickDockTitle { margin-bottom: 4px !important; }
+.studioQuickDock.is-collapsible.is-collapsed { padding-bottom: 14px; }
+.studioQuickDock.is-collapsed > .studioQuickDockTitle { margin-bottom: 0 !important; }
 .studioQuickDock.is-collapsible > .studioQuickDockTitle:focus-visible { outline: 2px solid #a38aff; outline-offset: 3px; border-radius: 6px; }
 /* 左邊面板的三角形原本 10px，配 15px 的標題太小；左右一起放大到 14px。 */
 #panel.inspector .inspectorPage .inspectorSection > summary::before { font-size: 14px; line-height: 1; }

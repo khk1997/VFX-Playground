@@ -272,6 +272,18 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     # 只留給手機）。
     assert sections == ["造型", "玻璃", "地板", "燈光", "鏡頭", "背景", "後期", "更多與管理"], sections
     assert page.locator("#panel .inspectorUtilities.inspectorTopBarMirrored").is_hidden()
+    # 每個分類預設收起（左邊的區塊與右側的卡片都是）；下面要量的東西先全部點開。
+    assert page.evaluate("""() => [...document.querySelectorAll('#inspectorPage-studio > details')]
+        .every(node => !node.open)"""), "studio sections should start collapsed"
+    assert page.evaluate("""() => ['studioShapeCard', 'studioFloorCard', 'studioQuickDock']
+        .every(id => document.getElementById(id).classList.contains('is-collapsed'))"""), \
+        "side cards should start collapsed"
+    page.evaluate("""() => {
+        document.querySelectorAll('#inspectorPage-studio > details').forEach(node => { node.open = true; });
+        for (const id of ['studioShapeCard', 'studioFloorCard', 'studioQuickDock']) {
+            document.querySelector(`#${id} .studioQuickDockTitle`).click();
+        }
+    }""")
     # 光暈只開放開關、強度與範圍；門檻、柔度、最大亮度、光暈色自動決定。打開光暈時
     # 那一組跟著展開。
     for key in ("bloomThreshold", "bloomKnee", "bloomClamp", "bloomTint"):
@@ -502,6 +514,11 @@ def check_studio_motion(browser, base_url: str) -> dict[str, object]:
     page.wait_for_selector('#panel.inspector[data-layout="studio"]')
     page.wait_for_function("() => !document.body.hasAttribute('data-bubble-boot')", timeout=90_000)
     assert page.locator(".inspectorTabs").is_hidden()
+    # 分類預設收起；下面要點、要量的東西先全部打開。
+    page.evaluate("""() => {
+        document.querySelectorAll('#inspectorPage-studio > details').forEach(node => { node.open = true; });
+        document.querySelectorAll('.studioQuickDock.is-collapsed > .studioQuickDockTitle').forEach(title => title.click());
+    }""")
     visible_sections = page.evaluate(
         """() => [...document.querySelectorAll('#inspectorPage-studio > details')]
             .filter(node => !node.classList.contains('is-emptyHidden') && !node.closest('.gated-off'))
