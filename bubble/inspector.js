@@ -85,19 +85,34 @@ const TYPOGRAPHY_KEYS = [
   'typeCaretWidth', 'typeCaretDepth',
 ];
 
-// 單頁面板「燈光」區：三盞燈各自的方向、高度、大小、強度，兩張黑卡的方向、高度、
-// 大小，最後是全部燈共用的設定。
-const LIGHT_ENTRIES = [
-  ['lightKeyAzimuth', '主光 方向'], ['lightKeyElevation', '主光 高度'],
-  ['lightKeySize', '主光 大小'], ['lightKeyPower', '主光 強度'],
-  ['lightFillAzimuth', '補光 方向'], ['lightFillElevation', '補光 高度'],
-  ['lightFillSize', '補光 大小'], ['lightFillPower', '補光 強度'],
-  ['lightRimAzimuth', '邊光 方向'], ['lightRimElevation', '邊光 高度'],
-  ['lightRimSize', '邊光 大小'], ['lightRimPower', '邊光 強度'],
-  ['flagAAzimuth', '黑卡A 方向'], ['flagAElevation', '黑卡A 高度'], ['flagASize', '黑卡A 大小'],
-  ['flagBAzimuth', '黑卡B 方向'], ['flagBElevation', '黑卡B 高度'], ['flagBSize', '黑卡B 大小'],
+// 棚景的燈與黑卡：方位盤、彈出的「細調」、單頁面板的「燈光」區都從這張表產生。
+// 加一盞燈：這裡加一筆，shader 那邊（environment.js 的 studioDir 與 bubble.js 的
+// syncStudioLights）另外接。黑卡（flag）沒有強度。
+const STUDIO_LIGHTS = [
+  { id: 'key', label: '主光', short: '主光', azimuth: 'lightKeyAzimuth', elevation: 'lightKeyElevation',
+    size: 'lightKeySize', power: 'lightKeyPower' },
+  { id: 'fill', label: '補光', short: '補光', azimuth: 'lightFillAzimuth', elevation: 'lightFillElevation',
+    size: 'lightFillSize', power: 'lightFillPower' },
+  { id: 'rim', label: '邊光', short: '邊光', azimuth: 'lightRimAzimuth', elevation: 'lightRimElevation',
+    size: 'lightRimSize', power: 'lightRimPower' },
+  { id: 'flagA', label: '黑卡 A', short: '黑卡A', azimuth: 'flagAAzimuth', elevation: 'flagAElevation',
+    size: 'flagASize', flag: true },
+  { id: 'flagB', label: '黑卡 B', short: '黑卡B', azimuth: 'flagBAzimuth', elevation: 'flagBElevation',
+    size: 'flagBSize', flag: true },
+];
+// 全部燈共用的設定。
+const SHARED_LIGHT_ENTRIES = [
   ['studioCardGain', '燈的亮度'], ['studioCardFalloff', '燈的衰減'],
   ['studioCardEdge', '燈的銳利度'], ['studioAmbient', '環境亮度'],
+];
+// 單頁面板「燈光」區（手機的抽屜用）：每一盞的方向、高度、大小、強度，最後是共用設定。
+const LIGHT_ENTRIES = [
+  ...STUDIO_LIGHTS.flatMap(light => [
+    [light.azimuth, `${light.short} 方向`], [light.elevation, `${light.short} 高度`],
+    [light.size, `${light.short} 大小`],
+    ...(light.power ? [[light.power, `${light.short} 強度`]] : []),
+  ]),
+  ...SHARED_LIGHT_ENTRIES,
 ];
 
 // Move the original controls, preserving IDs, handlers, gates and preset state.
@@ -701,10 +716,12 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     staticDial?.draw();
     studioQuickDock?.sync();
     studioShapeCard?.sync();
+    syncLightPopover();
     iorPresetSync?.();
     glassTintSync?.();
   }
   let staticDial = null;
+  let lightPopover = null;
   let studioQuickDock = null;
   let studioShapeCard = null;
   let iorPresetSync = null;
@@ -791,8 +808,9 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
   // 畫面角落。所以真正的控制項原地留著（不放進任何一個看得到的區塊），這裡拖曳
   // 時走 writeControl 寫回去 —— 跟使用者拖面板那根完全同一條路；反過來重設、
   // 風格、匯入改了真值時，refresh 呼叫 sync 把這邊對齊。
+  // shown(key)：額外的顯示條件（閘門之外）。燈光細調用它只留目前選中那盞燈的列。
   function buildQuickDock(title, entries, lead = null, id = 'studioQuickDock', parent = document.body,
-                          leadEntries = []) {
+                          leadEntries = [], shown = () => true) {
     const root = element('aside', 'studioQuickDock');
     root.id = id;
     root.setAttribute('aria-label', `${title}快速調整`);
@@ -865,7 +883,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     const sync = () => {
       for (const item of items) {
         const source = $(item.key);
-        item.row.hidden = gatedOff(source);
+        item.row.hidden = gatedOff(source) || !shown(item.key);
         if (item.kind === 'button') {
           item.mirror.textContent = source.textContent;
           item.mirror.disabled = source.disabled;
@@ -900,6 +918,57 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     };
     sync();
     return { root, sync };
+  }
+
+  // 燈光的「細調」：方位盤選中那盞燈的大小與強度，加上全部燈共用的設定。浮在右側
+  // 那一欄的左邊（絕對定位，不佔欄位的空間），所以打開它不會改變任何卡片的大小與
+  // 位置；面板收起、輸出對話框開著時跟著那一欄一起收。標題列上的「細調」開關它，
+  // Esc 或點到外面就關。
+  function buildLightPopover(sideStack, getSelected) {
+    const lightOf = key => STUDIO_LIGHTS.find(light => light.size === key || light.power === key);
+    const shared = new Set(SHARED_LIGHT_ENTRIES.map(([key]) => key));
+    const perLight = STUDIO_LIGHTS.flatMap(light => [
+      [light.size, '大小'], ...(light.power ? [[light.power, '強度']] : []),
+    ]);
+    lightPopover = buildQuickDock('燈光細調', [...perLight, ...SHARED_LIGHT_ENTRIES],
+      null, 'studioLightPopover', sideStack, [],
+      key => shared.has(key) || lightOf(key)?.id === getSelected());
+    const popover = lightPopover.root;
+    popover.hidden = true;
+    // 各列照傳進去的順序排，共用設定從第 perLight.length 列開始。
+    popover.querySelectorAll('.studioQuickDockRow')[perLight.length]
+      ?.before(element('div', 'studioQuickDockSubhead', '全部燈光'));
+    lightPopover.title = popover.querySelector('.studioQuickDockTitle');
+    lightPopover.getSelected = getSelected;
+
+    const toggle = button('細調', () => setOpen(popover.hidden));
+    toggle.className = 'studioQuickDockToggle';
+    toggle.setAttribute('aria-controls', popover.id);
+    toggle.setAttribute('aria-expanded', 'false');
+    $('studioQuickDock').querySelector('.studioQuickDockTitle').append(toggle);
+    function setOpen(open) {
+      popover.hidden = !open;
+      toggle.setAttribute('aria-expanded', String(open));
+      toggle.classList.toggle('is-active', open);
+      if (open) syncLightPopover();
+    }
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && !popover.hidden) setOpen(false);
+    });
+    document.addEventListener('pointerdown', event => {
+      if (popover.hidden || popover.contains(event.target)) return;
+      // 在右下卡片上換燈、拖方位盤時不關（細調本來就是跟著它看的）；「細調」按鈕
+      // 自己會切換。
+      if ($('studioQuickDock').contains(event.target)) return;
+      setOpen(false);
+    }, true);
+    syncLightPopover();
+  }
+  function syncLightPopover() {
+    if (!lightPopover) return;
+    const light = STUDIO_LIGHTS.find(item => item.id === lightPopover.getSelected()) ?? STUDIO_LIGHTS[0];
+    lightPopover.title.textContent = `${light.label} 細調`;
+    lightPopover.sync();
   }
 
   // 右側那一欄（桌面）：造型卡在上、燈光卡在下，由下往上堆。左緣對齊「輸出」、
@@ -1034,7 +1103,20 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     glassBlock.append(glassDetail);
     // 燈光整組（方向盤、燈光強度、明暗對比）是最常一邊看畫面一邊調的，拉到
     // 畫面右下角常駐（見 buildQuickDock），面板裡不再有燈光區。
-    staticDial = buildLightDial();
+    // 方位盤要調哪一盞燈（STUDIO_LIGHTS 的 id）。不存進參數檔：它是介面狀態，不是畫面。
+    // 手機的卡片沒有選燈按鈕（見 inspector.css），方位盤一律調主光。
+    let selectedLight = 'key';
+    const phoneDock = window.matchMedia('(max-width: 760px)');
+    const currentLight = () => (phoneDock.matches ? 'key' : selectedLight);
+    phoneDock.addEventListener?.('change', () => { staticDial.draw(); syncLightPopover(); });
+    staticDial = buildLightDial({
+      getSelected: currentLight,
+      onSelect: id => {
+        selectedLight = id;
+        staticDial.draw();
+        syncLightPopover();
+      },
+    });
     const sideStack = buildSideStack();
     // 卡片上不放「高度」：圓柱與圓錐已經不在選單裡了（見 registry 的 staticShape）。
     studioShapeCard = usesShapeField(launchMotion) ? buildQuickDock('造型', [
@@ -1052,6 +1134,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       ['lightBgGradientTop', '上方'],
       ['lightBgGradientBottom', '下方'],
     ]);
+    buildLightPopover(sideStack, currentLight);
     // 鏡像要跟著 gate 走，但 gate 不是在 change 事件當下套的：換形狀之後要等 shader
     // 變體換好、updateUIState 跑完才更新，那時沒有任何事件會再觸發 refresh。只靠
     // 事件同步的話，切回方體後「選擇 SVG…」會一直掛在卡片上，直到下一次操作。
@@ -1069,6 +1152,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
         mirrorSyncQueued = false;
         studioShapeCard?.sync();
         studioQuickDock?.sync();
+        syncLightPopover();
       });
     }).observe(panel, { subtree: true, attributes: true, attributeFilter: ['class', 'hidden'] });
     if (!isStatic) buildMotionSections();
@@ -1078,7 +1162,9 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     ]);
     // 每一盞燈與黑卡的位置、大小、強度，以及全部燈共用的設定。常用的那三樣
     // （主光方向、燈光強度、明暗對比）在右下的「背景與燈光」卡片上。
-    group('燈光', LIGHT_ENTRIES, false);
+    // 桌面上這些都在右下卡片：方位盤選燈調方向與高度，「細調」調大小、強度與共用
+    // 設定。這一區只留給手機的抽屜（手機的卡片太小，沒有選燈與細調）。
+    group('燈光', LIGHT_ENTRIES, false).classList.add('studioDesktopMirrored');
     // 會動的模式另有鏡頭的環繞與推軌；靜態是一張靜止的展示照，不給。
     const cameraBlock = group('鏡頭', [
       ['cameraFov', '視角'],
@@ -1258,42 +1344,53 @@ function buildPalette(prefix, applyValues) {
   return { root, refresh };
 }
 
-// 主光的方位盤：從正上方俯瞰，鏡頭固定在下方，所以光點往上拖是逆光、往下是順光，
+// 棚燈的方位盤：從正上方俯瞰，鏡頭固定在下方，所以光點往上拖是逆光、往下是順光，
 // 跟畫面上看到的方向一致（鏡頭轉了，盤面跟著轉）。半徑是高度：中心是正上方，
-// 外圈是地平線。寫回的仍是那兩根滑桿，參數檔與重設不必知道這個盤的存在。
-function buildLightDial() {
+// 細的那一圈是地平線，地平線外面那一圈是地平線以下（補光、邊光、黑卡的預設都在
+// 那裡），最外圈是 DIAL_MIN_ELEVATION。寫回的仍是那幾根滑桿，參數檔與重設不必
+// 知道這個盤的存在。
+//
+// 盤面上畫出 STUDIO_LIGHTS 的每一盞：選中的那盞是亮點、可以拖，其餘是淡點；黑卡
+// 畫成小方塊。上面那排按鈕切換要調哪一盞，方向鍵也跟著調選中的那盞。
+const DIAL_MIN_ELEVATION = -45;
+function buildLightDial({ getSelected, onSelect }) {
   // 盤面照實際顯示的尺寸畫：右下角的常駐區在桌面與手機給的大小不同（見
   // inspector.css 的 .studioQuickDock），寫死一個尺寸會被 CSS 拉伸而糊掉。
   const FALLBACK_SIZE = 132;
+  const wrap = element('div', 'lightDialWrap');
+  const picker = segmented(
+    STUDIO_LIGHTS.map(light => [light.id, light.short]),
+    id => onSelect(id),
+    '要調整的燈',
+  );
+  picker.group.classList.add('lightDialPicker');
   const root = element('div', 'lightDial');
   const canvas = element('canvas', 'lightDialCanvas');
   canvas.tabIndex = 0;
   canvas.setAttribute('role', 'slider');
-  canvas.setAttribute('aria-label', '主光方向與高度');
-  canvas.title = '拖曳光點改變主光方向；越靠近中心，光越從正上方打下來。方向鍵也可以微調。';
   const info = element('div', 'lightDialInfo');
   const readout = element('strong', 'lightDialReadout');
-  info.append(
-    readout,
-    element('p', 'inspectorNote', '拖曳光點改變主光方向；越靠近中心，光越從正上方打下來。方向鍵也可以微調。'),
-  );
+  const note = element('p', 'inspectorNote', '拖曳光點改變方向；越靠近中心，光越從正上方打下來。方向鍵也可以微調。');
+  info.append(readout, note);
   root.append(canvas, info);
-  const wrap = deg => ((((deg + 180) % 360) + 360) % 360) - 180;
-  const read = () => ({
-    az: Number($('lightKeyAzimuth').value),
-    el: Number($('lightKeyElevation').value),
-    cam: Number($('cameraRotationY').value),
-  });
+  wrap.append(picker.group, root);
+  const wrapDeg = deg => ((((deg + 180) % 360) + 360) % 360) - 180;
+  const clampElevation = value => Math.max(DIAL_MIN_ELEVATION, Math.min(89, value));
   const snap = value => Math.round(value * 2) / 2;
-  const clampElevation = value => Math.max(0, Math.min(89, value));
+  // 高度 ↔ 半徑（0 = 中心、1 = 最外圈）。
+  const radiusOf = el => (90 - clampElevation(el)) / (90 - DIAL_MIN_ELEVATION);
+  const elevationOf = r => 90 - Math.min(1, r) * (90 - DIAL_MIN_ELEVATION);
+  const camera = () => Number($('cameraRotationY').value);
+  const selected = () => STUDIO_LIGHTS.find(light => light.id === getSelected()) ?? STUDIO_LIGHTS[0];
   function setFromPointer(event) {
+    const light = selected();
     const box = canvas.getBoundingClientRect();
     const dx = event.clientX - box.left - box.width / 2;
     const dy = event.clientY - box.top - box.height / 2;
-    const r = Math.min(1, Math.hypot(dx, dy) / (box.width / 2 - 10));
+    const r = Math.hypot(dx, dy) / (box.width / 2 - 10);
     const angle = Math.atan2(dx, dy) * 180 / Math.PI;
-    writeControl('lightKeyAzimuth', snap(wrap(angle + read().cam)));
-    writeControl('lightKeyElevation', snap(clampElevation(90 * (1 - r))));
+    writeControl(light.azimuth, snap(wrapDeg(angle + camera())));
+    writeControl(light.elevation, snap(clampElevation(elevationOf(r))));
   }
   canvas.addEventListener('pointerdown', event => {
     if (event.button !== 0) return;
@@ -1304,14 +1401,16 @@ function buildLightDial() {
     if (canvas.hasPointerCapture(event.pointerId)) setFromPointer(event);
   });
   canvas.addEventListener('keydown', event => {
-    const { az, el } = read();
+    const light = selected();
+    const az = Number($(light.azimuth).value);
+    const el = Number($(light.elevation).value);
     const step = event.shiftKey ? 15 : 5;
-    if (event.key === 'ArrowLeft') writeControl('lightKeyAzimuth', wrap(az - step));
-    else if (event.key === 'ArrowRight') writeControl('lightKeyAzimuth', wrap(az + step));
-    // 高度跟拖曳一樣只走 0–89：盤面畫不出地平線以下，方向鍵壓到負值時光點停在
-    // 外圈不動，讀數卻一直往下掉。滑桿本身仍可以設到負的。
-    else if (event.key === 'ArrowUp') writeControl('lightKeyElevation', clampElevation(el + step));
-    else if (event.key === 'ArrowDown') writeControl('lightKeyElevation', clampElevation(el - step));
+    // 高度跟拖曳同一個範圍（DIAL_MIN_ELEVATION 到 89）：盤面外圈就是下限，再往下
+    // 光點會停在外圈不動、讀數卻一直掉。滑桿本身仍可以設到 -89。
+    if (event.key === 'ArrowLeft') writeControl(light.azimuth, wrapDeg(az - step));
+    else if (event.key === 'ArrowRight') writeControl(light.azimuth, wrapDeg(az + step));
+    else if (event.key === 'ArrowUp') writeControl(light.elevation, clampElevation(el + step));
+    else if (event.key === 'ArrowDown') writeControl(light.elevation, clampElevation(el - step));
     else return;
     event.preventDefault();
   });
@@ -1325,9 +1424,13 @@ function buildLightDial() {
     const c = SIZE / 2, R = c - 10;
     const circle = (x, y, radius) => { ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); };
     circle(c, c, R + 6); ctx.fillStyle = '#141416'; ctx.fill();
+    // 地平線以下那一圈壓暗一點，看得出光是從下面打上來的。
+    const horizon = R * radiusOf(0);
+    circle(c, c, R); ctx.fillStyle = '#0b0b0c'; ctx.fill();
+    circle(c, c, horizon); ctx.fillStyle = '#141416'; ctx.fill();
     ctx.lineWidth = 1;
     for (const ring of [0, 30, 60]) {
-      circle(c, c, R * (1 - ring / 90));
+      circle(c, c, R * radiusOf(ring));
       ctx.strokeStyle = ring === 0 ? '#ffffff2e' : '#ffffff14';
       ctx.stroke();
     }
@@ -1335,25 +1438,48 @@ function buildLightDial() {
     ctx.beginPath();
     ctx.moveTo(c, SIZE - 12); ctx.lineTo(c - 6, SIZE - 2); ctx.lineTo(c + 6, SIZE - 2); ctx.closePath();
     ctx.fillStyle = '#8e8e93'; ctx.fill();
-    circle(c, c, 6); ctx.fillStyle = '#ffffff3a'; ctx.fill();
-    const { az, el, cam } = read();
-    const a = (az - cam) * Math.PI / 180;
-    const r = Math.max(0, Math.min(1, 1 - el / 90));
-    const x = c + R * r * Math.sin(a), y = c + R * r * Math.cos(a);
+    circle(c, c, 4); ctx.fillStyle = '#ffffff3a'; ctx.fill();
+    const cam = camera();
+    const active = selected();
+    const place = light => {
+      const a = (Number($(light.azimuth).value) - cam) * Math.PI / 180;
+      const r = radiusOf(Number($(light.elevation).value));
+      return [c + R * r * Math.sin(a), c + R * r * Math.cos(a)];
+    };
+    // 先畫沒選中的（淡），選中的最後畫在最上面。
+    for (const light of STUDIO_LIGHTS) {
+      if (light === active) continue;
+      const [x, y] = place(light);
+      if (light.flag) {
+        ctx.fillStyle = '#5a5a60'; ctx.fillRect(x - 3.5, y - 3.5, 7, 7);
+      } else {
+        circle(x, y, 3.5); ctx.fillStyle = '#ffe3a366'; ctx.fill();
+      }
+    }
+    const [x, y] = place(active);
     ctx.beginPath(); ctx.moveTo(c, c); ctx.lineTo(x, y);
-    ctx.strokeStyle = '#ffd98a80'; ctx.stroke();
-    ctx.save();
-    ctx.shadowColor = '#ffd98a'; ctx.shadowBlur = 12;
-    circle(x, y, 7); ctx.fillStyle = '#ffe3a3'; ctx.fill();
-    ctx.restore();
-    const text = `方向 ${Math.round(az)}° · 高度 ${Math.round(el)}°`;
+    ctx.strokeStyle = active.flag ? '#ffffff40' : '#ffd98a80'; ctx.stroke();
+    if (active.flag) {
+      ctx.fillStyle = '#d8d8de'; ctx.strokeStyle = '#000'; ctx.fillRect(x - 6, y - 6, 12, 12);
+      ctx.strokeRect(x - 6, y - 6, 12, 12);
+    } else {
+      ctx.save();
+      ctx.shadowColor = '#ffd98a'; ctx.shadowBlur = 12;
+      circle(x, y, 7); ctx.fillStyle = '#ffe3a3'; ctx.fill();
+      ctx.restore();
+    }
+    picker.select(active.id);
+    const az = Math.round(Number($(active.azimuth).value));
+    const el = Math.round(Number($(active.elevation).value));
+    canvas.setAttribute('aria-label', `${active.label}方向與高度`);
+    canvas.setAttribute('aria-valuetext', `${active.label}：方向 ${az}° · 高度 ${el}°`);
+    canvas.title = `拖曳${active.label}改變方向；越靠近中心，光越從正上方打下來。方向鍵也可以微調。`;
     // 拆成兩段：窄的地方（右側卡片）各佔一行，寬的地方照樣排成一行（見 CSS）。
-    const direction = element('span', 'lightDialReadoutPart', `方向 ${Math.round(az)}°`);
-    const elevation = element('span', 'lightDialReadoutPart', `高度 ${Math.round(el)}°`);
+    const direction = element('span', 'lightDialReadoutPart', `方向 ${az}°`);
+    const elevation = element('span', 'lightDialReadoutPart', `高度 ${el}°`);
     readout.replaceChildren(direction, element('span', 'lightDialReadoutSep', ' · '), elevation);
-    canvas.setAttribute('aria-valuetext', text);
   }
-  return { root, draw };
+  return { root: wrap, draw };
 }
 
 function installNumberEditing(panel) {

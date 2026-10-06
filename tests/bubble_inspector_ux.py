@@ -325,9 +325,10 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     shape_card = page.locator("#studioShapeCard")
     assert shape_card.is_visible(), "the shape card is missing"
     # 造型與背景兩區在桌面上都搬到右側卡片，面板裡那兩區藏起來。
+    # 燈光那一區也是：桌面上改由右下卡片的選燈與細調操作。
     mirrored = page.locator("#panel .studioDesktopMirrored")
-    assert mirrored.count() == 2, mirrored.count()
-    assert all(mirrored.nth(i).is_hidden() for i in range(2)), "the mirrored panel sections should be hidden on desktop"
+    assert mirrored.count() == 3, mirrored.count()
+    assert all(mirrored.nth(i).is_hidden() for i in range(3)), "the mirrored panel sections should be hidden on desktop"
     geometry = page.evaluate(
         """() => Object.fromEntries(['exportBtn', 'toggleBtn', 'studioShapeCard', 'studioQuickDock']
              .map(id => [id, document.getElementById(id).getBoundingClientRect().toJSON()]))"""
@@ -339,7 +340,9 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     light_top = geometry["studioQuickDock"]["top"]
 
     # 背景色併進「背景與燈光」卡片：深底一個色票，改色要寫回真的 bgColor。
-    assert page.locator("#studioQuickDock .studioQuickDockTitle").text_content() == "背景與燈光"
+    # 標題列右邊還有「細調」按鈕，只比標題本身那段文字。
+    assert page.locator("#studioQuickDock .studioQuickDockTitle").evaluate(
+        "el => el.firstChild.textContent") == "背景與燈光"
     color_rows = """() => [...document.querySelectorAll('#studioQuickDock .studioQuickDockColorRow')]
         .filter(r => !r.hidden).map(r => r.textContent.trim())"""
     assert page.evaluate(color_rows) == ["背景"], page.evaluate(color_rows)
@@ -451,6 +454,35 @@ def check_studio_motion(browser, base_url: str) -> dict[str, object]:
     page.locator("#toggleBtn").click()
     page.wait_for_function("() => getComputedStyle(document.getElementById('studioSideStack')).opacity === '1'")
     assert page.evaluate(side_state)["clickable"] is True
+
+    # 方位盤選燈：選了邊光之後，方向鍵調的是邊光，而且地平線以下的高度留得住
+    # （邊光預設 -17.5°，舊的盤面會把它夾成 0）。
+    rim_before = float(page.locator("#lightRimElevation").input_value())
+    key_before = page.locator("#lightKeyElevation").input_value()
+    assert rim_before < 0, rim_before
+    page.locator("#studioQuickDock .lightDialPicker button", has_text="邊光").click()
+    page.locator("#studioQuickDock .lightDialCanvas").focus()
+    page.keyboard.press("ArrowDown")
+    assert float(page.locator("#lightRimElevation").input_value()) == rim_before - 5
+    assert page.locator("#lightKeyElevation").input_value() == key_before, "the key light moved"
+    # 細調：只列選中那盞燈的大小與強度，加上共用設定；Esc、點外面都會關。
+    popover = page.locator("#studioLightPopover")
+    assert popover.is_hidden()
+    page.locator("#studioQuickDock .studioQuickDockToggle").click()
+    assert popover.is_visible()
+    assert popover.locator(".studioQuickDockTitle").text_content() == "邊光 細調"
+    rows = popover.locator(".studioQuickDockRow:not([hidden])").all_inner_texts()
+    assert [row.split("\n")[0] for row in rows] == ["大小", "強度", "燈的亮度", "燈的衰減", "燈的銳利度", "環境亮度"], rows
+    page.locator("#studioQuickDock .lightDialPicker button", has_text="黑卡A").click()
+    assert popover.locator(".studioQuickDockTitle").text_content() == "黑卡 A 細調"
+    assert len(popover.locator(".studioQuickDockRow:not([hidden])").all_inner_texts()) == 5, "a black card has no power"
+    page.keyboard.press("Escape")
+    assert popover.is_hidden()
+    page.locator("#studioQuickDock .studioQuickDockToggle").click()
+    page.mouse.click(400, 400)
+    assert popover.is_hidden(), "clicking the canvas should close the light popover"
+    # 桌面上「燈光」區在右下卡片裡，面板那一區藏起來。
+    assert page.locator("#panel .studioDesktopMirrored", has_text="主光 方向").is_hidden()
     assert not errors, f"capillary inspector page errors: {errors}"
     context.close()
     return {"singlePage": True, "motionSection": True}

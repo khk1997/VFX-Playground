@@ -282,6 +282,28 @@ body:has(#panel.collapsed) .studioSideStack > * { pointer-events: none; }
 #panel.inspector .inspectorIorPresets button { padding: 7px 4px; font-size: 12px; white-space: nowrap; }
 /* 跟左邊面板的區塊標題同一個級數（見 .inspectorSection > summary h3）。 */
 .studioQuickDockTitle { margin-bottom: 14px; font-size: 15px; font-weight: 600; letter-spacing: -.01em; color: #f5f5f7; }
+/* 背景與燈光卡的標題列右邊放「細調」，不多佔一列。 */
+#studioQuickDock .studioQuickDockTitle { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.studioQuickDockToggle {
+  border: 1px solid #ffffff24 !important; border-radius: 99px !important; padding: 3px 10px;
+  background: transparent !important; color: #c7c7cc !important; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer;
+}
+.studioQuickDockToggle:hover, .studioQuickDockToggle.is-active { background: #2a2a2d !important; color: #fff !important; }
+/* 方位盤上面那排選燈按鈕：五顆擠在卡片寬度裡，字小一號、按鈕壓矮。 */
+.studioQuickDock .lightDialPicker { margin: 0 0 6px; padding: 2px; gap: 2px; }
+.studioQuickDock .lightDialPicker button {
+  flex: 1; min-width: 0; padding: 3px 0; border: 0 !important; border-radius: 99px !important;
+  background: transparent !important; color: #98989e !important; font: inherit; font-size: 11px; white-space: nowrap; cursor: pointer;
+}
+.studioQuickDock .lightDialPicker button[aria-pressed=true] { background: #38383b !important; color: #fff !important; }
+/* 燈光細調：浮在右側那一欄的左邊、跟它的底部對齊。絕對定位，不佔欄位的空間，
+   所以開關它不會動到任何一張卡片（見 inspector.js 的 buildLightPopover）。 */
+#studioLightPopover {
+  position: absolute; right: calc(100% + 12px); bottom: 0; width: 248px;
+  max-height: calc(100% - 4px); overflow-y: auto; overscroll-behavior: contain;
+}
+#studioLightPopover[hidden] { display: none; }
+.studioQuickDockSubhead { margin: 6px 0 10px; padding-top: 12px; border-top: 1px solid #ffffff14; font-size: 12px; font-weight: 600; color: #e5e5ea; }
 /* 方向盤在常駐區裡縮小，說明文字改成滑鼠提示（canvas 的 title），只留讀數。 */
 .studioQuickDock .lightDial { margin: 0 0 8px; gap: 12px; }
 /* 欄寬跟著三顆按鈕走（大約 240–290px），盤面 96px 才留得下旁邊的讀數。 */
@@ -332,6 +354,9 @@ body:has(#exportDialog[open]) .studioSideStack { display: none; }
     padding: 8px 14px 6px; border-radius: 16px;
   }
   #studioQuickDock .studioQuickDockTitle { display: none; }
+  /* 手機的卡片只有一條：不選燈、不開細調，方位盤只調主光。其餘的燈在底部抽屜的
+     「燈光」區（那一區只在手機顯示，見 inspector.js）。 */
+  .studioQuickDock .lightDialPicker, #studioLightPopover { display: none !important; }
   .studioQuickDock .lightDial { margin: 0; flex-direction: column; gap: 2px; }
   .studioQuickDock .lightDialCanvas { width: 76px; height: 76px; }
   .studioQuickDock .lightDialReadout { font-size: 10px; }
