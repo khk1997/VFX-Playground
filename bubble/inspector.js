@@ -1,7 +1,7 @@
 import { EDGE_TINT_TARGETS, EDGE_TINT_STOPS, edgeTintParams } from './edge-tint.js';
 import { EDGE_TINT_BASE_BY_BACKDROP, EDGE_TINT_STRENGTH_BY_BACKDROP } from './runtime-defaults.js?v=no-membrane-1';
 import { INSTALLING_VISUAL_PRESETS, installingVisualPresetValues } from './visual-presets.js?v=tint-light-1';
-import { motionParamsGate, usesShapeField, usesStudioGlass } from './motions/registry.js?v=studio-glass-1';
+import { motionParamsGate, usesShapeField, usesStudioGlass } from './motions/registry.js?v=type-glass-1';
 
 const PAGES = [['shape', '造型'], ['motion', '動態'], ['look', '外觀'], ['scene', '場景']];
 

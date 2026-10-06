@@ -2,7 +2,7 @@ import { EDGE_TINT_TARGETS, edgeTintKeys } from './edge-tint.js?v=dark-tint-1';
 import {
   MOTION_DEFAULT_COUNTS, MOTION_DEFAULT_DOLLY, MOTION_DEFAULT_LOOP_DURATION,
   MOTION_DEFAULT_RADIUS, MOTION_KEYS, MOTION_OVERRIDES, usesStudioGlass,
-} from './motions/registry.js?v=studio-glass-1';
+} from './motions/registry.js?v=type-glass-1';
 import {
   COLOR_DEFAULTS, DEFAULTS, EDGE_TINT_BASE_BY_BACKDROP, EDGE_TINT_STRENGTH_BY_BACKDROP, SELECT_DEFAULTS,
   SPECTRAL_CAUSTIC_DEFAULTS, TOGGLE_DEFAULTS,
@@ -53,6 +53,9 @@ export const MOTION_SCOPED_KEYS = [
   // switchMaterialProfile 還原該類型記住的整組材質值，而模式記憶是照這個陣列
   // 的順序逐一寫回的，排在後面模式的 override 才蓋得過材質類型的 profile。
   'transmission', 'reflect', 'materialExposure', 'roughness', 'fresnel', 'ior',
+  // 彩虹強度：打字的細筆畫幾乎整條都是圓角，全域的 1 會讓每個字裡都是一條彩色
+  // 亮帶，所以打字自己降一半（見 registry 的 typewriter overrides）。
+  'dispersionScale',
   'hdriYaw', 'hdriPitch', 'hdriBlur', 'envRefraction',
   'dispersion', 'artPatternSpeed', 'absorbColor', 'researchIconIOR',
   // 水滴形態這兩條同樣沒列進來，所以 research overrides 裡的 viscosity 0.82 /

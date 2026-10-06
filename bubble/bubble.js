@@ -17,7 +17,7 @@ import {
 import {
   MOTION_UNIFORM_MAP, MOTION_SVG_DEMO,
   MOTION_HDRI, MOTION_KEYS, MOTION_TEXT_DEFAULTS, usesShapeField, usesStudioGlass,
-} from './motions/registry.js?v=studio-glass-1';
+} from './motions/registry.js?v=type-glass-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import { buildMorphPairs } from './motions/morph.js?v=post-mask-3';
@@ -48,7 +48,7 @@ import {
 } from './runtime-defaults.js?v=no-membrane-1';
 import {
   BACKDROP_SCOPED_KEYS, createMemorySlot, createMotionMemory, motionDefaultsFor,
-} from './runtime-memory.js?v=studio-backdrop-1';
+} from './runtime-memory.js?v=type-glass-1';
 import {
   COLORS, LINEAR_COLOR_KEYS, SELECTS, createFormatters, createToggleBindings,
 } from './control-schema.js?v=3';

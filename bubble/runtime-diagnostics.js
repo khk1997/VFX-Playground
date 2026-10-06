@@ -1,6 +1,6 @@
 'use strict';
 
-import { usesStudioGlass } from './motions/registry.js?v=studio-glass-1';
+import { usesStudioGlass } from './motions/registry.js?v=type-glass-1';
 
 export function createRuntimeDiagnostics(options) {
   const {

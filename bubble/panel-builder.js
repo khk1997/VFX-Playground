@@ -1,6 +1,6 @@
 'use strict';
 
-import { MOTION_PARAMS, motionParamsGate } from './motions/registry.js?v=studio-glass-1';
+import { MOTION_PARAMS, motionParamsGate } from './motions/registry.js?v=type-glass-1';
 
 function buildMotionSubgroup(param, block) {
   const details = document.createElement('details');

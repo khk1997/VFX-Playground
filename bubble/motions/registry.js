@@ -562,6 +562,9 @@ export const MOTIONS = {
       capillaryHeight: 0.09,
       capillaryRings: 3,
       capillarySpeed: 2,
+      // 彩虹強度減半：色散只長在圓角上，而字的筆畫細、圓角佔了大半個截面，全域的 1
+      // 會讓每個字中間都是一條橘藍色亮帶，看起來像霓虹燈管而不是玻璃。
+      dispersionScale: 0.5,
     },
     params: [
       {
@@ -581,11 +584,14 @@ export const MOTIONS = {
         key: 'typeTracking', label: '字距', min: 0.6, max: 1.6, step: 0.01, value: 1.15,
       },
       {
-        // 使用者實測後定案（2026-08-27 存檔匯入）。
-        key: 'typeDepth', label: '擠出厚度', min: 0.02, max: 0.4, step: 0.005, value: 0.115,
+        // 厚度 0.24、圓角 0.046（2026-10-06 換到新玻璃與棚景後重調）。舊值 0.115／0.1
+        // 是舊材質上定的：圓角幾乎等於厚度，Menlo 的筆畫又細，整個截面都是圓角，
+        // 字變成一根根圓管，中間一條亮帶，沒有平的正面可以透光。厚一點、圓角小
+        // 一點，字才有正面、側壁與一圈圓角，讀起來是一塊塊玻璃。
+        key: 'typeDepth', label: '擠出厚度', min: 0.02, max: 0.4, step: 0.005, value: 0.24,
       },
       {
-        key: 'typeBevel', label: '邊緣圓角', min: 0, max: 0.12, step: 0.002, value: 0.1,
+        key: 'typeBevel', label: '邊緣圓角', min: 0, max: 0.12, step: 0.002, value: 0.046,
       },
       {
         // 關閉：字直接完整出現，不做基線往上長的液態動畫。
@@ -613,7 +619,7 @@ export const MOTIONS = {
         // 圓角(typeBevel)仍共用一份，兩個都是液態表面，共用手感一致。
         // 預設值跟 typeDepth 一樣，銜接舊行為——切過來的當下畫面不會變，
         // 想錯開再各自調。
-        key: 'typeCaretDepth', label: '游標厚度', min: 0.02, max: 0.4, step: 0.005, value: 0.115,
+        key: 'typeCaretDepth', label: '游標厚度', min: 0.02, max: 0.4, step: 0.005, value: 0.24,
       },
       // 以下四條是絕對時間，不是相對權重——循環秒數由它們的總和推導出來（見
       // motions/typewriter.js 開頭與 bubble.js 的 syncTypewriterLoopDuration）。
