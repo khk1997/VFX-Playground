@@ -301,7 +301,8 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     assert page.locator("#moreMenu").is_hidden()
     # 用 wait_for 而不是 is_visible：開機遮罩撤掉之後面板還會做最後一次 refresh
     # （收合空區塊、套 gate），is_visible 不等待，偶爾會剛好量到那一瞬間。
-    for key in ("ior", "dispersionScale", "studioShadowStrength", "cameraFov"):
+    # 影子深度在右側的地板卡（見下面），不在面板上。
+    for key in ("ior", "dispersionScale", "cameraFov"):
         try:
             page.locator(f"#{key}").wait_for(state="visible", timeout=5_000)
         except Exception:
@@ -359,10 +360,25 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     shape_card = page.locator("#studioShapeCard")
     assert shape_card.is_visible(), "the shape card is missing"
     # 造型與背景兩區在桌面上都搬到右側卡片，面板裡那兩區藏起來。
-    # 燈光那一區也是：桌面上改由右下卡片的選燈與細調操作。
+    # 燈光與地板也是：桌面上改由右側的卡片操作。
     mirrored = page.locator("#panel .studioDesktopMirrored")
-    assert mirrored.count() == 3, mirrored.count()
-    assert all(mirrored.nth(i).is_hidden() for i in range(3)), "the mirrored panel sections should be hidden on desktop"
+    assert mirrored.count() == 4, mirrored.count()
+    assert all(mirrored.nth(i).is_hidden() for i in range(4)), "the mirrored panel sections should be hidden on desktop"
+    # 右側由上而下：造型、地板、背景與燈光，互不重疊。
+    stack = page.evaluate("""() => ['studioShapeCard', 'studioFloorCard', 'studioQuickDock']
+        .map(id => document.getElementById(id).getBoundingClientRect().toJSON())""")
+    assert stack[0]["bottom"] <= stack[1]["top"] and stack[1]["bottom"] <= stack[2]["top"], stack
+    assert page.locator("#studioFloorCard .studioQuickDockTitle").text_content() == "地板"
+    # 靜態的面板拆成卡片：看得到的區塊各自一張，間距跟右側一樣 12px。
+    cards = page.evaluate("""() => [...document.querySelectorAll('#inspectorPage-studio > .inspectorSection')]
+        .filter(node => getComputedStyle(node).display !== 'none')
+        .map(node => ({ title: node.querySelector(':scope > summary h3').textContent,
+                        top: node.getBoundingClientRect().top, bottom: node.getBoundingClientRect().bottom,
+                        first: node.classList.contains('is-firstCard') }))""")
+    assert [card["title"] for card in cards] == ["玻璃", "鏡頭", "後期"], cards
+    assert cards[0]["first"] and not any(card["first"] for card in cards[1:]), cards
+    for upper, lower in zip(cards, cards[1:]):
+        assert abs(lower["top"] - upper["bottom"] - 12) <= 1, (upper, lower)
     geometry = page.evaluate(
         """() => Object.fromEntries(['exportBtn', 'toggleBtn', 'studioShapeCard', 'studioQuickDock']
              .map(id => [id, document.getElementById(id).getBoundingClientRect().toJSON()]))"""

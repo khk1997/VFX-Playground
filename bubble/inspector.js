@@ -718,7 +718,9 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     staticDial?.draw();
     studioQuickDock?.sync();
     studioShapeCard?.sync();
+    studioFloorCard?.sync();
     syncLightPopover();
+    splitSync?.();
     iorPresetSync?.();
     glassTintSync?.();
     antialiasSync?.();
@@ -727,6 +729,8 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
   let lightPopover = null;
   let studioQuickDock = null;
   let studioShapeCard = null;
+  let studioFloorCard = null;
+  let splitSync = null;
   let iorPresetSync = null;
   let glassTintSync = null;
   let antialiasSync = null;
@@ -1179,6 +1183,16 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
   function buildStudioLayout() {
     const isStatic = launchMotion === 'static';
     panel.dataset.layout = 'studio';
+    // 靜態的面板拆成一張張卡片（桌面，見 inspector.css 的 [data-split]），跟右側那一欄
+    // 同樣的卡片與間距。標題列接在第一張看得到的卡片上面，所以要標出是哪一張。
+    if (isStatic) {
+      panel.dataset.split = '';
+      splitSync = () => {
+        const sections = [...page.children].filter(node => node.classList.contains('inspectorSection'));
+        const first = sections.find(node => getComputedStyle(node).display !== 'none');
+        for (const node of sections) node.classList.toggle('is-firstCard', node === first);
+      };
+    }
     tabs.hidden = true;
     depthHeading.hidden = true;
     depthPicker.group.hidden = true;
@@ -1292,6 +1306,11 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       ...(isStatic ? STATIC_SHAPE_ENTRIES.filter(([key]) => key !== 'primitiveHeight') : []),
       ...IMPORT_ENTRIES,
     ], null, 'studioShapeCard', sideStack) : null;
+    // 地板（影子、透光光斑）獨立一張卡，排在造型與燈光中間。
+    studioFloorCard = buildQuickDock('地板', [
+      ['studioShadowStrength', '影子深度'],
+      ['studioCaustic', '透光光斑'],
+    ], null, 'studioFloorCard', sideStack);
     // 背景色也放進這張卡（方向盤讀數的下面）：它就一兩個色票，單獨在左邊佔一整區
     // 太浪費。深底是一個背景色，淺底是上下兩個漸層色，跟著底色切換（真的那幾列由
     // refresh 依底色收起，鏡像照著 hidden 走）。
@@ -1320,15 +1339,17 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       queueMicrotask(() => {
         mirrorSyncQueued = false;
         studioShapeCard?.sync();
+        studioFloorCard?.sync();
         studioQuickDock?.sync();
         syncLightPopover();
       });
     }).observe(panel, { subtree: true, attributes: true, attributeFilter: ['class', 'hidden'] });
     if (!isStatic) buildMotionSections();
+    // 桌面上地板在右側的卡片裡（studioFloorCard），這一區只留給手機的抽屜。
     group('地板', [
       ['studioShadowStrength', '影子深度'],
       ['studioCaustic', '透光光斑'],
-    ]);
+    ]).classList.add('studioDesktopMirrored');
     // 每一盞燈與黑卡的位置、大小、強度，以及全部燈共用的設定。常用的那三樣
     // （主光方向、燈光強度、明暗對比）在右下的「背景與燈光」卡片上。
     // 桌面上這些都在右下卡片：方位盤選燈調方向與高度，「細調」調大小、強度與共用

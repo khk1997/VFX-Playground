@@ -243,6 +243,31 @@
 }
 .topMenuPresets .presetIOGrid button:hover { background: #2a2a2d !important; }
 .topMenuPresets .presetIOGrid button i { color: #a1a1a6; }
+/* 靜態模組的面板（桌面）：拆成一張張卡片，卡片的樣子與 12px 的間距比照右側那一欄
+   （.studioQuickDock）。面板本身變成透明的捲動容器；標題列接在第一張看得到的卡片
+   上面（.is-firstCard，由 inspector.js 的 splitSync 標），兩者看起來是同一張。
+   手機的抽屜維持一整塊。 */
+@media (min-width: 761px) {
+  #panel.inspector[data-split] {
+    background: transparent !important; border: 0 !important; border-radius: 0 !important;
+    box-shadow: none !important; padding: 0 !important;
+    backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+  }
+  #panel.inspector[data-split] .inspectorHeader {
+    position: static; margin: 0; padding: 16px 18px 12px;
+    background: #050505eb; border: 1px solid #ffffff24; border-bottom: 1px solid #ffffff12;
+    border-radius: 20px 20px 0 0;
+  }
+  #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection {
+    margin: 0 0 12px !important; padding: 14px 18px 10px !important;
+    background: #050505eb; border: 1px solid #ffffff24 !important; border-radius: 20px;
+    box-shadow: 0 18px 60px #0005, inset 0 1px 0 #ffffff0a;
+  }
+  #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection.is-firstCard {
+    border-top: 0 !important; border-radius: 0 0 20px 20px; padding-top: 16px !important;
+  }
+  #panel.inspector[data-split] #inspectorPage-studio > .inspectorSection:last-child { margin-bottom: 0 !important; }
+}
 /* 面板底部的「更多與管理」：桌面上在 ⋯ 選單裡，這一區只留給手機。 */
 @media (min-width: 761px) { #panel .inspectorTopBarMirrored { display: none !important; } }
 /* 靜態模組沒有播放鍵：它是一張靜止的展示照（桌面的按鈕列與手機的抽屜把手都收）。 */
@@ -277,13 +302,13 @@ body:has(#panel.collapsed) .studioSideStack {
 body:has(#panel.collapsed) .studioSideStack > * { pointer-events: none; }
 .studioQuickDock {
   --inspector-accent: #7957ff;
-  box-sizing: border-box; padding: 16px 16px 12px;
+  box-sizing: border-box; padding: 14px 16px 10px;
   background: #050505eb; color: #f5f5f7; color-scheme: dark;
   border: 1px solid #ffffff24; border-radius: 20px;
   box-shadow: 0 18px 60px #0005, inset 0 1px 0 #ffffff0a;
   font-family: inherit;
 }
-#studioQuickDock { flex: 0 0 auto; }
+#studioQuickDock, #studioFloorCard { flex: 0 0 auto; }
 #studioShapeCard { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 #studioShapeCard::-webkit-scrollbar { width: 4px; }
 #studioShapeCard::-webkit-scrollbar-thumb { background: #353535; border-radius: 99px; }
@@ -332,7 +357,7 @@ body:has(#panel.collapsed) .studioSideStack > * { pointer-events: none; }
 #panel.inspector .inspectorGlassTint .inspectorSegments button { padding: 7px 2px; font-size: 12px; white-space: nowrap; }
 #panel.inspector .inspectorIorPresets button { padding: 7px 4px; font-size: 12px; white-space: nowrap; }
 /* 跟左邊面板的區塊標題同一個級數（見 .inspectorSection > summary h3）。 */
-.studioQuickDockTitle { margin-bottom: 14px; font-size: 15px; font-weight: 600; letter-spacing: -.01em; color: #f5f5f7; }
+.studioQuickDockTitle { margin-bottom: 10px; font-size: 15px; font-weight: 600; letter-spacing: -.01em; color: #f5f5f7; }
 /* 背景與燈光卡的標題列右邊放「細調」，不多佔一列。 */
 #studioQuickDock .studioQuickDockTitle { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
 .studioQuickDockToggle {
@@ -363,13 +388,13 @@ body:has(#panel.collapsed) .studioSideStack > * { pointer-events: none; }
 .studioQuickDock .lightDialReadout { display: grid; gap: 2px; font-size: 13px; line-height: 1.4; }
 .studioQuickDock .lightDialReadoutSep { display: none; }
 .studioQuickDock .lightDialInfo .inspectorNote { display: none; }
-.studioQuickDockRow { display: block; margin-bottom: 12px; cursor: pointer; }
+.studioQuickDockRow { display: block; margin-bottom: 8px; cursor: pointer; }
 .studioQuickDockRow:last-child { margin-bottom: 4px; }
 .studioQuickDockHead { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: #a1a1a6; margin-bottom: 4px; }
 .studioQuickDockRow.studioQuickDockSelectRow > .studioQuickDockHead { margin-bottom: 0; }
 .studioQuickDockValue { color: #e6e6eb; font-variant-numeric: tabular-nums; }
 .studioQuickDock input[type=range] {
-  width: 100%; height: 26px; margin: 0; appearance: none; -webkit-appearance: none;
+  width: 100%; height: 22px; margin: 0; appearance: none; -webkit-appearance: none;
   background: transparent; cursor: pointer; accent-color: var(--inspector-accent);
 }
 .studioQuickDock input[type=range]::-webkit-slider-runnable-track {
@@ -398,7 +423,7 @@ body:has(#exportDialog[open]) .studioSideStack { display: none; }
     min-width: 0; justify-content: flex-start;
   }
   /* 手機的造型與背景色留在底部抽屜裡（面板那兩區沒有藏）。 */
-  #studioShapeCard { display: none; }
+  #studioShapeCard, #studioFloorCard { display: none; }
   #studioQuickDock .studioQuickDockColorRow { display: none !important; }
   #studioQuickDock {
     display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 14px; align-items: center;
