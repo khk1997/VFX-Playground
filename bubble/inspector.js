@@ -719,6 +719,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     syncLightPopover();
     iorPresetSync?.();
     glassTintSync?.();
+    antialiasSync?.();
   }
   let staticDial = null;
   let lightPopover = null;
@@ -726,7 +727,9 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
   let studioShapeCard = null;
   let iorPresetSync = null;
   let glassTintSync = null;
+  let antialiasSync = null;
   built = true;
+  buildTopBar();
   if (usesStudioGlass(launchMotion)) {
     buildStudioLayout();
     // 單頁面板沒有「常用／完整」之分；不寫回 localStorage，其餘模式的深度照舊。
@@ -920,6 +923,92 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     return { root, sync };
   }
 
+  // 右上角那一組（桌面）：由右而左「面板、輸出、AA、播放」。
+  //
+  // - AA 是抗鋸齒（#antialiasLevel，超取樣倍率）：小按鈕，點開是四個等級的選單。
+  //   面板裡不再有「畫質」區；光譜取樣不開給使用者。
+  // - 靜態模組是一張靜止的展示照，沒有播放鍵（body[data-still-module]，見 CSS）。
+  // - 位置照各按鈕的實際寬度排（layoutTopBar），不寫死 right：字型、語系、有沒有
+  //   播放鍵都會改變寬度。共用的 switch2-theme.css 給的是另一種排法（其他頁面還在用），
+  //   這裡只在液態玻璃頁面覆寫。手機的按鈕在底部導覽列裡，不走這一套。
+  function buildTopBar() {
+    if (launchMotion === 'static') document.body.dataset.stillModule = '';
+    const source = $('antialiasLevel');
+    const aa = button('AA', () => setMenuOpen(menu.hidden));
+    aa.id = 'aaBtn';
+    aa.type = 'button';
+    aa.setAttribute('aria-haspopup', 'menu');
+    aa.setAttribute('aria-controls', 'aaMenu');
+    aa.setAttribute('aria-expanded', 'false');
+    const menu = element('div', 'aaMenu');
+    menu.id = 'aaMenu';
+    menu.setAttribute('role', 'menu');
+    menu.hidden = true;
+    menu.append(element('div', 'aaMenuTitle', '抗鋸齒'));
+    const items = [...source.options].map(option => {
+      const item = button(option.textContent.replace(/（.*?）/, ''), () => {
+        writeControl('antialiasLevel', option.value);
+        setMenuOpen(false);
+        refresh();
+      });
+      item.setAttribute('role', 'menuitemradio');
+      item.dataset.value = option.value;
+      menu.append(item);
+      return item;
+    });
+    menu.append(element('p', 'aaMenuNote', '越高邊緣越平滑，但越吃效能。'));
+    $('exportBtn').before(aa);
+    document.body.append(menu);
+    function setMenuOpen(open) {
+      menu.hidden = !open;
+      aa.setAttribute('aria-expanded', String(open));
+      if (!open) return;
+      const box = aa.getBoundingClientRect();
+      menu.style.top = `${Math.round(box.bottom + 8)}px`;
+      menu.style.right = `${Math.round(window.innerWidth - box.right)}px`;
+    }
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && !menu.hidden) setMenuOpen(false);
+    });
+    document.addEventListener('pointerdown', event => {
+      if (!menu.hidden && !menu.contains(event.target) && !aa.contains(event.target)) setMenuOpen(false);
+    }, true);
+    antialiasSync = () => {
+      const current = source.value;
+      for (const item of items) item.setAttribute('aria-checked', String(item.dataset.value === current));
+      const label = items.find(item => item.dataset.value === current)?.textContent ?? '';
+      aa.title = `抗鋸齒：${label}`;
+      aa.setAttribute('aria-label', `抗鋸齒：${label}`);
+    };
+    antialiasSync();
+
+    const desktop = window.matchMedia('(min-width: 761px)');
+    const GAP = 8;
+    // 由右而左排：面板的位置由共用主題決定，其餘一顆接一顆往左排。
+    function layoutTopBar() {
+      const order = ['exportBtn', 'aaBtn', 'playCtl'].map(id => $(id)).filter(Boolean);
+      if (!desktop.matches) {
+        for (const el of order) el.style.removeProperty('right');
+        return;
+      }
+      const toggle = $('toggleBtn').getBoundingClientRect();
+      let right = window.innerWidth - toggle.left + GAP;
+      for (const el of order) {
+        if (getComputedStyle(el).display === 'none') continue;
+        el.style.setProperty('right', `${Math.round(right)}px`, 'important');
+        right += el.getBoundingClientRect().width + GAP;
+      }
+    }
+    layoutTopBar();
+    window.addEventListener('resize', layoutTopBar);
+    desktop.addEventListener?.('change', layoutTopBar);
+    document.fonts?.ready?.then(layoutTopBar);
+    if (typeof ResizeObserver === 'function') {
+      const observer = new ResizeObserver(layoutTopBar);
+      for (const id of ['toggleBtn', 'exportBtn', 'aaBtn', 'playCtl']) if ($(id)) observer.observe($(id));
+    }
+  }
+
   // 燈光的「細調」：方位盤選中那盞燈的大小與強度，加上全部燈共用的設定。浮在右側
   // 那一欄的左邊（絕對定位，不佔欄位的空間），所以打開它不會改變任何卡片的大小與
   // 位置；面板收起、輸出對話框開著時跟著那一欄一起收。標題列上的「細調」開關它，
@@ -978,7 +1067,9 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     stack.id = 'studioSideStack';
     document.body.append(stack);
     const align = () => {
-      const first = $('exportBtn')?.getBoundingClientRect();
+      // 欄位左緣對齊右上角那一組的「AA」（見 layoutTopBar）；播放鍵在它更左邊，
+      // 不算進來，不然有沒有播放鍵（靜態沒有）欄寬就不一樣。
+      const first = ($('aaBtn') ?? $('exportBtn'))?.getBoundingClientRect();
       const last = $('toggleBtn')?.getBoundingClientRect();
       if (!first?.width || !last?.width) return;
       stack.style.setProperty('--stack-left', `${Math.round(first.left)}px`);
@@ -988,7 +1079,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     window.addEventListener('resize', align);
     if (typeof ResizeObserver === 'function') {
       const observer = new ResizeObserver(align);
-      for (const id of ['exportBtn', 'playCtl', 'toggleBtn']) if ($(id)) observer.observe($(id));
+      for (const id of ['aaBtn', 'exportBtn', 'playCtl', 'toggleBtn']) if ($(id)) observer.observe($(id));
     }
     document.fonts?.ready?.then(align);
     requestAnimationFrame(align);
@@ -1079,28 +1170,24 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     // 材料按鈕跟著折射率那一列走（見下面的 after）。
     // 玻璃顏色：單色或漸層（見 buildGlassTint）。漸層那三列靠 glassGradientOn
     // 閘門收放，單色時面板跟以前一模一樣。
-    const glassBlock = group('玻璃', [
+    group('玻璃', [
       ['absorbGradient', null],
       ['absorbColor', null],
       ['absorbColorB', null],
       ['absorbGradientMid', '漸層位置'],
+      // 柔和度跟著漸層那幾列走（同一個 glassGradientOn 閘門），單色時收起來。
+      ['absorbGradientSoftness', '漸層柔和度'],
       ['absorb', '顏色濃度'],
       ['roughness', '霧面'],
       ['dispersionScale', '彩虹強度'],
       ['reflect', '反射'],
+      ['transmission', '透射率'],
       ['ior', '折射率'],
     ]);
+    // 邊緣光（fresnel）不開給使用者：新模型的反射已經照 Fresnel 算，這一根在上面
+    // 再加的量調了看不太出差別。參數本身保留，參數檔照常讀寫。
     rowOf('ior').after(buildIorPresets());
     rowOf('absorbGradient').after(buildGlassTint());
-    // 玻璃的細項：調了看得出差別，但不是每次都要動，預設收起來放在玻璃區最底下。
-    const glassDetail = section('玻璃細調', null, false);
-    for (const [key, label] of [
-      ['transmission', '透射率'], ['fresnel', '邊緣光'], ['absorbGradientSoftness', '漸層柔和度'],
-    ]) {
-      relabel(key, label);
-      glassDetail.append(rowOf(key));
-    }
-    glassBlock.append(glassDetail);
     // 燈光整組（方向盤、燈光強度、明暗對比）是最常一邊看畫面一邊調的，拉到
     // 畫面右下角常駐（見 buildQuickDock），面板裡不再有燈光區。
     // 方位盤要調哪一盞燈（STUDIO_LIGHTS 的 id）。不存進參數檔：它是介面狀態，不是畫面。
@@ -1183,7 +1270,8 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     ]);
     backgroundBlock.classList.add('studioDesktopMirrored');
 
-    group('畫質', [['spectralSamples', '光譜取樣'], ['antialiasLevel', '抗鋸齒']], false);
+    // 光譜取樣不開給使用者，用預設值（畫質分級另外會壓低）。抗鋸齒是右上角的
+    // 「AA」按鈕（見 buildAntialiasButton）。
     group('後期', [], false).append($('bloomGroup'));
 
     // 存檔、提示與整個模組的重設。

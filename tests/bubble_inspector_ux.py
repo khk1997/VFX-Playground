@@ -263,8 +263,25 @@ def check_static(browser, base_url: str) -> dict[str, object]:
              .map(node => node.textContent)"""
     )
     # 風格已經拿掉；造型那一區還在面板裡（手機用），桌面上藏起來、改由右側卡片操作。
-    # 舊的「進階」拆成燈光、畫質、後期；透射率與邊緣光收進玻璃區的「玻璃細調」。
-    assert sections == ["造型", "玻璃", "地板", "燈光", "鏡頭", "背景", "畫質", "後期", "更多與管理"], sections
+    # 舊的「進階」拆成燈光與後期；透射率回到玻璃區、邊緣光與光譜取樣不開給使用者，
+    # 抗鋸齒在右上角的 AA。
+    assert sections == ["造型", "玻璃", "地板", "燈光", "鏡頭", "背景", "後期", "更多與管理"], sections
+    assert page.locator("#inspectorPage-studio #fresnel").count() == 0
+    assert page.locator("#inspectorPage-studio #spectralSamples").count() == 0
+    # 右上角由右而左：面板、輸出、AA；靜態沒有播放鍵。右側卡片欄對齊 AA 的左緣。
+    top = page.evaluate("""() => Object.fromEntries(['aaBtn', 'exportBtn', 'toggleBtn', 'playCtl'].map(id => {
+        const el = document.getElementById(id);
+        const r = el.getBoundingClientRect();
+        return [id, getComputedStyle(el).display === 'none' ? null : { left: r.left, right: r.right }];
+    }))""")
+    assert top["playCtl"] is None, "the static module should have no play button"
+    assert top["aaBtn"]["right"] < top["exportBtn"]["left"] < top["exportBtn"]["right"] < top["toggleBtn"]["left"], top
+    page.locator("#aaBtn").click()
+    page.locator("#aaMenu button", has_text="最高").click()
+    assert page.locator("#antialiasLevel").input_value() == "ultra"
+    assert page.locator("#aaMenu").is_hidden()
+    page.locator("#aaBtn").click()
+    page.locator("#aaMenu button", has_text="中").click()
     # 用 wait_for 而不是 is_visible：開機遮罩撤掉之後面板還會做最後一次 refresh
     # （收合空區塊、套 gate），is_visible 不等待，偶爾會剛好量到那一瞬間。
     for key in ("ior", "dispersionScale", "studioShadowStrength", "cameraFov"):
@@ -321,7 +338,7 @@ def check_static(browser, base_url: str) -> dict[str, object]:
 
     assert page.locator("[data-static-look]").count() == 0, "the style presets should be gone"
 
-    # 右側欄：左緣對齊「輸出」、右緣對齊「面板」；造型卡在燈光卡上面。
+    # 右側欄：左緣對齊 AA、右緣對齊「面板」；造型卡在燈光卡上面。
     shape_card = page.locator("#studioShapeCard")
     assert shape_card.is_visible(), "the shape card is missing"
     # 造型與背景兩區在桌面上都搬到右側卡片，面板裡那兩區藏起來。
@@ -330,11 +347,11 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     assert mirrored.count() == 3, mirrored.count()
     assert all(mirrored.nth(i).is_hidden() for i in range(3)), "the mirrored panel sections should be hidden on desktop"
     geometry = page.evaluate(
-        """() => Object.fromEntries(['exportBtn', 'toggleBtn', 'studioShapeCard', 'studioQuickDock']
+        """() => Object.fromEntries(['aaBtn', 'toggleBtn', 'studioShapeCard', 'studioQuickDock']
              .map(id => [id, document.getElementById(id).getBoundingClientRect().toJSON()]))"""
     )
     for card in ("studioShapeCard", "studioQuickDock"):
-        assert abs(geometry[card]["left"] - geometry["exportBtn"]["left"]) <= 1, (card, geometry)
+        assert abs(geometry[card]["left"] - geometry["aaBtn"]["left"]) <= 1, (card, geometry)
         assert abs(geometry[card]["right"] - geometry["toggleBtn"]["right"]) <= 1, (card, geometry)
     assert geometry["studioShapeCard"]["bottom"] < geometry["studioQuickDock"]["top"], geometry
     light_top = geometry["studioQuickDock"]["top"]
@@ -424,7 +441,7 @@ def check_studio_motion(browser, base_url: str) -> dict[str, object]:
             .map(node => node.querySelector(':scope > summary h3').textContent)"""
     )
     # 造型在右側卡片（桌面）；毛細波沒有水滴，「水滴」整區要被閘門收掉。
-    for name in ("玻璃", "動態", "地板", "燈光", "鏡頭", "畫質", "後期"):
+    for name in ("玻璃", "動態", "地板", "燈光", "鏡頭", "後期"):
         assert name in visible_sections, f"missing studio section {name}: {visible_sections}"
     assert "水滴" not in visible_sections, visible_sections
     motion = page.locator("#inspectorPage-studio > details", has_text="動態")
@@ -440,6 +457,11 @@ def check_studio_motion(browser, base_url: str) -> dict[str, object]:
     assert not any("形狀" in text for text in labels), labels
     assert any("檔案類型" in text for text in labels), labels
     assert page.locator("#cameraFov").input_value() == "28"
+    # 會動的模組：播放鍵在 AA 左邊（跟輸出換了位置）。
+    play = page.locator("#playCtl").bounding_box()
+    aa = page.locator("#aaBtn").bounding_box()
+    export = page.locator("#exportBtn").bounding_box()
+    assert play["x"] + play["width"] < aa["x"] < export["x"], (play, aa, export)
     # 「面板」收起時右側卡片要一起收（往右滑出、點不到），打開時一起回來。
     side_state = """() => {
         const stack = document.getElementById('studioSideStack');

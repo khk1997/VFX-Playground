@@ -94,6 +94,7 @@ def main():
                         homeBtn: rect('#homeBtn'),
                         toggleBtn: rect('#toggleBtn, #toggle'),
                         playCtl: rect('#playCtl'),
+                        aaBtn: rect('#aaBtn'),
                         controls: document.querySelectorAll('input, select, button').length,
                         canvasPixels: [...document.querySelectorAll('canvas')]
                             .reduce((sum, canvas) => sum + canvas.width * canvas.height, 0),
@@ -208,11 +209,13 @@ def main():
                 if not play_ctl or play_ctl["width"] <= 0 or play_ctl["height"] <= 0:
                     failures.append(f"{name}: play control is not visible")
                 toggle_ctl = metrics.get("toggleBtn")
-                if play_ctl and toggle_ctl:
-                    control_gap = toggle_ctl["x"] - (play_ctl["x"] + play_ctl["width"])
+                # 液態玻璃的播放鍵在 AA（抗鋸齒）左邊，其餘頁面緊貼「面板」。
+                neighbour = metrics.get("aaBtn") or toggle_ctl
+                if play_ctl and neighbour:
+                    control_gap = neighbour["x"] - (play_ctl["x"] + play_ctl["width"])
                     if control_gap < 6 or control_gap > 12:
                         failures.append(
-                            f"{name}: play/panel control gap is {control_gap:.1f}px"
+                            f"{name}: play control gap to its right neighbour is {control_gap:.1f}px"
                         )
                     toggle_font_size = float(toggle_ctl["fontSize"].removesuffix("px"))
                     if abs(toggle_font_size - 13) > 0.1 or toggle_ctl["whiteSpace"] != "nowrap":
