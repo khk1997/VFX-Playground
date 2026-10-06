@@ -266,7 +266,9 @@
     background: transparent !important; border: 0 !important; border-radius: 0 !important;
     box-shadow: none !important; padding: 0 !important;
     backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
-    display: flex; flex-direction: column; overflow: hidden !important;
+    /* 不裁切：卡片自己會縮短、在卡片內捲，不會超出面板；裁切的話卡片的大陰影會在
+       面板邊緣被切出一塊硬邊的灰色長方形（淺底上特別明顯），右側那一欄沒有這個問題。 */
+    display: flex; flex-direction: column; overflow: visible !important;
   }
   #panel.inspector[data-split] .inspectorHeader { flex: 0 0 auto; }
   #panel.inspector[data-split] #inspectorPage-studio {
