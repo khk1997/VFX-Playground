@@ -3517,6 +3517,14 @@ function requestPausedRender() {
   });
 }
 
+// 手機直式畫面採較正面的英雄鏡，避免桌面的斜角透視讓右滴顯得特別巨大、整組視覺
+// 偏右。新玻璃模型不轉：棚燈是固定在場景裡的，鏡頭偷轉 24° 打光就跟桌面不一樣
+// （毛細波的問號會整個轉到主光柔光箱前面，折射出一片亮面），右下的方位盤也是照
+// 「水平角度」畫的，不知道這一轉，光點會跟畫面對不上。
+function mobileYawCorrectionFor(isMobilePortrait) {
+  return isMobilePortrait && !usesStudioGlass(P.motion) ? -0.42 : 0;
+}
+
 function updatePausedCameraRotation() {
   if (!uniforms) return;
   rot.x = Math.max(-1.2, Math.min(1.2, rot.x));
@@ -3526,7 +3534,7 @@ function updatePausedCameraRotation() {
   const autoPitch = Math.sin(loopAngle + 1.1) * P.spin * 0.14;
   const mobile = document.documentElement.clientWidth <= 760
     && document.documentElement.clientWidth / Math.max(1, document.documentElement.clientHeight) < 0.8;
-  rotM4.makeRotationY(rot.y + autoYaw + (mobile ? -0.42 : 0));
+  rotM4.makeRotationY(rot.y + autoYaw + mobileYawCorrectionFor(mobile));
   tmpX.makeRotationX(rot.x + autoPitch);
   rotM4.multiply(tmpX);
   tmpZ.makeRotationZ(-0.03);
@@ -3791,8 +3799,7 @@ function frame(now) {
     compositionDistance *= 1.2;
     compositionOffsetY = -0.48;
   }
-  // 手機採較正面的英雄鏡，避免桌面的斜角透視讓右滴顯得特別巨大、整組視覺偏右。
-  const mobileYawCorrection = isMobilePortrait ? -0.42 : 0;
+  const mobileYawCorrection = mobileYawCorrectionFor(isMobilePortrait);
   rotM4.makeRotationY(rot.y + autoYaw + mobileYawCorrection);
   tmpX.makeRotationX(rot.x + autoPitch);
   rotM4.multiply(tmpX);
