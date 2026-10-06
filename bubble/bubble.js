@@ -1,6 +1,6 @@
 'use strict';
 import * as THREE from 'three';
-import { buildInspector } from './inspector.js?v=fixed-cards-1';
+import { buildInspector } from './inspector.js?v=bloom-3';
 import { createAdaptiveQuality, QUALITY_TIER_NAMES } from './adaptive-quality.js?v=2';
 import { createGpuProfiler } from './gpu-profiler.js?v=1';
 let inspector = null;
@@ -353,7 +353,7 @@ function refreshLoopScaledReadouts() {
 }
 
 import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=no-membrane-1';
-import { createPostChain } from './post.js?v=post-mask-3';
+import { createPostChain } from './post.js?v=shoulder-1';
 
 const {
   diagTiming, glTimeline, compactGlEnvironment, markGlEvent, startGlTimeline,
@@ -3415,6 +3415,36 @@ function backdropLevel(transparent) {
   return Math.max(r, g, b);
 }
 
+// 新玻璃模型的背景紙亮度：深底是背景色，淺底是上下兩個漸層色的平均。跟主 shader
+// 的高光肩部讀的是同一個量（environment.js 的 studioGlassShade 結尾用 backgroundSample
+// 的亮度），所以照它的換算：選色器的原始數值、Rec.709 亮度。
+function studioPaperLevel() {
+  const lum = hex => {
+    const v = hex.replace('#', '');
+    const [r, g, b] = [0, 2, 4].map(i => parseInt(v.slice(i, i + 2), 16) / 255);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  return P.backdrop === 'light'
+    ? (lum(P.lightBgGradientTop) + lum(P.lightBgGradientBottom)) / 2
+    : lum(P.bgColor);
+}
+// 新玻璃模型開著後處理時的光暈與高光設定。門檻、門檻柔度、最大亮度不開給使用者
+// （太技術、互相牽動），照背景自動決定：
+// - 膝點：跟主 shader 同一條規則（紙的亮度 + 0.08，夾在 0.5–0.95）。光暈加回來之後
+//   在後處理補上同一條高光肩部，畫面跟光暈關著時一樣，只多出外圈的光。
+// - 門檻：比白高、也比紙亮一截，淺底的紙與透過玻璃看到的紙都不會發光。
+// - 最大亮度：燈卡在玻璃上的反射可以到十幾倍，不壓的話一兩條亮邊就撐爆整片光暈。
+function studioBloomSettings(transparent) {
+  if (!usesStudioGlass(P.motion) || transparent) return null;
+  const paper = studioPaperLevel();
+  return {
+    shoulderKnee: Math.min(0.95, Math.max(0.5, paper + 0.08)),
+    threshold: Math.max(1, paper + 0.2),
+    knee: 0.5,
+    clampMax: 4,
+  };
+}
+
 function postActive() {
   return P.bloomEnabled || P.streaksEnabled
     || P.postExposure !== 1 || P.postToneMap !== 'none' || P.highlightGain !== 1
@@ -3444,16 +3474,18 @@ function renderComposite(target = null, superSample = 1) {
     return;
   }
   if (!postChain) postChain = createPostChain(renderer);
+  const studio = studioBloomSettings(transparent);
   postChain.render(scene, camera, target, {
     // bloom 關著時強度給 0：合成 pass 仍要跑（曝光與色調映射在那裡），但光暈
-    // 整條鏈的結果不參與。
-    threshold: P.bloomThreshold,
-    knee: P.bloomKnee,
-    clampMax: P.bloomClamp,
+    // 整條鏈的結果不參與。新玻璃模型的門檻、柔度、最大亮度自動決定（見上面）。
+    threshold: studio ? studio.threshold : P.bloomThreshold,
+    knee: studio ? studio.knee : P.bloomKnee,
+    clampMax: studio ? studio.clampMax : P.bloomClamp,
+    shoulderKnee: studio ? studio.shoulderKnee : 0,
     // 門檻是「比背景亮多少」。純色背景知道確切亮度就直接給；HDRI 背景每個
     // 方向都不一樣，沒有單一代表值，給 0 維持原本的絕對門檻。
-    // 去背輸出的背景是全透明，同樣是 0。
-    backdrop: backdropLevel(transparent),
+    // 去背輸出的背景是全透明，同樣是 0。新玻璃模型的門檻已經把紙算進去了。
+    backdrop: studio ? 0 : backdropLevel(transparent),
     intensity: P.bloomEnabled ? P.bloomIntensity : 0,
     radius: P.bloomRadius,
     exposure: P.postExposure,
@@ -3476,7 +3508,8 @@ function renderComposite(target = null, superSample = 1) {
       (uniforms.uTime.value / Math.max(0.001, uniforms.uLoopDuration.value)) % 1
         * Math.max(1, Math.round(uniforms.uLoopDuration.value * 24)),
     ),
-    tint: bloomTintColor.setStyle(P.bloomTint, THREE.LinearSRGBColorSpace),
+    // 新玻璃模型不開光暈色（預設白、幾乎不需要調），一律用白光。
+    tint: studio ? bloomTintColor.setRGB(1, 1, 1) : bloomTintColor.setStyle(P.bloomTint, THREE.LinearSRGBColorSpace),
     // 去背輸出寫的是 straight alpha，光暈的取樣與合成都要換一套（見 post.js）。
     transparent,
     // 匯出是超採樣的，模糊鏈要以「最終成品的尺寸」為基準展開，否則同一組參數在

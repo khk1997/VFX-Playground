@@ -253,6 +253,21 @@ uniform float uBrightness;
 uniform float uGrain;
 uniform float uGrainScale;
 uniform float uGrainSeed;
+// 新玻璃模型的高光肩部（0 = 不套）。光暈開著時主 shader 不壓高光、把 HDR 整份交
+// 過來（見 environment.js 的 studioGlassShade 結尾），這裡在光暈加回來之後補上同
+// 一條曲線，畫面才跟光暈關著時一樣，只多出外面那一圈光。
+uniform float uShoulderKnee;
+
+// 膝點以下原樣，以上用 Khronos PBR Neutral 的有理式收斂到 1（膝點斜率 1，跟
+// environment.js 的 studioGlassShade 結尾是同一條）。套在最大通道上、三通道等比
+// 縮放，色帶才不會被壓淡。
+vec3 highlightShoulder(vec3 c, float knee){
+  float peak = max(c.r, max(c.g, c.b));
+  if (peak <= knee) return c;
+  float room = 1.0 - knee;
+  float mapped = 1.0 - room * room / (peak - knee + room);
+  return c * (mapped / peak);
+}
 
 // 對照 Blender 的色調映射選單（Color Management → View Transform）。除了 AgX、
 // Filmic、ACES 都是 LUT／完整色彩空間轉換，這裡放的是業界公認的即時擬合 ——
@@ -385,6 +400,7 @@ void main(){
   );
 
   vec3 lit = (base.rgb * (uTransparent < 0.5 ? 1.0 : base.a) + bloom) * uExposure;
+  if (uShoulderKnee > 0.0) lit = highlightShoulder(lit, uShoulderKnee);
   vec3 color = applyToneMap(lit);
 
   // 對比與亮度是「調色」，所以放在色調映射之後：那時候的值才是實際要顯示的
@@ -532,6 +548,7 @@ export function createPostChain(renderer) {
     uTransparent: { value: 0 },
     uExposure: { value: 1 },
     uToneMap: { value: 0 },
+    uShoulderKnee: { value: 0 },
     uAberration: { value: 0 },
     uContrast: { value: 1 },
     uBrightness: { value: 0 },
@@ -701,6 +718,7 @@ export function createPostChain(renderer) {
     compositeMaterial.uniforms.uTransparent.value = params.transparent ? 1 : 0;
     compositeMaterial.uniforms.uExposure.value = params.exposure;
     compositeMaterial.uniforms.uToneMap.value = params.toneMap;
+    compositeMaterial.uniforms.uShoulderKnee.value = params.shoulderKnee ?? 0;
     compositeMaterial.uniforms.uAberration.value = params.aberration;
     compositeMaterial.uniforms.uContrast.value = params.contrast;
     compositeMaterial.uniforms.uBrightness.value = params.brightness;

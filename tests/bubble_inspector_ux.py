@@ -272,6 +272,16 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     # 只留給手機）。
     assert sections == ["造型", "玻璃", "地板", "燈光", "鏡頭", "背景", "後期", "更多與管理"], sections
     assert page.locator("#panel .inspectorUtilities.inspectorTopBarMirrored").is_hidden()
+    # 光暈只開放開關、強度與範圍；門檻、柔度、最大亮度、光暈色自動決定。打開光暈時
+    # 那一組跟著展開。
+    for key in ("bloomThreshold", "bloomKnee", "bloomClamp", "bloomTint"):
+        assert page.locator(f"#{key}").evaluate("el => el.closest('.row').hidden"), key
+    page.locator("#bloomEnabled").evaluate(
+        "el => { el.checked = true; el.dispatchEvent(new Event('change', { bubbles: true })); }")
+    page.wait_for_function("document.getElementById('bloomGroup').open")
+    assert page.locator("#bloomIntensity").evaluate("el => el.closest('.row').querySelector('label').textContent") == "光暈強度"
+    page.locator("#bloomEnabled").evaluate(
+        "el => { el.checked = false; el.dispatchEvent(new Event('change', { bubbles: true })); }")
     assert page.locator("#inspectorPage-studio #fresnel").count() == 0
     assert page.locator("#inspectorPage-studio #spectralSamples").count() == 0
     # 右上角由右而左：面板、⋯、輸出、畫質；靜態沒有播放鍵。
