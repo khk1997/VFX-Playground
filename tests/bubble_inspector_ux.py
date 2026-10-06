@@ -436,6 +436,20 @@ def check_studio_motion(browser, base_url: str) -> dict[str, object]:
     assert not any("形狀" in text for text in labels), labels
     assert any("檔案類型" in text for text in labels), labels
     assert page.locator("#cameraFov").input_value() == "28"
+    # 「面板」收起時右側卡片要一起收（往右滑出、點不到），打開時一起回來。
+    side_state = """() => {
+        const stack = document.getElementById('studioSideStack');
+        const dock = document.getElementById('studioQuickDock').getBoundingClientRect();
+        const hit = document.elementFromPoint(dock.x + dock.width / 2, dock.y + dock.height / 2);
+        return { opacity: getComputedStyle(stack).opacity, clickable: !!hit?.closest('#studioQuickDock') };
+    }"""
+    assert page.evaluate(side_state) == {"opacity": "1", "clickable": True}
+    page.locator("#toggleBtn").click()
+    page.wait_for_function("() => getComputedStyle(document.getElementById('studioSideStack')).opacity === '0'")
+    assert page.evaluate(side_state)["clickable"] is False, "the side cards stayed clickable while collapsed"
+    page.locator("#toggleBtn").click()
+    page.wait_for_function("() => getComputedStyle(document.getElementById('studioSideStack')).opacity === '1'")
+    assert page.evaluate(side_state)["clickable"] is True
     assert not errors, f"capillary inspector page errors: {errors}"
     context.close()
     return {"singlePage": True, "motionSection": True}

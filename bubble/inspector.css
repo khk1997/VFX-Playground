@@ -216,6 +216,14 @@
   pointer-events: none;
 }
 .studioSideStack > * { pointer-events: auto; }
+/* 右側卡片跟左邊的參數面板一起收：按「面板」把 #panel 收起時，這一欄往右滑出，
+   動畫與時間跟面板一致（見 bubble.css 的 #panel.collapsed）。手機的面板是另一套
+   抽屜（mobile-control-sheet.js），不會加 collapsed，這條在手機上不生效。 */
+.studioSideStack { transition: transform .25s ease, opacity .25s ease; }
+body:has(#panel.collapsed) .studioSideStack {
+  transform: translateX(calc(100% + 24px)); opacity: 0;
+}
+body:has(#panel.collapsed) .studioSideStack > * { pointer-events: none; }
 .studioQuickDock {
   --inspector-accent: #7957ff;
   box-sizing: border-box; padding: 16px 16px 12px;
