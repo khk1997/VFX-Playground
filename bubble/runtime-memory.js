@@ -126,10 +126,19 @@ export const BACKDROP_SCOPED_KEYS = new Set([
 // 之後才宣告，讀它會撞上 const 的 TDZ。
 export const BACKDROP_KEYS = ['dark', 'light'];
 
+// 新玻璃模型（靜態、毛細波等）的深淺底只是換一張背景：玻璃、燈光、鏡頭都是
+// 同一套模型，切底色時鏡頭應該停在原地、參數效果一致。上面那份名單是給舊路徑的
+// （兩個底色是兩條 shader 路徑，必須各調一份），套在新玻璃上，切一次底色鏡頭就
+// 跳回預設、反射與折射率也換成另一格的值。所以新玻璃模式一律讀寫深底那一格，
+// 只有背景色本身還分開記（淺底的上下漸層色是另外兩個 key，本來就不共用）。
+const STUDIO_BACKDROP_SCOPED_KEYS = new Set(['bgMode', 'bgColor']);
+
 export function createMemorySlot(params) {
-  return (key, motion = params.motion, backdrop = params.backdrop) => (
-    BACKDROP_SCOPED_KEYS.has(key) ? `${motion}|${backdrop}` : motion
-  );
+  return (key, motion = params.motion, backdrop = params.backdrop) => {
+    if (!BACKDROP_SCOPED_KEYS.has(key)) return motion;
+    if (usesStudioGlass(motion) && !STUDIO_BACKDROP_SCOPED_KEYS.has(key)) return `${motion}|dark`;
+    return `${motion}|${backdrop}`;
+  };
 }
 
 // 特定底色下另有起點的參數。淺底那一組是白底玻璃的基本調校（透射拉高、吸收

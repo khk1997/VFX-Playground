@@ -26,6 +26,14 @@ params.motion = 'research';
 params.backdrop = 'light';
 assert.equal(slotFor('count'), 'research|light');
 assert.equal(slotFor('shapeDepth'), 'research');
+// 新玻璃模型的深淺底只換背景：鏡頭與材質兩個底色共用深底那一格，只有背景色分開。
+params.motion = 'static';
+for (const key of ['cameraDistance', 'cameraRotationY', 'reflect', 'ior', 'bloomEnabled']) {
+  assert.equal(slotFor(key), 'static|dark', `${key} should be shared across backdrops on studio glass`);
+}
+assert.equal(slotFor('bgColor'), 'static|light');
+params.motion = 'research';
+assert.equal(slotFor('cameraDistance'), 'research|light');
 
 const countDefaults = motionDefaultsFor('count');
 assert.equal(Object.keys(countDefaults).length, MOTION_KEYS.length * 2);
