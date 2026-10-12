@@ -33,6 +33,9 @@
 #panel.inspector .inspectorContext .row select { width: 100%; height: 34px; }
 #panel.inspector .inspectorContext .row .val { display: none; }
 #panel.inspector .row { min-height: 34px; gap: 10px; margin-bottom: 14px; }
+/* 薄膜自訂漸層的「色 N」一列有兩個 input（色票＋滑桿），不吃下面那條滑桿列的 grid，
+   維持原本的單行 flex（窄卡片另有自己的排法，見 [data-split] 那段）。 */
+#panel.inspector .effectBlock--ramp .row.stopRow { display: flex; }
 #panel.inspector .row label { flex-basis: 102px; font-size: 13px; white-space: normal; line-height: 1.4; color: #a1a1a6 !important; }
 #panel.inspector .row .val { flex-basis: 46px; font-size: 12px; color: #e6e6eb !important; font-variant-numeric: tabular-nums; }
 #panel.inspector .row:has(> input[type=range]) { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 10px; margin-bottom: 18px; }
@@ -133,15 +136,19 @@
 #panel .inspectorStylePreset { display: grid; gap: 6px; min-width: 0; padding: 7px 8px 8px; color: #d7d7dc; background: #141416; border: 1px solid #ffffff14; border-radius: 12px; font-size: 11px; cursor: pointer; }
 #panel .inspectorStylePreset::before { content: ''; display: block; width: 100%; height: 7px; border-radius: 99px; background: var(--preset-swatch); box-shadow: inset 0 0 0 1px #ffffff18; }
 #panel .inspectorStylePreset:hover { color: #fff; background: #202023; border-color: #ffffff26; }
-.inspectorRamp { position: relative; height: 62px; margin: 8px 16px 14px; touch-action: none; }
+.inspectorRamp { position: relative; height: 44px; margin: 8px 16px 14px; touch-action: none; }
 .inspectorRampPreview { display: block; position: absolute; inset: 6px 0 auto; height: 5px; border-radius: 99px; opacity: .8; }
+/* 色標的圓點做小：預設色標最近的兩顆只差 6%，290px 的卡片裡軌道約 220px，也就是 13px。
+   圓點 16px 時那兩顆只貼著疊一點點，其餘都分得開。點擊範圍另外用 ::after 往外撐，
+   小圓點一樣好點、好拖。 */
 #panel .inspectorStop {
-  position: absolute; top: 27px; transform: translateX(-50%); width: 25px; height: 25px;
+  position: absolute; top: 20px; transform: translateX(-50%); width: 16px; height: 16px;
   border: 1px solid #ffffff35 !important; border-radius: 50% !important; padding: 0 !important; background: var(--stop-color) !important;
-  font-size: 10px; color: #fff; text-shadow: 0 1px 3px #000, 0 0 2px #000;
-  box-shadow: 0 2px 5px #0006; cursor: ew-resize; touch-action: none; user-select: none;
+  font-size: 9px; line-height: 14px; color: #fff; text-shadow: 0 1px 2px #000, 0 0 2px #000;
+  box-shadow: 0 1px 3px #0006; cursor: ew-resize; touch-action: none; user-select: none;
 }
-#panel .inspectorStop[data-selected=true] { border-color: #050505 !important; outline: 2px solid var(--inspector-accent); outline-offset: 3px; z-index: 2; box-shadow: 0 0 0 1px #050505 !important; }
+#panel .inspectorStop::after { content: ''; position: absolute; inset: -6px; border-radius: 50%; }
+#panel .inspectorStop[data-selected=true] { border-color: #050505 !important; outline: 2px solid var(--inspector-accent); outline-offset: 2px; z-index: 2; box-shadow: 0 0 0 1px #050505 !important; }
 #panel .inspectorStop:active { transform: translateX(-50%) !important; }
 #panel .inspectorStopControls { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: center; }
 #panel .inspectorStopControls .row { margin-bottom: 0; }
@@ -362,6 +369,30 @@ body:has(#panel.collapsed) .studioSideStack > * { pointer-events: none; }
 }
 #studioQuickDock, #studioFloorCard { flex: 0 0 auto; }
 #studioShapeCard { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+/* 安裝中右側有五張卡（見 inspector.js 的 buildInstallingLayout），全部打開時一欄
+   放不下：每張都可以縮、內容自己捲。 */
+.studioQuickDock.studioQuickDockScroll { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+/* 鏡像卡片裡的小標題（見 buildQuickDock 的 key: null）。 */
+.studioQuickDockSubhead { margin: 14px 0 8px; font-size: 11px; font-weight: 600; color: #8e8e93; letter-spacing: .02em; }
+.studioQuickDockSliders > .studioQuickDockSubhead:first-child { margin-top: 2px; }
+/* 鏡像的開關列：標籤靠左、開關靠右。 */
+/* 權重要比後面那條 .studioQuickDockRow（display: block）重，理由同下拉那一列。 */
+.studioQuickDockRow.studioQuickDockToggleRow { display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; }
+.studioQuickDockRow.studioQuickDockToggleRow > .studioQuickDockHead { flex: 1 1 auto; margin: 0; }
+.studioQuickDockRow.studioQuickDockToggleRow { position: relative; padding: 4px 0; }
+.studioQuickDockToggleRow > input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.studioQuickDockToggleRow > .switchTrack {
+  display: block; position: relative; flex: 0 0 34px; width: 34px; height: 18px; box-sizing: border-box;
+  border: 1px solid #ffffff18; border-radius: 999px; background: #303033;
+  transition: background .18s ease;
+}
+.studioQuickDockToggleRow > .switchTrack::after {
+  content: ""; position: absolute; width: 12px; height: 12px; left: 2px; top: 2px;
+  border-radius: 50%; background: #8e8e93; transition: transform .18s ease, background .18s ease;
+}
+.studioQuickDockToggleRow > input:checked + .switchTrack { background: var(--inspector-accent); border-color: var(--inspector-accent); }
+.studioQuickDockToggleRow > input:checked + .switchTrack::after { transform: translateX(16px); background: #fff; }
+.studioQuickDockToggleRow > input:focus-visible + .switchTrack { outline: 2px solid #a38aff; outline-offset: 2px; }
 /* 造型卡內容多時自己捲動，標題同樣釘在頂端（做法見左邊面板的 summary）。 */
 #studioShapeCard > .studioQuickDockTitle {
   position: sticky; top: -14px; z-index: 2;
@@ -416,6 +447,9 @@ body:has(#panel.collapsed) .studioSideStack > * { pointer-events: none; }
      窄下來之後，一列放不下的兩處改成換行：玻璃顏色的標籤在上、四顆按鈕在下；
      折射率的材料膠囊排成兩欄。 */
   #panel.inspector[data-split] { width: var(--studio-side-width, 340px); }
+  /* 安裝中例外：它的控制項多、而且有色盤編輯器這類寬元件，跟右側那一欄同寬（約 230px）
+     會擠在一起。左側固定 290px；其他模組照舊跟右側同寬。 */
+  #panel.inspector[data-split][data-module="installing"] { width: 290px; }
   #panel.inspector[data-split] .inspectorGlassTint { flex-wrap: wrap; row-gap: 8px; }
   #panel.inspector[data-split] .inspectorGlassTint > label { flex: 1 1 100%; }
   #panel.inspector[data-split] .inspectorGlassTint .inspectorSegments { flex: 1 1 100%; }
@@ -435,13 +469,33 @@ body:has(#panel.collapsed) .studioSideStack > * { pointer-events: none; }
   }
   #panel.inspector[data-split] #inspectorPage-studio .effectBlock::before,
   #panel.inspector[data-split] #inspectorPage-studio .effectBlock::after { display: none !important; }
-  #panel.inspector[data-split] #inspectorPage-studio .effectBlock > .effectTitle { display: none; }
+  /* 安裝中例外：它的 RAY／焦散／ART 開關就在區塊標題上（見 inspector.js 的
+     buildInstallingLayout）。 */
+  #panel.inspector[data-split]:not([data-module="installing"]) #inspectorPage-studio .effectBlock > .effectTitle { display: none; }
   /* 開關列（標籤、開關、「開啟／關閉」文字）在窄卡片裡文字會超出內距。開關本身就
      看得出狀態，文字拿掉、開關靠右（跟光暈標題上的開關一樣的位置）。 */
   #panel.inspector[data-split] .row.toggleRow > .val { display: none; }
   #panel.inspector[data-split] .row.toggleRow > label { flex: 1 1 auto; }
   #panel.inspector[data-split] .row.toggleRow > .switchTrack { margin-left: auto; }
   #panel.inspector[data-split] .inspectorIorPresets { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; }
+  /* 安裝中的窄卡片（見 inspector.js 的 buildInstallingLayout）：
+     - 色標編輯：原本「色票｜位置」左右兩欄，每欄只剩 100 出頭，「位置 %」被擠成兩行
+       壓到色票上。改成一欄：色標名稱＋色票一行、位置＋數字一行。
+     - 薄膜自訂漸層的「色 N」：一列裡有色票、滑桿、數值三樣，窄卡片放不下。標籤、
+       色票、數值在上，滑桿整列在下。 */
+  #panel.inspector[data-split] .inspectorStopControls { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  #panel.inspector[data-split] .inspectorStopControls .row label { flex: 1 1 auto; }
+  /* 焦散的 7 顆色票原本寫死 40px（7 顆加間距要 328px），窄卡片放不下。改成跟著欄寬縮，
+     最大 28px，維持正圓。 */
+  #panel.inspector[data-split] .spectralColorEditor { gap: 6px; }
+  #panel.inspector[data-split] .spectralColorEditor input[type=color] {
+    width: 100%; max-width: 28px; min-width: 0; height: auto; aspect-ratio: 1; padding: 2px;
+  }
+  #panel.inspector[data-split] .effectBlock--ramp .row.stopRow { display: grid; grid-template-columns: minmax(0, 1fr) 34px auto; gap: 6px 10px; align-items: center; }
+  #panel.inspector[data-split] .row.stopRow > label { grid-column: 1; grid-row: 1; min-width: 0; }
+  #panel.inspector[data-split] .row.stopRow > input[type=color] { grid-column: 2; grid-row: 1; }
+  #panel.inspector[data-split] .row.stopRow > .val { grid-column: 3; grid-row: 1; }
+  #panel.inspector[data-split] .row.stopRow > input[type=range] { grid-column: 1 / -1; grid-row: 2; }
 }
 /* 折射率底下的材料膠囊：沿用 inspectorSegments 的樣子，但四顆要擠在一列。 */
 #panel.inspector .inspectorIorPresets { margin: -8px 0 18px; }
@@ -557,7 +611,8 @@ body:has(#exportDialog[open]) .studioSideStack { display: none; }
   #panel.inspector .inspectorTabs button { min-height: 44px; }
   #panel.inspector .inspectorDepthPicker button { min-height: 40px; }
   #panel.inspector { border-radius: 26px 26px 0 0 !important; }
-  #panel .inspectorStop { width: 28px; height: 28px; }
+  /* 手機的軌道比較寬（約 300px，6% ≈ 18px），圓點跟著大一點。 */
+  #panel .inspectorStop { width: 18px; height: 18px; line-height: 16px; }
   #panel.inspector .mobile-sheet-handle {
     position: sticky; top: 0; z-index: 6;
     width: calc(100% + 32px); margin: 0 -16px;

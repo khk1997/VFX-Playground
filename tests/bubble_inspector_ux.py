@@ -96,74 +96,47 @@ def check_desktop(browser, base_url: str) -> dict[str, object]:
     assert page.locator("#quickSlots").count() == 0, "the removed quick-slot bar is still in the page"
     assert page.locator("[data-slot]").count() == 0, "a stray quick-slot button survived"
 
-    # Coordinated visual presets tune shell/icons separately for each backdrop,
-    # while continuing to use the existing per-backdrop memory.
-    page.goto(f"{base_url}/bubble/index.html?mode=research&diag=inspector-ux", wait_until="networkidle")
-    page.wait_for_selector("#panel.inspector[data-control-depth=\"complete\"]")
-    page.locator("#inspectorTab-motion").click()
+    # 分頁版面（不帶 ?mode= 的頁面）：數值可以直接輸入、調過的列有標記，分頁重設只動
+    # 這一頁。安裝中改成卡片版面之後，這裡改用場景分頁的鏡頭距離。
+    page.locator("#inspectorTab-scene").click()
     assert panel.get_attribute("role") == "region"
     assert page.locator(".inspectorTabs").get_attribute("aria-orientation") == "horizontal"
-
-    # Readouts expose direct numeric entry and changed values are visibly
-    # identified. A section reset restores only that section through the
-    # normal control event path.
-    breath = page.locator("#researchBreath")
-    breath_readout = page.locator("#researchBreath_v")
-    assert breath_readout.is_visible()
-    readout_style = breath_readout.evaluate(
+    distance = page.locator("#cameraDistance")
+    distance_readout = page.locator("#cameraDistance_v")
+    distance.evaluate("node => { for (let d = node.closest('details'); d; d = d.parentElement.closest('details')) d.open = true; }")
+    assert distance_readout.is_visible()
+    readout_style = distance_readout.evaluate(
         "node => ({ background: getComputedStyle(node).backgroundColor, radius: getComputedStyle(node).borderRadius })"
     )
     assert readout_style["background"] != "rgba(0, 0, 0, 0)"
     assert float(readout_style["radius"].replace("px", "")) >= 10
-    breath_readout.click()
-    assert breath_readout.locator("input[type=number]").is_visible()
-    breath_readout.locator("input[type=number]").press("Escape")
-    breath_default = breath.input_value()
-    breath.evaluate(
+    distance_readout.click()
+    assert distance_readout.locator("input[type=number]").is_visible()
+    distance_readout.locator("input[type=number]").press("Escape")
+    distance_default = distance.input_value()
+    distance.evaluate(
         """node => {
-            node.value = String(Math.min(Number(node.max), Number(node.value) + 0.1));
+            node.value = String(Math.min(Number(node.max), Number(node.value) + 0.5));
             node.dispatchEvent(new Event('input', { bubbles: true }));
         }"""
     )
-    breath_row = page.locator("#researchBreath").locator("xpath=ancestor::*[contains(@class, 'row')][1]")
-    page.wait_for_function("document.querySelector('#researchBreath').closest('.row').classList.contains('is-modified')")
-    assert "is-modified" in (breath_row.get_attribute("class") or "")
-    # 重設是以分頁為單位的：一頁一顆，而且只動這一頁的參數（見 inspector.js 的
-    # PAGES 迴圈）。這裡順便確認它沒有越界——外觀分頁的染色強度必須原封不動。
-    shell_tint = page.locator("#researchShellTint")
-    shell_tint.evaluate(
+    distance_row = page.locator("#cameraDistance").locator("xpath=ancestor::*[contains(@class, 'row')][1]")
+    page.wait_for_function("document.querySelector('#cameraDistance').closest('.row').classList.contains('is-modified')")
+    assert "is-modified" in (distance_row.get_attribute("class") or "")
+    absorb = page.locator("#absorb")
+    absorb.evaluate(
         """node => {
-            node.value = '0.33';
+            node.value = '3.3';
             node.dispatchEvent(new Event('input', { bubbles: true }));
         }"""
     )
-    page.locator("#inspectorPage-motion .inspectorPageReset").click()
+    page.locator("#inspectorPage-scene .inspectorPageReset").click()
     page.wait_for_function(
-        "expected => document.querySelector('#researchBreath').value === expected",
-        arg=breath_default,
+        "expected => document.querySelector('#cameraDistance').value === expected",
+        arg=distance_default,
     )
-    assert "is-modified" not in (breath_row.get_attribute("class") or "")
-    assert shell_tint.input_value() == "0.33", "the motion reset reached into the look page"
-
-    page.locator("#inspectorTab-look").click()
-    prism = page.locator('[data-visual-preset="prism"]')
-    assert prism.is_visible(), "Prism preset is not visible in Installing/look"
-    prism.click()
-    assert page.locator("#researchShellMultiTint").is_checked(), "shell multicolor was not enabled"
-    assert page.locator("#researchIconMultiTint").is_checked(), "icon multicolor was not enabled"
-    dark_shell = page.locator("#researchShellTint").input_value()
-    dark_icon = page.locator("#researchIconTint").input_value()
-    assert dark_shell != dark_icon, "preset collapsed shell and icon tuning"
-    # 深淺底在桌面上是右上角的開關（面板頂端那個下拉藏起來了）。
-    page.locator("#backdropBtn").click()
-    assert page.locator("#backdrop").input_value() == "light"
-    prism.click()
-    light_shell = page.locator("#researchShellTint").input_value()
-    assert light_shell != dark_shell, "preset did not distinguish light and dark tuning"
-    page.locator("#backdropBtn").click()
-    assert page.locator("#backdrop").input_value() == "dark"
-    page.wait_for_timeout(100)
-    assert page.locator("#researchShellTint").input_value() == dark_shell, "dark preset memory was not restored"
+    assert "is-modified" not in (distance_row.get_attribute("class") or "")
+    assert absorb.input_value() == "3.3", "the scene reset reached into the look page"
 
     # 常用深度會藏掉大部分參數，區塊很容易剩下一個打開沒東西的空殼。凡是還看得到
     # 展開箭頭的區塊，裡面就必須有東西可以調（見 inspector.js 的 pruneEmptySections）。
@@ -201,7 +174,6 @@ def check_desktop(browser, base_url: str) -> dict[str, object]:
     return {
         "expertControls": expert_count,
         "valuesPreserved": True,
-        "visualPresets": True,
     }
 
 
@@ -594,6 +566,75 @@ def check_studio_motion(browser, base_url: str) -> dict[str, object]:
     return {"singlePage": True, "motionSection": True}
 
 
+def check_installing(browser, base_url: str) -> dict[str, object]:
+    """安裝中用卡片版面（跟新玻璃同一種），shader 仍是舊路徑，參數一根都沒少。"""
+    context = browser.new_context(viewport={"width": 1100, "height": 900}, reduced_motion="reduce")
+    page = context.new_page()
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.goto(f"{base_url}/bubble/index.html?mode=research&diag=inspector-ux", wait_until="networkidle", timeout=45_000)
+    page.wait_for_selector('#panel.inspector[data-layout="studio"][data-module="installing"]')
+    page.wait_for_function("() => !document.body.hasAttribute('data-bubble-boot')", timeout=90_000)
+    assert page.locator(".inspectorTabs").is_hidden()
+    visible = page.evaluate(
+        """() => [...document.querySelectorAll('#inspectorPage-studio > details')]
+            .filter(node => !node.classList.contains('is-emptyHidden') && !node.classList.contains('gated-off'))
+            .filter(node => getComputedStyle(node).display !== 'none')
+            .map(node => node.querySelector(':scope > summary :is(h3, h4)').textContent)"""
+    )
+    # 左右兩欄平均分：左邊是外觀，右邊是東西與動作（鏡像卡片，面板裡的真身桌面藏起來）。
+    expected = ["表面", "內部氣泡", "配色", "玻璃", "後期"]
+    assert visible[:len(expected)] == expected, visible
+    cards = {
+        "造型": ("radius", "researchCompanionSize", "researchIconSizeA", "researchIconSpread"),
+        "動態": ("loopDuration", "researchBreath", "researchCompanionPath"),
+        "表面": ("wobble", "researchShellTexture", "researchTextureDirX"),
+        "編舞細節": ("researchCompanionOrbit", "researchIconPhaseOffset"),
+        "玻璃": ("ior", "researchIconIOR", "rayDispersionEnabled", "spectralCausticEnabled", "filmEnabled"),
+    }
+    for name, keys in cards.items():
+        card = page.locator("#inspectorPage-studio > details", has=page.locator(f":scope > summary h3:text-is('{name}')"))
+        for key in keys:
+            assert card.locator(f"#{key}").count() == 1, f"{key} is not in the {name} card"
+    side = page.locator("#studioSideStack .studioQuickDockTitle").all_inner_texts()
+    assert side == ["造型", "動態", "編舞細節", "鏡頭", "背景與環境光"], side
+    # 編舞細節的鏡像用小標題分成兩組。
+    subheads = page.locator("#installingChoreoCard .studioQuickDockSubhead").all_inner_texts()
+    assert subheads == ["第二外殼軌跡", "對話泡排列與時序"], subheads
+    # 鏡像的開關：前後拉伸，真的開關跟著動。
+    page.locator("#installingCameraCard .studioQuickDockTitle").click()
+    dolly_before = page.locator("#dollyEnabled").is_checked()
+    page.locator("#installingCameraCard .studioQuickDockToggleRow").click()
+    assert page.locator("#dollyEnabled").is_checked() is not dolly_before
+    page.locator("#installingCameraCard .studioQuickDockToggleRow").click()
+    assert page.locator("#dollyEnabled").is_checked() is dolly_before
+    page.locator("#studioQuickDock .studioQuickDockTitle").click()
+    assert page.locator("#studioQuickDock .studioQuickDockRow:not([hidden])", has_text="背景模式").is_visible()
+
+    # 推薦風格在「配色」卡：外殼／圖示各自調、深淺底各自記。
+    page.locator("#inspectorPage-studio > details > summary", has_text="配色").click()
+    prism = page.locator('[data-visual-preset="prism"]')
+    assert prism.is_visible(), "Prism preset is not visible in the 配色 card"
+    prism.click()
+    assert page.locator("#researchShellMultiTint").is_checked(), "shell multicolor was not enabled"
+    assert page.locator("#researchIconMultiTint").is_checked(), "icon multicolor was not enabled"
+    dark_shell = page.locator("#researchShellTint").input_value()
+    dark_icon = page.locator("#researchIconTint").input_value()
+    assert dark_shell != dark_icon, "preset collapsed shell and icon tuning"
+    page.locator("#backdropBtn").click()
+    assert page.locator("#backdrop").input_value() == "light"
+    prism.click()
+    light_shell = page.locator("#researchShellTint").input_value()
+    assert light_shell != dark_shell, "preset did not distinguish light and dark tuning"
+    page.locator("#backdropBtn").click()
+    assert page.locator("#backdrop").input_value() == "dark"
+    page.wait_for_timeout(100)
+    assert page.locator("#researchShellTint").input_value() == dark_shell, "dark preset memory was not restored"
+    assert not errors, f"installing inspector page errors: {errors}"
+    context.close()
+    return {"cards": visible, "visualPresets": True}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:4173")
@@ -605,6 +646,7 @@ def main() -> int:
             "mobile": check_mobile(browser, args.base_url),
             "static": check_static(browser, args.base_url),
             "studioMotion": check_studio_motion(browser, args.base_url),
+            "installing": check_installing(browser, args.base_url),
         }
         browser.close()
     print(results)

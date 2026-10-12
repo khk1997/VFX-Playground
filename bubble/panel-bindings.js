@@ -293,7 +293,8 @@ function resetSpectralCausticColors() {
 function updateRampRows() {
   const n = Math.round(parseFloat(document.getElementById('rampCount').value));
   for (let i = 0; i < STOP_MAX; i++) {
-    document.getElementById('stopRow' + i).style.display = (i < n) ? 'flex' : 'none';
+    // 只負責藏起來；顯示時的版面交給 CSS（窄卡片裡這一列是兩行的 grid，見 inspector.css）。
+    document.getElementById('stopRow' + i).style.display = (i < n) ? '' : 'none';
   }
 }
 function bindRamp() {

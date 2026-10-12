@@ -719,6 +719,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     studioQuickDock?.sync();
     studioShapeCard?.sync();
     studioFloorCard?.sync();
+    for (const item of installingDocks) item.sync();
     syncLightPopover();
     splitSync?.();
     iorPresetSync?.();
@@ -731,6 +732,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
   let studioQuickDock = null;
   let studioShapeCard = null;
   let studioFloorCard = null;
+  let installingDocks = [];
   let splitSync = null;
   let iorPresetSync = null;
   let glassTintSync = null;
@@ -741,6 +743,9 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
   if (usesStudioGlass(launchMotion)) {
     buildStudioLayout();
     // 單頁面板沒有「常用／完整」之分；不寫回 localStorage，其餘模式的深度照舊。
+    setControlDepth('complete', false);
+  } else if (launchMotion === 'research') {
+    buildInstallingLayout();
     setControlDepth('complete', false);
   } else {
     let initialPage = 'look';
@@ -840,6 +845,12 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     // data-preset-ignore、不給 id。
     const items = [...entries.map(entry => [...entry, sliders]),
       ...leadEntries.map(entry => [...entry, leadSlot])].map(([key, label, slot]) => {
+      // key 為 null：卡片裡的小標題，把一長串滑桿分成幾組（例如安裝中的編舞細節）。
+      if (key === null) {
+        const row = element('div', 'studioQuickDockSubhead', label);
+        slot.append(row);
+        return { key, kind: 'heading', row };
+      }
       const source = $(key);
       if (source.type === 'color') {
         // 顏色：標籤在左、色票在右，一列就好（放在方向盤旁邊那一欄，空間很窄）。
@@ -865,6 +876,21 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
         row.append(mirror);
         slot.append(row);
         return { key, kind: 'button', row, mirror };
+      }
+      if (source.type === 'checkbox') {
+        // 開關：標籤在左、開關在右，跟面板裡的開關列同一個樣子。
+        const row = element('label', 'studioQuickDockRow studioQuickDockToggleRow');
+        const name = element('span', 'studioQuickDockHead', label);
+        const mirror = element('input');
+        mirror.type = 'checkbox';
+        mirror.dataset.presetIgnore = '';
+        mirror.setAttribute('aria-label', label);
+        mirror.addEventListener('change', () => { writeControl(key, mirror.checked); refresh(); });
+        const track = element('span', 'switchTrack');
+        track.setAttribute('aria-hidden', 'true');
+        row.append(name, mirror, track);
+        slot.append(row);
+        return { key, kind: 'toggle', row, mirror };
       }
       if (source.tagName === 'SELECT') {
         const row = element('label', 'studioQuickDockRow studioQuickDockSelectRow');
@@ -896,6 +922,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     const gatedOff = source => !!source.closest('.gated-off') || !!source.closest('.row')?.hidden;
     const sync = () => {
       for (const item of items) {
+        if (item.kind === 'heading') continue;
         const source = $(item.key);
         item.row.hidden = gatedOff(source) || !shown(item.key);
         if (item.kind === 'button') {
@@ -905,6 +932,10 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
         }
         if (item.kind === 'color') {
           if (document.activeElement !== item.mirror) item.mirror.value = source.value;
+          continue;
+        }
+        if (item.kind === 'toggle') {
+          item.mirror.checked = source.checked;
           continue;
         }
         if (item.kind === 'select') {
@@ -1225,6 +1256,205 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     document.fonts?.ready?.then(align);
     requestAnimationFrame(align);
     return stack;
+  }
+
+  // 安裝中的面板：跟新玻璃模式同一種卡片版面（左邊一疊卡片、右邊一張背景卡），但
+  // shader 仍是舊的材質路徑，所以參數一根都不少 —— 只是從「造型／動態／外觀／場景」
+  // 四個分頁，改成照「東西」分卡：外殼、融合、對話泡、內部氣泡，再來才是配色、玻璃、
+  // 光學效果、鏡頭與後期。每張卡先放最常調的幾根，細的收在卡片裡的子區塊。
+  //
+  // 卡片都是從上面分頁版面建好的區塊搬過來的（同一批控制項，不是複製），所以參數檔、
+  // 重設、閘門與 borrow 照舊。
+  function buildInstallingLayout() {
+    panel.dataset.layout = 'studio';
+    panel.dataset.split = '';
+    // 安裝中保留舊的特效區塊（RAY／焦散／ART），它們的開關在區塊標題上，不能跟
+    // 新玻璃一樣把標題藏掉（見 inspector.css）。
+    panel.dataset.module = 'installing';
+    tabs.hidden = true;
+    depthHeading.hidden = true;
+    depthPicker.group.hidden = true;
+    depthHelp.hidden = true;
+    for (const pane of Object.values(panes)) pane.hidden = true;
+    const page = element('section', 'inspectorPage');
+    page.id = 'inspectorPage-studio';
+    header.after(page);
+    splitSync = () => {
+      const sections = [...page.children].filter(node => node.classList.contains('inspectorSection'));
+      const first = sections.find(node => getComputedStyle(node).display !== 'none');
+      for (const node of sections) node.classList.toggle('is-firstCard', node === first);
+    };
+    const card = text => {
+      const node = section(text, null, false);
+      page.append(node);
+      return node;
+    };
+    const sub = (text, keys) => {
+      const node = section(text, null, false);
+      node.className = 'subgroup';
+      for (const key of keys) if (rowOf(key)) node.append(rowOf(key));
+      return node;
+    };
+    const relabel = (key, text) => {
+      const label = rowOf(key)?.querySelector('label');
+      if (label) label.textContent = text;
+    };
+
+    // 分兩欄：右邊是「東西與動作」—— 造型、動態、編舞細節、鏡頭、背景；左邊是「看起來
+    // 怎樣」—— 表面、內部氣泡、配色、玻璃（含色散與薄膜）、後期。調動作看右邊、調外觀
+    // 看左邊，動態與它的細節也因此排在一起。
+    //
+    // 右邊的卡片是鏡像（buildQuickDock）：真的控制項必須留在 #panel 裡（閘門、borrow、
+    // 參數檔、「已調整」標記都只看 #panel）。所以右邊那幾區在面板裡仍有一份，標成
+    // studioDesktopMirrored —— 桌面上藏起來，手機的抽屜照常列出。
+    const mirrored = node => { node.classList.add('studioDesktopMirrored'); return node; };
+
+    // ── 右邊那幾區（面板裡的真身，桌面藏起來）──
+    // 外殼大小是借來的「水滴大小」（registry 的 type: 'borrow'）：定位點要一起搬，
+    // syncBorrowedRows 才會把那一列放到這裡。初始化時可能已經借過來了，列跟著走。
+    const shapeCard = mirrored(card('造型'));
+    const radiusAnchor = shell.querySelector('[data-borrow="radius"]');
+    const radiusBorrowed = rowOf('radius')?.previousElementSibling === radiusAnchor;
+    shapeCard.append(radiusAnchor);
+    if (radiusBorrowed) radiusAnchor.after(rowOf('radius'));
+    relabel('researchCompanionSize', '第二外殼大小');
+    relabel('researchIconSizeA', '對話泡 A 大小');
+    relabel('researchIconSizeB', '對話泡 B 大小');
+    relabel('researchIconAspect', '對話泡扁度');
+    relabel('researchIconTailTip', '尾巴尖度');
+    relabel('researchIconSpread', '對話泡間距');
+    for (const key of ['researchCompanionSize', 'researchIconSizeA', 'researchIconSizeB',
+      'researchIconAspect', 'researchIconTailTip', 'researchIconSpread']) shapeCard.append(rowOf(key));
+    const SHAPE_ENTRIES = [
+      ['radius', '外殼大小'], ['researchCompanionSize', '第二外殼大小'],
+      ['researchIconSizeA', '對話泡 A 大小'], ['researchIconSizeB', '對話泡 B 大小'],
+      ['researchIconAspect', '對話泡扁度'], ['researchIconTailTip', '尾巴尖度'],
+      ['researchIconSpread', '對話泡間距'],
+    ];
+
+    // 動態：循環秒數就是融合的節奏，跟呼吸、融合放一起。
+    const motionCard = mirrored(card('動態'));
+    for (const key of ['loopDuration', 'researchBreath', 'researchCompanionDepth',
+      'researchCompanionFusion', 'researchCompanionPath']) motionCard.append(rowOf(key));
+    const MOTION_ENTRIES = [
+      ['loopDuration', '循環秒數'], ['researchBreath', '呼吸幅度'],
+      ['researchCompanionDepth', '融合深度'], ['researchCompanionFusion', '融合柔度'],
+      ['researchCompanionPath', '軌跡類型'],
+    ];
+
+    // 編舞細節：「動態」之外、比較少動的那些，排在動態下面。
+    const choreoCard = mirrored(card('編舞細節'));
+    choreoCard.append(
+      sub('第二外殼軌跡', ['researchCompanionExposure', 'researchCompanionHold',
+        'researchCompanionPathAngle', 'researchCompanionOrbit', 'researchCompanionDepthOrbit']),
+      sub('對話泡排列與時序', ['researchIconStagger', 'researchIconDepth',
+        'researchIconPhaseOffset', 'researchIconBirthStagger']),
+    );
+    const CHOREO_ENTRIES = [
+      [null, '第二外殼軌跡'],
+      ['researchCompanionExposure', '外露程度'], ['researchCompanionHold', '融合停留'],
+      ['researchCompanionPathAngle', '出發方向'], ['researchCompanionOrbit', '側向弧線'],
+      ['researchCompanionDepthOrbit', '前後弧線'],
+      [null, '對話泡排列與時序'],
+      ['researchIconStagger', '高度錯位'], ['researchIconDepth', '前後錯位'],
+      ['researchIconPhaseOffset', '出現時機'], ['researchIconBirthStagger', 'A/B 出現錯開'],
+    ];
+
+    title(camera, '鏡頭');
+    camera.open = false;
+    page.append(mirrored(camera));
+    const CAMERA_ENTRIES = [
+      ['cameraDistance', '鏡頭距離'], ['cameraRotationY', '水平視角'],
+      ['cameraRotationX', '垂直視角'], ['spin', '環繞幅度'], ['dollyEnabled', '前後拉伸'],
+    ];
+
+    title(background, '背景與環境光');
+    background.open = false;
+    page.append(mirrored(background));
+    const BACKGROUND_ENTRIES = [
+      ['bgMode', '背景模式'], ['bgColor', '背景顏色'],
+      ['lightBgGradientTop', '上方顏色'], ['lightBgGradientBottom', '下方顏色'],
+      ['hdriYaw', 'HDRI 水平'], ['hdriPitch', 'HDRI 垂直'], ['hdriBlur', 'HDRI 模糊'],
+      ['envRefraction', '環境折射'], ['hdriBtn', null],
+    ];
+
+    // ── 左邊 ──
+    // 表面：外殼的兩套起伏（fbm 雜訊、程序紋理）。
+    const surfaceCard = card('表面');
+    title(surface, '表面雜訊');
+    surface.className = 'subgroup';
+    surface.open = false;
+    title(texture, '程序紋理');
+    texture.className = 'subgroup';
+    texture.open = false;
+    delete texture.dataset.gate;
+    texture.classList.remove('modeBlock');
+    title(directions, '紋理方向');
+    directions.className = 'subgroup';
+    surfaceCard.append(surface, texture);
+
+    // 內部氣泡：總開關在標題上，整區沿用。跟表面一樣是玻璃裡外的細節。
+    title(bubbles, '內部氣泡');
+    bubbles.open = false;
+    page.append(bubbles);
+
+    // 配色：外殼／圖示的局部配色與推薦風格，整塊沿用。
+    title(colors, '配色');
+    colors.open = false;
+    page.append(colors);
+
+    // 玻璃：整體材質，加上對話泡的相對折射率（就排在外殼的折射率後面），色散與
+    // 薄膜收在底下當子區塊。
+    title(material, '玻璃');
+    material.open = false;
+    rowOf('ior').after(rowOf('researchIconIOR'));
+    relabel('researchIconIOR', '對話泡折射率');
+    material.append($('dispersionGroup'), $('thinFilmGroup'));
+    page.append(material);
+
+    title(post, '後期');
+    post.open = false;
+    page.append(post);
+
+    // ── 右側那一欄的鏡像卡片，由上而下 ──
+    const sideStack = buildSideStack();
+    const dock = (name, entries, id) => {
+      const built = buildQuickDock(name, entries, null, id, sideStack);
+      built.root.classList.add('studioQuickDockScroll');
+      makeDockCollapsible(built.root);
+      return built;
+    };
+    installingDocks = [
+      dock('造型', SHAPE_ENTRIES, 'installingShapeCard'),
+      dock('動態', MOTION_ENTRIES, 'installingMotionCard'),
+      dock('編舞細節', CHOREO_ENTRIES, 'installingChoreoCard'),
+      dock('鏡頭', CAMERA_ENTRIES, 'installingCameraCard'),
+    ];
+    studioQuickDock = dock('背景與環境光', BACKGROUND_ENTRIES, 'studioQuickDock');
+    // 鏡像跟著 gate 與 hidden 走（深淺底切換時背景色那幾列會換、氣泡關掉時數量那幾列
+    // 會收），理由見 buildStudioLayout 的同一段。
+    let mirrorSyncQueued = false;
+    new MutationObserver(() => {
+      if (mirrorSyncQueued) return;
+      mirrorSyncQueued = true;
+      queueMicrotask(() => {
+        mirrorSyncQueued = false;
+        for (const item of installingDocks) item.sync();
+        studioQuickDock?.sync();
+      });
+    }).observe(panel, { subtree: true, attributes: true, attributeFilter: ['class', 'hidden'] });
+
+    // 存檔、提示與整個模組的重設。抗鋸齒在右上角的「畫質」。
+    $('resetBtn').textContent = '全部重設';
+    share.before($('presetIO'));
+    share.hidden = true;
+    page.append(utilities);
+
+    for (const node of page.querySelectorAll('details')) {
+      const top = node.parentElement === page;
+      node.classList.toggle('inspectorSection', top);
+      node.classList.toggle('inspectorSubsection', !top);
+    }
   }
 
   // 新玻璃模型（registry 的 studioGlass）的面板：一頁、由上而下照「東西 → 材質 →
