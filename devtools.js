@@ -1,6 +1,7 @@
 /*
  * 開發者 HUD：FPS、frame time、draw call。
- * ?dev=1 開啟（記在 localStorage），?dev=0 關閉；Shift+D 切換顯示，Shift+F 換位置。
+ * ?dev=1 開啟（記在 localStorage），?dev=0 關閉。
+ * Shift+D 顯示／隱藏　Shift+F 換位置　Shift+G 展開詳細資訊　Shift+R 強制 DPR=1（會重新載入）
  * 沒開啟時什麼都不包；首頁預覽 iframe（?preview=1）一律不啟用。
  * 要在特效腳本之前載入，才包得到 requestAnimationFrame 與 WebGL 的 draw 呼叫。
  */
@@ -33,6 +34,16 @@
     return;
   }
 
+  // 強制 DPR=1：快速判斷瓶頸是不是像素填充量。特效大多在載入當下讀 DPR
+  // （bubble 的 deviceMaxDpr 就是），所以切換一律重新載入，從頭生效。
+  const forceDpr1 = store.get('vfx-dev-dpr1') === '1';
+  const nativeDpr = window.devicePixelRatio || 1;
+  if (forceDpr1) {
+    try {
+      Object.defineProperty(window, 'devicePixelRatio', { configurable: true, get: () => 1 });
+    } catch (_) { /* 有些瀏覽器的 DPR 不可覆寫 */ }
+  }
+
   // ---- 量測 ----
   const SAMPLE_SIZE = 240;
   const intervals = [];   // 實際「有畫東西」的幀之間的間隔（ms）
@@ -52,8 +63,99 @@
   HTMLCanvasElement.prototype.getContext = function (kind, ...rest) {
     const ctx = nativeGetContext.call(this, kind, ...rest);
     if (ctx) contextKinds.add(/webgl/.test(kind) ? 'webgl' : kind);
+    if (ctx && kind === 'webgl2') watchGpu(ctx);
     return ctx;
   };
+
+  // ---- GPU 時間（EXT_disjoint_timer_query_webgl2）----
+  // 每幀第一個 draw 時開一個 TIME_ELAPSED query，下一幀開頭收掉；結果晚幾幀才回來。
+  // 同一時間一個 context 只能有一個 TIME_ELAPSED query，特效自己要量的時候
+  // （bubble 的 gpu-profiler.js）這裡就讓開，不搶。Safari 沒有這個擴充，顯示 n/a。
+  const gpuTimes = [];
+  const gpuStates = new Map();
+  const gl2 = window.WebGL2RenderingContext?.prototype;
+  const nativeBeginQuery = gl2?.beginQuery;
+  const nativeEndQuery = gl2?.endQuery;
+
+  function watchGpu(gl) {
+    if (gpuStates.has(gl)) return;
+    const ext = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+    gpuStates.set(gl, ext ? { ext, ours: null, pending: [], appActive: false } : null);
+  }
+
+  const gpuBegin = gl => {
+    const st = gpuStates.get(gl);
+    if (!st || st.ours || st.appActive || st.pending.length > 4) return;
+    st.ours = gl.createQuery();
+    nativeBeginQuery.call(gl, st.ext.TIME_ELAPSED_EXT, st.ours);
+  };
+
+  const gpuEndFrame = () => {
+    for (const [gl, st] of gpuStates) {
+      if (!st) continue;
+      if (st.ours) {
+        nativeEndQuery.call(gl, st.ext.TIME_ELAPSED_EXT);
+        st.pending.push(st.ours);
+        st.ours = null;
+      }
+      while (st.pending.length && gl.getQueryParameter(st.pending[0], gl.QUERY_RESULT_AVAILABLE)) {
+        const query = st.pending.shift();
+        const disjoint = gl.getParameter(st.ext.GPU_DISJOINT_EXT);
+        const ns = gl.getQueryParameter(query, gl.QUERY_RESULT);
+        gl.deleteQuery(query);
+        if (!disjoint && Number.isFinite(ns)) push(gpuTimes, ns / 1e6);
+      }
+    }
+  };
+
+  if (gl2 && nativeBeginQuery) {
+    gl2.beginQuery = function (target, query) {
+      const st = gpuStates.get(this);
+      if (st && target === st.ext.TIME_ELAPSED_EXT) {
+        // 特效要開自己的 query：先把我們這幀的收掉、丟棄，讓它的量測成立。
+        if (st.ours) {
+          nativeEndQuery.call(this, target);
+          this.deleteQuery(st.ours);
+          st.ours = null;
+        }
+        st.appActive = true;
+      }
+      return nativeBeginQuery.call(this, target, query);
+    };
+    gl2.endQuery = function (target) {
+      const st = gpuStates.get(this);
+      if (st && target === st.ext.TIME_ELAPSED_EXT) st.appActive = false;
+      return nativeEndQuery.call(this, target);
+    };
+  }
+
+  // ---- 資源計數 ----
+  // 建立減掉刪除＝目前活著的數量。切換模式、改參數之後只增不減，就是洩漏。
+  const resources = { texture: 0, buffer: 0, program: 0, shader: 0, framebuffer: 0, renderbuffer: 0, vao: 0 };
+  const live = new WeakSet();
+  const hookResource = (proto, type, key) => {
+    const create = proto?.[`create${type}`];
+    const remove = proto?.[`delete${type}`];
+    if (!create || !remove) return;
+    proto[`create${type}`] = function (...args) {
+      const obj = create.apply(this, args);
+      if (obj) { live.add(obj); resources[key]++; }
+      return obj;
+    };
+    proto[`delete${type}`] = function (obj) {
+      if (obj && live.has(obj)) { live.delete(obj); resources[key]--; }
+      return remove.call(this, obj);
+    };
+  };
+  for (const proto of [window.WebGLRenderingContext?.prototype, gl2]) {
+    hookResource(proto, 'Texture', 'texture');
+    hookResource(proto, 'Buffer', 'buffer');
+    hookResource(proto, 'Program', 'program');
+    hookResource(proto, 'Shader', 'shader');
+    hookResource(proto, 'Framebuffer', 'framebuffer');
+    hookResource(proto, 'Renderbuffer', 'renderbuffer');
+  }
+  hookResource(gl2, 'VertexArray', 'vao');
 
   const push = (list, value) => {
     list.push(value);
@@ -82,6 +184,7 @@
   window.requestAnimationFrame = callback => nativeRAF(stamp => {
     if (stamp !== lastFrameStamp) {
       if (lastFrameStamp) finishFrame();
+      gpuEndFrame();
       lastFrameStamp = stamp;
     }
     const start = performance.now();
@@ -104,6 +207,7 @@
     const original = proto && proto[name];
     if (!original) return;
     proto[name] = function (...args) {
+      if (proto === gl2) gpuBegin(this);
       frameDraws++;
       framePrims += primitiveCount(args[0], args[countArg]) * (instanceArg ? args[instanceArg] : 1);
       return original.apply(this, args);
@@ -137,6 +241,7 @@
   const CORNERS = ['tc', 'bc', 'bl', 'br', 'tr', 'tl'];
   let corner = CORNERS.includes(store.get('vfx-dev-corner')) ? store.get('vfx-dev-corner') : 'tc';
   let visible = store.get('vfx-dev-hidden') !== '1';
+  let expanded = store.get('vfx-dev-expanded') === '1';
 
   const style = document.createElement('style');
   style.textContent = `
@@ -144,7 +249,7 @@
       position: fixed; z-index: 2147483000; pointer-events: none;
       font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       color: #d8dee9; background: rgba(8, 10, 14, .62);
-      padding: 4px 8px; border-radius: 6px; white-space: nowrap;
+      padding: 4px 8px; border-radius: 6px; white-space: pre;
       font-variant-numeric: tabular-nums; letter-spacing: .01em;
     }
     #vfxDevHud[data-corner="tc"] { left: 50%; top: 10px; transform: translateX(-50%); }
@@ -157,17 +262,30 @@
     #vfxDevHud .warn { color: #ffd166; }
     #vfxDevHud .bad { color: #ff6b6b; }
     #vfxDevHud .dim { color: #8a93a3; }
+    #vfxDevHud .tag { color: #0d1117; background: #ffd166; border-radius: 3px; padding: 0 3px; }
+    #vfxDevDetail { width: 240px; margin-top: 5px; padding-top: 5px; border-top: 1px solid rgba(255,255,255,.08); }
+    #vfxDevDetail[hidden] { display: none; }
+    #vfxDevDetail canvas { display: block; width: 240px; height: 48px; margin-bottom: 4px; }
+    #vfxDevDetail .row { display: flex; justify-content: space-between; gap: 16px; }
   `;
 
   const hud = document.createElement('div');
   hud.id = 'vfxDevHud';
   hud.setAttribute('aria-hidden', 'true');
+  const line = document.createElement('div');
+  const detail = document.createElement('div');
+  detail.id = 'vfxDevDetail';
+  const graph = document.createElement('canvas');
+  const rows = document.createElement('div');
+  detail.append(graph, rows);
+  hud.append(line, detail);
 
   const mount = () => {
     document.head.appendChild(style);
     document.body.appendChild(hud);
     hud.dataset.corner = corner;
     hud.hidden = !visible;
+    detail.hidden = !expanded;
   };
   if (document.body) mount();
   else addEventListener('DOMContentLoaded', mount, { once: true });
@@ -181,6 +299,74 @@
   const span = (text, cls) => (cls ? `<span class="${cls}">${text}</span>` : text);
   const compact = n => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : `${Math.round(n)}`);
 
+  // frame time 走勢圖：最近 240 個實際渲染的幀，虛線是 16.7ms（60fps）和 33.3ms（30fps）。
+  const GRAPH_MAX_MS = 50;
+  const drawGraph = () => {
+    const ratio = Math.min(nativeDpr, 2);
+    const w = 240, h = 48;
+    if (graph.width !== w * ratio) { graph.width = w * ratio; graph.height = h * ratio; }
+    // 用原生 getContext，HUD 自己的畫布不該被算成頁面的 context。
+    const g = nativeGetContext.call(graph, '2d');
+    g.setTransform(ratio, 0, 0, ratio, 0, 0);
+    g.clearRect(0, 0, w, h);
+    const y = ms => h - Math.min(ms, GRAPH_MAX_MS) / GRAPH_MAX_MS * h;
+    g.strokeStyle = 'rgba(255,255,255,.14)';
+    g.setLineDash([2, 3]);
+    for (const ms of [1000 / 60, 1000 / 30]) {
+      g.beginPath(); g.moveTo(0, y(ms)); g.lineTo(w, y(ms)); g.stroke();
+    }
+    g.setLineDash([]);
+    const step = w / SAMPLE_SIZE;
+    const x0 = w - intervals.length * step;
+    intervals.forEach((ms, i) => {
+      g.fillStyle = ms > 1000 / 30 ? '#ff6b6b' : ms > 1000 / 50 ? '#ffd166' : '#7ee0a1';
+      const top = y(ms);
+      g.fillRect(x0 + i * step, top, Math.max(1, step - .2), h - top);
+    });
+    // GPU 時間疊成細線，看得出 GPU 吃掉一幀裡多少。
+    if (gpuTimes.length > 1) {
+      g.strokeStyle = '#8ab4ff';
+      g.beginPath();
+      const gx0 = w - gpuTimes.length * step;
+      gpuTimes.forEach((ms, i) => (i ? g.lineTo : g.moveTo).call(g, gx0 + i * step, y(ms)));
+      g.stroke();
+    }
+  };
+
+  const largestCanvas = () => {
+    let best = null;
+    for (const c of document.querySelectorAll('canvas')) {
+      if (c === graph || !c.clientWidth) continue;
+      if (!best || c.width * c.height > best.width * best.height) best = c;
+    }
+    return best;
+  };
+
+  const row = (label, value, cls) => `<div class="row"><span class="dim">${label}</span>${span(value, cls)}</div>`;
+  const renderDetail = () => {
+    drawGraph();
+    const out = [];
+    const hasGpuTimer = [...gpuStates.values()].some(Boolean);
+    if (contextKinds.has('webgl')) {
+      out.push(row('GPU', hasGpuTimer
+        ? (stats.gpuMs != null ? `${stats.gpuMs.toFixed(2)}ms（p95 ${stats.gpuP95.toFixed(2)}）` : '量測中…')
+        : 'n/a（瀏覽器不支援）'));
+      out.push(row('貼圖 / buffer', `${resources.texture} / ${resources.buffer}`));
+      out.push(row('program / shader', `${resources.program} / ${resources.shader}`));
+      out.push(row('FBO / RBO / VAO', `${resources.framebuffer} / ${resources.renderbuffer} / ${resources.vao}`));
+    }
+    const c = largestCanvas();
+    if (c) {
+      const scale = c.width / c.clientWidth;
+      out.push(row('canvas', `${c.width}×${c.height}（×${scale.toFixed(2)}）`));
+    }
+    out.push(row('DPR', forceDpr1 ? `1（強制，原生 ${nativeDpr}）` : `${nativeDpr}`, forceDpr1 ? 'warn' : ''));
+    if (performance.memory) out.push(row('JS heap', `${(performance.memory.usedJSHeapSize / 1048576).toFixed(0)} MB`));
+    out.push(`<div class="dim">low＝最差 1% 的 fps　max＝最慢一幀 ms</div>`);
+    out.push(`<div class="dim">⇧D 隱藏 ⇧F 位置 ⇧G 收合 ⇧R DPR=1</div>`);
+    rows.innerHTML = out.join('');
+  };
+
   const stats = {};
   const UPDATE_MS = 400;
   setInterval(() => {
@@ -193,12 +379,12 @@
     stats.idle = !frames;
 
     if (intervals.length < 2) {
-      if (visible) hud.innerHTML = span('等待畫面…', 'dim');
+      if (visible) line.innerHTML = span('等待畫面…', 'dim');
       return;
     }
     // 這段時間一幀都沒畫：特效在休眠或暫停，舊數字留著會誤導，直接標出來。
     if (stats.idle) {
-      if (visible) hud.innerHTML = span('閒置／暫停中', 'dim');
+      if (visible) line.innerHTML = span('閒置／暫停中', 'dim');
       return;
     }
     // 只看最近約 1 秒算平均，1% low 和最差一幀看整個樣本視窗。
@@ -208,18 +394,26 @@
     stats.low1 = 1000 / percentile(intervals, .99);
     stats.worstMs = Math.max(...intervals);
     stats.cpuMs = average(cpuTimes.slice(-60));
+    if (gpuTimes.length) {
+      stats.gpuMs = average(gpuTimes.slice(-60));
+      stats.gpuP95 = percentile(gpuTimes, .95);
+    }
+    stats.resources = { ...resources };
 
     if (!visible) return;
-    hud.innerHTML = [
+    if (expanded) renderDetail();
+    line.innerHTML = [
+      ...(forceDpr1 ? [span('DPR1', 'tag')] : []),
       span(`${stats.fps.toFixed(0)}fps`, fpsClass(stats.fps)),
-      span(`1%low ${stats.low1.toFixed(0)}`, fpsClass(stats.low1)),
+      span(`low${stats.low1.toFixed(0)}`, fpsClass(stats.low1)),
       `${stats.frameMs.toFixed(1)}ms`,
-      span(`max ${stats.worstMs.toFixed(0)}ms`, stats.worstMs > 50 ? 'bad' : stats.worstMs > 25 ? 'warn' : 'dim'),
-      `js ${stats.cpuMs.toFixed(1)}ms`,
+      span(`max${stats.worstMs.toFixed(0)}`, stats.worstMs > 50 ? 'bad' : stats.worstMs > 25 ? 'warn' : 'dim'),
+      `js${stats.cpuMs.toFixed(1)}`,
+      ...(stats.gpuMs != null ? [`gpu${stats.gpuMs.toFixed(1)}`] : []),
       ...(contextKinds.has('webgl')
         ? [`${stats.drawCalls.toFixed(0)}dc`, `${compact(stats.primitives)}tri`]
         : [span(contextKinds.has('2d') ? 'canvas2d' : 'no-gl', 'dim')]),
-    ].join(span(' · ', 'dim'));
+    ].join('  ');
   }, UPDATE_MS);
 
   addEventListener('keydown', event => {
@@ -233,9 +427,18 @@
       corner = CORNERS[(CORNERS.indexOf(corner) + 1) % CORNERS.length];
       hud.dataset.corner = corner;
       store.set('vfx-dev-corner', corner);
+    } else if (event.code === 'KeyG') {
+      expanded = !expanded;
+      detail.hidden = !expanded;
+      if (expanded) { store.set('vfx-dev-expanded', '1'); renderDetail(); }
+      else store.remove('vfx-dev-expanded');
+    } else if (event.code === 'KeyR') {
+      if (forceDpr1) store.remove('vfx-dev-dpr1');
+      else store.set('vfx-dev-dpr1', '1');
+      location.reload();
     }
   });
 
   // 給之後的抽屜／bug report／自動化測試讀。
-  window.__vfxDev = { stats };
+  window.__vfxDev = { stats, resources };
 })();
