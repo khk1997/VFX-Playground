@@ -476,8 +476,40 @@ function createTarget(width, height, type = THREE.HalfFloatType) {
 // 但匯出是 4× 超採樣：1080p 的成品換算成 7680×4320，半浮點 RGBA 就是 265MB。
 // 超過上限時退回 8-bit（高光在那裡會被夾掉，光暈比預覽弱），並且明講 —— 靜默地
 // 換掉輸出的成色是最糟的處理方式。
-// 條紋的迭代輪數。每多一輪，覆蓋距離乘四；成本是每個方向多一個 pass。
+// 條紋的迭代輪數上限。每多一輪，覆蓋距離乘四；成本是每個方向多一個 pass。
 const STREAK_PASSES = 4;
+
+// 這一組參數實際需要跑幾輪。
+//
+// 短光芒的後面幾輪是白跑的：第 p 輪的取樣間距是 4^p，權重是 atten^(4^p · k)，
+// 長度 0.11（安裝中的預設）時 atten ≈ 0.866，第四輪第一個取樣的權重只剩 1e-4。
+// 但它一點都不便宜 —— 取樣跨距 64 texel，四個取樣橫跨 192 texel，貼圖快取整個
+// 失效；實測（M 系列 Mac，2880×1194）第四輪一輪就要約 14ms，比前三輪加主畫面
+// 的 raymarch 還貴。
+//
+// 判斷用的是保守上限：這一輪能加到畫面上的最大亮度 =
+//   進條紋的最大值（亮部取出已被 clampMax 夾住）
+//   × 前面幾輪的總增益（每輪是 Σ atten^(stride·k)）
+//   × 這一輪 k ≥ 1 的權重和（k = 0 只是原樣傳下去）
+//   × 合成時的係數（強度 / √方向數、曝光、對比放大）
+// 小於半個 8-bit 色階就停，之後的輪數間距更大、權重更小，也都不用跑。
+// 實測長度 0.11 停在三輪，整張 2880×1194 最大誤差 1/255、只有 0.001% 的像素有差；
+// 長光芒的上限不會降，四輪照跑，外觀不變。
+const STREAK_SKIP_LEVEL = 0.5 / 255;
+function streakPassesNeeded(params, count, atten) {
+  const sourceMax = Math.max(params.clampMax ?? 1, 1);
+  const outputScale = (params.streakIntensity / Math.sqrt(count))
+    * Math.max(params.exposure ?? 1, 0) * Math.max(params.contrast ?? 1, 1);
+  let gain = 1;
+  for (let pass = 0; pass < STREAK_PASSES; pass++) {
+    const stride = Math.pow(4, pass);
+    let tail = 0;
+    for (let k = 1; k < 4; k++) tail += Math.pow(atten, stride * k);
+    if (pass > 0 && sourceMax * gain * tail * outputScale < STREAK_SKIP_LEVEL) return pass;
+    gain *= 1 + tail;
+  }
+  return STREAK_PASSES;
+}
 const MAX_HDR_BYTES = 512 * 1024 * 1024;
 let hdrFallbackWarned = false;
 
@@ -759,6 +791,7 @@ export function createPostChain(renderer) {
         atten * (1 - chroma * 0.010),
         atten * (1 - chroma * 0.022),
       );
+      const passes = streakPassesNeeded(params, count, Math.max(atten, 0));
       for (let i = 0; i < count; i++) {
         // 方向平均分布在整圈。這裡不能只跑半圈 —— 濾波只沿著 +dir 前進（那是它
         // 便宜的原因），一個方向只長出一條臂，跑半圈的話星芒是單邊的。
@@ -767,7 +800,7 @@ export function createPostChain(renderer) {
         const dirY = Math.sin(angle) * (glareTarget.width / glareTarget.height);
         let readTarget = glarePing;
         let writeTarget = glarePong;
-        for (let pass = 0; pass < STREAK_PASSES; pass++) {
+        for (let pass = 0; pass < passes; pass++) {
           const stride = Math.pow(4, pass);
           streakMaterial.uniforms.uTex.value = pass === 0 ? source : readTarget.texture;
           streakMaterial.uniforms.uStride.value = stride;
