@@ -1415,6 +1415,38 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     title(post, '後期');
     post.open = false;
     page.append(post);
+    // 光暈與光芒只留開關加一根最直覺的滑桿（光暈強度、光芒長度）：設計師要判斷的
+    // 是「亮不亮、要不要那道光」，門檻、柔度、臂數、角度這些交給預設值。色調映射
+    // 整列拿掉 —— 安裝中的預設是「無」，換成 AgX／ACES 會把整顆玻璃的色調改掉，
+    // 不是這裡該給的選項。參數本身都保留，參數檔照常讀寫。
+    for (const key of [
+      'postToneMap',
+      'bloomThreshold', 'bloomKnee', 'bloomClamp', 'bloomRadius', 'bloomTint',
+      'streakCount', 'streakAngle', 'streakChroma', 'streakIntensity',
+    ]) {
+      const row = rowOf(key);
+      if (row) { row.hidden = true; row.classList.add('studioRetiredRow'); }
+    }
+    title($('bloomGroup'), '光暈');
+    title($('streaksGroup'), '光芒');
+    relabel('bloomIntensity', '光暈強度');
+    relabel('streakLength', '光芒長度');
+    // 只剩一根滑桿，開關打開就直接展開，不必再點一次。開關不只會被點：模式預設、
+    // 上次的設定、參數檔都是直接寫 checked、不發事件，所以掛在 refresh 的尾端
+    // （splitSync），只在開關狀態真的變了的時候跟著開合 —— 使用者自己收起來的不會
+    // 被每次 refresh 又打開。
+    const glowToggles = [['bloomGroup', 'bloomEnabled'], ['streaksGroup', 'streaksEnabled']]
+      .map(([group, toggle]) => ({ group: $(group), toggle: $(toggle), last: null }));
+    const syncGlowOpen = () => {
+      for (const item of glowToggles) {
+        const on = item.toggle.checked;
+        if (on !== item.last) item.group.open = on;
+        item.last = on;
+      }
+    };
+    const layoutSync = splitSync;
+    splitSync = () => { layoutSync(); syncGlowOpen(); };
+    syncGlowOpen();
 
     // ── 右側那一欄的鏡像卡片，由上而下 ──
     const sideStack = buildSideStack();

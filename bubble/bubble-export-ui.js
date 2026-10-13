@@ -93,6 +93,7 @@
       height: Number(height.value),
       background: document.getElementById('exportBackground').value,
       shadow: document.getElementById('exportShadow').checked,
+      glow: document.getElementById('exportGlow').checked,
       fov: Number(document.getElementById('exportFov').value),
       scale: Number(document.getElementById('exportScale').value) / 100,
       centerX: Number(document.getElementById('exportCenterX').value) / 100,
@@ -227,12 +228,25 @@
       document.getElementById('exportBackground').value !== 'transparent'
       || document.body.dataset.glassModel !== 'studio';
   }
+  // 「包含光暈與光芒」只在透明背景、而且光暈或光芒開著時才有意義。
+  function syncGlowOption() {
+    const glowOn = document.getElementById('bloomEnabled')?.checked
+      || document.getElementById('streaksEnabled')?.checked;
+    const hidden = document.getElementById('exportBackground').value !== 'transparent' || !glowOn;
+    document.getElementById('exportGlowField').hidden = hidden;
+    document.getElementById('exportGlowHelp').hidden = hidden;
+  }
   document.getElementById('exportBackground').addEventListener('change', () => {
     syncShadowOption();
+    syncGlowOption();
     syncPreview();
   });
   document.getElementById('motion')?.addEventListener('change', syncShadowOption);
+  for (const id of ['bloomEnabled', 'streaksEnabled', 'motion']) {
+    document.getElementById(id)?.addEventListener('change', syncGlowOption);
+  }
   syncShadowOption();
+  syncGlowOption();
   start.addEventListener('click', () => {
     if (exporting) {
       window.dispatchEvent(new CustomEvent('prism-export-cancel'));

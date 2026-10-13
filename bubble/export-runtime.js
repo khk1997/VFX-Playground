@@ -197,6 +197,13 @@ async function runExport(settings) {
     // 不留影子：地板在兩張背景紙上就都是一張乾淨的紙，解出來整片透明。
     if (settings.shadow === false) getUniforms().uStudioShadowStrength.value = 0;
   }
+  // 透明背景預設不帶光暈與光芒（見 index.html 的 exportGlowField）：輸出期間暫時
+  // 關掉，結束後還原。
+  const savedGlow = { bloom: P.bloomEnabled, streaks: P.streaksEnabled };
+  if (transparentExport && !settings.glow) {
+    P.bloomEnabled = false;
+    P.streaksEnabled = false;
+  }
   const frameSettings = { ...settings, width, height, renderWidth, renderHeight, staticMatte };
 
   try {
@@ -252,6 +259,8 @@ async function runExport(settings) {
     getUniforms().uStudioFloorLift.value = saved.floorLift;
     getUniforms().uStudioFloorTone.value = saved.floorTone;
     getUniforms().uStudioShadowStrength.value = saved.shadowStrength;
+    P.bloomEnabled = savedGlow.bloom;
+    P.streaksEnabled = savedGlow.streaks;
     resetPreviousDropT();
     setSimTime(saved.time);
     exportJob = null;

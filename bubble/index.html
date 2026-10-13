@@ -628,6 +628,14 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
           <input type="checkbox" id="exportShadow" checked>
           <span>保留地板影子</span>
         </label>
+        <!-- 去背 PNG 是 straight alpha，表達不了「加上去的光」：光暈與光芒寫進去只能
+             近似（見 post.js 的合成說明），疊到別的背景上會帶著一點遮蔽。所以預設不帶，
+             建議在 AE 疊好背景之後再加。只有光暈或光芒開著時才顯示。 -->
+        <label class="exportCheckLabel" id="exportGlowField" hidden>
+          <input type="checkbox" id="exportGlow">
+          <span>包含光暈與光芒</span>
+        </label>
+        <p class="exportHelp" id="exportGlowHelp" hidden>透明背景無法正確保存光暈與光芒這類「加上去的光」，建議在 AE 疊好背景後再加。勾選的話會用近似方式寫進透明度，疊到其他背景上可能略顯混濁。</p>
         <p class="exportHelp">透明模式仍保留 HDRI 對水滴的反射與折射。液態薄膜的膜身顏色來自白底透射，因此它的透明輸出是對白底反乘出來的：疊回白色版面與畫面完全一致，疊在其他顏色上背景仍會透出來，但水滴自身的顏色維持白底時的樣子。</p>
       </section>
 
