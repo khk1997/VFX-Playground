@@ -167,11 +167,25 @@
 
   // 有些特效閒置時會自己跳幀省電（例如 bubble），rAF 照跑但沒畫東西。
   // WebGL 頁面只把真的有 draw call 的幀算進 FPS，量到的才是畫面實際的更新率。
+  // 特效刻意的省電節流（例如 bubble 閒置一段時間後降到 30fps）由特效自己用
+  // __vfxDev.throttled(() => 布林) 告知。節流中的幀不算卡頓：HUD 和走勢圖改用
+  // 中性色，1%low／max 也只拿沒節流的幀來算。
+  let throttleGetter = null;
+  const throttledFlags = [];
+  let prevThrottled = false;
+  const isThrottled = () => {
+    try { return Boolean(throttleGetter?.()); } catch (_) { return false; }
+  };
+
   const finishFrame = () => {
     const rendered = !contextKinds.has('webgl') || frameDraws > 0;
     if (rendered) {
       if (lastRenderedStamp) {
         push(intervals, lastFrameStamp - lastRenderedStamp);
+        // 間隔兩端任一幀在節流，這段間隔就是節流造成的（剛喚醒的第一幀也算）。
+        const throttled = isThrottled();
+        push(throttledFlags, throttled || prevThrottled);
+        prevThrottled = throttled;
         push(cpuTimes, frameCpu);
       }
       lastRenderedStamp = lastFrameStamp;
@@ -265,6 +279,8 @@
     #vfxDevHud .warn { color: #ffd166; }
     #vfxDevHud .bad { color: #ff6b6b; }
     #vfxDevHud .dim { color: #8a93a3; }
+    #vfxDevHud .idle { color: #0d1117; background: #8fa3c7; border-radius: 3px; padding: 0 3px; }
+    #vfxDevHud .idle-text { color: #a9b8d6; }
     #vfxDevHud .tag { color: #0d1117; background: #ffd166; border-radius: 3px; padding: 0 3px; }
     #vfxDevDetail { margin-top: 5px; padding-top: 5px; border-top: 1px solid rgba(255,255,255,.08); }
     #vfxDevDetail[hidden] { display: none; }
@@ -327,7 +343,8 @@
     const step = w / SAMPLE_SIZE;
     const x0 = w - intervals.length * step;
     intervals.forEach((ms, i) => {
-      g.fillStyle = ms > 1000 / 30 ? '#ff6b6b' : ms > 1000 / 50 ? '#ffd166' : '#7ee0a1';
+      g.fillStyle = throttledFlags[i] ? '#6c7a96'
+        : ms > 1000 / 30 ? '#ff6b6b' : ms > 1000 / 50 ? '#ffd166' : '#7ee0a1';
       const top = y(ms);
       g.fillRect(x0 + i * step, top, Math.max(1, step - .2), h - top);
     });
@@ -392,7 +409,8 @@
     }
     out.push(row('DPR', forceDpr1 ? `1（強制，原生 ${nativeDpr}）` : `${nativeDpr}`, forceDpr1 ? 'warn' : ''));
     if (performance.memory) out.push(row('JS heap', `${(performance.memory.usedJSHeapSize / 1048576).toFixed(0)} MB`));
-    out.push(`<div class="dim">1%low＝最差 1% 幀的 fps · max＝樣本內最慢一幀</div>`);
+    out.push(`<div class="dim">1%low＝最差 1% 幀的 fps · max＝樣本內最慢一幀（都不含省電節流的幀）</div>`);
+    if (throttleGetter) out.push(`<div class="dim">走勢圖藍灰色＝省電節流中的幀</div>`);
     out.push(`<div class="dim">⇧D 隱藏 · ⇧F 位置 · ⇧G 收合 · ⇧R DPR=1</div>`);
     rows.innerHTML = out.join('');
   };
@@ -418,11 +436,17 @@
       return;
     }
     // 只看最近約 1 秒算平均，1% low 和最差一幀看整個樣本視窗。
-    const recent = intervals.slice(-60);
+    stats.throttled = prevThrottled; // 最新一幀的狀態，喚醒當下就切回來
+    const active = intervals.filter((_, i) => !throttledFlags[i]);
+    // 節流中就照實顯示節流後的幀率；沒節流時排除前面節流那段，剛喚醒才不會被拉低。
+    const recent = stats.throttled || active.length < 2 ? intervals.slice(-60) : active.slice(-60);
     stats.fps = 1000 / average(recent);
     stats.frameMs = average(recent);
-    stats.low1 = 1000 / percentile(intervals, .99);
-    stats.worstMs = Math.max(...intervals);
+    // 整個樣本都在節流：沒有可以判斷卡頓的幀，只好拿全部來算，但不上色。
+    const basis = active.length >= 2 ? active : intervals;
+    stats.low1 = 1000 / percentile(basis, .99);
+    stats.worstMs = Math.max(...basis);
+    const judge = active.length >= 2;
     stats.cpuMs = average(cpuTimes.slice(-60));
     if (gpuTimes.length) {
       stats.gpuMs = average(gpuTimes.slice(-60));
@@ -434,10 +458,11 @@
     if (expanded) renderDetail();
     line.innerHTML = [
       ...(forceDpr1 ? [span('DPR1', 'tag')] : []),
-      span(`${stats.fps.toFixed(0)}fps`, fpsClass(stats.fps)),
-      span(`1%low ${stats.low1.toFixed(0)}`, fpsClass(stats.low1)),
+      ...(stats.throttled ? [span('省電', 'idle')] : []),
+      span(`${stats.fps.toFixed(0)}fps`, stats.throttled ? 'idle-text' : fpsClass(stats.fps)),
+      span(`1%low ${stats.low1.toFixed(0)}`, judge ? fpsClass(stats.low1) : 'dim'),
       `${stats.frameMs.toFixed(1)}ms`,
-      span(`max ${stats.worstMs.toFixed(0)}ms`, stats.worstMs > 50 ? 'bad' : stats.worstMs > 25 ? 'warn' : 'dim'),
+      span(`max ${stats.worstMs.toFixed(0)}ms`, !judge ? 'dim' : stats.worstMs > 50 ? 'bad' : stats.worstMs > 25 ? 'warn' : 'dim'),
       `js ${stats.cpuMs.toFixed(1)}ms`,
       ...(stats.gpuMs != null ? [`gpu ${stats.gpuMs.toFixed(1)}ms`] : []),
       ...(contextKinds.has('webgl')
@@ -480,6 +505,8 @@
       }
       return () => { for (const label of Object.keys(entries)) watches.delete(label); };
     },
+    // 特效告知「現在是刻意節流」，每個渲染幀讀一次，getter 要便宜。
+    throttled(getter) { throttleGetter = typeof getter === 'function' ? getter : null; },
     // 一次讀出全部數值，給之後的 bug report／自動化測試用。
     snapshot: () => ({ stats: { ...stats }, resources: { ...resources }, effect: readWatches() }),
   };

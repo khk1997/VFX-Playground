@@ -3629,6 +3629,8 @@ window.__vfxDev?.watch({
   'shader 變體': () => `${activeVariantKey ?? '—'}（快取 ${variantCache.size}/${VARIANT_CACHE_LIMIT}）`,
   '首次編譯': () => (initialCompileMs == null ? '進行中' : `${Math.round(initialCompileMs)}ms`),
 });
+// 閒置省電降到 30fps 是刻意的，告訴 HUD 別把它標成卡頓。
+window.__vfxDev?.throttled(() => powerSaveThrottled);
 
 // 診斷 static / compileonly 只執行一次，避免後續的 syncLoop 重複啟動。
 let diagOnceDone = false;
