@@ -3585,7 +3585,7 @@ window.__vfxDev?.watch({
     : null,
   '狀態': () => [
     isPaused() && '暫停',
-    powerSaveThrottled && '省電節流',
+    powerSaveThrottled && '閒置降速（30fps）',
     dragging && '拖曳中（降 DPR）',
     isExporting() && '輸出中',
   ].filter(Boolean).join('、') || '執行中',

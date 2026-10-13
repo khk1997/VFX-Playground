@@ -481,9 +481,9 @@
       : '0', longTaskClass(tasks)));
     out.push(row('DPR', forceDpr1 ? `1（強制，原生 ${nativeDpr}）` : `${nativeDpr}`, forceDpr1 ? 'warn' : ''));
     if (performance.memory) out.push(row('JS heap', `${(performance.memory.usedJSHeapSize / 1048576).toFixed(0)} MB`));
-    out.push(`<div class="dim">紅黃門檻：gpu 16 / 33ms · js 8 / 16ms · 省電時 gpu 超過 33ms 或低於 27fps 標紅</div>`);
-    out.push(`<div class="dim">1%low＝最差 1% 幀的 fps · max＝樣本內最慢一幀（都不含省電節流的幀）</div>`);
-    if (throttleGetter) out.push(`<div class="dim">走勢圖藍灰色＝省電節流中的幀</div>`);
+    out.push(`<div class="dim">紅黃門檻：gpu 16 / 33ms · js 8 / 16ms · 閒置時 gpu 超過 33ms 或低於 27fps 標「閒置・掉幀」</div>`);
+    out.push(`<div class="dim">1%low＝最差 1% 幀的 fps · max＝樣本內最慢一幀（都不含閒置降速的幀）</div>`);
+    if (throttleGetter) out.push(`<div class="dim">走勢圖藍灰色＝閒置降到 30fps 的幀</div>`);
     if (pageMode) out.push(row('螢幕更新率（推估）', `${refreshHz}Hz`));
     if (pageMode) out.push(`<div class="dim">頁面模式：fps 是主執行緒探測迴圈量到的，不是特效的渲染幀率</div>`);
     out.push(`<div class="dim">⇧D 隱藏 · ⇧F 位置 · ⇧G 收合 · ⇧R DPR=1</div>`);
@@ -548,7 +548,7 @@
     }
     line.innerHTML = [
       ...(forceDpr1 ? [span('DPR1', 'tag')] : []),
-      ...(stats.throttled ? [span(stats.throttleStrained ? '省電但撐不住' : '省電', stats.throttleStrained ? 'idle-bad' : 'idle')] : []),
+      ...(stats.throttled ? [span(stats.throttleStrained ? '閒置・掉幀' : '閒置 30fps', stats.throttleStrained ? 'idle-bad' : 'idle')] : []),
       span(`${stats.fps.toFixed(0)}fps`, stats.throttled ? 'idle-text' : fpsClass(stats.fps)),
       span(`1%low ${stats.low1.toFixed(0)}`, judge ? fpsClass(stats.low1) : 'dim'),
       `${stats.frameMs.toFixed(1)}ms`,
