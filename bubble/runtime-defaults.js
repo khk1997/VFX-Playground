@@ -1,7 +1,7 @@
 import {
   MOTION_DEFAULT_DOLLY, MOTION_PARAM_DEFAULTS, MOTION_TOGGLE_DEFAULTS,
   MOTION_COLOR_DEFAULTS,
-} from './motions/registry.js?v=type-glass-1';
+} from './motions/registry.js?v=melt-defaults-1';
 
 /* ===== 參數 ===== */
 export const DEFAULTS = {              // 數值滑桿
@@ -358,6 +358,9 @@ export const DEFAULTS = {              // 數值滑桿
   // 底部取樣範圍：形狀高度的多少比例算「底部」，滴落點就從那一段裡挑。
   meltBand: 0.22,
   meltSeed: 0,
+  // 擠出的 SVG 底面在前後方向用多寬來鋪滴落點：0 是厚度正中間那一條線（舊行為），
+  // 1 是鋪滿整個平底。GLB 本身就是 3D 取樣，不受這一項影響。
+  meltDepthSpread: 1,
   // 水滴的形狀（見 melt.js 的 meltDeform）。懸掛時被重力拉長、上方收出一個頸；
   // 脫離後頸縮回，水滴在表面張力下彈動著收斂回接近球形。
   meltStretch: 0.3,

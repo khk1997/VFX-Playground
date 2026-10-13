@@ -2,8 +2,7 @@ import assert from 'node:assert/strict';
 import { describeShapeImport, loadShapeAsset } from '../bubble/shape-loader.js';
 
 const names = {
-  defaultSvgName: 'Question.svg',
-  meltSvgName: 'Ice.svg',
+  builtinSvgName: variant => ({ question: 'Question.svg', ice: 'Ice.svg' })[variant],
   defaultSolidName: 'Ring.glb',
 };
 assert.deepEqual(describeShapeImport({
@@ -33,8 +32,7 @@ const helpers = {
   svgToField: async (source, options) => { calls.push(['svg', source, options]); return 'svg-field'; },
   gltfToField: async (source, gridSize) => { calls.push(['gltf', source, gridSize]); return 'gltf-field'; },
   objectToField: async (source, gridSize) => { calls.push(['object', source, gridSize]); return 'object-field'; },
-  makeDefaultSvgFile: () => 'default-svg',
-  makeMeltDemoSvgFile: () => 'melt-svg',
+  makeBuiltinSvgFile: variant => ({ question: 'default-svg', ice: 'melt-svg' })[variant],
   buildDefaultSolid: () => 'default-solid',
 };
 

@@ -256,6 +256,35 @@ function vec4() {
   assert.deepEqual(runtime.anchors(),
     selectBottomAnchors(targets, MAX_DROPS, P.meltBand, Math.round(P.meltSeed)));
 
+  // 擠出的 SVG：候選點全在 z=0，滴落點要沿厚度方向鋪開，而且不能超出平底
+  // （厚度扣掉邊緣圓角，再乘形狀大小）。
+  {
+    const flatTargets = Array.from({ length: 40 }, (_, i) => ({
+      x: -0.6 + i * 0.03, y: -0.8, z: 0, surface: true, radiusHint: 0.05,
+    }));
+    const PS = makeParams({ motion: 'melt', shapeDepth: 0.55, shapeEdgeBevel: 0.13, shapeAScale: 1 });
+    const svgRuntime = createMeltRuntime({
+      params: PS, maxDrops: MAX_DROPS,
+      shapeTargets: () => flatTargets, shapeSerial: () => 0, shapeExtruded: () => true,
+    });
+    svgRuntime.rebuildAnchors();
+    const zs = svgRuntime.anchors().map(p => p.z);
+    const reach = 0.55 - 0.13;
+    assert.ok(Math.max(...zs) - Math.min(...zs) > reach, 'SVG drip points must spread across the thickness');
+    assert.ok(zs.every(z => Math.abs(z) <= reach + 1e-9), 'SVG drip points must stay on the flat bottom');
+    // 深度範圍 0 退回厚度中線（舊行為）。
+    PS.meltDepthSpread = 0;
+    svgRuntime.rebuildAnchors();
+    assert.ok(svgRuntime.anchors().every(p => p.z === 0), 'spread 0 must collapse to the centre line');
+    // 厚度是滑桿，改了要重挑。
+    PS.meltDepthSpread = 1;
+    svgRuntime.rebuildAnchors();
+    const beforeDepth = svgRuntime.anchors();
+    PS.shapeDepth = 0.3;
+    svgRuntime.rebuildAnchors();
+    assert.notEqual(svgRuntime.anchors(), beforeDepth, 'a new shape depth must reselect the drip points');
+  }
+
   // 參考實作：改動前 updateDropUniforms／updateMicroDrops 裡的那兩段。
   const { meltDrop } = createMeltMotion(P, { bottomAnchors: () => runtime.anchors() });
   const mine = vec();

@@ -19,8 +19,12 @@ import { edgeTintParams } from '../edge-tint.js';
 //                  調過的值會保留，切回來時恢復，只有初始預設不同。
 //   svgDemo        使用者還沒自己匯入 SVG 時，這個模式該顯示哪個內建展示形狀
 //                  （見 default-shapes.js）。只有需要形狀的模式才有意義。值取的是
-//                  形狀本身的名字（question／ice），不是模式名——同一顆形狀可能
+//                  形狀本身的名字（question／ice／snowflake…），不是模式名——同一顆形狀可能
 //                  被多個模式共用，用模式名當值會誤導。
+//   previewZoom    首頁卡片預覽的取景倍率（> 1 拉近）。每個模式的造型大小差很多，
+//                  同一個鏡頭距離在卡片裡有的塞滿、有的只剩一小塊；這裡把主物件
+//                  校到跟靜態、安裝中差不多大。只影響 ?preview=1，作品頁不受影響。
+//                  數值是拿首頁海報實測整段循環的主物件尺寸換算出來的。
 //   studioGlass    走新的玻璃模型與棚景（OpenPBR 材質、光譜折射、地板／燈卡／影子，
 //                  見 shader-chunks/environment.js 的 FEATURE_STUDIO_GLASS）。沒標的模式
 //                  走舊的材質路徑與那幾層加色外觀（薄膜、RAY 色散、光芒、焦散）。
@@ -653,7 +657,8 @@ export const MOTIONS = {
     radius: 0.25,
     loopDuration: 12,
     dolly: false,
-    svgDemo: 'question',
+    previewZoom: 1.17,
+    svgDemo: 'snowflake',
     overrides: {
       ...STUDIO_GLASS_OVERRIDES,
       // 舊構圖是全域的 45.6° 視角、距離 5.5；換成 28° 的長焦，主體一樣大的距離
@@ -673,7 +678,8 @@ export const MOTIONS = {
     radius: 0.25,
     loopDuration: 12,
     dolly: false,
-    svgDemo: 'question',
+    previewZoom: 1.2,
+    svgDemo: 'infinity',
     overrides: {
       ...STUDIO_GLASS_OVERRIDES,
       // 構圖同形狀匯聚（見那邊的說明）。
@@ -699,21 +705,23 @@ export const MOTIONS = {
     dolly: false,
     // 問號的底部只有一個小圓點，滴落點會擠成一團看不出「整個底部在滴」；
     // 冰塊的底邊夠寬，才挑得出好幾個分散的滴落點。
+    previewZoom: 1.35,
     svgDemo: 'ice',
     // 融化持續滴落、水滴本身就在動，跟形狀匯聚那套「擠出外形＋輪廓液滴」
     // 的共用預設（原本是設計給靜止展示模型用的）不搭：擠出深度、邊緣圓角
-    // 都要拉高才看得出冰塊的立體感；輪廓液滴則直接打開、水滴分佈與大小
-    // 調整過、流速歸零（融化的水滴已經有自己的滴落動畫，輪廓液滴只負責
-    // 靜態鑲邊，動起來反而互相干擾）。
+    // 都要拉高才看得出冰塊的立體感（厚度 0.55，接近正方體的比例）。輪廓液滴
+    // 預設關掉：沿輪廓鑲一圈靜止的小水珠，跟底部持續滴落的水滴搶畫面。分佈、
+    // 大小與流速的設定保留，使用者打開時仍是調過的手感（流速歸零——融化的
+    // 水滴已經有自己的滴落動畫，輪廓液滴動起來反而互相干擾）。
     overrides: {
       ...STUDIO_GLASS_OVERRIDES,
       // 構圖同形狀匯聚。水滴會往下掉一大段（地板落在水滴縮到消失的那個高度，
       // 見 bubble.js 的 sweepDropLowest），鏡頭拉遠一點才裝得下整段。
       cameraDistance: 10.5,
       cameraRotationX: -15,
-      shapeDepth: 0.28,
+      shapeDepth: 0.55,
       shapeEdgeBevel: 0.129,
-      edgeDropsEnabled: true,
+      edgeDropsEnabled: false,
       shapeLiquid: 1,
       shapeLiquidPosition: 6,
       shapeLiquidSize: 0.77,
@@ -734,7 +742,8 @@ export const MOTIONS = {
     dolly: false,
     // 形狀 A。B 目前固定是內建星形（見 default-shapes.js 的 MORPH_TARGET_SVG_TEXT），
     // 還不能由使用者匯入——兩個匯入槽留到下一步。
-    svgDemo: 'question',
+    previewZoom: 1.3,
+    svgDemo: 'crescent',
     // 這個模式的形狀從頭到尾都是實體，擠出厚度與邊緣圓角的手感跟「水滴逐漸
     // 長成形狀」那套共用預設不一樣：薄一點、圓角大一點，切口與收頸才不會被
     // 厚實的側壁蓋住。
@@ -761,7 +770,7 @@ export const MOTIONS = {
     loopDuration: 4,
     // 果凍是原地晃動，鏡頭推軌會跟形變混在一起，分不清是誰在動。
     dolly: false,
-    svgDemo: 'question',
+    svgDemo: 'gummy',
     // 厚實圓潤才像一塊果凍；薄片擠出被壓扁時看起來是紙在抖，不是膠體在晃。
     overrides: {
       ...STUDIO_GLASS_OVERRIDES,
@@ -790,7 +799,8 @@ export const MOTIONS = {
     // 四段時長預設 1.1 / 0.5 / 0.4 / 2.0 合計正好 4 秒，面板才顯示得出實際秒數。
     loopDuration: 4,
     dolly: false,
-    svgDemo: 'question',
+    previewZoom: 1.35,
+    svgDemo: 'sculpture',
     overrides: {
       ...STUDIO_GLASS_OVERRIDES,
       // 構圖同形狀匯聚；碎片往外飛，距離多留一點。
@@ -803,6 +813,7 @@ export const MOTIONS = {
     studioGlass: true,
     // 毛細波只作用在 SVG／GLB 距離場本體，不生成主滴、微滴或輪廓液滴。
     count: 0, radius: 0.24, loopDuration: 4, dolly: false,
+    svgDemo: 'ring',
     overrides: {
       ...STUDIO_GLASS_OVERRIDES,
       shapeEdgeBevel: 0.051,
@@ -810,7 +821,7 @@ export const MOTIONS = {
       // 3.7 × tan(22.8°) / tan(14°) ≈ 6.2。
       cameraDistance: 6.2,
       // 從上方往下看，地板與影子才看得到（舊構圖幾乎是平視，地板只剩一條線）。
-      // 比靜態的 -40° 平一點：問號是扁的擠出體，壓太低會只剩一個側面。
+      // 比靜態的 -40° 平一點：圓環是扁的擠出體，壓太低會只剩一個側面。
       cameraRotationX: -20,
       cameraRotationY: 27.9,
     },
@@ -888,6 +899,7 @@ export const MOTION_DEFAULT_RADIUS = pick('radius');
 export const MOTION_DEFAULT_LOOP_DURATION = pick('loopDuration');
 export const MOTION_DEFAULT_DOLLY = pick('dolly');
 export const MOTION_SVG_DEMO = pick('svgDemo');
+export const MOTION_PREVIEW_ZOOM = pick('previewZoom');
 export const MOTION_OVERRIDES = pick('overrides');
 export const MOTION_HDRI = pick('hdri');
 export const MOTION_KEYS = Object.keys(MOTIONS);

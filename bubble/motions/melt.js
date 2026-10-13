@@ -20,7 +20,14 @@ import { fract, hash11CPU, smoothstepCPU } from './util.js?v=svg-shape-76';
 // 不是「最低的 N 個取樣點」——那會全部擠在同一個最低點旁邊，變成一條直線上的
 // 水柱。要的是散在底部各處、彼此拉開的幾個滴落點，所以在「夠低」的候選裡再做
 // 一次 XZ 平面上的最遠點取樣。
-export function selectBottomAnchors(candidates, count, band, seed = 0) {
+//
+// depthReach 給擠出的 SVG 用：SVG 是 2D 圖，候選點的 z 全是 0，只靠上面那樣挑，
+// 滴落點會全部落在厚度正中間那條線上——x 跟著輪廓散開，前後方向卻完全沒有分佈。
+// 擠出體在前後方向是一整塊等高的平底，所以把每個「夠低」的候選點沿 z 複製成
+// 幾層（±depthReach 之間），最遠點取樣自然就會把滴落點鋪滿整片底面。
+// GLB 的候選點本來就是 3D 的，呼叫端傳 0，行為與原本完全相同。
+const MELT_DEPTH_LAYERS = [-1, -0.5, 0, 0.5, 1];
+export function selectBottomAnchors(candidates, count, band, seed = 0, depthReach = 0) {
   if (!candidates.length) return [];
   // 只從表面點裡挑：內部點在造型肚子裡，水滴從那裡冒出來會穿模。
   const surface = candidates.filter(p => p.surface);
@@ -44,6 +51,11 @@ export function selectBottomAnchors(candidates, count, band, seed = 0) {
     low = pool.filter(p => p.y <= threshold);
   }
   if (!low.length) return [];
+  if (depthReach > 0) {
+    low = low.flatMap(p => MELT_DEPTH_LAYERS.map(f => ({
+      x: p.x, y: p.y, z: p.z + f * depthReach, surface: p.surface, radiusHint: p.radiusHint,
+    })));
+  }
 
   // 兩個滴落點在水平上必須分得開。擠在同一個 XZ 的點（擠出造型的前後面、垂直
   // 側壁都會產生）落下來會完全重疊成一條線，看起來只有一滴。

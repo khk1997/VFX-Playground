@@ -1,10 +1,10 @@
 'use strict';
 
-import { MOTION_HDRI, MOTION_TEXT_DEFAULTS } from './motions/registry.js?v=type-glass-1';
+import { MOTION_HDRI, MOTION_TEXT_DEFAULTS } from './motions/registry.js?v=melt-defaults-1';
 import {
   DEFAULTS, LEGACY_SELECT_VALUES, SELECT_DEFAULTS, SPECTRAL_CAUSTIC_DEFAULTS,
-} from './runtime-defaults.js?v=no-membrane-1';
-import { LINEAR_COLOR_KEYS } from './control-schema.js?v=3';
+} from './runtime-defaults.js?v=melt-depth-1';
+import { LINEAR_COLOR_KEYS } from './control-schema.js?v=4';
 
 export function createPanelBindings(options) {
   const {

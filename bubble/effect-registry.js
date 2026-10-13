@@ -1,6 +1,6 @@
 'use strict';
 
-import { MOTIONS, MOTION_KEYS } from './motions/registry.js?v=type-glass-1';
+import { MOTIONS, MOTION_KEYS } from './motions/registry.js?v=melt-defaults-1';
 
 // 首頁清單裡的「液態玻璃」那一族。
 //

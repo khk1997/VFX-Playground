@@ -115,6 +115,7 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
     <div class="row" id="meltJitterRow"><label>墜落擾動</label><input type="range" id="meltJitter" min="0" max="0.2" step="0.005" value="0.04"><span class="val" id="meltJitter_v"></span></div>
     <div class="row" id="meltBandRow"><label>底部範圍</label><input type="range" id="meltBand" min="0.05" max="0.8" step="0.01" value="0.22"><span class="val" id="meltBand_v"></span></div>
     <div class="row" id="meltSeedRow"><label>滴落點種子</label><input type="range" id="meltSeed" min="0" max="30" step="1" value="0"><span class="val" id="meltSeed_v"></span></div>
+    <div class="row" id="meltDepthSpreadRow"><label>滴落深度範圍</label><input type="range" id="meltDepthSpread" min="0" max="1" step="0.01" value="1"><span class="val" id="meltDepthSpread_v"></span></div>
     <div class="row" id="meltStretchRow"><label>懸垂拉長</label><input type="range" id="meltStretch" min="0" max="0.6" step="0.01" value="0.3"><span class="val" id="meltStretch_v"></span></div>
     <div class="row" id="meltNeckRow"><label>頸部尖端</label><input type="range" id="meltNeck" min="0" max="1" step="0.01" value="0.5"><span class="val" id="meltNeck_v"></span></div>
     <div class="row" id="meltWobbleRow"><label>脫離彈動</label><input type="range" id="meltWobble" min="0" max="1" step="0.01" value="0.5"><span class="val" id="meltWobble_v"></span></div>
@@ -672,6 +673,6 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
 } }
 </script>
 
-<script type="module" src="./bubble.js?v=type-glass-1"></script>
+<script type="module" src="./bubble.js?v=melt-depth-1"></script>
 </body>
 </html>

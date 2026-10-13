@@ -9,15 +9,14 @@ import {
   svgToField, gltfToField, objectToField, packShapePairTexture,
 } from './shape-field.js?v=mesh-2';
 import {
-  DEFAULT_SVG_NAME, DEFAULT_SOLID_NAME, buildDefaultSolid, makeDefaultSvgFile,
-  MELT_DEFAULT_SVG_NAME, makeMeltDemoSvgFile,
+  DEFAULT_SOLID_NAME, buildDefaultSolid, builtinSvgName, makeBuiltinSvgFile,
   MORPH_TARGET_SVG_NAME, makeMorphTargetSvgFile,
   MORPH_TARGET_SOLID_NAME, buildMorphTargetSolid,
-} from './default-shapes.js?v=svg-shape-76';
+} from './default-shapes.js?v=svg-shape-79';
 import {
-  MOTION_UNIFORM_MAP, MOTION_SVG_DEMO,
+  MOTION_UNIFORM_MAP, MOTION_SVG_DEMO, MOTION_PREVIEW_ZOOM,
   MOTION_HDRI, MOTION_KEYS, MOTION_TEXT_DEFAULTS, usesShapeField, usesStudioGlass,
-} from './motions/registry.js?v=type-glass-1';
+} from './motions/registry.js?v=melt-defaults-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
 import { buildMorphPairs } from './motions/morph.js?v=post-mask-3';
@@ -30,7 +29,7 @@ import patchEnvMapResolution from './vendor/patchEnvMapResolution.js';
 import { parseBubbleRuntimeOptions } from './diagnostics.js?v=2';
 import { createMaterialTextureController } from './material-textures.js?v=1';
 import { createEnvironmentLoader, selectMaterialEnvironment } from './environment-loader.js?v=1';
-import { describeShapeImport, loadShapeAsset } from './shape-loader.js?v=1';
+import { describeShapeImport, loadShapeAsset } from './shape-loader.js?v=2';
 import { createShaderVariantPlanner, VariantMaterialCache } from './shader-variants.js?v=5';
 import {
   contactMergeAmount, findClosestDropPair, staticShapeFloorHeight, staticShapeHalfExtents,
@@ -45,20 +44,20 @@ import {
 import {
   COLOR_DEFAULTS, DEFAULTS, LEGACY_SELECT_VALUES, SELECT_DEFAULTS,
   SPECTRAL_CAUSTIC_DEFAULTS, TOGGLE_DEFAULTS, isFormationMotion,
-} from './runtime-defaults.js?v=no-membrane-1';
+} from './runtime-defaults.js?v=melt-depth-1';
 import {
   BACKDROP_SCOPED_KEYS, createMemorySlot, createMotionMemory, motionDefaultsFor,
 } from './runtime-memory.js?v=type-glass-1';
 import {
   COLORS, LINEAR_COLOR_KEYS, SELECTS, createFormatters, createToggleBindings,
-} from './control-schema.js?v=3';
+} from './control-schema.js?v=4';
 import { glassTintBox } from './glass-tint.js?v=2';
 import { FLOOR_GAP, lowestPointOverLoop, shapeFieldFloorHeight } from './studio-floor.js?v=2';
 import { createTypewriterRuntime } from './typewriter-runtime.js?v=studio-floor-1';
 import { createStaticCapillaryRuntime } from './motions/runtime/static-capillary.js?v=1';
 import { createJellyRuntime } from './motions/runtime/jelly.js?v=1';
 import { createResearchRuntime } from './motions/runtime/research.js?v=1';
-import { createMeltRuntime } from './motions/runtime/melt.js?v=1';
+import { createMeltRuntime } from './motions/runtime/melt.js?v=2';
 import { createShatterRuntime } from './motions/runtime/shatter.js?v=1';
 import { createWeaveRuntime } from './motions/runtime/weave.js?v=1';
 import { createMorphRuntime } from './motions/runtime/morph.js?v=1';
@@ -1321,6 +1320,8 @@ const meltRuntime = createMeltRuntime({
   maxDrops: MAX_DROPS,
   shapeTargets: () => shapeTargets,
   shapeSerial: () => shapeFieldSerial,
+  // SVG 是擠出體，候選點只有 z=0 那一層，滴落點要另外沿厚度方向鋪開。
+  shapeExtruded: () => !!shapeField?.localBounds?.extruded,
 });
 // 形狀變形：時間軸、波前與水滴規則都在模組裡。配對表與雙通道貼圖仍由 bubble.js
 // 持有（它們跟形狀匯入管線同一條生命週期，這裡才知道形狀什麼時候換），以 getter
@@ -3234,8 +3235,7 @@ async function importShapeFile(file, kind, { rebuilding = false } = {}) {
     svgVariant,
     gridSize,
     rebuilding,
-    defaultSvgName: DEFAULT_SVG_NAME,
-    meltSvgName: MELT_DEFAULT_SVG_NAME,
+    builtinSvgName,
     defaultSolidName: DEFAULT_SOLID_NAME,
   });
   shapeState.textContent = status;
@@ -3257,8 +3257,7 @@ async function importShapeFile(file, kind, { rebuilding = false } = {}) {
       svgToField,
       gltfToField,
       objectToField,
-      makeDefaultSvgFile,
-      makeMeltDemoSvgFile,
+      makeBuiltinSvgFile,
       buildDefaultSolid,
     });
     if (requestId !== shapeImportRequestId) {
@@ -3344,7 +3343,7 @@ shapeInput.addEventListener('change', e => {
 //
 // 「換了形狀來源」不是唯一要重新烘焙的情況：使用者還沒自己匯入 SVG 時，
 // 不同模式的內建展示形狀也不一樣（見 motions/registry.js 的 svgDemo，例如
-// 融化用底部夠寬的冰塊、其餘模式用問號）。只要還在用內建預設、且目前載入的
+// 融化用底部夠寬的冰塊、匯聚用雪花）。只要還在用內建預設、且目前載入的
 // 版本跟新模式想要的不一致，也要重新烘焙——但使用者一旦自己匯入過 SVG，
 // userShapeFiles.svg 就有值，這個判斷會直接短路，不會蓋掉使用者的檔案。
 function ensureShapeForCurrentSource() {
@@ -3878,7 +3877,8 @@ function frame(now) {
   // 方體會塞滿整張卡片。卡片（660×570）比作品頁窄，再往後退一成，右後方的
   // 地板影子才不會被切掉。
   let previewCameraDistance = !PREVIEW ? P.cameraDistance
-    : usesStudioGlass(P.motion) ? P.cameraDistance * STUDIO_PREVIEW_PULLBACK
+    : usesStudioGlass(P.motion)
+      ? P.cameraDistance * STUDIO_PREVIEW_PULLBACK / (MOTION_PREVIEW_ZOOM[P.motion] || 1)
     : 4.95;
   // 打字模式的寬度是由字串長度決定的，不是固定的——一個固定鏡距沒辦法同時服務
   // 「LIQUID」跟一整句話。而且預覽框（660×570）比作品頁窄得多，同樣的距離在

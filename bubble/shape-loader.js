@@ -4,13 +4,12 @@ export function describeShapeImport({
   svgVariant,
   gridSize,
   rebuilding,
-  defaultSvgName,
-  meltSvgName,
+  builtinSvgName,
   defaultSolidName,
 }) {
   const builtin = !file;
   const label = builtin
-    ? (kind === 'svg' ? (svgVariant === 'ice' ? meltSvgName : defaultSvgName) : defaultSolidName)
+    ? (kind === 'svg' ? builtinSvgName(svgVariant) : defaultSolidName)
     : file.name;
   const status = kind === 'svg'
     ? `正在分析 SVG：${label}`
@@ -29,12 +28,11 @@ export async function loadShapeAsset({
   svgToField,
   gltfToField,
   objectToField,
-  makeDefaultSvgFile,
-  makeMeltDemoSvgFile,
+  makeBuiltinSvgFile,
   buildDefaultSolid,
 }) {
   if (kind === 'svg') {
-    const source = file || (svgVariant === 'ice' ? makeMeltDemoSvgFile() : makeDefaultSvgFile());
+    const source = file || makeBuiltinSvgFile(svgVariant);
     return svgToField(source, { supersample: mobile ? 2 : 3 });
   }
   return file

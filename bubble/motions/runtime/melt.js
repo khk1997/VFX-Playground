@@ -1,6 +1,6 @@
 'use strict';
 
-import createMeltMotion, { selectBottomAnchors } from '../melt.js?v=svg-shape-76';
+import createMeltMotion, { selectBottomAnchors } from '../melt.js?v=melt-depth-1';
 
 // 融化的執行期模組。
 //
@@ -11,7 +11,9 @@ import createMeltMotion, { selectBottomAnchors } from '../melt.js?v=svg-shape-76
 // 滴落點取自形狀底部，取樣範圍與種子是滑桿，所以跟崩解切法一樣用 key 快取而不是
 // 每幀重挑。形狀本身（shapeTargets）與它的版本號（shapeSerial）是 bubble.js 才
 // 知道何時換掉的狀態，以 getter 傳進來。
-export function createMeltRuntime({ params: P, maxDrops, shapeTargets, shapeSerial }) {
+export function createMeltRuntime({
+  params: P, maxDrops, shapeTargets, shapeSerial, shapeExtruded = () => false,
+}) {
   let bottomAnchors = [];
   let anchorKey = null;
 
@@ -23,12 +25,25 @@ export function createMeltRuntime({ params: P, maxDrops, shapeTargets, shapeSeri
 
   const active = () => P.motion === 'melt';
 
+  // 擠出的 SVG 底面在前後方向可以鋪多寬（見 melt.js 的 selectBottomAnchors）。
+  // 前後兩緣被邊緣圓角削成斜面，要往內縮一個圓角半徑，水滴才不會從斜面上冒出來。
+  // 擠出厚度與圓角都是本地座標，shader 會再乘上形狀大小（uShapeAScale），而
+  // 候選點已經套過同一個倍率，所以這裡也要乘。厚度、圓角是滑桿，值進了快取
+  // key，拖動時滴落點會跟著變寬變窄。
+  function depthReach() {
+    if (!shapeExtruded()) return 0;
+    const flat = Math.max(0, P.shapeDepth - P.shapeEdgeBevel);
+    const spread = Math.max(0, Math.min(1, P.meltDepthSpread ?? 1));
+    return flat * (P.shapeAScale ?? 1) * spread;
+  }
+
   function rebuildAnchors() {
-    const key = `${shapeSerial()}:${P.meltBand.toFixed(3)}:${Math.round(P.meltSeed)}`;
+    const reach = depthReach();
+    const key = `${shapeSerial()}:${P.meltBand.toFixed(3)}:${Math.round(P.meltSeed)}:${reach.toFixed(4)}`;
     if (key === anchorKey) return;
     anchorKey = key;
     bottomAnchors = selectBottomAnchors(
-      shapeTargets(), maxDrops, P.meltBand, Math.round(P.meltSeed),
+      shapeTargets(), maxDrops, P.meltBand, Math.round(P.meltSeed), reach,
     );
   }
 

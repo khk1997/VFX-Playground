@@ -1,5 +1,5 @@
 import { EDGE_TINT_TARGETS, EDGE_TINT_STOPS } from './edge-tint.js?v=dark-tint-1';
-import { MOTION_UNIFORM_MAP } from './motions/registry.js?v=type-glass-1';
+import { MOTION_UNIFORM_MAP } from './motions/registry.js?v=melt-defaults-1';
 import { GLASS_TINT_MODES } from './glass-tint.js?v=2';
 
 // select 字串 → int uniform
@@ -289,6 +289,7 @@ export function createFormatters(P, { effectiveCapillaryHeight, shatterSegmentSe
   meltJitter: v => v === 0 ? '關閉' : v.toFixed(3),
   meltBand: v => Math.round(v * 100) + '%',
   meltSeed: v => '#' + v.toFixed(0),
+  meltDepthSpread: v => v === 0 ? '中線' : Math.round(v * 100) + '%',
   meltStretch: v => v === 0 ? '正圓球' : '+' + Math.round(v * 100) + '%',
   meltNeck: v => v === 0 ? '無頸' : Math.round(v * 100) + '%',
   meltWobble: v => v === 0 ? '不彈動' : Math.round(v * 100) + '%',
