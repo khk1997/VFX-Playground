@@ -311,3 +311,11 @@ function drawSmokeTexture(rotA, loopPhase) {
   }
   smokeCtx.putImageData(smokeImg, 0, 0);
 }
+
+// 開發者 HUD（../devtools.js，?dev=1 才存在）展開時列出的數值。
+window.__vfxDev?.watch({
+  // 池子是依循環秒數預先建好的上限，數量為 0 代表那一項沒開。
+  '火花 / 吸積 / 電弧（池）': () => `${sparkPool.length} / ${accPool.length} / ${arcPool.length}`,
+  '背景星': () => starPool.length,
+  '暫停': () => paused || msgPaused,
+});

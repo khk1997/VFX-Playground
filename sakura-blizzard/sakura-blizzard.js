@@ -65,3 +65,5 @@ document.querySelector('#leafColor').oninput=e=>state.leafColor=e.target.value;
 document.querySelector('#loopSec').oninput=e=>{state.loopSec=+e.target.value;document.querySelector('#loopLabel').textContent=`循環 ${state.loopSec} 秒`;};
 document.querySelector('#seamless').onchange=e=>{state.seamless=e.target.checked;document.querySelector('#speed').disabled=state.seamless;document.querySelector('#loopNote').textContent=state.seamless?'無縫模式下，循環秒數會取代風速決定移動速度。':'自然模式使用風速，軌跡會持續但不保證首尾同幀。';time=0;};
 addEventListener('message',e=>{if(e.data==='vfx-pause')msgPaused=true;else if(e.data==='vfx-play')msgPaused=false;else return;syncLoop();});document.addEventListener('visibilitychange',syncLoop);
+// 開發者 HUD（../devtools.js，?dev=1 才存在）展開時列出的數值。
+window.__vfxDev?.watch({'花瓣':()=>`${petals.length} / ${state.amount}`,'暫停':()=>paused||msgPaused,'無縫循環':()=>state.seamless?`${state.loopSec} 秒`:'關'});

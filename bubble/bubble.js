@@ -3607,6 +3607,29 @@ const { collectGlEnvironment, computeShaderStats, captureFrameForDiff } = create
   canvas,
 });
 
+// 開發者 HUD（../devtools.js，?dev=1 才存在）展開時列出的 bubble 專屬數值。
+// HUD 約 0.4 秒讀一次，只讀不寫；沒開開發者模式時這段什麼都不做。
+window.__vfxDev?.watch({
+  '動態': () => P.motion,
+  '畫質': () => {
+    const q = adaptiveQuality.snapshot();
+    return `${q.tier}（DPR ${q.dpr.toFixed(2)}，範圍 ${q.minDpr.toFixed(2)}–${q.maxDpr.toFixed(2)}）`;
+  },
+  'raymarch 步數': () => uniforms?.uMaxSteps.value,
+  '反射取樣': () => adaptiveQuality.snapshot().reflectionSamples,
+  '主滴 / 微滴 / 負形': () => uniforms
+    ? `${Math.round(uniforms.uCount.value)} / ${Math.round(uniforms.uMicroCount.value)} / ${Math.round(uniforms.uNegativeCount.value)}`
+    : null,
+  '狀態': () => [
+    isPaused() && '暫停',
+    powerSaveThrottled && '省電節流',
+    dragging && '拖曳中（降 DPR）',
+    isExporting() && '輸出中',
+  ].filter(Boolean).join('、') || '執行中',
+  'shader 變體': () => `${activeVariantKey ?? '—'}（快取 ${variantCache.size}/${VARIANT_CACHE_LIMIT}）`,
+  '首次編譯': () => (initialCompileMs == null ? '進行中' : `${Math.round(initialCompileMs)}ms`),
+});
+
 // 診斷 static / compileonly 只執行一次，避免後續的 syncLoop 重複啟動。
 let diagOnceDone = false;
 function syncLoop() {

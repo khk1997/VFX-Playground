@@ -4,6 +4,9 @@
  * Shift+D 顯示／隱藏　Shift+F 換位置　Shift+G 展開詳細資訊　Shift+R 強制 DPR=1（會重新載入）
  * 沒開啟時什麼都不包；首頁預覽 iframe（?preview=1）一律不啟用。
  * 要在特效腳本之前載入，才包得到 requestAnimationFrame 與 WebGL 的 draw 呼叫。
+ *
+ * 特效自己的數值用 window.__vfxDev?.watch({ 標籤: () => 值 }) 登記，展開（Shift+G）
+ * 時每次更新讀一次。沒開開發者模式時 __vfxDev 不存在，那一行什麼都不做。
  */
 (() => {
   'use strict';
@@ -266,6 +269,7 @@
     #vfxDevDetail { margin-top: 5px; padding-top: 5px; border-top: 1px solid rgba(255,255,255,.08); }
     #vfxDevDetail[hidden] { display: none; }
     #vfxDevDetail canvas { display: block; height: 48px; margin-bottom: 4px; }
+    #vfxDevDetail .sep { height: 1px; margin: 4px 0; background: rgba(255,255,255,.08); }
     #vfxDevDetail .row { display: flex; justify-content: space-between; gap: 16px; }
   `;
 
@@ -346,10 +350,32 @@
     return best;
   };
 
+  // 特效登記的數值：標籤 → getter。用拉的而不是每幀推，沒展開時零成本。
+  const watches = new Map();
+  const formatWatch = value => {
+    if (value == null) return '—';
+    if (typeof value === 'boolean') return value ? '是' : '否';
+    if (typeof value === 'number') return Number.isInteger(value) ? `${value}` : value.toFixed(2);
+    return String(value);
+  };
+  const readWatches = () => {
+    const out = {};
+    for (const [label, getter] of watches) {
+      try { out[label] = getter(); } catch (_) { out[label] = undefined; }
+    }
+    return out;
+  };
+
+  const escapeHtml = text => text.replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
   const row = (label, value, cls) => `<div class="row"><span class="dim">${label}</span>${span(value, cls)}</div>`;
   const renderDetail = () => {
     drawGraph();
     const out = [];
+    if (watches.size) {
+      const values = readWatches();
+      for (const label of watches.keys()) out.push(row(escapeHtml(label), escapeHtml(formatWatch(values[label]))));
+      out.push('<div class="sep"></div>');
+    }
     const hasGpuTimer = [...gpuStates.values()].some(Boolean);
     if (contextKinds.has('webgl')) {
       out.push(row('GPU', hasGpuTimer
@@ -444,5 +470,17 @@
   });
 
   // 給之後的抽屜／bug report／自動化測試讀。
-  window.__vfxDev = { stats, resources };
+  window.__vfxDev = {
+    stats,
+    resources,
+    // 回傳取消函式；同一個標籤重複登記會蓋掉舊的。
+    watch(entries) {
+      for (const [label, getter] of Object.entries(entries)) {
+        if (typeof getter === 'function') watches.set(label, getter);
+      }
+      return () => { for (const label of Object.keys(entries)) watches.delete(label); };
+    },
+    // 一次讀出全部數值，給之後的 bug report／自動化測試用。
+    snapshot: () => ({ stats: { ...stats }, resources: { ...resources }, effect: readWatches() }),
+  };
 })();
