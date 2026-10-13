@@ -2,7 +2,8 @@
  * 開發者 HUD：FPS、frame time、draw call。
  * ?dev=1 開啟（記在 localStorage），?dev=0 關閉。
  * Shift+D 顯示／隱藏　Shift+F 換位置　Shift+G 展開詳細資訊　Shift+R 強制 DPR=1（會重新載入）
- * 沒開啟時什麼都不包；首頁預覽 iframe（?preview=1）一律不啟用。
+ * 沒開啟時什麼都不包。首頁預覽 iframe（?preview=1）裡只量不顯示，數字交給首頁讀。
+ * 沒有自己動畫迴圈的頁面（首頁）呼叫 __vfxDev.mode('page')，改由 HUD 自己跑探測迴圈量主執行緒。
  * 要在特效腳本之前載入，才包得到 requestAnimationFrame 與 WebGL 的 draw 呼叫。
  *
  * 特效自己的數值用 window.__vfxDev?.watch({ 標籤: () => 值 }) 登記，展開（Shift+G）
@@ -12,7 +13,7 @@
   'use strict';
 
   const params = new URLSearchParams(location.search);
-  if (params.has('preview')) return;
+  const headless = params.has('preview');
 
   const KEY = 'vfx-dev';
   const store = {
@@ -21,14 +22,15 @@
     remove(name) { try { localStorage.removeItem(name); } catch (_) { /* 無痕模式 */ } },
   };
 
-  if (params.get('dev') === '1') store.set(KEY, '1');
-  if (params.get('dev') === '0') store.remove(KEY);
+  if (!headless && params.get('dev') === '1') store.set(KEY, '1');
+  if (!headless && params.get('dev') === '0') store.remove(KEY);
   const enabled = store.get(KEY) === '1';
 
   const isTyping = target => target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
 
   // 沒啟用時只留一個快捷鍵：開啟後重新載入，讓 hook 從頭裝上。
   if (!enabled) {
+    if (headless) return;
     addEventListener('keydown', event => {
       if (!event.shiftKey || event.code !== 'KeyD' || isTyping(event.target)) return;
       store.set(KEY, '1');
@@ -39,7 +41,8 @@
 
   // 強制 DPR=1：快速判斷瓶頸是不是像素填充量。特效大多在載入當下讀 DPR
   // （bubble 的 deviceMaxDpr 就是），所以切換一律重新載入，從頭生效。
-  const forceDpr1 = store.get('vfx-dev-dpr1') === '1';
+  // 預覽 iframe 的 DPR 歸首頁管（preview-performance.js），這裡不插手。
+  const forceDpr1 = !headless && store.get('vfx-dev-dpr1') === '1';
   const nativeDpr = window.devicePixelRatio || 1;
   if (forceDpr1) {
     try {
@@ -177,7 +180,24 @@
     try { return Boolean(throttleGetter?.()); } catch (_) { return false; }
   };
 
+  // 頁面模式：頁面本身沒有持續的動畫迴圈，改由 HUD 跑自己的探測迴圈，量到的是
+  // 主執行緒能維持的幀率（捲動、CSS 動畫、iframe 載入造成的卡頓都會反映在這裡）。
+  let pageMode = false;
+  let lastProbe = 0;
+  const probe = stamp => {
+    if (lastProbe) {
+      push(intervals, stamp - lastProbe);
+      push(throttledFlags, false);
+      push(cpuTimes, 0);
+    }
+    lastProbe = stamp;
+    renderedInWindow++;
+    nativeRAF(probe);
+  };
+  document.addEventListener('visibilitychange', () => { lastProbe = 0; });
+
   const finishFrame = () => {
+    if (pageMode) { frameCpu = frameDraws = framePrims = 0; return; }
     const rendered = !contextKinds.has('webgl') || frameDraws > 0;
     if (rendered) {
       if (lastRenderedStamp) {
@@ -257,7 +277,7 @@
   // 預設放頂端中間：各頁的「首頁」和右上按鈕之間通常是空的，左右兩側都有面板。
   const CORNERS = ['tc', 'bc', 'bl', 'br', 'tr', 'tl'];
   let corner = CORNERS.includes(store.get('vfx-dev-corner')) ? store.get('vfx-dev-corner') : 'tc';
-  let visible = store.get('vfx-dev-hidden') !== '1';
+  let visible = !headless && store.get('vfx-dev-hidden') !== '1';
   let expanded = store.get('vfx-dev-expanded') === '1';
 
   const style = document.createElement('style');
@@ -307,8 +327,24 @@
     hud.hidden = !visible;
     detail.hidden = !expanded;
   };
-  if (document.body) mount();
+  if (headless) { /* 預覽 iframe：只量，不顯示 */ }
+  else if (document.body) mount();
   else addEventListener('DOMContentLoaded', mount, { once: true });
+
+  // ---- 長任務（主執行緒被佔住超過 50ms）----
+  // 首頁載入預覽 iframe、編譯 shader 時最常出現；特效頁的參數切換也看得到。
+  const LONG_TASK_WINDOW_MS = 10000;
+  const longTasks = [];
+  try {
+    new PerformanceObserver(list => {
+      for (const entry of list.getEntries()) longTasks.push({ at: entry.startTime + entry.duration, ms: entry.duration });
+    }).observe({ type: 'longtask', buffered: true });
+  } catch (_) { /* Safari／Firefox 沒有 longtask */ }
+  const recentLongTasks = () => {
+    const since = performance.now() - LONG_TASK_WINDOW_MS;
+    while (longTasks.length && longTasks[0].at < since) longTasks.shift();
+    return longTasks;
+  };
 
   const fpsClass = fps => (fps < 30 ? 'bad' : fps < 50 ? 'warn' : '');
   const percentile = (list, p) => {
@@ -368,7 +404,9 @@
   };
 
   // 特效登記的數值：標籤 → getter。用拉的而不是每幀推，沒展開時零成本。
+  // inline 的那幾個另外顯示在上方那一行（每次更新都會讀）。
   const watches = new Map();
+  const inlineWatches = new Set();
   const formatWatch = value => {
     if (value == null) return '—';
     if (typeof value === 'boolean') return value ? '是' : '否';
@@ -407,10 +445,15 @@
       const scale = c.width / c.clientWidth;
       out.push(row('canvas', `${c.width}×${c.height}（×${scale.toFixed(2)}）`));
     }
+    const tasks = recentLongTasks();
+    out.push(row('長任務（10 秒內）', tasks.length
+      ? `${tasks.length} 次，最長 ${Math.round(Math.max(...tasks.map(t => t.ms)))}ms`
+      : '0', tasks.length ? 'warn' : ''));
     out.push(row('DPR', forceDpr1 ? `1（強制，原生 ${nativeDpr}）` : `${nativeDpr}`, forceDpr1 ? 'warn' : ''));
     if (performance.memory) out.push(row('JS heap', `${(performance.memory.usedJSHeapSize / 1048576).toFixed(0)} MB`));
     out.push(`<div class="dim">1%low＝最差 1% 幀的 fps · max＝樣本內最慢一幀（都不含省電節流的幀）</div>`);
     if (throttleGetter) out.push(`<div class="dim">走勢圖藍灰色＝省電節流中的幀</div>`);
+    if (pageMode) out.push(`<div class="dim">頁面模式：fps 是主執行緒探測迴圈量到的，不是特效的渲染幀率</div>`);
     out.push(`<div class="dim">⇧D 隱藏 · ⇧F 位置 · ⇧G 收合 · ⇧R DPR=1</div>`);
     rows.innerHTML = out.join('');
   };
@@ -425,6 +468,7 @@
     }
     renderedInWindow = drawsInWindow = primsInWindow = 0;
     stats.idle = !frames;
+    stats.context = contextKinds.has('webgl') ? 'webgl' : contextKinds.has('2d') ? 'canvas2d' : 'none';
 
     if (intervals.length < 2) {
       if (visible) line.innerHTML = span('等待畫面…', 'dim');
@@ -456,6 +500,12 @@
 
     if (!visible) return;
     if (expanded) renderDetail();
+    const tasks = recentLongTasks();
+    const inline = [];
+    if (inlineWatches.size) {
+      const values = readWatches();
+      for (const label of inlineWatches) inline.push(`${escapeHtml(label)} ${escapeHtml(formatWatch(values[label]))}`);
+    }
     line.innerHTML = [
       ...(forceDpr1 ? [span('DPR1', 'tag')] : []),
       ...(stats.throttled ? [span('省電', 'idle')] : []),
@@ -463,16 +513,20 @@
       span(`1%low ${stats.low1.toFixed(0)}`, judge ? fpsClass(stats.low1) : 'dim'),
       `${stats.frameMs.toFixed(1)}ms`,
       span(`max ${stats.worstMs.toFixed(0)}ms`, !judge ? 'dim' : stats.worstMs > 50 ? 'bad' : stats.worstMs > 25 ? 'warn' : 'dim'),
-      `js ${stats.cpuMs.toFixed(1)}ms`,
-      ...(stats.gpuMs != null ? [`gpu ${stats.gpuMs.toFixed(1)}ms`] : []),
-      ...(contextKinds.has('webgl')
-        ? [`${stats.drawCalls.toFixed(0)}dc`, `${compact(stats.primitives)}tri`]
-        : [span(contextKinds.has('2d') ? 'canvas2d' : 'no-gl', 'dim')]),
+      ...(tasks.length ? [span(`long ${tasks.length}`, 'warn')] : []),
+      ...(pageMode ? [] : [
+        `js ${stats.cpuMs.toFixed(1)}ms`,
+        ...(stats.gpuMs != null ? [`gpu ${stats.gpuMs.toFixed(1)}ms`] : []),
+        ...(contextKinds.has('webgl')
+          ? [`${stats.drawCalls.toFixed(0)}dc`, `${compact(stats.primitives)}tri`]
+          : [span(contextKinds.has('2d') ? 'canvas2d' : 'no-gl', 'dim')]),
+      ]),
+      ...inline,
     ].join(span(' · ', 'dim'));
   }, UPDATE_MS);
 
   addEventListener('keydown', event => {
-    if (!event.shiftKey || isTyping(event.target)) return;
+    if (headless || !event.shiftKey || isTyping(event.target)) return;
     if (event.code === 'KeyD') {
       visible = !visible;
       hud.hidden = !visible;
@@ -498,16 +552,32 @@
   window.__vfxDev = {
     stats,
     resources,
-    // 回傳取消函式；同一個標籤重複登記會蓋掉舊的。
-    watch(entries) {
+    // 回傳取消函式；同一個標籤重複登記會蓋掉舊的。{ inline: true } 會顯示在上方那一行。
+    watch(entries, { inline = false } = {}) {
       for (const [label, getter] of Object.entries(entries)) {
-        if (typeof getter === 'function') watches.set(label, getter);
+        if (typeof getter !== 'function') continue;
+        watches.set(label, getter);
+        if (inline) inlineWatches.add(label);
       }
-      return () => { for (const label of Object.keys(entries)) watches.delete(label); };
+      return () => {
+        for (const label of Object.keys(entries)) { watches.delete(label); inlineWatches.delete(label); }
+      };
+    },
+    // 沒有自己動畫迴圈的頁面（首頁）用 'page'：改量主執行緒的探測迴圈。
+    mode(name) {
+      if (name !== 'page' || pageMode) return;
+      pageMode = true;
+      intervals.length = throttledFlags.length = cpuTimes.length = 0;
+      nativeRAF(probe);
     },
     // 特效告知「現在是刻意節流」，每個渲染幀讀一次，getter 要便宜。
     throttled(getter) { throttleGetter = typeof getter === 'function' ? getter : null; },
     // 一次讀出全部數值，給之後的 bug report／自動化測試用。
-    snapshot: () => ({ stats: { ...stats }, resources: { ...resources }, effect: readWatches() }),
+    snapshot: () => ({
+      stats: { ...stats },
+      resources: { ...resources },
+      longTasks: recentLongTasks().map(t => Math.round(t.ms)),
+      effect: readWatches(),
+    }),
   };
 })();

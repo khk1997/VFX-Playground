@@ -18,6 +18,8 @@ let previewTimer = 0;
 let pendingCard = null;
 let launching = false;
 let masonryRaf = 0;
+// 開發者 HUD 用：各特效上一次「開始載入到預覽出現」花了多久。
+const lastRevealMs = new Map();
 
 function scheduleMasonryLayout() {
   if (masonryRaf) return;
@@ -119,6 +121,8 @@ function startLivePreview(card, effect) {
     try { frame.contentWindow?.postMessage('vfx-play', '*'); } catch (_) {}
     const reveal = () => {
       if (activePreview?.frame === frame && frame.isConnected) {
+        activePreview.revealMs = performance.now() - activePreview.startedAt;
+        lastRevealMs.set(effect.title, activePreview.revealMs);
         frame.classList.add('is-ready');
         card.classList.remove('is-loading-preview');
         card.classList.add('is-previewing');
@@ -141,7 +145,7 @@ function startLivePreview(card, effect) {
     waitForFirstFrame();
   }, { once: true });
 
-  activePreview = { card, frame, host };
+  activePreview = { card, frame, host, effect, startedAt: performance.now(), revealMs: null };
   // 先指定真正的網址再插入 DOM。若先插入空 iframe，瀏覽器會先派發一次
   // about:blank 的 load，讓上面 once:true 的監聽器過早被消耗；真正效果載完後
   // 就不會再加 is-ready，使用者只會一直看到海報。
@@ -273,3 +277,48 @@ document.addEventListener('keydown', event => {
 
 livePreviewQuery.addEventListener('change', () => stopLivePreview());
 scheduleMasonryLayout();
+
+// 開發者 HUD（./devtools.js，?dev=1 才存在）。首頁沒有自己的動畫迴圈，改用頁面模式
+// 量主執行緒；預覽 iframe 裡的 devtools 只量不顯示，數字從這裡讀出來。
+if (window.__vfxDev) {
+  const childDev = () => {
+    try { return activePreview?.frame.contentWindow?.__vfxDev ?? null; } catch (_) { return null; }
+  };
+  const childPerf = () => {
+    try { return activePreview?.frame.contentWindow?.__vfxPreviewPerf ?? null; } catch (_) { return null; }
+  };
+  const fmtMs = ms => (ms == null ? '—' : `${Math.round(ms)}ms`);
+  window.__vfxDev.mode('page');
+  window.__vfxDev.watch({
+    '預覽': () => {
+      if (!activePreview) return '—';
+      const stats = childDev()?.stats;
+      if (activePreview.revealMs == null) return `${activePreview.effect.title} 載入中`;
+      return stats?.fps ? `${activePreview.effect.title} ${Math.round(stats.fps)}fps` : activePreview.effect.title;
+    },
+  }, { inline: true });
+  window.__vfxDev.watch({
+    '預覽出現耗時': () => (activePreview ? fmtMs(activePreview.revealMs ?? null) : '—'),
+    '預覽上限 fps / DPR': () => {
+      const perf = childPerf();
+      return perf ? `${perf.fps} / ${perf.dpr.toFixed(2)}` : '—';
+    },
+    '預覽 GPU / draw call': () => {
+      const stats = childDev()?.stats;
+      if (stats?.context === 'canvas2d') return 'canvas2d（沒有 GPU 計時）';
+      if (!stats || stats.gpuMs == null) return stats?.drawCalls != null ? `— / ${Math.round(stats.drawCalls)}` : '—';
+      return `${stats.gpuMs.toFixed(1)}ms / ${Math.round(stats.drawCalls)}`;
+    },
+    '預覽 1%low / max': () => {
+      const stats = childDev()?.stats;
+      return stats?.low1 ? `${Math.round(stats.low1)} / ${Math.round(stats.worstMs)}ms` : '—';
+    },
+    // 切換卡片之後這個數字應該一直是 0 或 1；變多代表舊的 iframe 沒被移除。
+    'iframe 數量': () => document.querySelectorAll('iframe').length,
+    '最慢出現的預覽': () => {
+      if (!lastRevealMs.size) return '—';
+      const [title, ms] = [...lastRevealMs].reduce((a, b) => (b[1] > a[1] ? b : a));
+      return `${title} ${fmtMs(ms)}（已看過 ${lastRevealMs.size} 個）`;
+    },
+  });
+}
