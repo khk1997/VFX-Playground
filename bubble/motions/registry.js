@@ -50,7 +50,6 @@ import { edgeTintParams } from '../edge-tint.js';
 export const STUDIO_GLASS_OVERRIDES = {
   materialStyle: 'universal',
   spectralCausticEnabled: false,
-  dispersionEnabled: false,
   bloomEnabled: false,
   bloomThreshold: 1.75,
   bloomIntensity: 0.4,
@@ -212,10 +211,6 @@ export const MOTIONS = {
       spectralCausticNoiseScale: 0.5,
       spectralCausticAzimuth: -29,
       spectralCausticElevation: -31,
-      dispersionEnabled: true,
-      dispersion: 0.03,
-      dispersionSeparation: 1.5,
-      artPatternSpeed: 0,
       // 使用者實測後定案的後處理整組（2026-09-02 存檔匯入；曝光／亮度已於
       // 2026-09-08 改回全域預設 1.0 / 0）：體積吸收拉濃，顆粒放大顆粒感、
       // 縮小粒徑，開 Bloom 與條紋光芒各自給一組收斂過的手感。

@@ -16,11 +16,6 @@ assert.match(
 );
 assert.match(
   shader,
-  /separateSpectrum\(\s*visibleSpectrum\(spectrumCoordinate\),\s*uDispersionSeparation\s*\)/s,
-  'Art dispersion must use its own spectrum separation',
-);
-assert.match(
-  shader,
   /vec3 causticRampColor =\s*texture2D\(uSpectralCausticRamp,[\s\S]*?separateSpectrum\(\s*causticRampColor,\s*uSpectralCausticSeparation\s*\)/s,
   'Spectral caustics must use their own spectrum separation',
 );

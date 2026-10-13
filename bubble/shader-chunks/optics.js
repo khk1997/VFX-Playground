@@ -614,17 +614,6 @@ struct SurfaceMaterial {
   float edgeFactor;
 };
 
-// 藝術色散使用固定可見光譜。
-vec3 visibleSpectrum(float t){
-  t = clamp(t, 0.0, 1.0);
-  float red = smoothstep(0.46, 0.74, t)
-    + (1.0 - smoothstep(0.0, 0.14, t)) * 0.28;
-  float green = smoothstep(0.10, 0.38, t)
-    * (1.0 - smoothstep(0.68, 0.94, t));
-  float blue = 1.0 - smoothstep(0.27, 0.60, t);
-  return clamp(vec3(red, green, blue), 0.0, 1.0);
-}
-
 vec3 separateSpectrum(vec3 spectrum, float separationControl){
   float lum = dot(spectrum, vec3(0.2126, 0.7152, 0.0722));
   // 粗糙度會把色散「洗掉」，而不只是「弄柔」——這是霧面玻璃不會打出彩虹的原因。
@@ -651,31 +640,6 @@ vec3 separateSpectrum(vec3 spectrum, float separationControl){
     clamp((separated - 0.5) * 1.45 + 0.5, 0.0, 1.0),
     clamp(separation - 1.0, 0.0, 0.5) * 2.0
   );
-}
-
-float artisticDispersionOPD(vec3 p, vec3 N, vec3 V){
-// 診斷探針 B（?diag=probe-no-refraction）。本體含 4 次 fbm＝16 份展開的 snoise。
-#ifdef PROBE_NO_ART_DISPERSION
-  return 0.0;
-#endif
-#ifndef PROBE_NO_ART_DISPERSION
-  float cosTheta = clamp(dot(N, V), 0.0, 1.0);
-  vec3 sp = p * uArtNoiseScale;
-  vec3 flow = loopNoiseOffset(uArtPatternSpeed);
-  vec3 warp = vec3(
-    fbm(sp + flow),
-    fbm(sp + vec3(5.2, 1.3, 0.0) + flow.yzx),
-    fbm(sp + vec3(1.7, 9.2, 0.0) + flow.zxy)
-  );
-  float n = fbm(sp + warp * 0.6 + flow * 0.5);
-  float thickness = uArtThickness + n * uArtThickVar;
-  float top = clamp(N.y * 0.5 + 0.5, 0.0, 1.0);
-  thickness -= pow(top, 2.5) * uArtGravity * uArtThickness * 0.95;
-  thickness = max(thickness, 0.0);
-  float sinI = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
-  float cosT = sqrt(max(0.0, 1.0 - (sinI / uIOR) * (sinI / uIOR)));
-  return 2.0 * uIOR * thickness * cosT;
-#endif // PROBE_NO_ART_DISPERSION
 }
 
 // 表面的反射與透射分開計算；避免以暗色 alpha 覆蓋白色背景。

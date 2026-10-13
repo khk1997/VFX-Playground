@@ -145,12 +145,6 @@ const MATERIAL_PROFILE_KEYS = [
   'hdriYaw', 'hdriPitch', 'hdriBlur', 'envRefraction',
   'reflect', 'transmission', 'materialExposure',
   'roughness', 'fresnel', 'ior',
-  // 薄膜式藝術色散：白底薄膜的顯色幾乎全靠它，跟通用玻璃要的分佈差很多
-  // （通用玻璃靠折射堆疊出顏色，薄膜是整片透光、顏色要自己長出來），
-  // 所以兩種材質也各記一份。
-  'dispersion', 'dispersionSeparation', 'artThickness', 'artThickVar',
-  'artNoiseScale', 'artPatternSpeed', 'artGravity',
-  'causticScale', 'causticSharpness',
 ];
 const pickMaterialProfile = source => Object.fromEntries(
   MATERIAL_PROFILE_KEYS.map(key => [key, source[key]])
@@ -261,7 +255,7 @@ for (const key of MOTION_MEMORY_KEYS) P[key] = motionMemory[key][memorySlot(key)
 
 const TOGGLES = createToggleBindings(applyEdgeDropDistribution);
 
-const DISPERSION_TOGGLE_KEYS = ['dispersionEnabled', 'rayDispersionEnabled', 'spectralCausticEnabled'];
+const DISPERSION_TOGGLE_KEYS = ['rayDispersionEnabled', 'spectralCausticEnabled'];
 // 色散總開關：純粹是一個總閘，關閉時三個效果一律停用，但不動它們各自的
 // 開關狀態；重新打開總開關後，各效果回到自己原本開/關的樣子。不隨參數組合
 // 存檔，只是面板互動的捷徑，所以是一個獨立於 P 的暫時狀態。
@@ -2392,10 +2386,6 @@ function initGL() {
     uDropShape:  { value: dropShapeData },
     uDropPhysics: { value: dropPhysicsData },
     uBounds:     { value: dropBounds },
-    uDispersion: { value: P.dispersion },
-    uDispersionSeparation: { value: P.dispersionSeparation },
-    uCausticScale: { value: P.causticScale },
-    uCausticSharpness: { value: P.causticSharpness },
     uRayBeamIntensity: { value: P.rayBeamIntensity },
     uRayBeamSeparation: { value: P.rayBeamSeparation },
     uRayBeamPattern: { value: SELECTS.rayBeamPattern.map[P.rayBeamPattern] },
@@ -2430,12 +2420,6 @@ function initGL() {
     uSpectralCausticHdri: { value: P.spectralCausticHdri },
     uSpectralCausticIconAffect: { value: P.spectralCausticIconAffect ? 1 : 0 },
     uSpectralCausticRamp: { value: makeSpectralCausticTexture() },
-    uArtThickness: { value: P.artThickness },
-    uArtThickVar: { value: P.artThickVar },
-    uArtNoiseScale: { value: P.artNoiseScale },
-    uArtPatternSpeed: { value: P.artPatternSpeed },
-    uArtGravity: { value: P.artGravity },
-    uDispersionEnabled: { value: P.dispersionEnabled ? 1 : 0 },
     uRayDispersionEnabled: { value: P.rayDispersionEnabled ? 1 : 0 },
     uSpectralCausticEnabled: { value: P.spectralCausticEnabled ? 1 : 0 },
     uFresnel:    { value: P.fresnel },
@@ -4000,7 +3984,7 @@ if (!PREVIEW && window.PresetIO) {
       'motion', 'backdrop', 'bgMode', 'bgColor',
       'materialStyle', 'shapeSource', 'shapeQuality',
       'rayBeamPattern',
-      'dispersionEnabled', 'rayDispersionEnabled',
+      'rayDispersionEnabled',
       'spectralCausticEnabled',
     ],
     exclude: [

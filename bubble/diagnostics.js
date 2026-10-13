@@ -52,16 +52,14 @@ const LAUNCH_MODE = params.get('mode') || null;
 //                cube_uv_reflection_fragment，所以它是第一個該被單獨量的對象。
 //                注意：畫面會少掉高粗糙度的環形預濾波，這是探針不是可上線的設定。
 //   probe-no-late-shading  探針 A。編譯期移除 main() 光線行進之後的六個著色區塊：
-//                稜光光芒、液態薄膜材質分支、稜光彩度後處理、色散/光譜、光譜焦散、
-//                薄膜深度。raymarch、noise、表面材質、內部折射全部保留。
-//   probe-no-refraction  探針 B。編譯期抽掉三支函式的「本體」（簽章保留，所以呼叫點
-//                與 main() 的控制流都不變）：traceExitSurface（自帶 raymarch 迴圈 +
-//                calcNormal）、artisticDispersionOPD（4 次 fbm）。等同於下面兩個同時開。
-//                （原本還有第三個成分 thinFilm，薄膜在 2026-10 移除後一起拿掉了。）
-//   probe-no-trace-exit / probe-no-art-dispersion
-//                B 的成分各自單獨（B1 / B3），用來二分 B 本身：是「fbm 的
-//                靜態展開份數」在主導，還是 traceExitSurface → mapScene → calcNormal
-//                那個結構性的放大器。三者互斥可組合，也都可以跟其他 diag 疊加。
+//                稜光光芒、液態薄膜材質分支、稜光彩度後處理、光譜焦散、薄膜深度。
+//                raymarch、noise、表面材質、內部折射全部保留。
+//   probe-no-refraction  探針 B。編譯期抽掉 traceExitSurface 的「本體」（自帶
+//                raymarch 迴圈 + calcNormal；簽章保留，所以呼叫點與 main() 的控制流
+//                都不變）。原本還包含 thinFilm 與 artisticDispersionOPD，薄膜與藝術
+//                色散在 2026-10 移除後一起拿掉了，現在等同 probe-no-trace-exit。
+//   probe-no-trace-exit
+//                B 的成分（B1），可以跟其他 diag 疊加。
 //   probe-no-wobble  探針 C。只把正式 mapScene 尾端 geometry wobble 那一次 fbmFast
 //                在編譯期移除，其餘完全不動。測「同一份 noise 被 13 個 mapScene
 //                呼叫點重複 inline」的代價。
@@ -141,15 +139,14 @@ const DIAG = (() => {
     singleReflectionSample: set.has('single-reflection-sample'),
     // 正式 FRAG 的 feature-level 二分。三個都可以跟任何其他 diag 疊加，因為要比的是
     // 「同一支 shader、只差這一塊」。見 shaders.js 對應的 #ifndef 區塊。
-    //   A 後段著色：稜光、液態薄膜分支、彩度後處理、色散/光譜、光譜焦散、薄膜深度
-    //   B 折射群：traceExitSurface、artisticDispersionOPD（保留簽章、抽掉本體）
+    //   A 後段著色：稜光、液態薄膜分支、彩度後處理、光譜焦散、薄膜深度
+    //   B 折射群：traceExitSurface（保留簽章、抽掉本體）
     //   C 只拿掉 mapScene 尾端的 geometry wobble noise
     probeNoLateShading: set.has('probe-no-late-shading'),
     // 後段著色的 8 個單獨隔離探針（第七、八項不在 main() 的後段，但同屬這一輪）。
     // 每個只關一個功能，其餘完全維持基底。
     probeNoPrismBeam: set.has('probe-no-prism-beam'),
     probeNoPrismSaturation: set.has('probe-no-prism-saturation'),
-    probeNoDispersionSpectral: set.has('probe-no-dispersion-spectral'),
     probeNoSpectralCaustics: set.has('probe-no-spectral-caustics'),
     probeNoEnvPmrem: set.has('probe-no-env-pmrem'),
     probeNoRefractionFilm: set.has('probe-no-refraction'),
@@ -204,7 +201,6 @@ const DIAG = (() => {
     probeModeNone: set.has('probe-mode-none'),
     probeModeVoxel: set.has('probe-mode-voxel'),
     probeModeSvg: set.has('probe-mode-svg'),
-    probeNoArtDispersion: set.has('probe-no-art-dispersion'),
     probeNoise: set.has('probe-noise'),
     probeSnoise: set.has('probe-snoise'),
     probeFbm: set.has('probe-fbm'),

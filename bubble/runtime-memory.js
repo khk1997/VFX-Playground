@@ -35,8 +35,6 @@ export const MOTION_SCOPED_KEYS = [
   'spectralCausticAzimuth', 'spectralCausticElevation',
   'spectralCausticMapping',
   ...SPECTRAL_CAUSTIC_DEFAULTS.map((_, index) => `spectralCausticCol${index}`),
-  // 藝術色散的開關，跟上面的光譜焦散開關同一個身分。
-  'dispersionEnabled',
   'cameraDistance', 'cameraRotationX', 'cameraRotationY', 'cameraFov',
   // 環繞幅度也是構圖的一部分，跟上面三條鏡頭參數同一組。
   'spin',
@@ -57,7 +55,7 @@ export const MOTION_SCOPED_KEYS = [
   // 亮帶，所以打字自己降一半（見 registry 的 typewriter overrides）。
   'dispersionScale',
   'hdriYaw', 'hdriPitch', 'hdriBlur', 'envRefraction',
-  'dispersion', 'artPatternSpeed', 'absorbColor', 'researchIconIOR',
+  'absorbColor', 'researchIconIOR',
   // 水滴形態這兩條同樣沒列進來，所以 research overrides 裡的 viscosity 0.82 /
   // surfaceTension 0.92 從來沒被寫回控制項，面板一直是全域的 0.78 / 0.82。
   'viscosity', 'surfaceTension',
@@ -116,7 +114,6 @@ export const BACKDROP_SCOPED_KEYS = new Set([
   'spectralCausticWarp', 'spectralCausticNoiseScale',
   'spectralCausticFilmSoften',
   'spectralCausticAzimuth', 'spectralCausticElevation',
-  'dispersion', 'artPatternSpeed',
   'postExposure', 'postBrightness',
   'postContrast', 'postGrain', 'postGrainScale',
   'bloomEnabled', 'streaksEnabled',

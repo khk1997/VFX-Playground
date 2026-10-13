@@ -58,7 +58,6 @@ export function createShaderVariantPlanner({
         && (isFormationMotion(motion) || motion === 'shatter'
           || motion === 'melt' || motion === 'morph'),
       negativeField: shapeField,
-      dispersion: !!params.dispersionEnabled,
       prismBeam: !!params.rayDispersionEnabled,
       spectralCaustics: !!scoped('spectralCausticEnabled'),
       beamPatterns: params.rayBeamPattern !== 'grid',
@@ -78,7 +77,7 @@ export function createShaderVariantPlanner({
         + flag(state.staticShape, 'X') + flag(state.research, 'H')
         + flag(state.typewriter, 'Y') + flag(state.shapeMorph, 'R')
         + flag(state.formationCut, 'T'),
-      'o' + flag(state.dispersion, 'D') + flag(state.prismBeam, 'P')
+      'o' + flag(state.prismBeam, 'P')
         + flag(state.spectralCaustics, 'K') + flag(state.beamPatterns, 'B')
         + flag(state.envPmrem, 'E') + flag(state.studioGlass, 'A')
         + flag(state.staticMesh, 'Q'),
@@ -133,7 +132,6 @@ export function createShaderVariantPlanner({
       FEATURE_DISSOLVE_FIELD: state.dissolveField ? '' : false,
       NORMAL_TAPS_TETRA: '',
       NORMAL_TAPS_SVG: state.svgNormals ? '' : false,
-      FEATURE_DISPERSION: state.dispersion ? '' : false,
       FEATURE_PRISM_BEAM: state.prismBeam ? '' : false,
       FEATURE_PRISM_SATURATION: state.prismBeam ? '' : false,
       FEATURE_SPECTRAL_CAUSTICS: state.spectralCaustics ? '' : false,
@@ -162,7 +160,6 @@ export function createShaderVariantPlanner({
     //
     // 順帶把靜態變體的編譯量降回來：這幾塊是整支 shader 裡最大的幾段。
     if (state.studioGlass) {
-      defines.FEATURE_DISPERSION = false;
       defines.FEATURE_PRISM_BEAM = false;
       defines.FEATURE_PRISM_SATURATION = false;
       defines.FEATURE_SPECTRAL_CAUSTICS = false;
@@ -202,7 +199,6 @@ export function createShaderVariantPlanner({
     const late = DIAG.probeNoLateShading;
     if (late || DIAG.probeNoPrismBeam) defines.FEATURE_PRISM_BEAM = false;
     if (late || DIAG.probeNoPrismSaturation) defines.FEATURE_PRISM_SATURATION = false;
-    if (late || DIAG.probeNoDispersionSpectral) defines.FEATURE_DISPERSION = false;
     if (late || DIAG.probeNoSpectralCaustics) defines.FEATURE_SPECTRAL_CAUSTICS = false;
     if (DIAG.probeNoEnvPmrem) defines.FEATURE_ENV_PMREM = false;
     if (DIAG.probeMapscenePlain) {
@@ -227,7 +223,6 @@ export function createShaderVariantPlanner({
     if (DIAG.probeStaticNoBounce) defines.PROBE_STATIC_NO_BOUNCE = '';
     if (DIAG.probeStaticNoReflection) defines.PROBE_STATIC_NO_REFLECTION = '';
     if (DIAG.probeNoRefractionFilm || DIAG.probeNoTraceExit) defines.PROBE_NO_TRACE_EXIT = '';
-    if (DIAG.probeNoRefractionFilm || DIAG.probeNoArtDispersion) defines.PROBE_NO_ART_DISPERSION = '';
     if (DIAG.probeNoTraceNormal) defines.PROBE_NO_TRACE_NORMAL = '';
     if (DIAG.probeNoTraceMarch) defines.PROBE_NO_TRACE_MARCH = '';
     if (DIAG.probeCheapTraceSdf) defines.PROBE_CHEAP_TRACE_SDF = '';

@@ -10,7 +10,6 @@ const params = {
   shapeSource: 'svg',
   formationFrontOn: true,
   materialStyle: 'universal',
-  dispersionEnabled: true,
   rayDispersionEnabled: true,
   spectralCausticEnabled: true,
   rayBeamPattern: 'ring',
@@ -83,7 +82,7 @@ assert.equal(planner.variantState().staticMesh, false, '其餘模式不得走三
 params.shapeSource = 'svg';
 
 const key = planner.variantKey(formation);
-assert.equal(key, 'gSV--MN----T.oDPKBE--');
+assert.equal(key, 'gSV--MN----T.oPKBE--');
 assert.equal(planner.variantKey(formation), key, 'variant keys must be deterministic');
 
 const desktopDefines = planner.shaderFeatures(formation);

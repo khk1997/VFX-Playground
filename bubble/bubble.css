@@ -143,7 +143,6 @@
     background: var(--effect-accent);
     opacity: .82;
   }
-  .effectBlock--art { --effect-accent: #b38cff; }
   .effectBlock--physical { --effect-accent: #66bce8; }
   .effectBlock--caustic { --effect-accent: #f0b75b; }
   .effectBlock--shape { --effect-accent: #7fa0e6; }

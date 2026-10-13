@@ -536,7 +536,7 @@ window.__bubbleDiagReport = function () {
         'texture lookup': has('texture2D|texture\\s*\\('),
         'sampler 宣告': has('uniform\\s+sampler'),
         '內部折射 traceExitSurface': has('traceExitSurface'),
-        '色散/OPD/光譜': has('Dispersion|artisticDispersionOPD|visibleSpectrum'),
+        '色散/光譜': has('Dispersion|separateSpectrum'),
         '稜光光芒 prismBeam': has('prismBeamField|prismBeamCoord'),
         '負形場': has('uNegativeDrops'),
         '造型距離場': has('svgShapeDistance|volumeShapeDistance'),
@@ -595,7 +595,6 @@ window.__bubbleDiagReport = function () {
     },
     色散: {
       色散總閘: runtime().dispersionMasterOn,
-      'uDispersionEnabled': runtime().uniforms ? runtime().uniforms.uDispersionEnabled.value : null,
       'uRayDispersionEnabled': runtime().uniforms ? runtime().uniforms.uRayDispersionEnabled.value : null,
       'uSpectralCausticEnabled': runtime().uniforms ? runtime().uniforms.uSpectralCausticEnabled.value : null,
       取樣方式: '不是多次 raymarch，而是同一條光線上的 RGB 三通道相位/OPD 位移（稜光圖樣為 3 次迴圈的程序化雜訊）',

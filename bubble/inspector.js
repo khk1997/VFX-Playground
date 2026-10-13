@@ -1410,6 +1410,16 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     rowOf('ior').after(rowOf('researchIconIOR'));
     relabel('researchIconIOR', '對話泡折射率');
     material.append($('dispersionGroup'));
+    // 光譜焦散裡實測調了也看不出差別的幾根（2026-10-13，diagTime 2.5 深底逐格比對）：
+    // 光源尺寸、HDRI 連動推到極端也只差 2～6 個色階；影響對話泡 icon 0.6；色彩融合、
+    // 內部反射、光帶寬度在預設附近幾乎是 0，要拉到極端才出來。照預設值跑，參數保留。
+    for (const key of [
+      'spectralCausticLightSize', 'spectralCausticHdri', 'spectralCausticIconAffect',
+      'spectralCausticBlend', 'spectralCausticBounce', 'spectralCausticWidth',
+    ]) {
+      const row = rowOf(key);
+      if (row) { row.hidden = true; row.classList.add('studioRetiredRow'); }
+    }
     page.append(material);
 
     title(post, '後期');

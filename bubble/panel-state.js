@@ -121,7 +121,6 @@ export function createPanelStateController({
         });
     };
     const dispersionMaster = getDispersionMaster();
-    setFeatureState('artDispersionGroup', P.dispersionEnabled && dispersionMaster);
     setFeatureState('rayDispersionGroup', P.rayDispersionEnabled && dispersionMaster);
     setFeatureState('spectralCausticGroup', P.spectralCausticEnabled && dispersionMaster);
     document.getElementById('dispersionMaster').checked = dispersionMaster;

@@ -273,11 +273,6 @@ uniform float uMicroBlend;
 uniform sampler2D uNegativeDrops;
 uniform int   uNegativeCount;
 
-uniform float uDispersion;
-uniform float uDispersionEnabled;
-uniform float uDispersionSeparation;
-uniform float uCausticScale;
-uniform float uCausticSharpness;
 // 稜光光芒（見 prismBeamField）。開關沿用 uRayDispersionEnabled ——「造型光線
 // 色散」那個面板區塊本身還在，只是換了裡面的效果，總開關的接線不必動。
 uniform float uRayDispersionEnabled;
@@ -318,15 +313,10 @@ uniform float uSpectralCausticAzimuth;
 uniform float uSpectralCausticElevation;
 uniform float uSpectralCausticHdri;
 // 0 = 對話泡 icon 不受焦散影響（icon 所在像素維持原樣），1 = 焦散改用 icon
-// 自己的表面與法線（跟 FEATURE_DISPERSION 換座標系是同一套處理），讓聚光帶
+// 自己的表面與法線（換成內含物的座標系），讓聚光帶
 // 貼著 icon 的曲率走。見 FEATURE_SPECTRAL_CAUSTICS 區塊。
 uniform float uSpectralCausticIconAffect;
 uniform sampler2D uSpectralCausticRamp;
-uniform float uArtThickness;
-uniform float uArtThickVar;
-uniform float uArtNoiseScale;
-uniform float uArtPatternSpeed;
-uniform float uArtGravity;
 uniform float uFresnel;
 
 uniform int   uBgMode;      // 0 純色, 1 HDRI
@@ -545,7 +535,6 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
   // cache-bust：恆為 0，不影響畫面。放在這裡是因為它在 SDF 與 raymarch 之外。
   bg.rgb += vec3(float(SHADER_RUN) * uShaderSalt);
 #endif
-  float dispersionStrength = uDispersion * uDispersionEnabled;
 
   // 僅追蹤真正穿過物件包圍球的射線；色散發生在透明材質內部，不生成
   // 幾何外側的彩虹描邊或光暈。
@@ -1371,85 +1360,6 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
   // 通用玻璃的亮底補償由原開關管理。
   float brightColorSupport = whiteBackdrop;
 
-  // 色散沿用薄膜的 thickness → OPD mapping：厚度噪聲、花紋尺度、
-  // 花紋流動、重力與入射角都和薄膜一致；唯一不同的是固定使用獨立
-  // 可見光譜，不讀取自訂漸層。Fresnel 只控制亮度，不生成同心環。
-#ifdef FEATURE_DISPERSION   // 單獨隔離：色散／光譜 dispersion / spectral
-  if (dispersionStrength > 0.001) {
-    float artOpd = artisticDispersionOPD(p, N, -rd);
-#ifdef FEATURE_RESEARCH
-    // 光程差的取樣點換成 icon 自己的表面與法線。只加強度不換座標的話,彩帶的
-    // 花紋仍然是外殼的,看起來會像「外殼的色散剛好蓋在 icon 上」;換過來之後
-    // 條紋才跟著 icon 的曲面走,讀得出來是那顆內含物在分光。
-    if (researchIconHit) {
-      artOpd = artisticDispersionOPD(
-        researchIconPoint, researchIconN, -researchInsideDir
-      );
-    }
-#endif
-    float dispersionPeriod = 205.0 * max(0.35, uCausticScale);
-    float spectrumCoordinate = fract(
-      artOpd / dispersionPeriod
-    );
-    vec3 prismSpectrum = separateSpectrum(
-      visibleSpectrum(spectrumCoordinate),
-      uDispersionSeparation
-    );
-    // 銳利度收束每個 OPD 週期的邊界，但週期內仍完整走過一次彩虹。
-    float cycleEnvelope = sin(spectrumCoordinate * PI);
-    cycleEnvelope = mix(
-      1.0,
-      pow(max(0.0, cycleEnvelope), mix(0.8, 4.5, uCausticSharpness)),
-      uCausticSharpness
-    );
-    float fresnelGain = clamp(
-      0.12 + material.edgeFactor * 0.72 + localPrism * 0.42 + backRim * 0.22,
-      0.0,
-      1.0
-    );
-    float prismAmount = dispersionStrength * fresnelGain
-      * (0.28 + cycleEnvelope * 0.52);
-    vec3 prismLight = prismSpectrum * prismAmount;
-    // 黑底沒有透射底光可承托彩虹，因此依背景亮度自動補回焦散能量。
-    // 指數曝光保留色帶層次並限制峰值；亮底增益回到 1，不會一起過曝。
-    float darkBackdrop = 1.0 - smoothstep(0.06, 0.72, bgLum);
-    float darkPrismGain = mix(1.0, 2.35, darkBackdrop);
-    prismLight = 1.0 - exp(
-      -prismLight * darkPrismGain * mix(1.0, 1.18, darkBackdrop)
-    );
-    // screen 合成使焦散維持透明發光感，而不是實體顏料。
-    vec3 prismScreen = 1.0
-      - (1.0 - finalColor) * (1.0 - prismLight);
-    // 白色已沒有 screen 的加色空間，所以亮底走「互補扣除」：真實色散是把白光
-    // 分開，某個方向多了紅就必然少了青，所以從白光裡扣掉光譜的補色，紅／青、
-    // 綠／洋紅會自動成對出現。舊版是把一個飽和色平塗混進去，沒有互補關係，
-    // 讀起來是顏料而不是光。
-    //
-    // 位置遮罩的指數 2.2 同樣是刻意「沒有下限」：舊版是
-    // mix(0.18, 1.0, whitePrismLocality)，那個 0.18 下限讓完全不在邊界的平坦
-    // 白區照樣被塗色 —— 「色塊貼在玻璃上」就是這麼來的。
-    //
-    // sqrt 是感知式響應：低強度在白底仍看得見，高強度逐漸壓縮，保持 0 → 無效果
-    // 且全程單調。brightColorSupport 在深底為 0，amount 為 0、乘數為 vec3(1)，
-    // 深底是精確的恆等運算。
-    float whitePrismLocality = clamp(
-      material.edgeFactor * 0.76
-        + localPrism * 0.62
-        + backRim * 0.34,
-      0.0,
-      1.0
-    );
-    float absorbAmount = brightColorSupport * clamp(
-      sqrt(max(prismAmount, 0.0))
-        * (0.62 + 0.18 * uDispersionSeparation)
-        * pow(whitePrismLocality, 2.2),
-      0.0,
-      0.42
-    );
-    vec3 prismAbsorb = vec3(1.0) - prismSpectrum;
-    finalColor = prismScreen * (vec3(1.0) - prismAbsorb * absorbAmount);
-  }
-#endif // FEATURE_DISPERSION：色散／光譜 dispersion / spectral
 
   // 獨立虛擬光源驅動的光譜焦散。HDRI 不參與圖樣或顏色，只能選擇
   // 調節總亮度，因此純色畫布不會顯示攝影棚影像。
@@ -1465,8 +1375,7 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
   if (researchIconHit) {
     if (uSpectralCausticIconAffect > 0.5) {
       // 焦散圖案改用 icon 自己的表面、法線與視線方向，讓聚光帶跟著 icon 的
-      // 曲率走，而不是外殼——跟 FEATURE_DISPERSION 換座標系（見上方
-      // artisticDispersionOPD 那段）是同一套處理。
+      // 曲率走，而不是外殼。
       causticP = researchIconPoint;
       causticN = researchIconN;
       causticViewDir = researchInsideDir;

@@ -22,10 +22,6 @@ export const DEFAULTS = {              // 數值滑桿
   lightIconEdge: 5.2,
   lightIconRimStrength: 0.62,
   ...MOTION_PARAM_DEFAULTS,
-  dispersion: 0.02,
-  dispersionSeparation: 1.5,
-  causticScale: 1.0,
-  causticSharpness: 0.65,
   // 稜光光芒（見 shaders.js 的 prismBeamField）。取代原本走 Cauchy 曲線的物理
   // 分光：那條路每個 fragment 要多跑四次波長追蹤，換來的只是輪廓上一層很薄的
   // 邊緣分光。這一版是程序化的放射光束，零額外 raymarch。
@@ -80,11 +76,6 @@ export const DEFAULTS = {              // 數值滑桿
   spectralCausticAzimuth: 5,
   spectralCausticElevation: -19,
   spectralCausticHdri: 0.3,
-  artThickness: 295,
-  artThickVar: 130,
-  artNoiseScale: 1.2,
-  artPatternSpeed: 0.27,
-  artGravity: 0.52,
   count: 2,
   radius: 0.4,
   viscosity: 0.78,
@@ -466,7 +457,6 @@ export const LEGACY_SELECT_VALUES = {
 };
 export const TOGGLE_DEFAULTS = {
   edgeDropsEnabled: false,
-  dispersionEnabled: true,
   rayDispersionEnabled: true,
   spectralCausticEnabled: true,
   // 焦散是否影響對話泡 icon：關閉時 icon 所在像素完全跳過焦散運算，維持

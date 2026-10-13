@@ -23,7 +23,6 @@ let edgeDropsApplied = 0;
 const toggles = createToggleBindings(() => { edgeDropsApplied++; });
 toggles.edgeDropsEnabled();
 assert.equal(edgeDropsApplied, 1);
-assert.equal(toggles.dispersionEnabled, 'uDispersionEnabled');
 assert.equal(toggles.researchBubbles, 'uResearchBubbles');
 assert.equal(typeof toggles.bloomEnabled, 'function');
 for (const prefix of EDGE_TINT_TARGETS) {
