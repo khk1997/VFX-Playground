@@ -249,7 +249,7 @@
       position: fixed; z-index: 2147483000; pointer-events: none;
       font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       color: #d8dee9; background: rgba(8, 10, 14, .62);
-      padding: 4px 8px; border-radius: 6px; white-space: pre;
+      padding: 4px 8px; border-radius: 6px; white-space: nowrap;
       font-variant-numeric: tabular-nums; letter-spacing: .01em;
     }
     #vfxDevHud[data-corner="tc"] { left: 50%; top: 10px; transform: translateX(-50%); }
@@ -263,9 +263,9 @@
     #vfxDevHud .bad { color: #ff6b6b; }
     #vfxDevHud .dim { color: #8a93a3; }
     #vfxDevHud .tag { color: #0d1117; background: #ffd166; border-radius: 3px; padding: 0 3px; }
-    #vfxDevDetail { width: 240px; margin-top: 5px; padding-top: 5px; border-top: 1px solid rgba(255,255,255,.08); }
+    #vfxDevDetail { margin-top: 5px; padding-top: 5px; border-top: 1px solid rgba(255,255,255,.08); }
     #vfxDevDetail[hidden] { display: none; }
-    #vfxDevDetail canvas { display: block; width: 240px; height: 48px; margin-bottom: 4px; }
+    #vfxDevDetail canvas { display: block; height: 48px; margin-bottom: 4px; }
     #vfxDevDetail .row { display: flex; justify-content: space-between; gap: 16px; }
   `;
 
@@ -303,8 +303,12 @@
   const GRAPH_MAX_MS = 50;
   const drawGraph = () => {
     const ratio = Math.min(nativeDpr, 2);
-    const w = 240, h = 48;
-    if (graph.width !== w * ratio) { graph.width = w * ratio; graph.height = h * ratio; }
+    // 跟著上面那一行的寬度撐滿面板。
+    const w = Math.max(240, Math.round(line.offsetWidth)), h = 48;
+    if (graph.width !== w * ratio) {
+      graph.width = w * ratio; graph.height = h * ratio;
+      graph.style.width = `${w}px`;
+    }
     // 用原生 getContext，HUD 自己的畫布不該被算成頁面的 context。
     const g = nativeGetContext.call(graph, '2d');
     g.setTransform(ratio, 0, 0, ratio, 0, 0);
@@ -362,8 +366,8 @@
     }
     out.push(row('DPR', forceDpr1 ? `1（強制，原生 ${nativeDpr}）` : `${nativeDpr}`, forceDpr1 ? 'warn' : ''));
     if (performance.memory) out.push(row('JS heap', `${(performance.memory.usedJSHeapSize / 1048576).toFixed(0)} MB`));
-    out.push(`<div class="dim">low＝最差 1% 的 fps　max＝最慢一幀 ms</div>`);
-    out.push(`<div class="dim">⇧D 隱藏 ⇧F 位置 ⇧G 收合 ⇧R DPR=1</div>`);
+    out.push(`<div class="dim">1%low＝最差 1% 幀的 fps · max＝樣本內最慢一幀</div>`);
+    out.push(`<div class="dim">⇧D 隱藏 · ⇧F 位置 · ⇧G 收合 · ⇧R DPR=1</div>`);
     rows.innerHTML = out.join('');
   };
 
@@ -405,15 +409,15 @@
     line.innerHTML = [
       ...(forceDpr1 ? [span('DPR1', 'tag')] : []),
       span(`${stats.fps.toFixed(0)}fps`, fpsClass(stats.fps)),
-      span(`low${stats.low1.toFixed(0)}`, fpsClass(stats.low1)),
+      span(`1%low ${stats.low1.toFixed(0)}`, fpsClass(stats.low1)),
       `${stats.frameMs.toFixed(1)}ms`,
-      span(`max${stats.worstMs.toFixed(0)}`, stats.worstMs > 50 ? 'bad' : stats.worstMs > 25 ? 'warn' : 'dim'),
-      `js${stats.cpuMs.toFixed(1)}`,
-      ...(stats.gpuMs != null ? [`gpu${stats.gpuMs.toFixed(1)}`] : []),
+      span(`max ${stats.worstMs.toFixed(0)}ms`, stats.worstMs > 50 ? 'bad' : stats.worstMs > 25 ? 'warn' : 'dim'),
+      `js ${stats.cpuMs.toFixed(1)}ms`,
+      ...(stats.gpuMs != null ? [`gpu ${stats.gpuMs.toFixed(1)}ms`] : []),
       ...(contextKinds.has('webgl')
         ? [`${stats.drawCalls.toFixed(0)}dc`, `${compact(stats.primitives)}tri`]
         : [span(contextKinds.has('2d') ? 'canvas2d' : 'no-gl', 'dim')]),
-    ].join('  ');
+    ].join(span(' · ', 'dim'));
   }, UPDATE_MS);
 
   addEventListener('keydown', event => {
