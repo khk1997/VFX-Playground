@@ -2358,6 +2358,7 @@ function initGL() {
     uResearchTextureDirZ: { value: P.researchTextureDirZ },
     uResearchIconIOR: { value: P.researchIconIOR },
     uResearchIconTint: { value: P.researchIconTint },
+    uResearchPaperShade: { value: 0 },
     uResearchIconTintEdge: { value: P.researchIconTintEdge },
     uResearchIconTintColor: { value: new THREE.Color().setStyle(
       P.researchIconTintColor, THREE.LinearSRGBColorSpace

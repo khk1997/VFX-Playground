@@ -1,7 +1,7 @@
 'use strict';
 
 import { buildStoredZip, downloadBlob, nextPaint, pixelsToPng } from './export-utils.js?v=1';
-import { usesStudioGlass } from './motions/registry.js?v=melt-defaults-1';
+import { usesDualMatte } from './motions/registry.js?v=melt-defaults-1';
 
 export function createExportRuntime(options) {
   const {
@@ -73,8 +73,8 @@ function renderExportPixels(settings, target) {
   return pixels;
 }
 
-// 靜態玻璃的去背：同一幀在全黑、全白兩張背景紙上各算一次，由兩者的差解出
-// alpha 與顏色（difference matting）。
+// 靜態玻璃（與安裝中，見 registry 的 dualMatte）的去背：同一幀在全黑、全白兩張
+// 背景紙上各算一次，由兩者的差解出 alpha 與顏色（difference matting）。
 //
 // 單張去背（shader 裡 uTransparentBackground 那條）對靜態玻璃是錯的：它假設
 // 「畫面 = 自身 + 正後方的背景 × 透過率」，但玻璃透過來的是折射、分光之後的
@@ -181,11 +181,11 @@ async function runExport(settings) {
   target.texture.generateMipmaps = false;
   const transparentExport = settings.background === 'transparent';
   // 舊材質路徑（通用玻璃）走「黑場 + 反預乘」，它的顏色本來就不依附背景。
-  // 新玻璃模型改走雙背景去背（見 matteExportPixels）。兩張都照一般的不透明輸出
+  // 新玻璃模型與安裝中改走雙背景去背（見 matteExportPixels）。兩張都照一般的不透明輸出
   // 來算，後處理與 HDR 的行為就跟畫面上一模一樣；背景紙要是一張均勻的紙，
   // 牆面與地板的抬底、地板的壓暗、淺底的漸層都拿掉 —— 不然它們兩張都有，
   // 會被當成玻璃自己的東西，成品上浮出一整片灰色的地板。
-  const staticMatte = transparentExport && usesStudioGlass(P.motion);
+  const staticMatte = transparentExport && usesDualMatte(P.motion);
   getUniforms().uTransparentBackground.value = transparentExport && !staticMatte ? 1 : 0;
   getUniforms().uBgMode.value = settings.background === 'scene' ? SELECTS.bgMode.map[P.bgMode] : 0;
   if (transparentExport) getUniforms().uBgColor.value.setHex(0x000000, THREE.LinearSRGBColorSpace);
@@ -196,6 +196,9 @@ async function runExport(settings) {
     getUniforms().uStudioFloorTone.value = 1;
     // 不留影子：地板在兩張背景紙上就都是一張乾淨的紙，解出來整片透明。
     if (settings.shadow === false) getUniforms().uStudioShadowStrength.value = 0;
+    // 安裝中的淺底：漸層拿掉之後，透過玻璃看到的紙改乘上那道漸層，泡泡才會跟畫面上
+    // 一樣有明暗（見 environment.js 的 researchBackdropSample）。
+    getUniforms().uResearchPaperShade.value = P.backdrop === 'light' ? 1 : 0;
   }
   // 透明背景預設不帶光暈與光芒（見 index.html 的 exportGlowField）：輸出期間暫時
   // 關掉，結束後還原。
@@ -259,6 +262,7 @@ async function runExport(settings) {
     getUniforms().uStudioFloorLift.value = saved.floorLift;
     getUniforms().uStudioFloorTone.value = saved.floorTone;
     getUniforms().uStudioShadowStrength.value = saved.shadowStrength;
+    getUniforms().uResearchPaperShade.value = 0;
     P.bloomEnabled = savedGlow.bloom;
     P.streaksEnabled = savedGlow.streaks;
     resetPreviousDropT();

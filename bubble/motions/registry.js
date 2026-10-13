@@ -151,6 +151,10 @@ export const MOTIONS = {
     uniform: 9,
     usesShapeField: false,
     gate: 'research',
+    // 透明輸出走雙背景去背（見 export-runtime.js 的 matteExportPixels）。舊的
+    // 單張去背把底色釘成黑、覆蓋率用自身能量估，淺底輸出因此不像畫面，深底
+    // 輸出疊到白底上會浮出一層乳白霧。
+    dualMatte: true,
     // 主殼之外再放一顆會靠近／吞入的伴生外殼。count 控制列在私語模式仍隱藏，
     // 使用者要調的是下面那組有語意的尺寸與融合參數，而不是任意增減顆數。
     count: 2,
@@ -942,6 +946,8 @@ export const MOTION_COLOR_DEFAULTS = Object.fromEntries(
 
 export const usesShapeField = motion => Boolean(MOTIONS[motion]?.usesShapeField);
 export const usesStudioGlass = motion => Boolean(MOTIONS[motion]?.studioGlass);
+// 透明輸出要不要走雙背景去背：新玻璃一律走，舊材質路徑的模式各自選擇。
+export const usesDualMatte = motion => usesStudioGlass(motion) || Boolean(MOTIONS[motion]?.dualMatte);
 // 一個模式自己那組參數（params）在面板上的閘門。毛細波的那組表面波紋控制跟靜態、
 // 安裝中共用（capillaryTextureUI），其餘就是模式自己的 gate。panel-builder 產生
 // 區塊、單頁面板挑區塊都讀這一支。

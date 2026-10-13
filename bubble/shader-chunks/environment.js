@@ -182,6 +182,12 @@ vec3 sampleEnvironmentBackdrop(vec3 d, float extraBlur){
   return textureCubeUV(uPmremMap, d, rayFootprint).rgb;
 #endif // FEATURE_ENV_PMREM
 }
+// 淺底的背景紙漸層（說明見 backgroundSample）。拆出來是因為安裝中的去背輸出
+// 也要讀它（見 researchBackdropSample）。
+vec3 lightPaperGradient(vec3 rd){
+  float t = smoothstep(-0.55, 0.55, rd.y);
+  return mix(uLightBgGradientBottom, uLightBgGradientTop, t);
+}
 vec4 backgroundSample(vec3 rd, float extraBlur){
   if (uBgMode == 1 && uHasEnv == 1){
     return vec4(sampleEnvironmentBackdrop(rd, extraBlur), 1.0);
@@ -191,12 +197,29 @@ vec4 backgroundSample(vec3 rd, float extraBlur){
     // 讀起來才是「紙自然垂墜」的漸層，不是機械的線性內插。跟 proceduralEnv
     // 同一個慣例，用歸一化方向的 d.y 當「畫面垂直位置」，折射、反射取樣同一支
     // 函式時漸層會自然跟著彎折，穿過玻璃看仍是同一塊背景紙。
-    float t = smoothstep(-0.55, 0.55, rd.y);
-    vec3 gradient = mix(uLightBgGradientBottom, uLightBgGradientTop, t);
-    return vec4(gradient, uTransparentBackground == 1 ? 0.0 : 1.0);
+    return vec4(lightPaperGradient(rd), uTransparentBackground == 1 ? 0.0 : 1.0);
   }
   return vec4(uBgColor, uTransparentBackground == 1 ? 0.0 : 1.0);
 }
+
+#ifdef FEATURE_RESEARCH
+// 安裝中透過玻璃看到的背景。平常就是 backgroundSample；只有淺底的去背輸出不同。
+//
+// 透明玻璃放在純白紙上本來就是隱形的 —— 反射的是亮的棚燈、透過去的是白紙，
+// 疊在白底上都是白。淺底 viewer 看得出形狀，靠的是背景紙那道上白下灰的漸層被
+// 折射顛倒。去背輸出時背景紙必須是均勻的黑／白兩張（見 export-runtime 的
+// matteExportPixels），漸層一拿掉，泡泡就整顆消失了。
+//
+// 所以淺底輸出時（uResearchPaperShade = 1），透過玻璃看到的紙乘上同一道漸層：
+// 白紙上就等於 viewer 看到的那張漸層紙，PNG 疊回白底與畫面一致；黑紙上仍是黑。
+// 漸層是乘在紙上的，去背解出來的是「這裡擋掉了多少背景」，而不是一塊印上去的
+// 灰 —— 疊到其他顏色的頁面上，玻璃照樣透出那個顏色。
+vec3 researchBackdropSample(vec3 rd, float extraBlur){
+  vec3 paper = backgroundSample(rd, extraBlur).rgb;
+  if (uResearchPaperShade < 0.5) return paper;
+  return paper * lightPaperGradient(rd);
+}
+#endif
 
 #ifdef FEATURE_STUDIO_GLASS
 // 程序化棚景（見這個檔案開頭 uStudioBackdrop 那段說明）。只有靜態模式編它，

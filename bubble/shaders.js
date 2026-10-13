@@ -144,6 +144,7 @@ uniform float uResearchBubbleMin;
 uniform float uResearchBubbleMax;
 uniform float uResearchIconIOR;
 uniform float uResearchIconTint;
+uniform float uResearchPaperShade;
 uniform vec3 uResearchIconTintColor;
 uniform float uResearchIconTintEdge;
 uniform sampler2D uResearchIconTintRamp;
@@ -595,6 +596,14 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
   // 的彩度要隨背景變亮而收回來（見 beamEnergy 的 brightWash），而 bgLum 歸零之後
   // 就問不出「背景到底有多亮」了。
   float trueBgLum = bgLum;
+#ifdef FEATURE_RESEARCH
+  // 安裝中的淺底去背輸出：背景紙換成黑、白兩張，但外觀的分支（下面的
+  // whiteBackdrop、稜光光芒的 brightWash）要照 viewer 那張漸層紙的亮度走，
+  // 不然兩張紙各走一套外觀，解出來的 PNG 就不是畫面上那顆（見 researchBackdropSample）。
+  if (uResearchPaperShade > 0.5) {
+    trueBgLum = dot(lightPaperGradient(rd), vec3(0.2126, 0.7152, 0.0722));
+  }
+#endif
   if (universalGlass) bgLum = 0.0;
   // 通用玻璃的 bgLum 會刻意歸零，因為暗底自身能量要在黑場生成；但使用者明確
   // 選擇淺底時，最終材質仍必須切到 brightComposite。舊寫法只看歸零後的 bgLum，
@@ -796,7 +805,11 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
           );
         }
 #else
+#ifdef FEATURE_RESEARCH
+        refractedBg = researchBackdropSample(exitDir, roughBlur);
+#else
         refractedBg = backgroundSample(exitDir, roughBlur).rgb;
+#endif
 #endif
 #ifdef FEATURE_STUDIO_GLASS
         // 內部再彈一次。這是先前為了消掉臨界角硬邊而拿掉的那層結構，用連續的
@@ -879,7 +892,7 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
           // 佔畫面很小一塊,出口面在那個立體角內幾乎沒有變化。
           vec3 shellOut = refract(iconOut, -exitNormal, uIOR);
           if (dot(shellOut, shellOut) < 0.0001) shellOut = iconOut;
-          vec3 iconTransmitted = backgroundSample(normalize(shellOut), roughBlur).rgb;
+          vec3 iconTransmitted = researchBackdropSample(normalize(shellOut), roughBlur);
           float iconFacing = clamp(dot(-researchInsideDir, researchIconN), 0.0, 1.0);
           researchIconFacing = iconFacing;
           researchIconPath = iconPath;
@@ -1763,7 +1776,10 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
 
   }
   // Include the colored reflection in own energy before coverage / transparent export.
-  if (uLightBgGradientEnabled < 0.5 && researchBoundaryDepth > 0.0) {
+  // 這是深底的效果：淺底畫面有漸層所以不會走到；淺底的去背輸出把漸層暫時關掉，
+  // 要另外排除（uResearchPaperShade，見 export-runtime）。
+  if (uLightBgGradientEnabled < 0.5 && uResearchPaperShade < 0.5
+      && researchBoundaryDepth > 0.0) {
     finalColor = researchDarkBoundaryReflection(finalColor, researchBoundaryColor, researchBoundaryDepth);
   }
 #endif
