@@ -15,7 +15,7 @@ import {
 } from './default-shapes.js?v=svg-shape-79';
 import {
   MOTION_UNIFORM_MAP, MOTION_SVG_DEMO, MOTION_PREVIEW_ZOOM,
-  MOTION_HDRI, MOTION_KEYS, MOTION_TEXT_DEFAULTS, usesShapeField, usesStudioGlass,
+  MOTION_HDRI, MOTION_KEYS, MOTION_TEXT_DEFAULTS, usesShapeField, usesStudioGlass, MOTIONS,
 } from './motions/registry.js?v=melt-defaults-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
@@ -3609,11 +3609,13 @@ const { collectGlEnvironment, computeShaderStats, captureFrameForDiff } = create
 
 // 開發者 HUD（../devtools.js，?dev=1 才存在）展開時列出的 bubble 專屬數值。
 // HUD 約 0.4 秒讀一次，只讀不寫；沒開開發者模式時這段什麼都不做。
+// 名稱跟面板上看到的一致，括號裡的內部代號對照網址的 ?mode= 和程式碼用。
+const DEV_TIER_LABELS = { high: '高品質', balanced: '平衡', low: '效能' };
 window.__vfxDev?.watch({
-  '動態': () => P.motion,
+  '動態': () => `${MOTIONS[P.motion]?.label ?? P.motion}（${P.motion}）`,
   '畫質': () => {
     const q = adaptiveQuality.snapshot();
-    return `${q.tier}（DPR ${q.dpr.toFixed(2)}，範圍 ${q.minDpr.toFixed(2)}–${q.maxDpr.toFixed(2)}）`;
+    return `${DEV_TIER_LABELS[q.tier] ?? q.tier}（DPR ${q.dpr.toFixed(2)}，範圍 ${q.minDpr.toFixed(2)}–${q.maxDpr.toFixed(2)}）`;
   },
   'raymarch 步數': () => uniforms?.uMaxSteps.value,
   '反射取樣': () => adaptiveQuality.snapshot().reflectionSamples,

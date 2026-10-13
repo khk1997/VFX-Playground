@@ -558,7 +558,7 @@ syncLoop();
 
 // 開發者 HUD（../devtools.js，?dev=1 才存在）展開時列出的數值。
 window.__vfxDev?.watch({
-  '音訊模式': () => audioMode,
+  '音訊模式': () => ({ natural: '自然模式', synth: '背景音樂', mic: '麥克風', file: '音樂檔' })[audioMode] ?? audioMode,
   '低 / 中 / 高頻': () => `${bassEnv.toFixed(2)} / ${midEnv.toFixed(2)} / ${trebleEnv.toFixed(2)}`,
   '星星 / 雪粒': () => `${starField?.count ?? 0} / ${snowField?.length ?? 0}`,
   '暫停': () => userPaused || extPaused,
