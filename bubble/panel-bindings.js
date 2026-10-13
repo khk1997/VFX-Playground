@@ -1,6 +1,6 @@
 'use strict';
 
-import { MOTION_HDRI, MOTION_TEXT_DEFAULTS } from './motions/registry.js?v=melt-defaults-1';
+import { MOTION_HDRI, MOTION_HDRI_LIGHT, MOTION_TEXT_DEFAULTS } from './motions/registry.js?v=melt-defaults-1';
 import {
   DEFAULTS, LEGACY_SELECT_VALUES, SELECT_DEFAULTS, SPECTRAL_CAUSTIC_DEFAULTS,
 } from './runtime-defaults.js?v=melt-depth-1';
@@ -127,6 +127,8 @@ function bindControls() {
         applyMemorySlots(
           BACKDROP_MEMORY_KEYS, P.motion, P.motion, previousValue, P[key],
         );
+        // 淺底另指定了 HDRI 的模式（registry 的 hdriLight），切底色要換圖。
+        if (isInited() && MOTION_HDRI_LIGHT[P.motion]) loadMaterialEnvironment(P.materialStyle);
       }
       if (key === 'motion' && previousMotion !== P.motion) {
         // 毛細波只允許形狀場本體。舊的自動保存／參數檔可能還記著早期版本的

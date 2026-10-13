@@ -181,6 +181,16 @@ const BACKDROP_OVERRIDES = {
   },
 };
 
+// 某個模式在某個底色下自己的起點，優先於 BACKDROP_OVERRIDES。
+// 安裝中的淺底：換一張 HDRI（registry 的 hdriLight），角度與模糊照那張調；環境
+// 折射讓 HDRI 的明暗透進玻璃 —— 外殼改走 OpenPBR 之後（見 optics.js 的
+// surfaceMaterial），透過玻璃看到的只有背景紙，玻璃裡才有明暗。深底維持原值。
+const MOTION_BACKDROP_OVERRIDES = {
+  research: {
+    light: { hdriYaw: -35, hdriPitch: -62, hdriBlur: 0.2, envRefraction: 0.17 },
+  },
+};
+
 export function motionDefaultsFor(key) {
   const intrinsicByMode = {
     count: MOTION_DEFAULT_COUNTS,
@@ -203,6 +213,8 @@ export function motionDefaultsFor(key) {
     `${motion}|${backdrop}`,
     key in (MOTION_FIXED_OVERRIDES[motion] ?? {})
       ? MOTION_FIXED_OVERRIDES[motion][key]
+    : key in (MOTION_BACKDROP_OVERRIDES[motion]?.[backdrop] ?? {})
+      ? MOTION_BACKDROP_OVERRIDES[motion][backdrop][key]
     : key in BACKDROP_OVERRIDES[backdrop]
       ? BACKDROP_OVERRIDES[backdrop][key]
     // 染色強度兩個底色各有自己的起點（見 runtime-defaults 的

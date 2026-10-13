@@ -15,7 +15,7 @@ import {
 } from './default-shapes.js?v=svg-shape-79';
 import {
   MOTION_UNIFORM_MAP, MOTION_SVG_DEMO, MOTION_PREVIEW_ZOOM,
-  MOTION_HDRI, MOTION_KEYS, MOTION_TEXT_DEFAULTS, usesShapeField, usesStudioGlass, MOTIONS,
+  MOTION_HDRI, MOTION_HDRI_LIGHT, MOTION_KEYS, MOTION_TEXT_DEFAULTS, usesShapeField, usesStudioGlass, MOTIONS,
 } from './motions/registry.js?v=melt-defaults-1';
 import { fract, hash11CPU, smoothstepCPU } from './motions/util.js?v=svg-shape-76';
 import createFormationMotion, { MICRO_ORBIT_TUNE } from './motions/formation.js?v=svg-shape-76';
@@ -109,8 +109,9 @@ const GLASS_HDRI_URL = new URL('./assets/photo_studio2_london_hall_1k.hdr', impo
 const GLASS_HDRI_LABEL = 'photo_studio2_london_hall_1k.hdr';
 // 動態模式自己指定的環境貼圖（registry.js 的 hdri 欄位）。HDRI 平常跟著材質
 // 類型走，但某些模式的外觀是照特定一張棚燈校出來的，換一張反射就全變了。
+// 淺底有指定 hdriLight 的模式改用那張。
 function motionEnvironmentFor(motion) {
-  const name = MOTION_HDRI[motion];
+  const name = (P.backdrop === 'light' && MOTION_HDRI_LIGHT[motion]) || MOTION_HDRI[motion];
   if (!name) return null;
   return {
     url: new URL(`./assets/${name}`, import.meta.url).href,

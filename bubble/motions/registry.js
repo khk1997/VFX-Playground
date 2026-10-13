@@ -168,6 +168,9 @@ export const MOTIONS = {
     // 只是預設：使用者自己匯入 HDRI 之後就以他的為準（見 loadMaterialEnvironment），
     // 離開私語模式也會換回材質類型原本那張。
     hdri: 'photo_studio3_london_hall_1k.hdr',
+    // 淺底另用一張（見 bubble.js 的 motionEnvironmentFor）。白底上的玻璃要靠環境裡的
+    // 明暗才讀得出曲面，這張浴室的磁磚與窗光在淺底比較好看；深底維持上面那張。
+    hdriLight: 'bathroom_1k.hdr',
     overrides: {
       materialStyle: 'universal',
       cameraDistance: 3.85,
@@ -412,8 +415,9 @@ export const MOTIONS = {
         // 帶開關的分節：key 一填，這個布林就長在小節標題上（沿用面板既有的
         // .summaryToggle，跟「造型動態 Shape Motion」同一個樣式），而不是另外
         // 佔一行。開關與收合是兩件事 —— 收起來只是不想看，關掉才是不要這個效果。
+        // 預設關閉（2026-10-13）：要再打開就在標題上勾。
         type: 'subgroup', label: '內部氣泡 Bubbles',
-        key: 'researchBubbles', value: true,
+        key: 'researchBubbles', value: false,
       },
       {
         // 顆數。上限 40 是 shader 端迴圈的編譯期上界(RESEARCH_BUBBLE_MAX),
@@ -902,6 +906,7 @@ export const MOTION_SVG_DEMO = pick('svgDemo');
 export const MOTION_PREVIEW_ZOOM = pick('previewZoom');
 export const MOTION_OVERRIDES = pick('overrides');
 export const MOTION_HDRI = pick('hdri');
+export const MOTION_HDRI_LIGHT = pick('hdriLight');
 export const MOTION_KEYS = Object.keys(MOTIONS);
 export const MOTION_PARAMS = Object.fromEntries(entries.map(([key, motion]) => [key, motion.params || []]));
 
