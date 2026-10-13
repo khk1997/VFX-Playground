@@ -1659,9 +1659,9 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
     //
     // 權重用的是上面算好的 researchIconFres：那是 icon 與外殼折射率比值算出來的
     // Schlick 項，法線正對時很低、掠射時接近 1，所以呈現出來是一圈亮邊加上薄薄的
-    // 面反射 —— 跟參考照片裡「暗心亮邊」的內部氣泡是同一個成因。uFresnel 讓它跟
-    // 著材質滑桿走。
-    float iconRim = clamp(researchIconFres * (0.35 + uFresnel), 0.0, 1.0);
+    // 面反射 —— 跟參考照片裡「暗心亮邊」的內部氣泡是同一個成因。權重就是這個
+    // Fresnel 本身（OpenPBR），不再乘邊緣光滑桿。
+    float iconRim = clamp(researchIconFres, 0.0, 1.0);
     vec3 iconSpec = sampleEnvironmentBackdrop(
       reflect(researchInsideDir, researchIconN), roughBlur * 0.35
     );
@@ -1819,6 +1819,11 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
   if (universalGlass) {
     universalTransmitted = refractedBg * material.transmission * volumeAbsorption
       * (1.0 - backFres * 0.72);
+#ifdef FEATURE_RESEARCH
+    // OpenPBR：出口面的反射率同樣整份扣掉（見 optics.js 的 surfaceMaterial）。
+    universalTransmitted = refractedBg * material.transmission * volumeAbsorption
+      * (1.0 - backFres);
+#endif
     // 覆蓋率取材質不透明度與自身能量兩者的較大值。不能只用
     // luma：純藍光的亮度權重只有 0.072，飽和色散即使能量很高也會
     // 被計成幾乎透明，PNG 疊在亮底上就會被背景沖成淡灰色。以最強
@@ -1829,6 +1834,11 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
       0.0,
       1.0
     );
+#ifdef FEATURE_RESEARCH
+    // 透射已經乘過 (1 − F)，不再按自身亮度遮掉背景 —— 反射是加上去的光，不是
+    // 一層擋住背景的膜。
+    universalCovered = 0.0;
+#endif
     // 淺底把覆蓋率抬高。這是整個白底問題的核心一行，說明如下。
     //
     // over 合成是 final = own + bg·(1 - cover)，而 cover 取的是自身能量的峰值。

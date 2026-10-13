@@ -182,7 +182,8 @@ export const MOTIONS = {
       // 以下整組材質與 RAY 色散是這個模式的指定外觀，逐項寫死而不是只列出
       // 與全域 DEFAULTS 不同的幾個 —— 全域預設之後若被調動，這裡不該跟著漂。
       transmission: 1,
-      reflect: 1.22,
+      // OpenPBR 的 specular_weight（0–1，見 optics.js 的 surfaceMaterial）。
+      reflect: 1,
       materialExposure: 1,
       roughness: 0.14,
       fresnel: 0.8,

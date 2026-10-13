@@ -682,6 +682,23 @@ SurfaceMaterial surfaceMaterial(vec3 p, vec3 N, vec3 V){
   material.reflectionChroma = reflectionChroma;
   material.transmission = transmittance;
   material.edgeFactor = pow(1.0 - cosTheta, 1.4);
+#ifdef FEATURE_RESEARCH
+  // 安裝中的外殼改走 OpenPBR 介電質，上面那套暗底美術模型整個不用：
+  // - 反射量由折射率決定（Schlick F），uReflect 是 specular_weight（0–1），跟靜態
+  //   的 studioGlassShade 同一條規則。
+  // - 反射拿走 F'，透射只剩 (1 − F')，能量守恆；不透明度不再跟著反射亮度走（見
+  //   shaders.js 的 universalCovered）。
+  // - HDRI 用原始亮度：不壓 1 − exp 曲線，也不加寫死方向的高光。
+  //
+  // 舊模型是照 london hall 那張 HDRI 校的：正面固定 12% 的反射底值（物理值是
+  // 0.5%～4%）、高光固定在同一個方向、亮部被曲線壓成平塗。換一張 HDRI，燈的倒影
+  // 會變成一塊塊剪紙似的白，牆的顏色鋪滿整顆；淺底則是一層按反射亮度蓋上去的乳白霧。
+  float specWeight = clamp(uReflect, 0.0, 1.0);
+  float fresSpec = specWeight * schlick;
+  material.darkColor = env * fresSpec;
+  material.darkAlpha = 1.0;
+  material.transmission = vec3(1.0 - fresSpec) * uTransmission;
+#endif
   return material;
 }
 
