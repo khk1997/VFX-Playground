@@ -301,6 +301,7 @@
     #vfxDevHud .dim { color: #8a93a3; }
     #vfxDevHud .idle { color: #0d1117; background: #8fa3c7; border-radius: 3px; padding: 0 3px; }
     #vfxDevHud .idle-text { color: #a9b8d6; }
+    #vfxDevHud .idle-bad { color: #0d1117; background: #ff6b6b; border-radius: 3px; padding: 0 3px; }
     #vfxDevHud .tag { color: #0d1117; background: #ffd166; border-radius: 3px; padding: 0 3px; }
     #vfxDevDetail { margin-top: 5px; padding-top: 5px; border-top: 1px solid rgba(255,255,255,.08); }
     #vfxDevDetail[hidden] { display: none; }
@@ -361,6 +362,13 @@
     if (!pageMode) return fps < 30 ? 'bad' : fps < 50 ? 'warn' : '';
     return fps < refreshHz * .5 ? 'bad' : fps < refreshHz * .8 ? 'warn' : '';
   };
+  // GPU 一幀耗時：超過 16ms（60fps 預算）黃、超過 33ms（30fps 預算）紅。
+  // 跟有沒有省電無關——它代表「畫一幀要多久」，省電時超過 33ms 代表連 30fps 都撐不住。
+  const above = (value, warn, bad) => (value > bad ? 'bad' : value > warn ? 'warn' : '');
+  const gpuClass = ms => above(ms, 1000 / 60, 1000 / 30);
+  // JS 一幀耗時：Canvas 2D 的繪圖成本也算在這裡。超過 8ms 黃（吃掉 60fps 預算一半）、
+  // 超過 16ms 紅（光 JS 就超過 60fps 預算）。
+  const jsClass = ms => above(ms, 8, 1000 / 60);
   // 長任務：有就黃，任一次超過 200ms（肉眼看得出的卡頓）就紅。
   const longTaskClass = tasks => (!tasks.length ? '' : tasks.some(t => t.ms > 200) ? 'bad' : 'warn');
   const percentile = (list, p) => {
@@ -457,7 +465,7 @@
     if (contextKinds.has('webgl')) {
       out.push(row('GPU', hasGpuTimer
         ? (stats.gpuMs != null ? `${stats.gpuMs.toFixed(2)}ms（p95 ${stats.gpuP95.toFixed(2)}）` : '量測中…')
-        : 'n/a（瀏覽器不支援）'));
+        : 'n/a（瀏覽器不支援）', stats.gpuMs != null ? gpuClass(stats.gpuMs) : ''));
       out.push(row('貼圖 / buffer', `${resources.texture} / ${resources.buffer}`));
       out.push(row('program / shader', `${resources.program} / ${resources.shader}`));
       out.push(row('FBO / RBO / VAO', `${resources.framebuffer} / ${resources.renderbuffer} / ${resources.vao}`));
@@ -473,6 +481,7 @@
       : '0', longTaskClass(tasks)));
     out.push(row('DPR', forceDpr1 ? `1（強制，原生 ${nativeDpr}）` : `${nativeDpr}`, forceDpr1 ? 'warn' : ''));
     if (performance.memory) out.push(row('JS heap', `${(performance.memory.usedJSHeapSize / 1048576).toFixed(0)} MB`));
+    out.push(`<div class="dim">紅黃門檻：gpu 16 / 33ms · js 8 / 16ms · 省電時 gpu 超過 33ms 或低於 27fps 標紅</div>`);
     out.push(`<div class="dim">1%low＝最差 1% 幀的 fps · max＝樣本內最慢一幀（都不含省電節流的幀）</div>`);
     if (throttleGetter) out.push(`<div class="dim">走勢圖藍灰色＝省電節流中的幀</div>`);
     if (pageMode) out.push(row('螢幕更新率（推估）', `${refreshHz}Hz`));
@@ -522,6 +531,10 @@
       stats.gpuP95 = percentile(gpuTimes, .95);
     }
     stats.resources = { ...resources };
+    // 省電中也要抓得到真正的問題：GPU 一幀超過 30fps 預算，或實際幀率掉到
+    // 節流目標（約 30）的 90% 以下，就是「省電了還是撐不住」。
+    stats.throttleStrained = Boolean(stats.throttled
+      && ((stats.gpuMs != null && stats.gpuMs > 1000 / 30) || stats.fps < 27));
 
     if (!visible) return;
     if (expanded) renderDetail();
@@ -535,15 +548,15 @@
     }
     line.innerHTML = [
       ...(forceDpr1 ? [span('DPR1', 'tag')] : []),
-      ...(stats.throttled ? [span('省電', 'idle')] : []),
+      ...(stats.throttled ? [span(stats.throttleStrained ? '省電但撐不住' : '省電', stats.throttleStrained ? 'idle-bad' : 'idle')] : []),
       span(`${stats.fps.toFixed(0)}fps`, stats.throttled ? 'idle-text' : fpsClass(stats.fps)),
       span(`1%low ${stats.low1.toFixed(0)}`, judge ? fpsClass(stats.low1) : 'dim'),
       `${stats.frameMs.toFixed(1)}ms`,
       span(`max ${stats.worstMs.toFixed(0)}ms`, !judge ? 'dim' : stats.worstMs > 50 ? 'bad' : stats.worstMs > 25 ? 'warn' : 'dim'),
       ...(tasks.length ? [span(`long ${tasks.length}`, longTaskClass(tasks))] : []),
       ...(pageMode ? [] : [
-        `js ${stats.cpuMs.toFixed(1)}ms`,
-        ...(stats.gpuMs != null ? [`gpu ${stats.gpuMs.toFixed(1)}ms`] : []),
+        span(`js ${stats.cpuMs.toFixed(1)}ms`, jsClass(stats.cpuMs)),
+        ...(stats.gpuMs != null ? [span(`gpu ${stats.gpuMs.toFixed(1)}ms`, gpuClass(stats.gpuMs))] : []),
         ...(contextKinds.has('webgl')
           ? [`${stats.drawCalls.toFixed(0)}dc`, `${compact(stats.primitives)}tri`]
           : [span(contextKinds.has('2d') ? 'canvas2d' : 'no-gl', 'dim')]),
