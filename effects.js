@@ -49,6 +49,12 @@ const trail = ORDERED.findIndex(effect => effect.id === 'sakura');
 if (lead < 0 || trail < 0) throw new Error('首頁清單找不到要對調的 research / sakura');
 [ORDERED[lead], ORDERED[trail]] = [ORDERED[trail], ORDERED[lead]];
 
+// 靜態排在第 3 張（原本是極光的位置），極光退到最後。
+const still = ORDERED.findIndex(effect => effect.id === 'static');
+const glow = ORDERED.findIndex(effect => effect.id === 'aurora');
+if (still < 0 || glow < 0) throw new Error('首頁清單找不到要對調的 static / aurora');
+[ORDERED[still], ORDERED[glow]] = [ORDERED[glow], ORDERED[still]];
+
 export const EFFECTS = ORDERED.map(effect => ({
   ...effect,
   posterSrc: `image/previews/${effect.id}.webp`,

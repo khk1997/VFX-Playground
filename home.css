@@ -66,7 +66,8 @@ a { color: inherit; }
   min-height: 86px; border-bottom: 1px solid rgba(255,255,255,.08);
 }
 .brand { display: inline-flex; align-items: center; gap: 12px; color: var(--ink); text-decoration: none; }
-.brand strong { font: 650 15px/1 var(--font-display); letter-spacing: .16em; }
+.brand strong { font: 700 24px/1 var(--font-display); letter-spacing: .14em; }
+.brand-version { font: 500 11px/1 var(--font-display); letter-spacing: .08em; color: var(--ink); opacity: .55; padding: 3px 7px; border: 1px solid currentColor; border-radius: 999px; }
 #gallery { padding-top: 22px; }
 .filters {
   display: flex; gap: 4px; padding: 5px; overflow-x: auto; border: 1px solid rgba(255,255,255,.13);
