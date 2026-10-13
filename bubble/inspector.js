@@ -1409,7 +1409,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     material.open = false;
     rowOf('ior').after(rowOf('researchIconIOR'));
     relabel('researchIconIOR', '對話泡折射率');
-    material.append($('dispersionGroup'), $('thinFilmGroup'));
+    material.append($('dispersionGroup'));
     page.append(material);
 
     title(post, '後期');

@@ -5,22 +5,6 @@ export function hexToRgb(hex) {
   return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
 }
 
-// Cyclic sampling keeps the final and first color connected across the seam.
-export function sampleLoopingStops(stops, t) {
-  const n = stops.length;
-  if (n === 1) return stops[0].rgb;
-  for (let i = 0; i < n; i++) {
-    const a = stops[i], b = stops[(i + 1) % n];
-    let p0 = a.p, p1 = b.p, tt = t;
-    if (i === n - 1) { p1 += 1; if (t < a.p) tt = t + 1; }
-    if (tt >= p0 && tt <= p1) {
-      const f = (p1 > p0) ? (tt - p0) / (p1 - p0) : 0;
-      return [a.rgb[0] + (b.rgb[0] - a.rgb[0]) * f, a.rgb[1] + (b.rgb[1] - a.rgb[1]) * f, a.rgb[2] + (b.rgb[2] - a.rgb[2]) * f];
-    }
-  }
-  return stops[0].rgb;
-}
-
 export function createMaterialTextureController({
   THREE,
   params: P,
@@ -29,30 +13,9 @@ export function createMaterialTextureController({
   documentRef = document,
 }) {
   const document = documentRef;
-/* ===== 自訂漸層查找表（LUT）===== */
-let rampTex = null;
+// 漸層查找表（邊緣染色、光譜焦散）的寬度。
 const RAMP_W = 256;
-function readStops() {
-  const n = Math.round(parseFloat(document.getElementById('rampCount').value));
-  const stops = [];
-  for (let i = 0; i < n; i++) {
-    stops.push({
-      p: Math.min(1, Math.max(0, parseFloat(document.getElementById('stopPos' + i).value))),
-      rgb: hexToRgb(document.getElementById('stopCol' + i).value),
-    });
-  }
-  return stops;
-}
-function buildRampLUT() {
-  if (!rampTex) return;
-  const stops = readStops().sort((s1, s2) => s1.p - s2.p);
-  const data = rampTex.image.data;
-  for (let x = 0; x < RAMP_W; x++) {
-    const c = sampleLoopingStops(stops, x / RAMP_W);
-    data[x * 4] = c[0]; data[x * 4 + 1] = c[1]; data[x * 4 + 2] = c[2]; data[x * 4 + 3] = 255;
-  }
-  rampTex.needsUpdate = true;
-}
+
 // 面板色票 → uniform。
 //
 // THREE.Color 預設把色票當 sRGB，寫進 uniform 前轉成線性工作空間；但這個 shader
@@ -65,8 +28,8 @@ function buildRampLUT() {
 // 都會跟著偏。所以這裡叫 THREE.Color 不要轉 —— setStyle 的第二個參數就是「這個
 // 值本來就在工作空間裡」。
 //
-// 只有背景色這樣處理。薄膜的五個色票與兩張漸層 LUT 走同一條轉換，但它們是被人眼
-// 在現況下調出來的美術輸入，改了會讓所有既有的參數組合換一個樣子。
+// 只有背景色這樣處理。其他色票與漸層 LUT 走同一條轉換，但它們是被人眼在現況下
+// 調出來的美術輸入，改了會讓所有既有的參數組合換一個樣子。
 function setBgColorUniform(hex) {
   const uniforms = getUniforms();
   if (!uniforms) return;
@@ -80,18 +43,6 @@ function pageBackgroundCss(fallback) {
   return P.backdrop === 'light'
     ? `linear-gradient(to bottom, ${P.lightBgGradientTop}, ${P.lightBgGradientBottom})`
     : fallback;
-}
-
-function makeRampTexture() {
-  rampTex = new THREE.DataTexture(new Uint8Array(RAMP_W * 4), RAMP_W, 1, THREE.RGBAFormat);
-  rampTex.colorSpace = THREE.SRGBColorSpace;
-  rampTex.wrapS = THREE.RepeatWrapping;
-  rampTex.wrapT = THREE.ClampToEdgeWrapping;
-  rampTex.minFilter = THREE.LinearFilter;
-  rampTex.magFilter = THREE.LinearFilter;
-  rampTex.generateMipmaps = false;
-  buildRampLUT();
-  return rampTex;
 }
 
 // Raw channel ratios, matching the existing single-color absorption uniforms.
@@ -210,10 +161,8 @@ function makeSpectralCausticTexture() {
 }
 
   return {
-    buildRampLUT,
     buildSpectralCausticLUT,
     makeEdgeTintUniforms,
-    makeRampTexture,
     makeSpectralCausticTexture,
     pageBackgroundCss,
     setBgColorUniform,

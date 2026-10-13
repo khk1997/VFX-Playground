@@ -504,7 +504,7 @@ def check_studio_motion(browser, base_url: str) -> dict[str, object]:
     for key in ("loopDuration", "capillaryHeight", "capillaryRings", "capillarySpeed"):
         assert motion.locator(f"#{key}").count() == 1, f"{key} is not in the motion section"
     # 舊的加色外觀不在這一頁。
-    for key in ("rayDispersionEnabled", "spectralCausticEnabled", "filmEnabled", "materialExposure"):
+    for key in ("rayDispersionEnabled", "spectralCausticEnabled", "materialExposure"):
         assert page.locator(f"#inspectorPage-studio #{key}").count() == 0, f"{key} leaked into the studio page"
     # 造型卡片是匯入那一組，不是靜態的內建幾何。
     card = page.locator("#studioShapeCard")
@@ -590,7 +590,7 @@ def check_installing(browser, base_url: str) -> dict[str, object]:
         "動態": ("loopDuration", "researchBreath", "researchCompanionPath"),
         "表面": ("wobble", "researchShellTexture", "researchTextureDirX"),
         "編舞細節": ("researchCompanionOrbit", "researchIconPhaseOffset"),
-        "玻璃": ("ior", "researchIconIOR", "rayDispersionEnabled", "spectralCausticEnabled", "filmEnabled"),
+        "玻璃": ("ior", "researchIconIOR", "rayDispersionEnabled", "spectralCausticEnabled"),
     }
     for name, keys in cards.items():
         card = page.locator("#inspectorPage-studio > details", has=page.locator(f":scope > summary h3:text-is('{name}')"))

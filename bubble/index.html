@@ -424,27 +424,10 @@ body[data-bubble-boot] #panel,body[data-bubble-boot] #stage{visibility:hidden!im
     </details>
 
 
-    <details class="subgroup" id="thinFilmGroup" data-gate="!studioGlass">
-      <summary><h4>薄膜外觀 Thin Film</h4><span class="summaryToggle" onclick="event.stopPropagation()"><input type="checkbox" id="filmEnabled"><span class="switchTrack" aria-hidden="true"></span></span></summary>
-      <div class="row"><label>上色模式</label><select id="colorMode"><option value="spectral">光譜（物理）</option><option value="ramp">自訂漸層</option></select><span class="val"></span></div>
-      <div class="row"><label>薄膜厚度</label><input type="range" id="thickness" min="120" max="760" step="5" value="250"><span class="val" id="thickness_v"></span></div>
-      <div class="row"><label>花紋強度</label><input type="range" id="thickVar" min="0" max="400" step="5" value="400"><span class="val" id="thickVar_v"></span></div>
-      <div class="row"><label>花紋尺度</label><input type="range" id="noiseScale" min="0.5" max="6" step="0.1" value="0.8"><span class="val" id="noiseScale_v"></span></div>
-      <div class="row"><label>花紋速度</label><input type="range" id="patternSpeed" min="0" max="2" step="0.01" value="0.07"><span class="val" id="patternSpeed_v"></span></div>
-      <div class="row"><label>薄膜柔化</label><input type="range" id="filmBlur" min="0" max="1" step="0.01" value="1.00"><span class="val" id="filmBlur_v"></span></div>
-      <div class="row"><label>彩度</label><input type="range" id="saturation" min="0" max="2" step="0.02" value="2"><span class="val" id="saturation_v"></span></div>
-      <div class="row"><label>重力黑膜</label><input type="range" id="gravity" min="0" max="1" step="0.01" value="1"><span class="val" id="gravity_v"></span></div>
-      <div class="effectBlock effectBlock--ramp" id="rampGroup">
-        <div class="effectTitle"><span>RAMP</span> 薄膜自訂配色</div>
-        <div class="row"><label>配色數量</label><input type="range" id="rampCount" min="2" max="6" step="1" value="6"><span class="val" id="rampCount_v"></span></div>
-        <div class="row stopRow" id="stopRow0"><label>色 1</label><input type="color" id="stopCol0" value="#3698d8"><input type="range" id="stopPos0" min="0" max="1" step="0.01" value="0.56"><span class="val" id="stopPos0_v"></span></div>
-        <div class="row stopRow" id="stopRow1"><label>色 2</label><input type="color" id="stopCol1" value="#b794a6"><input type="range" id="stopPos1" min="0" max="1" step="0.01" value="0.20"><span class="val" id="stopPos1_v"></span></div>
-        <div class="row stopRow" id="stopRow2"><label>色 3</label><input type="color" id="stopCol2" value="#d1aa75"><input type="range" id="stopPos2" min="0" max="1" step="0.01" value="0.39"><span class="val" id="stopPos2_v"></span></div>
-        <div class="row stopRow" id="stopRow3"><label>色 4</label><input type="color" id="stopCol3" value="#b2b3b4"><input type="range" id="stopPos3" min="0" max="1" step="0.01" value="0.60"><span class="val" id="stopPos3_v"></span></div>
-        <div class="row stopRow" id="stopRow4"><label>色 5</label><input type="color" id="stopCol4" value="#9e7d98"><input type="range" id="stopPos4" min="0" max="1" step="0.01" value="0.27"><span class="val" id="stopPos4_v"></span></div>
-        <div class="row stopRow" id="stopRow5"><label>色 6</label><input type="color" id="stopCol5" value="#5dbded"><input type="range" id="stopPos5" min="0" max="1" step="0.01" value="0.66"><span class="val" id="stopPos5_v"></span></div>
-      </div>
-    </details>
+    <!-- 薄膜外觀（安裝中）在 2026-10 整組移除。「重力」不是薄膜專屬：它也決定一般模式
+         大水滴的下沉量（見 bubble.js 的 dropPosition），但那些模式從來沒有顯示過這根
+         滑桿，所以留一個隱藏的控制項，讓參數與參數檔照舊。 -->
+      <div class="row" hidden><label>重力</label><input type="range" id="gravity" min="0" max="1" step="0.01" value="1"><span class="val" id="gravity_v"></span></div>
 
   </details>
 

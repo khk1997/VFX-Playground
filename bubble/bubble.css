@@ -146,7 +146,6 @@
   .effectBlock--art { --effect-accent: #b38cff; }
   .effectBlock--physical { --effect-accent: #66bce8; }
   .effectBlock--caustic { --effect-accent: #f0b75b; }
-  .effectBlock--ramp { --effect-accent: #79d6bd; margin-top: 10px; }
   .effectBlock--shape { --effect-accent: #7fa0e6; }
   .effectBlock--drop { --effect-accent: #5dbded; }
   /* 面板閘門：目前的模式／形狀來源用不到這條參數，直接收起來 —— 反灰保留
@@ -291,10 +290,6 @@
   .noteRow { font-size: 10.5px; color: #7f8ead; line-height: 1.4; margin-top: -2px; }
   #capillaryHeightRow .val { flex-basis: 72px; }
   #capillarySpeedRow .val { flex-basis: 64px; }
-  .stopRow label { flex: 0 0 34px; font-size: 11px; color: #97a6c6; }
-  .stopRow input[type=color] { flex: 0 0 40px; min-width: 40px; }
-  .stopRow input[type=range] { flex: 1 1 70px; }
-  .stopRow .val { flex: 0 0 34px; }
   #hdriBtn, .fileBtn {
     flex: 1 1 auto; background: rgba(150,180,255,.1); color: #c3d3ff;
     border: 1px solid rgba(150,180,255,.3); border-radius: 7px;

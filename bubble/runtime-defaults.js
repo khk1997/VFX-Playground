@@ -22,9 +22,6 @@ export const DEFAULTS = {              // 數值滑桿
   lightIconEdge: 5.2,
   lightIconRimStrength: 0.62,
   ...MOTION_PARAM_DEFAULTS,
-  thickness: 250,
-  thickVar: 400,
-  noiseScale: 0.8,
   dispersion: 0.02,
   dispersionSeparation: 1.5,
   causticScale: 1.0,
@@ -88,9 +85,6 @@ export const DEFAULTS = {              // 數值滑桿
   artNoiseScale: 1.2,
   artPatternSpeed: 0.27,
   artGravity: 0.52,
-  filmBlur: 1.00,
-  saturation: 2,
-  patternSpeed: 0.07,
   count: 2,
   radius: 0.4,
   viscosity: 0.78,
@@ -444,7 +438,6 @@ export const SELECT_DEFAULTS = {
   // 淺底版本尚未定案，目前固定走既有深底材質路徑。
   backdrop: 'dark',
   materialStyle: 'universal',
-  colorMode: 'spectral',
   motion: 'static',
   shapeSource: 'svg',
   shapeQuality: 'balanced',
@@ -473,7 +466,6 @@ export const LEGACY_SELECT_VALUES = {
 };
 export const TOGGLE_DEFAULTS = {
   edgeDropsEnabled: false,
-  filmEnabled: false,
   dispersionEnabled: true,
   rayDispersionEnabled: true,
   spectralCausticEnabled: true,

@@ -273,9 +273,6 @@ uniform float uMicroBlend;
 uniform sampler2D uNegativeDrops;
 uniform int   uNegativeCount;
 
-uniform float uThickness;
-uniform float uThickVar;
-uniform float uNoiseScale;
 uniform float uDispersion;
 uniform float uDispersionEnabled;
 uniform float uDispersionSeparation;
@@ -330,15 +327,7 @@ uniform float uArtThickVar;
 uniform float uArtNoiseScale;
 uniform float uArtPatternSpeed;
 uniform float uArtGravity;
-uniform float uFilmEnabled;
-uniform float uFilmBlur;
-uniform float uSaturation;
 uniform float uFresnel;
-uniform float uGravity;
-uniform float uPatternSpeed;
-
-uniform int       uColorMode;   // 0 光譜, 1 自訂漸層
-uniform sampler2D uRampTex;      // 自訂漸層查找表（CPU 端依色標生成）
 
 uniform int   uBgMode;      // 0 純色, 1 HDRI
 uniform int   uMaterialStyle; // 0 已移除的舊值（相容用途，視同通用玻璃）, 1 液態薄膜, 2 通用玻璃
@@ -614,7 +603,7 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
 
   vec3 p = ro + rd * t;
   vec3 N = PRIMARY_NORMAL(p);
-  FilmMaterial material = thinFilm(p, N, -rd);
+  SurfaceMaterial material = surfaceMaterial(p, N, -rd);
   // 通用玻璃：顏色一律以黑場算出「水滴自身的能量」，最後再 over 疊到實際透射
   // 過來的背景上。加色合成需要暗畫布才顯色、吸收需要亮畫布才顯色 —— over 兩
   // 邊都成立，而且 alpha 直接就是去背輸出要的覆蓋率。
@@ -655,7 +644,6 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
   // 亮底：追蹤水滴內部到背面，取得實際光程、背面 Fresnel 與折射方向。
   vec3 refractedBg = bg.rgb;
   vec3 volumeAbsorption = vec3(1.0);
-  vec3 backFilmChroma = vec3(0.0);
   float backFres = 0.0;
   float backRim = 0.0;
   vec3 transmissionDir = rd;
@@ -1013,30 +1001,6 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
         // 純白因此等於把這個效果關掉，濃度滑桿再拉也沒有作用，那是對的語意。
         volumeAbsorption = glassVolumeAbsorption(pathLength, tintDepth);  // 漸層色見 glass-tint.js
 
-        // 背面使用低成本 2-octave 厚度場，產生內部彩色折線與融合區層次。
-        //
-        // 跟正面那條鏈同樣的道理：唯一產物 backFilmChroma 最後整個乘上 uFilmEnabled，
-        // 薄膜關閉時恆為 vec3(0.0)，而 backThickness / backOpd 沒有別的去處。
-        // 所以薄膜關閉時這一段（1 次 fbmFast + sampleFilmInterference 的 3 次 texture2D）
-        // 也是死碼，編譯期移除與執行結果逐位元相同。
-#ifdef FEATURE_THIN_FILM
-        vec3 backFlow = loopNoiseOffset(uPatternSpeed);
-        float backNoise = fbmFast(exitPoint * uNoiseScale + backFlow);
-        float backThickness = uThickness + backNoise * uThickVar;
-        float backTop = clamp(exitNormal.y * 0.5 + 0.5, 0.0, 1.0);
-        backThickness -= pow(backTop, 2.5) * uGravity * uThickness * 0.95;
-        backThickness = max(backThickness, 0.0);
-        float backOpd = 2.0 * uIOR * backThickness * max(exitFacing, 0.12);
-
-        vec3 backInterf = sampleFilmInterference(backOpd);
-        float backLum = dot(backInterf, vec3(0.2126, 0.7152, 0.0722));
-        backInterf = mix(vec3(backLum), backInterf, uSaturation);
-        backFilmChroma = clamp(
-          backInterf - vec3(dot(backInterf, vec3(0.2126, 0.7152, 0.0722))),
-          vec3(-0.65),
-          vec3(0.65)
-        ) * uFilmEnabled;
-#endif // FEATURE_THIN_FILM
       }
     }
   }
@@ -1193,7 +1157,7 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
     brightBodyDepth * clamp(uLightDepth, 0.0, 1.0)
   );
   vec3 surfaceLight = clamp(
-    material.baseSurface + material.filmSurface * 0.08 + vec3(backFres * 0.10),
+    material.baseSurface + vec3(backFres * 0.10),
     0.0,
     1.0
   );
@@ -1216,16 +1180,8 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
     1.0
   );
   float coolColorFocus = rimColorFocus * (1.0 - rainbowFocus * 0.55);
-  float chromaLocal = smoothstep(0.055, 0.24, material.filmAmount)
-    * rainbowFocus;
-  vec3 brightChroma = material.filmChroma * material.filmAmount
-    * brightBg * 2.45 * chromaLocal * sqrt(max(uMaterialExposure, 0.0))
-    * clamp(uLightChroma, 0.0, 1.0);
-  brightChroma += material.reflectionChroma * brightBg
+  vec3 brightChroma = material.reflectionChroma * brightBg
     * mix(0.62, 0.08, whiteBackdrop) * rainbowFocus
-    * clamp(uLightChroma, 0.0, 1.0);
-  brightChroma += backFilmChroma * brightBg
-    * (backRim * 0.54 + material.filmAmount * 0.10) * rainbowFocus
     * clamp(uLightChroma, 0.0, 1.0);
   brightChroma += vec3(0.10, 0.48, 1.0) * brightBg
     * coolColorFocus * (0.025 + localPrism * 0.055)
@@ -2039,7 +1995,7 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
 
   float outputAlpha = 1.0;
   if (uTransparentBackground == 1) {
-    float surfaceLuma = dot(material.baseSurface + material.filmSurface, vec3(0.3333));
+    float surfaceLuma = dot(material.baseSurface, vec3(0.3333));
     float glassAlpha = clamp(
       0.12 + material.darkAlpha * 0.52 + material.edgeFactor * 0.30 + surfaceLuma * 0.24,
       0.08,

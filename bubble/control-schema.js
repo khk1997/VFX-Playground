@@ -8,7 +8,6 @@ export const SELECTS = {
   // 這份淺底參數是在既有通用玻璃路徑上調成，因此兩種底色都使用同一 shader 路徑。
   backdrop:  { uniform: 'uLightBackdrop', map: { dark: 0, light: 0 } },
   materialStyle: { uniform: 'uMaterialStyle', map: { universal: 2 } },
-  colorMode: { uniform: 'uColorMode', map: { spectral: 0, ramp: 1 } },
   rayBeamPattern: {
     uniform: 'uRayBeamPattern',
     map: { grid: 0, starburst: 1, ring: 2, softbox: 3, window: 4 },
@@ -73,7 +72,6 @@ export function createToggleBindings(applyEdgeDropDistribution) {
   return {
   ...Object.fromEntries(EDGE_TINT_TARGETS.map(prefix =>
     [`${prefix}MultiTint`, `u${prefix[0].toUpperCase()}${prefix.slice(1)}MultiTint`])),
-  filmEnabled: 'uFilmEnabled',
   dispersionEnabled: 'uDispersionEnabled',
   rayDispersionEnabled: 'uRayDispersionEnabled',
   spectralCausticEnabled: 'uSpectralCausticEnabled',
@@ -104,9 +102,6 @@ export function createFormatters(P, { effectiveCapillaryHeight, shatterSegmentSe
   typeDepth: v => v.toFixed(3),
   typeBevel: v => v.toFixed(3),
   typeSoftness: v => (v <= 0 ? '關閉' : v.toFixed(3)),
-  thickness: v => v.toFixed(0) + 'nm',
-  thickVar: v => '±' + v.toFixed(0),
-  noiseScale: v => 'x' + v.toFixed(1),
   count: v => v.toFixed(0),
   radius: v => v.toFixed(2),
   viscosity: v => v.toFixed(2),
@@ -164,7 +159,6 @@ export function createFormatters(P, { effectiveCapillaryHeight, shatterSegmentSe
   researchIconBirthStagger: v => (v * P.loopDuration).toFixed(2) + 's',
   capillaryCrestSoftness: v => Math.round(v * 100) + '%',
   capillaryWarp: v => Math.round(v * 100) + '%',
-  patternSpeed: v => 'x' + v.toFixed(2),
   dispersion: v => Math.round(v * 100) + '%',
   dispersionSeparation: v => 'x' + v.toFixed(2),
   causticScale: v => 'x' + v.toFixed(2),
@@ -211,7 +205,6 @@ export function createFormatters(P, { effectiveCapillaryHeight, shatterSegmentSe
   artNoiseScale: v => 'x' + v.toFixed(1),
   artPatternSpeed: v => 'x' + v.toFixed(2),
   artGravity: v => Math.round(v * 100) + '%',
-  filmBlur: v => v.toFixed(2),
   reflect: v => 'x' + v.toFixed(2),
   transmission: v => v.toFixed(2),
   absorb: v => '×' + v.toFixed(2),

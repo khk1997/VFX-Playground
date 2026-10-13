@@ -259,14 +259,6 @@ const BACKDROP_MEMORY_KEYS = MOTION_MEMORY_KEYS.filter(k => BACKDROP_SCOPED_KEYS
 // overrides，得在這裡把起始 P 值先補成該模式記得的值，跟切換模式時的行為一致。
 for (const key of MOTION_MEMORY_KEYS) P[key] = motionMemory[key][memorySlot(key)];
 
-// 自訂漸層色標（最多 6，可調位置）— reset 用
-const STOP_MAX = 6;
-const RAMP_DEFAULT = {
-  count: 6,
-  cols: ['#3698d8', '#b794a6', '#d1aa75', '#b2b3b4', '#9e7d98', '#5dbded'],
-  pos:  [0.56, 0.20, 0.39, 0.60, 0.27, 0.66],
-};
-
 const TOGGLES = createToggleBindings(applyEdgeDropDistribution);
 
 const DISPERSION_TOGGLE_KEYS = ['dispersionEnabled', 'rayDispersionEnabled', 'spectralCausticEnabled'];
@@ -2289,10 +2281,8 @@ function makeMicroDropTexture() {
 }
 
 const {
-  buildRampLUT,
   buildSpectralCausticLUT,
   makeEdgeTintUniforms,
-  makeRampTexture,
   makeSpectralCausticTexture,
   pageBackgroundCss,
   setBgColorUniform,
@@ -2402,9 +2392,6 @@ function initGL() {
     uDropShape:  { value: dropShapeData },
     uDropPhysics: { value: dropPhysicsData },
     uBounds:     { value: dropBounds },
-    uThickness:  { value: P.thickness },
-    uThickVar:   { value: P.thickVar },
-    uNoiseScale: { value: P.noiseScale },
     uDispersion: { value: P.dispersion },
     uDispersionSeparation: { value: P.dispersionSeparation },
     uCausticScale: { value: P.causticScale },
@@ -2451,14 +2438,7 @@ function initGL() {
     uDispersionEnabled: { value: P.dispersionEnabled ? 1 : 0 },
     uRayDispersionEnabled: { value: P.rayDispersionEnabled ? 1 : 0 },
     uSpectralCausticEnabled: { value: P.spectralCausticEnabled ? 1 : 0 },
-    uFilmEnabled: { value: P.filmEnabled ? 1 : 0 },
-    uFilmBlur:   { value: P.filmBlur },
-    uSaturation: { value: P.saturation },
     uFresnel:    { value: P.fresnel },
-    uGravity:    { value: P.gravity },
-    uPatternSpeed: { value: P.patternSpeed },
-    uColorMode:  { value: SELECTS.colorMode.map[P.colorMode] },
-    uRampTex:    { value: makeRampTexture() },
     uBgMode:     { value: SELECTS.bgMode.map[P.bgMode] },
     uMaterialStyle: { value: SELECTS.materialStyle.map[P.materialStyle] },
     uTransparentBackground: { value: 0 },
@@ -2957,7 +2937,7 @@ function syncMotionUrl() {
 }
 
 const {
-  bindTextControls, bindControls, resetSpectralCausticColors, resetRamp, updateRampRows,
+  bindTextControls, bindControls, resetSpectralCausticColors,
 } = createPanelBindings({
   THREE, params: P, preview: PREVIEW, selects: SELECTS, toggles: TOGGLES, colors: COLORS,
   formatters: fmt, getUniforms: () => uniforms, uniformNameFor, rotation: rot,
@@ -2974,7 +2954,7 @@ const {
   getDispersionMaster: () => dispersionMasterOn,
   setDispersionMaster: value => { dispersionMasterOn = value; },
   dispersionToggleKeys: DISPERSION_TOGGLE_KEYS, setBgColorUniform, pageBackgroundCss,
-  scheduleGlyphRebuild, buildRampLUT, stopMax: STOP_MAX, rampDefault: RAMP_DEFAULT,
+  scheduleGlyphRebuild,
   syncMotionUrl,
 });
 
@@ -3032,7 +3012,6 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   // 所以得自己補。
   for (const key of MOTION_MEMORY_KEYS) P[key] = motionMemory[key][memorySlot(key, motion)];
   resetSpectralCausticColors();
-  resetRamp();
   bindControls();
   bindTextControls();
   // 文字被還原成預設，字形圖集得跟著重烘（bindTextControls 只同步 DOM）。
@@ -4019,10 +3998,10 @@ if (!PREVIEW && window.PresetIO) {
     // 配色數量會決定色標列的顯示，順序顛倒會讓後套的值被蓋掉。
     applyFirst: [
       'motion', 'backdrop', 'bgMode', 'bgColor',
-      'materialStyle', 'colorMode', 'shapeSource', 'shapeQuality',
+      'materialStyle', 'shapeSource', 'shapeQuality',
       'rayBeamPattern',
-      'filmEnabled', 'dispersionEnabled', 'rayDispersionEnabled',
-      'spectralCausticEnabled', 'rampCount',
+      'dispersionEnabled', 'rayDispersionEnabled',
+      'spectralCausticEnabled',
     ],
     exclude: [
       'materialStyle',
@@ -4063,8 +4042,6 @@ if (!PREVIEW && window.PresetIO) {
     },
     afterApply: payload => {
       restoreTintMemory(payload);
-      updateRampRows();
-      buildRampLUT();
       buildSpectralCausticLUT();
       EDGE_TINT_TARGETS.forEach(updateEdgeTintPalette);
       // 其餘材質沿用既有載入規則；局部配色由 restoreTintMemory 分別還原，

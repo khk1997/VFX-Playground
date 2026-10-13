@@ -605,42 +605,16 @@ vec3 prismBeamField(vec2 q, float radius){
 }
 
 
-struct FilmMaterial {
+struct SurfaceMaterial {
   vec3 darkColor;
   float darkAlpha;
   vec3 baseSurface;
-  vec3 filmSurface;
-  vec3 filmChroma;
   vec3 reflectionChroma;
   vec3 transmission;
-  float filmAmount;
   float edgeFactor;
 };
 
-// 在光程差域柔化干涉色；只混合色帶，不影響幾何輪廓、折射或高光銳利度。
-vec3 sampleFilmInterference(float opd){
-  float blurNm = uFilmBlur * 72.0;
-  if (uColorMode == 0){
-    // 薄膜本身固定使用可見光 RGB 波長。uDispersion 專門控制折射後的
-    // 色頻分離，不再同時改變薄膜條紋，兩個參數因而有清楚不同的功能。
-    vec3 lambda = vec3(650.0, 550.0, 450.0);
-    vec3 phase = TAU * opd / lambda;
-    // Gaussian 卷積 cosine 後的解析解，避免光譜模式增加三倍三角函數成本。
-    vec3 sigma = TAU * blurNm / lambda;
-    vec3 attenuation = exp(-0.5 * sigma * sigma);
-    return 0.5 - 0.5 * cos(phase) * attenuation;
-  }
-
-  float freq = 1.0;
-  float phase = opd / 560.0 * freq;
-  float phaseRadius = blurNm / 560.0 * freq;
-  vec3 center = texture2D(uRampTex, vec2(fract(phase), 0.5)).rgb;
-  vec3 lower = texture2D(uRampTex, vec2(fract(phase - phaseRadius), 0.5)).rgb;
-  vec3 upper = texture2D(uRampTex, vec2(fract(phase + phaseRadius), 0.5)).rgb;
-  return center * 0.5 + (lower + upper) * 0.25;
-}
-
-// 藝術色散使用固定可見光譜，完全獨立於薄膜的自訂漸層。
+// 藝術色散使用固定可見光譜。
 vec3 visibleSpectrum(float t){
   t = clamp(t, 0.0, 1.0);
   float red = smoothstep(0.46, 0.74, t)
@@ -704,48 +678,13 @@ float artisticDispersionOPD(vec3 p, vec3 N, vec3 V){
 #endif // PROBE_NO_ART_DISPERSION
 }
 
-// 薄膜反射與透射分開計算；避免以暗色 alpha 覆蓋白色背景。
-FilmMaterial thinFilm(vec3 p, vec3 N, vec3 V){
+// 表面的反射與透射分開計算；避免以暗色 alpha 覆蓋白色背景。
+//
+// 這裡原本是薄膜干涉（安裝中的「薄膜外觀」），2026-10 整組移除。薄膜關閉時干涉色
+// 恆為 0，下面每一項都是把那個 0 代進去之後的結果，所以畫面與移除前逐位元相同：
+// 反射率只剩 Fresnel、暗底的體積填光取 lum = 0 那一支（0.4）。
+SurfaceMaterial surfaceMaterial(vec3 p, vec3 N, vec3 V){
   float cosTheta = clamp(dot(N, V), 0.0, 1.0);
-
-  vec3 interf = vec3(0.0);
-// 薄膜干涉的整條計算鏈：4 次 fbm（＝16 份展開的 snoise）→ 厚度 → 光程差 →
-// sampleFilmInterference（3 次 texture2D）。
-//
-// 它唯一的產物是 interf，而 interf 在 uFilmEnabled 為 0 時：這裡維持 vec3(0.0)，
-// 下游的 filmAmount 又整個乘上 uFilmEnabled，film / filmChroma / darkInterf 因此
-// 全部歸零。thickness 與 opd 沒有別的去處。所以薄膜關閉時整條鏈是死碼，
-// 編譯期移除與 uFilmEnabled=0 的執行結果逐位元相同 —— 不是降級，是不編用不到的東西。
-//
-// 面板預設 filmEnabled = false，所以預設變體不含這一整塊。
-#ifdef FEATURE_THIN_FILM
-  vec3 sp = p * uNoiseScale;
-  vec3 flow = loopNoiseOffset(uPatternSpeed);
-  vec3 warp = vec3(
-    fbm(sp + flow),
-    fbm(sp + vec3(5.2, 1.3, 0.0) + flow.yzx),
-    fbm(sp + vec3(1.7, 9.2, 0.0) + flow.zxy)
-  );
-  float n = fbm(sp + warp * 0.6 + flow * 0.5);
-  float thickness = uThickness + n * uThickVar;
-
-  float top = clamp(N.y * 0.5 + 0.5, 0.0, 1.0);
-  thickness -= pow(top, 2.5) * uGravity * uThickness * 0.95;
-  thickness = max(thickness, 0.0);
-
-  // Snell 折射角：掠射角時 cosT 仍可觀 → 邊緣才有彩虹
-  float sinI = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
-  float cosT = sqrt(max(0.0, 1.0 - (sinI / uIOR) * (sinI / uIOR)));
-  float opd = 2.0 * uIOR * thickness * cosT;
-
-  if (uFilmEnabled > 0.5) interf = sampleFilmInterference(opd);
-#endif
-
-  float lum = dot(interf, vec3(0.3333));
-  interf = mix(vec3(lum), interf, uSaturation);
-  vec3 darkInterf = interf;
-
-  interf = max(interf, vec3(0.0));
 
   // 水膜 F0 約 2%；藝術化邊緣光只增強掠射角，不會讓中心變成灰色實體。
   float f0 = pow((uIOR - 1.0) / (uIOR + 1.0), 2.0);
@@ -753,14 +692,11 @@ FilmMaterial thinFilm(vec3 p, vec3 N, vec3 V){
   float rim = pow(1.0 - cosTheta, 3.0) * uFresnel;
   float fres = mix(schlick, 1.0, clamp(rim * 0.28, 0.0, 0.82));
 
-  // 干涉色是波長相關反射率；透射使用其互補值，白底仍能乾淨穿透。
-  float filmAmount = clamp(0.035 + rim * 0.42, 0.0, 0.72) * uFilmEnabled;
-  vec3 reflectance = clamp(vec3(fres) + interf * filmAmount, vec3(0.0), vec3(0.94));
+  vec3 reflectance = clamp(vec3(fres), vec3(0.0), vec3(0.94));
   vec3 transmittance = (vec3(1.0) - reflectance) * uTransmission;
 
   vec3 env = sampleReflection(reflect(-V, N), uRoughness);
   vec3 refl = env * reflectance * uReflect;
-  vec3 film = interf * filmAmount * (0.07 + 0.08 * uReflect);
   float envLum = dot(env, vec3(0.2126, 0.7152, 0.0722));
   vec3 reflectionChroma = clamp(env - vec3(envLum), vec3(-0.5), vec3(0.5))
     * reflectance * uReflect;
@@ -769,33 +705,25 @@ FilmMaterial thinFilm(vec3 p, vec3 N, vec3 V){
   float sharp = pow(max(dot(reflect(-V, N), normalize(vec3(-0.45, -0.2, 0.6))), 0.0), mix(220.0, 14.0, uRoughness)) * mix(1.0, 0.3, uRoughness);
   vec3 spec = vec3(sharp);
 
-  // Commit 版的暗底美術模型：保留強薄膜、反射底值與深藍體積填光。
+  // Commit 版的暗底美術模型：反射底值與深藍體積填光。
   float darkFres = pow(1.0 - cosTheta, 3.0);
   float darkRim = darkFres * uFresnel;
-  vec3 darkFilm = darkInterf * (0.08 + 1.3 * darkRim);
   vec3 darkRefl = env * uReflect * (0.12 + 0.9 * darkFres);
-  vec3 darkBodyTint = vec3(0.02, 0.03, 0.05) * (0.4 + 0.6 * lum);
-  vec3 darkColor = 1.0 - exp(-(darkFilm + darkRefl + spec + darkBodyTint) * 1.7);
+  vec3 darkBodyTint = vec3(0.02, 0.03, 0.05) * 0.4;
+  vec3 darkColor = 1.0 - exp(-(darkRefl + spec + darkBodyTint) * 1.7);
   float darkAlpha = clamp(
-    0.05 + darkRim * 0.95 + sharp
-      + dot(darkFilm, vec3(0.4)) + dot(darkRefl, vec3(0.4)),
+    0.05 + darkRim * 0.95 + sharp + dot(darkRefl, vec3(0.4)),
     0.0,
     1.0
   );
 
   vec3 baseSurface = 1.0 - exp(-max(vec3(0.0), refl + spec) * uMaterialExposure * 1.45);
-  vec3 filmSurface = 1.0 - exp(-max(vec3(0.0), film) * uMaterialExposure * 1.45);
-  float filmLum = dot(interf, vec3(0.2126, 0.7152, 0.0722));
-  vec3 filmChroma = clamp(interf - vec3(filmLum), vec3(-0.65), vec3(0.65));
-  FilmMaterial material;
+  SurfaceMaterial material;
   material.darkColor = darkColor;
   material.darkAlpha = darkAlpha;
   material.baseSurface = baseSurface;
-  material.filmSurface = filmSurface;
-  material.filmChroma = filmChroma;
   material.reflectionChroma = reflectionChroma;
   material.transmission = transmittance;
-  material.filmAmount = filmAmount;
   material.edgeFactor = pow(1.0 - cosTheta, 1.4);
   return material;
 }

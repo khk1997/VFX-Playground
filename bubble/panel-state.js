@@ -121,17 +121,11 @@ export function createPanelStateController({
         });
     };
     const dispersionMaster = getDispersionMaster();
-    setFeatureState('thinFilmGroup', P.filmEnabled);
     setFeatureState('artDispersionGroup', P.dispersionEnabled && dispersionMaster);
     setFeatureState('rayDispersionGroup', P.rayDispersionEnabled && dispersionMaster);
     setFeatureState('spectralCausticGroup', P.spectralCausticEnabled && dispersionMaster);
     document.getElementById('dispersionMaster').checked = dispersionMaster;
     document.getElementById('dispersionGroup').classList.toggle('is-disabled', !dispersionMaster);
-
-    const rampGroup = document.getElementById('rampGroup');
-    const rampDisabled = P.colorMode === 'spectral' || !P.filmEnabled;
-    rampGroup.classList.toggle('is-disabled', rampDisabled);
-    rampGroup.querySelectorAll('input').forEach(element => setDisabled(element, rampDisabled));
 
     const colorBackground = P.bgMode === 'color';
     const backgroundColor = document.getElementById('bgColor');

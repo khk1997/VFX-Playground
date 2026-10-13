@@ -58,7 +58,6 @@ export function createShaderVariantPlanner({
         && (isFormationMotion(motion) || motion === 'shatter'
           || motion === 'melt' || motion === 'morph'),
       negativeField: shapeField,
-      thinFilm: !!params.filmEnabled,
       dispersion: !!params.dispersionEnabled,
       prismBeam: !!params.rayDispersionEnabled,
       spectralCaustics: !!scoped('spectralCausticEnabled'),
@@ -79,8 +78,7 @@ export function createShaderVariantPlanner({
         + flag(state.staticShape, 'X') + flag(state.research, 'H')
         + flag(state.typewriter, 'Y') + flag(state.shapeMorph, 'R')
         + flag(state.formationCut, 'T'),
-      'o' + flag(state.thinFilm, 'F')
-        + flag(state.dispersion, 'D') + flag(state.prismBeam, 'P')
+      'o' + flag(state.dispersion, 'D') + flag(state.prismBeam, 'P')
         + flag(state.spectralCaustics, 'K') + flag(state.beamPatterns, 'B')
         + flag(state.envPmrem, 'E') + flag(state.studioGlass, 'A')
         + flag(state.staticMesh, 'Q'),
@@ -135,7 +133,6 @@ export function createShaderVariantPlanner({
       FEATURE_DISSOLVE_FIELD: state.dissolveField ? '' : false,
       NORMAL_TAPS_TETRA: '',
       NORMAL_TAPS_SVG: state.svgNormals ? '' : false,
-      FEATURE_THIN_FILM: state.thinFilm ? '' : false,
       FEATURE_DISPERSION: state.dispersion ? '' : false,
       FEATURE_PRISM_BEAM: state.prismBeam ? '' : false,
       FEATURE_PRISM_SATURATION: state.prismBeam ? '' : false,
@@ -165,7 +162,6 @@ export function createShaderVariantPlanner({
     //
     // 順帶把靜態變體的編譯量降回來：這幾塊是整支 shader 裡最大的幾段。
     if (state.studioGlass) {
-      defines.FEATURE_THIN_FILM = false;
       defines.FEATURE_DISPERSION = false;
       defines.FEATURE_PRISM_BEAM = false;
       defines.FEATURE_PRISM_SATURATION = false;
@@ -209,7 +205,6 @@ export function createShaderVariantPlanner({
     if (late || DIAG.probeNoDispersionSpectral) defines.FEATURE_DISPERSION = false;
     if (late || DIAG.probeNoSpectralCaustics) defines.FEATURE_SPECTRAL_CAUSTICS = false;
     if (DIAG.probeNoEnvPmrem) defines.FEATURE_ENV_PMREM = false;
-    if (DIAG.probeNoThinFilm || DIAG.probeNoRefractionFilm) defines.FEATURE_THIN_FILM = false;
     if (DIAG.probeMapscenePlain) {
       defines.FEATURE_NEGATIVE_FIELD = false;
       defines.NORMAL_TAPS_SVG = false;

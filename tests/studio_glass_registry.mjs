@@ -23,7 +23,7 @@ for (const motion of MOTION_KEYS) {
 // shader 變體：新模型的模式編 FEATURE_STUDIO_GLASS，而且不編舊的加色外觀。
 const params = {
   motion: 'static', staticShape: 0, shapeSource: 'svg', formationFrontOn: false,
-  filmEnabled: true, materialStyle: 'universal', dispersionEnabled: true,
+  materialStyle: 'universal', dispersionEnabled: true,
   rayDispersionEnabled: true, spectralCausticEnabled: true, rayBeamPattern: 'ring',
 };
 const motionMemory = new Proxy({}, { get: () => new Proxy({}, { get: () => true }) });
@@ -45,7 +45,7 @@ for (const motion of MOTION_KEYS) {
   const studio = usesStudioGlass(motion);
   assert.equal(defines.FEATURE_STUDIO_GLASS === '', studio, `${motion} FEATURE_STUDIO_GLASS`);
   if (studio) {
-    for (const legacy of ['FEATURE_THIN_FILM', 'FEATURE_DISPERSION', 'FEATURE_PRISM_BEAM',
+    for (const legacy of ['FEATURE_DISPERSION', 'FEATURE_PRISM_BEAM',
       'FEATURE_SPECTRAL_CAUSTICS', 'FEATURE_BEAM_PATTERNS']) {
       assert.equal(defines[legacy], false, `${motion} should not compile ${legacy}`);
     }

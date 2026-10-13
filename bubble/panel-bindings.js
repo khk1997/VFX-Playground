@@ -19,8 +19,7 @@ export function createPanelBindings(options) {
     backdropMemoryKeys: BACKDROP_MEMORY_KEYS, resetPreviousDropT, isInited, loadMaterialEnvironment,
     updateUIState, scheduleGLBRebuild, applyAntialiasLevel, ensureGlyphAtlas, applyToggle,
     getDispersionMaster, setDispersionMaster, dispersionToggleKeys: DISPERSION_TOGGLE_KEYS,
-    setBgColorUniform, pageBackgroundCss, scheduleGlyphRebuild, buildRampLUT,
-    stopMax: STOP_MAX, rampDefault: RAMP_DEFAULT, syncMotionUrl,
+    setBgColorUniform, pageBackgroundCss, scheduleGlyphRebuild, syncMotionUrl,
   } = options;
 
 // 文字型控制項。單獨一支而不是塞進下面那個數值迴圈：那個迴圈對每個 key 一律
@@ -260,7 +259,6 @@ function bindControls() {
     clearIconPreset._bound = true;
   }
   bindSpectralCausticColors();
-  bindRamp();
   updateUIState();
 }
 
@@ -289,48 +287,7 @@ function resetSpectralCausticColors() {
   buildSpectralCausticLUT();
 }
 
-// 自訂漸層色標：數量 + 每色位置
-function updateRampRows() {
-  const n = Math.round(parseFloat(document.getElementById('rampCount').value));
-  for (let i = 0; i < STOP_MAX; i++) {
-    // 只負責藏起來；顯示時的版面交給 CSS（窄卡片裡這一列是兩行的 grid，見 inspector.css）。
-    document.getElementById('stopRow' + i).style.display = (i < n) ? '' : 'none';
-  }
-}
-function bindRamp() {
-  const rc = document.getElementById('rampCount');
-  const rcv = document.getElementById('rampCount_v');
-  const onCount = () => { rcv.textContent = Math.round(parseFloat(rc.value)).toFixed(0); updateRampRows(); buildRampLUT(); updateUIState(); };
-  if (!PREVIEW && !rc._bound) { rc.addEventListener('input', onCount); rc._bound = true; }
-  onCount();
-  for (let i = 0; i < STOP_MAX; i++) {
-    const col = document.getElementById('stopCol' + i);
-    const pos = document.getElementById('stopPos' + i);
-    const pv = document.getElementById('stopPos' + i + '_v');
-  const upd = () => {
-    if (pv) pv.textContent = parseFloat(pos.value).toFixed(2);
-    buildRampLUT();
-    requestPausedRender();
-  };
-    if (!PREVIEW && !col._bound) { col.addEventListener('input', upd); col._bound = true; }
-    if (!PREVIEW && !pos._bound) { pos.addEventListener('input', upd); pos._bound = true; }
-    upd();
-  }
-}
-function resetRamp() {
-  document.getElementById('rampCount').value = RAMP_DEFAULT.count;
-  for (let i = 0; i < STOP_MAX; i++) {
-    document.getElementById('stopCol' + i).value = RAMP_DEFAULT.cols[i];
-    document.getElementById('stopPos' + i).value = RAMP_DEFAULT.pos[i];
-  }
-}
-
-
   return {
-    // updateRampRows 一併交出去：套用參數組合檔之後，bubble.js 的 afterApply 要把
-    // 色標列、兩張 LUT 與邊緣染色整組重刷一次，它是其中一步。這個函式讀的是
-    // STOP_MAX 這個 options 閉包變數，所以只能從這裡交出來，不能在呼叫端另寫
-    // 一份——兩份色標上限遲早會對不上。
-    bindTextControls, bindControls, resetSpectralCausticColors, resetRamp, updateRampRows,
+    bindTextControls, bindControls, resetSpectralCausticColors,
   };
 }

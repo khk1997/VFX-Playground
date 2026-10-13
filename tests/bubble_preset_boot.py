@@ -21,15 +21,13 @@ from bubble_baseline import set_select, wait_for_shader
 
 STORAGE_KEY = "vfx:prism-drops:last"
 # 靜態方體與毛細波各自的專屬參數：這兩個模式共用同一組表面紋理控制項，存進去的
-# 值必須連模式一起回來，才算真的還原。rampCount 則是專門盯住 afterApply：色標
-# 列的顯示數量得靠 updateRampRows 補刷，那一行曾經整個是未定義的。
+# 值必須連模式一起回來，才算真的還原。
 SAVED_VALUES = {
     "motion": "capillary",
     "capillaryHeight": "0.18",
     "capillaryRings": "5",
     "capillarySpeed": "2",
     "capillaryDirectionX": "-0.6",
-    "rampCount": "4",
 }
 SAVED_PAYLOAD = {"effect": "prism-drops", "version": 1, "values": SAVED_VALUES}
 
@@ -38,11 +36,7 @@ READ_CONTROLS = """() => {
   return {
     motion: v('motion'), capillaryHeight: v('capillaryHeight'),
     capillaryRings: v('capillaryRings'), capillarySpeed: v('capillarySpeed'),
-    capillaryDirectionX: v('capillaryDirectionX'), rampCount: v('rampCount'),
-    // 色標列是被 inline style 開關的；外層的配色模式另有自己的 CSS 閘門，
-    // 所以這裡只看 updateRampRows 自己寫下的那一層。
-    laidOutStopRows: [...document.querySelectorAll('[id^=stopRow]')]
-      .filter(row => row.style.display !== 'none').length,
+    capillaryDirectionX: v('capillaryDirectionX'),
     booting: document.body.hasAttribute('data-bubble-boot'),
     panelVisible: !!document.querySelector('#panel')
       && getComputedStyle(document.querySelector('#panel')).visibility !== 'hidden',
@@ -125,10 +119,6 @@ def main() -> int:
             assert restored[key] == expected, (
                 f"{key} restored as {restored[key]!r}, expected {expected!r}"
             )
-        assert restored["laidOutStopRows"] == int(SAVED_VALUES["rampCount"]), (
-            "restoring did not lay out the gradient stop rows"
-            f" ({restored['laidOutStopRows']} shown)"
-        )
         # restore() 把任何失敗都當成「這份檔壞了」，直接把快照從 localStorage 刪掉
         # （見 preset-io.js）。所以「保存檔還在」正是「還原這一趟從頭到尾沒有出事」
         # 最直接的證據：afterApply 只要中途丟例外，使用者的設定就此消失。
@@ -153,9 +143,6 @@ def main() -> int:
         wait_for_shader(page)
         imported = page.evaluate(READ_CONTROLS)
         assert imported["motion"] == "capillary", "import did not switch back to the saved motion"
-        assert imported["laidOutStopRows"] == int(SAVED_VALUES["rampCount"]), (
-            "importing a parameter file did not lay out the gradient stop rows"
-        )
         assert not errors, f"importing a parameter file raised: {errors}"
         context.close()
 
