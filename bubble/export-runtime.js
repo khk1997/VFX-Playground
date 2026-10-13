@@ -1,7 +1,7 @@
 'use strict';
 
 import { buildStoredZip, downloadBlob, nextPaint, pixelsToPng } from './export-utils.js?v=1';
-import { usesDualMatte } from './motions/registry.js?v=melt-defaults-1';
+import { usesDualMatte, usesStudioGlass } from './motions/registry.js?v=melt-defaults-1';
 
 export function createExportRuntime(options) {
   const {
@@ -91,19 +91,28 @@ function renderExportPixels(settings, target) {
 // 單一 alpha 表示不了有色的透過率，所以 a 取透過率的亮度，顏色取「讓黑底與白底
 // 兩邊誤差平均」的那個值。直接在 8 位元的輸出值上解，而不是線性空間：PNG 的
 // 使用者（瀏覽器、設計軟體）就是在這個空間裡做 over 合成的。
-function matteExportPixels(black, white) {
+//
+// onWhite：改成以白底為準（安裝中的淺底輸出，見 runExport）。平均法會把有色
+// 透射的顏色對半稀釋 —— 安裝中淺底的配色（稜彩等）就是藍青透得多、紅透得少的
+// 那種顏色，疊白後彩度只剩一半不到。這時 a 取「最不透光的那個通道」，每個通道
+// 疊白都解得出來、不會被夾：w ≥ 透過率 ≥ 1 − a，所以 (w − (1 − a)) / a 落在 0–1。
+// 代價是疊黑時多出一層淡淡的配色光，淺底輸出本來就是給淺色頁面用的。
+function matteExportPixels(black, white, onWhite = false) {
   const out = new Uint8Array(black.length);
   for (let i = 0; i < black.length; i += 4) {
     const tr = Math.min(Math.max((white[i] - black[i]) / 255, 0), 1);
     const tg = Math.min(Math.max((white[i + 1] - black[i + 1]) / 255, 0), 1);
     const tb = Math.min(Math.max((white[i + 2] - black[i + 2]) / 255, 0), 1);
-    const alpha = 1 - (0.2126 * tr + 0.7152 * tg + 0.0722 * tb);
+    const alpha = onWhite
+      ? 1 - Math.min(tr, tg, tb)
+      : 1 - (0.2126 * tr + 0.7152 * tg + 0.0722 * tb);
     if (alpha < 0.5 / 255) continue;   // 全透明：留 0,0,0,0
     const leak = 1 - alpha;
     for (let c = 0; c < 3; c++) {
       const b = black[i + c] / 255;
       const w = white[i + c] / 255;
-      out[i + c] = Math.round(Math.min(Math.max((b + w - leak) / (2 * alpha), 0), 1) * 255);
+      const color = onWhite ? (w - leak) / alpha : (b + w - leak) / (2 * alpha);
+      out[i + c] = Math.round(Math.min(Math.max(color, 0), 1) * 255);
     }
     out[i + 3] = Math.round(alpha * 255);
   }
@@ -119,7 +128,7 @@ async function renderExportFrame(settings, time, target) {
     const black = renderExportPixels(settings, target);
     paper.setRGB(1, 1, 1, THREE.LinearSRGBColorSpace);
     const white = renderExportPixels(settings, target);
-    pixels = matteExportPixels(black, white);
+    pixels = matteExportPixels(black, white, settings.lightPaperMatte);
   } else {
     pixels = renderExportPixels(settings, target);
   }
@@ -186,6 +195,8 @@ async function runExport(settings) {
   // 牆面與地板的抬底、地板的壓暗、淺底的漸層都拿掉 —— 不然它們兩張都有，
   // 會被當成玻璃自己的東西，成品上浮出一整片灰色的地板。
   const staticMatte = transparentExport && usesDualMatte(P.motion);
+  // 靜態仍走平均法（它的透射接近無色，淺底輸出也站得住）。
+  const lightPaperMatte = staticMatte && !usesStudioGlass(P.motion) && P.backdrop === 'light';
   getUniforms().uTransparentBackground.value = transparentExport && !staticMatte ? 1 : 0;
   getUniforms().uBgMode.value = settings.background === 'scene' ? SELECTS.bgMode.map[P.bgMode] : 0;
   if (transparentExport) getUniforms().uBgColor.value.setHex(0x000000, THREE.LinearSRGBColorSpace);
@@ -197,8 +208,9 @@ async function runExport(settings) {
     // 不留影子：地板在兩張背景紙上就都是一張乾淨的紙，解出來整片透明。
     if (settings.shadow === false) getUniforms().uStudioShadowStrength.value = 0;
     // 安裝中的淺底：漸層拿掉之後，透過玻璃看到的紙改乘上那道漸層，泡泡才會跟畫面上
-    // 一樣有明暗（見 environment.js 的 researchBackdropSample）。
-    getUniforms().uResearchPaperShade.value = P.backdrop === 'light' ? 1 : 0;
+    // 一樣有明暗（見 environment.js 的 researchBackdropSample）；去背也改成以白底
+    // 為準，配色才不會被稀釋（見 matteExportPixels）。
+    getUniforms().uResearchPaperShade.value = lightPaperMatte ? 1 : 0;
   }
   // 透明背景預設不帶光暈與光芒（見 index.html 的 exportGlowField）：輸出期間暫時
   // 關掉，結束後還原。
@@ -207,7 +219,9 @@ async function runExport(settings) {
     P.bloomEnabled = false;
     P.streaksEnabled = false;
   }
-  const frameSettings = { ...settings, width, height, renderWidth, renderHeight, staticMatte };
+  const frameSettings = {
+    ...settings, width, height, renderWidth, renderHeight, staticMatte, lightPaperMatte,
+  };
 
   try {
     resetPreviousDropT();
