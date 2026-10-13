@@ -288,17 +288,33 @@ if (window.__vfxDev) {
     try { return activePreview?.frame.contentWindow?.__vfxPreviewPerf ?? null; } catch (_) { return null; }
   };
   const fmtMs = ms => (ms == null ? '—' : `${Math.round(ms)}ms`);
+  // 門檻（黃 / 紅）：
+  //   預覽 fps　　　低於上限的 80% / 50%（上限目前 30，預覽本來就鎖在這裡）
+  //   預覽出現耗時　超過 800 / 1500ms（再加 260ms 懸停延遲，超過約 1 秒就會覺得卡）
+  //   預覽 GPU　　　超過 16 / 33ms（60fps / 30fps 的一幀預算）
+  //   iframe 數量　 超過 1 就紅（代表有預覽沒被移除）
+  const above = (value, warn, bad) => (value > bad ? 'bad' : value > warn ? 'warn' : '');
+  const previewFpsLevel = fps => {
+    const cap = childPerf()?.fps || 30;
+    return fps < cap * .5 ? 'bad' : fps < cap * .8 ? 'warn' : '';
+  };
+  const revealLevel = ms => above(ms, 800, 1500);
+
   window.__vfxDev.mode('page');
   window.__vfxDev.watch({
     '預覽': () => {
       if (!activePreview) return '—';
-      const stats = childDev()?.stats;
-      if (activePreview.revealMs == null) return `${activePreview.effect.title} 載入中`;
-      return stats?.fps ? `${activePreview.effect.title} ${Math.round(stats.fps)}fps` : activePreview.effect.title;
+      const { title } = activePreview.effect;
+      if (activePreview.revealMs == null) return `${title} 載入中`;
+      const fps = childDev()?.stats?.fps;
+      return fps ? { value: `${title} ${Math.round(fps)}fps`, level: previewFpsLevel(fps) } : title;
     },
   }, { inline: true });
   window.__vfxDev.watch({
-    '預覽出現耗時': () => (activePreview ? fmtMs(activePreview.revealMs ?? null) : '—'),
+    '預覽出現耗時': () => {
+      const ms = activePreview?.revealMs;
+      return ms == null ? '—' : { value: fmtMs(ms), level: revealLevel(ms) };
+    },
     '預覽上限 fps / DPR': () => {
       const perf = childPerf();
       return perf ? `${perf.fps} / ${perf.dpr.toFixed(2)}` : '—';
@@ -307,18 +323,22 @@ if (window.__vfxDev) {
       const stats = childDev()?.stats;
       if (stats?.context === 'canvas2d') return 'canvas2d（沒有 GPU 計時）';
       if (!stats || stats.gpuMs == null) return stats?.drawCalls != null ? `— / ${Math.round(stats.drawCalls)}` : '—';
-      return `${stats.gpuMs.toFixed(1)}ms / ${Math.round(stats.drawCalls)}`;
+      return { value: `${stats.gpuMs.toFixed(1)}ms / ${Math.round(stats.drawCalls)}`, level: above(stats.gpuMs, 16, 33) };
     },
     '預覽 1%low / max': () => {
       const stats = childDev()?.stats;
-      return stats?.low1 ? `${Math.round(stats.low1)} / ${Math.round(stats.worstMs)}ms` : '—';
+      if (!stats?.low1) return '—';
+      return { value: `${Math.round(stats.low1)} / ${Math.round(stats.worstMs)}ms`, level: previewFpsLevel(stats.low1) };
     },
     // 切換卡片之後這個數字應該一直是 0 或 1；變多代表舊的 iframe 沒被移除。
-    'iframe 數量': () => document.querySelectorAll('iframe').length,
+    'iframe 數量': () => {
+      const count = document.querySelectorAll('iframe').length;
+      return { value: count, level: count > 1 ? 'bad' : '' };
+    },
     '最慢出現的預覽': () => {
       if (!lastRevealMs.size) return '—';
       const [title, ms] = [...lastRevealMs].reduce((a, b) => (b[1] > a[1] ? b : a));
-      return `${title} ${fmtMs(ms)}（已看過 ${lastRevealMs.size} 個）`;
+      return { value: `${title} ${fmtMs(ms)}（已看過 ${lastRevealMs.size} 個）`, level: revealLevel(ms) };
     },
   });
 }

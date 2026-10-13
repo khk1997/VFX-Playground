@@ -346,7 +346,23 @@
     return longTasks;
   };
 
-  const fpsClass = fps => (fps < 30 ? 'bad' : fps < 50 ? 'warn' : '');
+  // 特效頁：固定門檻（低於 50 黃、低於 30 紅）。
+  // 頁面模式（首頁）：跟著螢幕更新率走，低於 80% 黃、低於 50% 紅——120Hz 螢幕上
+  // 掉到 60 已經看得出頓，固定門檻抓不到。
+  const COMMON_HZ = [60, 75, 90, 100, 120, 144, 165, 240];
+  let refreshHz = 60;
+  const estimateRefreshHz = () => {
+    if (intervals.length < 30) return;
+    // 最快那一成的幀最接近 vsync 間隔，再貼齊常見更新率，避免抖動。
+    const fastest = 1000 / percentile(intervals, .1);
+    refreshHz = COMMON_HZ.reduce((a, b) => (Math.abs(b - fastest) < Math.abs(a - fastest) ? b : a));
+  };
+  const fpsClass = fps => {
+    if (!pageMode) return fps < 30 ? 'bad' : fps < 50 ? 'warn' : '';
+    return fps < refreshHz * .5 ? 'bad' : fps < refreshHz * .8 ? 'warn' : '';
+  };
+  // 長任務：有就黃，任一次超過 200ms（肉眼看得出的卡頓）就紅。
+  const longTaskClass = tasks => (!tasks.length ? '' : tasks.some(t => t.ms > 200) ? 'bad' : 'warn');
   const percentile = (list, p) => {
     const sorted = [...list].sort((a, b) => a - b);
     return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
@@ -407,7 +423,11 @@
   // inline 的那幾個另外顯示在上方那一行（每次更新都會讀）。
   const watches = new Map();
   const inlineWatches = new Set();
-  const formatWatch = value => {
+  // getter 可以直接回傳值，或回傳 { value, level: 'warn' | 'bad' } 指定顏色。
+  const isLevelled = v => v != null && typeof v === 'object' && 'value' in v;
+  const watchLevel = v => (isLevelled(v) && (v.level === 'warn' || v.level === 'bad') ? v.level : '');
+  const formatWatch = raw => {
+    const value = isLevelled(raw) ? raw.value : raw;
     if (value == null) return '—';
     if (typeof value === 'boolean') return value ? '是' : '否';
     if (typeof value === 'number') return Number.isInteger(value) ? `${value}` : value.toFixed(2);
@@ -428,7 +448,9 @@
     const out = [];
     if (watches.size) {
       const values = readWatches();
-      for (const label of watches.keys()) out.push(row(escapeHtml(label), escapeHtml(formatWatch(values[label]))));
+      for (const label of watches.keys()) {
+        out.push(row(escapeHtml(label), escapeHtml(formatWatch(values[label])), watchLevel(values[label])));
+      }
       out.push('<div class="sep"></div>');
     }
     const hasGpuTimer = [...gpuStates.values()].some(Boolean);
@@ -448,11 +470,12 @@
     const tasks = recentLongTasks();
     out.push(row('長任務（10 秒內）', tasks.length
       ? `${tasks.length} 次，最長 ${Math.round(Math.max(...tasks.map(t => t.ms)))}ms`
-      : '0', tasks.length ? 'warn' : ''));
+      : '0', longTaskClass(tasks)));
     out.push(row('DPR', forceDpr1 ? `1（強制，原生 ${nativeDpr}）` : `${nativeDpr}`, forceDpr1 ? 'warn' : ''));
     if (performance.memory) out.push(row('JS heap', `${(performance.memory.usedJSHeapSize / 1048576).toFixed(0)} MB`));
     out.push(`<div class="dim">1%low＝最差 1% 幀的 fps · max＝樣本內最慢一幀（都不含省電節流的幀）</div>`);
     if (throttleGetter) out.push(`<div class="dim">走勢圖藍灰色＝省電節流中的幀</div>`);
+    if (pageMode) out.push(row('螢幕更新率（推估）', `${refreshHz}Hz`));
     if (pageMode) out.push(`<div class="dim">頁面模式：fps 是主執行緒探測迴圈量到的，不是特效的渲染幀率</div>`);
     out.push(`<div class="dim">⇧D 隱藏 · ⇧F 位置 · ⇧G 收合 · ⇧R DPR=1</div>`);
     rows.innerHTML = out.join('');
@@ -491,6 +514,8 @@
     stats.low1 = 1000 / percentile(basis, .99);
     stats.worstMs = Math.max(...basis);
     const judge = active.length >= 2;
+    if (pageMode) estimateRefreshHz();
+    stats.refreshHz = refreshHz;
     stats.cpuMs = average(cpuTimes.slice(-60));
     if (gpuTimes.length) {
       stats.gpuMs = average(gpuTimes.slice(-60));
@@ -504,7 +529,9 @@
     const inline = [];
     if (inlineWatches.size) {
       const values = readWatches();
-      for (const label of inlineWatches) inline.push(`${escapeHtml(label)} ${escapeHtml(formatWatch(values[label]))}`);
+      for (const label of inlineWatches) {
+        inline.push(span(`${escapeHtml(label)} ${escapeHtml(formatWatch(values[label]))}`, watchLevel(values[label])));
+      }
     }
     line.innerHTML = [
       ...(forceDpr1 ? [span('DPR1', 'tag')] : []),
@@ -513,7 +540,7 @@
       span(`1%low ${stats.low1.toFixed(0)}`, judge ? fpsClass(stats.low1) : 'dim'),
       `${stats.frameMs.toFixed(1)}ms`,
       span(`max ${stats.worstMs.toFixed(0)}ms`, !judge ? 'dim' : stats.worstMs > 50 ? 'bad' : stats.worstMs > 25 ? 'warn' : 'dim'),
-      ...(tasks.length ? [span(`long ${tasks.length}`, 'warn')] : []),
+      ...(tasks.length ? [span(`long ${tasks.length}`, longTaskClass(tasks))] : []),
       ...(pageMode ? [] : [
         `js ${stats.cpuMs.toFixed(1)}ms`,
         ...(stats.gpuMs != null ? [`gpu ${stats.gpuMs.toFixed(1)}ms`] : []),
@@ -577,7 +604,7 @@
       stats: { ...stats },
       resources: { ...resources },
       longTasks: recentLongTasks().map(t => Math.round(t.ms)),
-      effect: readWatches(),
+      effect: Object.fromEntries(Object.entries(readWatches()).map(([k, v]) => [k, isLevelled(v) ? v.value : v])),
     }),
   };
 })();
