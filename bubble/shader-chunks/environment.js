@@ -313,6 +313,14 @@ int glassSpectralSamples(){
   return uGlassQualityTier >= 2 ? min(uSpectralSamples, 6) : uSpectralSamples;
 }
 
+// 內部彈跳那一份的取樣數。降級時只減樣本、不關掉：方體側面的藍與琥珀色就是從這
+// 一條來的，以前 balanced 以上直接整段跳過，自動畫質一降級（使用者一點面板、省電
+// 解除、幾秒後 fps 不夠）側面的彩虹就整片消失，看起來像點了面板畫面就變了。
+// 6 個樣本加上 bandJitter 仍是連續的色帶，差的是細緻度。
+int bounceSpectralSamples(){
+  return uGlassQualityTier >= 1 ? min(uSpectralSamples, 6) : uSpectralSamples;
+}
+
 // 棚燈卡：方向球上的一塊圓盤，邊緣的銳利度自己控制。
 //
 // 為什麼要是「有邊的」而不是一團柔光：色散的顏色來自背景在一個很小的角度差內
@@ -910,8 +918,7 @@ vec3 spectralBounce(vec3 rd, vec3 N, vec3 exitNormal, vec3 bouncePoint,
 #ifdef PROBE_STATIC_NO_SPECTRAL_BOUNCE
   if (true) {
 #else
-  if (uGlassQualityTier >= 1 || bandSpread <= 0.0001 || uSpectralSamples <= 1
-      || backFres < 0.05) {
+  if (bandSpread <= 0.0001 || uSpectralSamples <= 1 || backFres < 0.05) {
 #endif
     return studioBackdropSampleEdge(bouncePoint, bounceOut, roughBlur, 1.0,
       studioSoften, roughEdge).rgb;
@@ -941,8 +948,8 @@ vec3 spectralBounce(vec3 rd, vec3 N, vec3 exitNormal, vec3 bouncePoint,
   vec3 first = bounceOut;
   vec3 last = bounceOut;
   for (int i = 0; i < MAX_SPECTRAL_COMPILE; i++) {
-    if (i >= glassSpectralSamples()) break;
-    float band = (float(i) + bandJitter) / float(glassSpectralSamples());
+    if (i >= bounceSpectralSamples()) break;
+    float band = (float(i) + bandJitter) / float(bounceSpectralSamples());
     float iorBand = bandIOR(band, bandSpread);
     vec3 outBand = bounceOut;
     vec3 inBand = refract(rd, N, 1.0 / iorBand);
