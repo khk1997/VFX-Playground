@@ -144,14 +144,7 @@ vec3 exitNormalTetra(vec3 p){
 // 最後輸出的值域處理（HDR 時保留超過 1 的部分，否則夾到 0–1）。從 shaders.js 搬來。
 vec3 clampOutput(vec3 c){
   if (uHdrOutput > 0.5) {
-    c = max(c, vec3(0.0));
-    if (uHighlightGain > 1.0) {
-      float peak = max(c.r, max(c.g, c.b));
-      // 0.75 起算：低於這裡的完全不動，到 1.0 才吃滿增益。用 smoothstep 而不是
-      // 硬切，否則會在等亮度線上留下一圈看得見的邊。
-      c *= mix(1.0, uHighlightGain, smoothstep(0.75, 1.0, peak));
-    }
-    return c;
+    return max(c, vec3(0.0));
   }
   return clamp(c, 0.0, 1.0);
 }

@@ -113,7 +113,6 @@ export const DEFAULTS = {              // 數值滑桿
   // 那根「材質曝光」不同：那一根改的是材質的能量，這一根改的是整張畫面。
   postExposure: 1,
   // 高光增益。只作用在接近上限的那一段（見 shaders.js 的 clampOutput），1 = 不動。
-  highlightGain: 1,
   // 鏡頭與底片。三者都是 0 = 沒有這個效果，所以不另外開開關。
   postAberration: 0,
   // 對比與亮度是色調映射之後的調色（見 post.js 的合成 pass），跟「曝光」不同：

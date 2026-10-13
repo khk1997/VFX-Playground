@@ -2486,7 +2486,6 @@ function initGL() {
     uTransmission: { value: P.transmission },
     uHdrOutput: { value: 0 },
     uCoverageAlpha: { value: 0 },
-    uHighlightGain: { value: 1 },
     uAbsorb: { value: P.absorb },
     uAbsorbColor: { value: new THREE.Color().setStyle(P.absorbColor, THREE.LinearSRGBColorSpace) },
     // 漸層玻璃色（見 shader-chunks/glass-tint.js）。範圍每幀由 updateGlassTintBox 更新。
@@ -3425,7 +3424,7 @@ function bloomRadiusFor(value) {
 
 function postActive() {
   return P.bloomEnabled || P.streaksEnabled
-    || P.postExposure !== 1 || P.postToneMap !== 'none' || P.highlightGain !== 1
+    || P.postExposure !== 1 || P.postToneMap !== 'none'
     || P.postAberration > 0 || P.postGrain > 0
     || P.postContrast !== 1 || P.postBrightness !== 0;
 }
@@ -3438,7 +3437,6 @@ function renderComposite(target = null, superSample = 1) {
   // 那條路徑的反預乘推導假設值域是 0–1（見主 shader 結尾），HDR 會讓它算出
   // 超出範圍的顏色。
   uniforms.uHdrOutput.value = (postActive() && !transparent) ? 1 : 0;
-  uniforms.uHighlightGain.value = P.highlightGain;
   // 後處理需要一份物件遮罩（寫在 alpha，見 shaders.js 的 uCoverageAlpha）：亮部
   // 取樣與調色都只該作用在主體上。旁路時維持 0，alpha 就還是原本的 1.0。
   uniforms.uCoverageAlpha.value = (postActive() && !transparent) ? 1 : 0;

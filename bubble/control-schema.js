@@ -125,7 +125,6 @@ export function createFormatters(P, { effectiveCapillaryHeight, shatterSegmentSe
   researchTextureDirY: v => v.toFixed(2),
   researchTextureDirZ: v => v.toFixed(2),
   postExposure: v => '×' + v.toFixed(2),
-  highlightGain: v => '×' + v.toFixed(1),
   postAberration: v => (v <= 0 ? '關閉' : v.toFixed(2)),
   postContrast: v => '×' + v.toFixed(2),
   postBrightness: v => (v === 0 ? '0' : (v > 0 ? '+' : '') + v.toFixed(2)),
