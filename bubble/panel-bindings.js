@@ -4,7 +4,7 @@ import { MOTION_HDRI, MOTION_HDRI_LIGHT, MOTION_TEXT_DEFAULTS } from './motions/
 import {
   DEFAULTS, LEGACY_SELECT_VALUES, SELECT_DEFAULTS, SPECTRAL_CAUSTIC_DEFAULTS,
 } from './runtime-defaults.js?v=melt-depth-1';
-import { LINEAR_COLOR_KEYS } from './control-schema.js?v=4';
+import { LINEAR_COLOR_KEYS } from './control-schema.js?v=5';
 
 export function createPanelBindings(options) {
   const {

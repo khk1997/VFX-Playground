@@ -158,7 +158,8 @@ export function createFormatters(P, { effectiveCapillaryHeight, shatterSegmentSe
   capillaryCrestSoftness: v => Math.round(v * 100) + '%',
   capillaryWarp: v => Math.round(v * 100) + '%',
   rayBeamIntensity: v => v === 0 ? '關閉' : 'x' + v.toFixed(2),
-  rayBeamSeparation: v => v === 0 ? '無色散' : v.toFixed(3),
+  // 安裝中這根叫「色邊偏移」（見 inspector.js 的玻璃卡片），0 的說法跟著換。
+  rayBeamSeparation: v => v === 0 ? (P.motion === 'research' ? '無偏移' : '無色散') : v.toFixed(3),
   rayBeamZoom: v => 'x' + v.toFixed(2),
   rayBeamRings: v => v.toFixed(1),
   rayBeamSpeed: v => {

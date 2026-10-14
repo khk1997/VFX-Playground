@@ -1410,17 +1410,25 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     rowOf('ior').after(rowOf('researchIconIOR'));
     relabel('researchIconIOR', '對話泡折射率');
     material.append($('dispersionGroup'));
-    // 這兩個名字照實際行為改（只在安裝中）：「色散分離」其實是 RGB 三通道取樣同一張
-    // 光芒圖樣時的相位錯位，不看折射率；「虛擬光譜焦散」的顏色來自色標，安裝中是
-    // 青到藍，不是光譜。
+    // 這一區的名字照實際行為改（只在安裝中）。兩個效果都不是真的分光：RAY 是一張
+    // 程序化的光芒圖樣，「色散分離」只是 RGB 三通道取樣它時的相位錯位，不看折射率；
+    // 「虛擬光譜焦散」的顏色來自色標（安裝中是青到藍），「光譜分離」調的是色標在
+    // 光帶上攤開的寬度。整組因此叫「光效」。
     relabel('rayBeamSeparation', '色邊偏移');
-    const causticTitle = $('spectralCausticGroup')?.querySelector('.effectTitle');
-    if (causticTitle) {
-      for (const node of [...causticTitle.childNodes]) {
+    relabel('spectralCausticSeparation', '色帶展開');
+    const groupTitle = $('dispersionGroup')?.querySelector('summary h4');
+    if (groupTitle) groupTitle.textContent = '光效';
+    // 子區塊標題是「標籤 + 文字 + 開關」，只留開關、換上新名字。
+    const retitle = (groupId, text) => {
+      const heading = $(groupId)?.querySelector('.effectTitle');
+      if (!heading) return;
+      for (const node of [...heading.childNodes]) {
         if (node.nodeType === Node.TEXT_NODE || !node.classList.contains('summaryToggle')) node.remove();
       }
-      causticTitle.prepend('焦散光帶');
-    }
+      heading.prepend(text);
+    };
+    retitle('rayDispersionGroup', '光芒圖樣');
+    retitle('spectralCausticGroup', '焦散光帶');
     // 光譜焦散裡實測調了也看不出差別的幾根（2026-10-13，diagTime 2.5 深底逐格比對）：
     // 光源尺寸、HDRI 連動推到極端也只差 2～6 個色階；影響對話泡 icon 0.6；色彩融合、
     // 內部反射、光帶寬度在預設附近幾乎是 0，要拉到極端才出來。照預設值跑，參數保留。

@@ -1,6 +1,6 @@
 'use strict';
 import * as THREE from 'three';
-import { buildInspector } from './inspector.js?v=sync-1';
+import { buildInspector } from './inspector.js?v=sync-2';
 import { createAdaptiveQuality, QUALITY_TIER_NAMES } from './adaptive-quality.js?v=2';
 import { createGpuProfiler } from './gpu-profiler.js?v=1';
 let inspector = null;
@@ -50,7 +50,7 @@ import {
 } from './runtime-memory.js?v=research-dark-mask-1';
 import {
   COLORS, LINEAR_COLOR_KEYS, SELECTS, createFormatters, createToggleBindings,
-} from './control-schema.js?v=4';
+} from './control-schema.js?v=5';
 import { glassTintBox } from './glass-tint.js?v=2';
 import { FLOOR_GAP, lowestPointOverLoop, shapeFieldFloorHeight } from './studio-floor.js?v=2';
 import { createTypewriterRuntime } from './typewriter-runtime.js?v=studio-floor-1';
@@ -64,7 +64,7 @@ import { createMorphRuntime } from './motions/runtime/morph.js?v=1';
 import { createFormationRuntime } from './motions/runtime/formation.js?v=1';
 import { buildExtendedMotionControls } from './panel-builder.js?v=2';
 import { createPanelStateController } from './panel-state.js?v=6';
-import { createPanelBindings } from './panel-bindings.js?v=2';
+import { createPanelBindings } from './panel-bindings.js?v=3';
 import { createExportRuntime } from './export-runtime.js?v=7';
 import { createCompileDiagnostics } from './compile-diagnostics.js?v=2';
 import { createRuntimeDiagnostics } from './runtime-diagnostics.js?v=3';
