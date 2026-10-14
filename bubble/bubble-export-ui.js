@@ -14,6 +14,10 @@
   const width = document.getElementById('exportWidth');
   const height = document.getElementById('exportHeight');
   const aspect = document.getElementById('exportAspect');
+  const linkSize = document.getElementById('exportLinkSize');
+  // 綁定寬高時要維持的比例（寬 / 高）。只在打開綁定、或按尺寸預設時重記：打字
+  // 途中（300 會先經過 3、30）兩邊都是半成品，從那裡重算比例會越算越歪。
+  let linkedRatio = 1;
   const summary = document.getElementById('exportSummary');
   const sequenceSection = document.getElementById('exportSequenceSection');
   const frameCount = document.getElementById('exportFrameCount');
@@ -177,12 +181,30 @@
     if (dialog.open) dialog.close();
   });
   document.querySelectorAll('input[name="exportType"]').forEach(input => input.addEventListener('change', syncSequence));
+  function rememberRatio() {
+    const w = Number(width.value);
+    const h = Number(height.value);
+    if (w > 0 && h > 0) linkedRatio = w / h;
+  }
   document.querySelectorAll('.exportPresetGrid button').forEach(button => button.addEventListener('click', () => {
     [width.value, height.value] = button.dataset.size.split('x');
+    rememberRatio();
     syncDimensions();
     syncPreview();
   }));
+  linkSize.addEventListener('click', () => {
+    const linked = linkSize.getAttribute('aria-pressed') !== 'true';
+    linkSize.setAttribute('aria-pressed', String(linked));
+    linkSize.title = linked ? '綁定寬高比例' : '寬高分開設定';
+    if (linked) rememberRatio();
+  });
   [width, height].forEach(input => input.addEventListener('input', () => {
+    const value = Number(input.value);
+    if (linkSize.getAttribute('aria-pressed') === 'true' && value > 0) {
+      const partner = input === width ? height : width;
+      const next = input === width ? value / linkedRatio : value * linkedRatio;
+      partner.value = Math.min(Number(partner.max) || 4096, Math.max(1, Math.round(next)));
+    }
     syncDimensions();
     syncPreview();
   }));
