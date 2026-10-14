@@ -145,6 +145,8 @@ uniform float uResearchBubbleMax;
 uniform float uResearchIconIOR;
 uniform float uResearchIconTint;
 uniform float uResearchPaperShade;
+// 安裝中深底的去背輸出：外觀分支要照的背景亮度（viewer 那張深色紙），< 0 = 不覆寫。
+uniform float uResearchMatteLookLum;
 uniform vec3 uResearchIconTintColor;
 uniform float uResearchIconTintEdge;
 uniform sampler2D uResearchIconTintRamp;
@@ -603,6 +605,9 @@ ${GLASS_TINT_GLSL}${ENVIRONMENT_GLSL}${GEOMETRY_GLSL}${OPTICS_GLSL}void main(){
   if (uResearchPaperShade > 0.5) {
     trueBgLum = dot(lightPaperGradient(rd), vec3(0.2126, 0.7152, 0.0722));
   }
+  // 深底也一樣：白紙那一張不能因為紙是白的就換成淺底外觀（whiteBackdrop 會整個
+  // 打開），否則黑白兩張外觀不同，解出來的 PNG 顏色就偏了。
+  if (uResearchMatteLookLum >= 0.0) trueBgLum = uResearchMatteLookLum;
 #endif
   if (universalGlass) bgLum = 0.0;
   // 通用玻璃的 bgLum 會刻意歸零，因為暗底自身能量要在黑場生成；但使用者明確

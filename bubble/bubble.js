@@ -65,7 +65,7 @@ import { createFormationRuntime } from './motions/runtime/formation.js?v=1';
 import { buildExtendedMotionControls } from './panel-builder.js?v=2';
 import { createPanelStateController } from './panel-state.js?v=6';
 import { createPanelBindings } from './panel-bindings.js?v=2';
-import { createExportRuntime } from './export-runtime.js?v=5';
+import { createExportRuntime } from './export-runtime.js?v=7';
 import { createCompileDiagnostics } from './compile-diagnostics.js?v=2';
 import { createRuntimeDiagnostics } from './runtime-diagnostics.js?v=3';
 
@@ -338,7 +338,7 @@ function refreshLoopScaledReadouts() {
   refreshTypewriterReadouts();
 }
 
-import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=no-membrane-1';
+import { VERT, FRAG, FRAG_BASELINE } from './shaders.js?v=dark-matte-1';
 import { createPostChain } from './post.js?v=shoulder-1';
 
 const {
@@ -2360,6 +2360,7 @@ function initGL() {
     uResearchIconIOR: { value: P.researchIconIOR },
     uResearchIconTint: { value: P.researchIconTint },
     uResearchPaperShade: { value: 0 },
+    uResearchMatteLookLum: { value: -1 },
     uResearchIconTintEdge: { value: P.researchIconTintEdge },
     uResearchIconTintColor: { value: new THREE.Color().setStyle(
       P.researchIconTintColor, THREE.LinearSRGBColorSpace

@@ -97,13 +97,20 @@ function renderExportPixels(settings, target) {
 // 那種顏色，疊白後彩度只剩一半不到。這時 a 取「最不透光的那個通道」，每個通道
 // 疊白都解得出來、不會被夾：w ≥ 透過率 ≥ 1 − a，所以 (w − (1 − a)) / a 落在 0–1。
 // 代價是疊黑時多出一層淡淡的配色光，淺底輸出本來就是給淺色頁面用的。
-function matteExportPixels(black, white, onWhite = false) {
+//
+// onBlack：安裝中的深底輸出，對稱的做法 —— 以黑底為準。平均法會把深底那顆藍色
+// 削掉一截（外殼透射偏暖，藍透得少，平均之後疊回黑底的藍就被扣掉），畫面上的
+// 顏色對不上。a 一樣取最不透光的通道，顏色直接是 黑 / a：疊回黑底與畫面逐值一致，
+// 而且 黑 ≤ 1 − 透過率 ≤ a，不會被夾。代價是疊白時少了有色的那一點透射。
+function matteExportPixels(black, white, reference = 'average') {
+  const onWhite = reference === 'white';
+  const onBlack = reference === 'black';
   const out = new Uint8Array(black.length);
   for (let i = 0; i < black.length; i += 4) {
     const tr = Math.min(Math.max((white[i] - black[i]) / 255, 0), 1);
     const tg = Math.min(Math.max((white[i + 1] - black[i + 1]) / 255, 0), 1);
     const tb = Math.min(Math.max((white[i + 2] - black[i + 2]) / 255, 0), 1);
-    const alpha = onWhite
+    const alpha = onWhite || onBlack
       ? 1 - Math.min(tr, tg, tb)
       : 1 - (0.2126 * tr + 0.7152 * tg + 0.0722 * tb);
     if (alpha < 0.5 / 255) continue;   // 全透明：留 0,0,0,0
@@ -111,7 +118,9 @@ function matteExportPixels(black, white, onWhite = false) {
     for (let c = 0; c < 3; c++) {
       const b = black[i + c] / 255;
       const w = white[i + c] / 255;
-      const color = onWhite ? (w - leak) / alpha : (b + w - leak) / (2 * alpha);
+      const color = onWhite ? (w - leak) / alpha
+        : onBlack ? b / alpha
+          : (b + w - leak) / (2 * alpha);
       out[i + c] = Math.round(Math.min(Math.max(color, 0), 1) * 255);
     }
     out[i + 3] = Math.round(alpha * 255);
@@ -128,7 +137,7 @@ async function renderExportFrame(settings, time, target) {
     const black = renderExportPixels(settings, target);
     paper.setRGB(1, 1, 1, THREE.LinearSRGBColorSpace);
     const white = renderExportPixels(settings, target);
-    pixels = matteExportPixels(black, white, settings.lightPaperMatte);
+    pixels = matteExportPixels(black, white, settings.matteReference);
   } else {
     pixels = renderExportPixels(settings, target);
   }
@@ -197,6 +206,9 @@ async function runExport(settings) {
   const staticMatte = transparentExport && usesDualMatte(P.motion);
   // 靜態仍走平均法（它的透射接近無色，淺底輸出也站得住）。
   const lightPaperMatte = staticMatte && !usesStudioGlass(P.motion) && P.backdrop === 'light';
+  // 安裝中的深底以黑底為準（見 matteExportPixels 的 onBlack）。
+  const darkPaperMatte = staticMatte && !usesStudioGlass(P.motion) && P.backdrop !== 'light';
+  const matteReference = lightPaperMatte ? 'white' : darkPaperMatte ? 'black' : 'average';
   getUniforms().uTransparentBackground.value = transparentExport && !staticMatte ? 1 : 0;
   getUniforms().uBgMode.value = settings.background === 'scene' ? SELECTS.bgMode.map[P.bgMode] : 0;
   if (transparentExport) getUniforms().uBgColor.value.setHex(0x000000, THREE.LinearSRGBColorSpace);
@@ -211,6 +223,14 @@ async function runExport(settings) {
     // 一樣有明暗（見 environment.js 的 researchBackdropSample）；去背也改成以白底
     // 為準，配色才不會被稀釋（見 matteExportPixels）。
     getUniforms().uResearchPaperShade.value = lightPaperMatte ? 1 : 0;
+    // 安裝中的深底：黑白兩張紙的外觀都照畫面上那張深色紙的亮度走（見 shaders.js
+    // 的 trueBgLum）。不鎖的話白紙那一張會走淺底外觀，解出來整體偏色。
+    if (darkPaperMatte) {
+      const paper = saved.bgColor;
+      getUniforms().uResearchMatteLookLum.value = P.bgMode === 'color'
+        ? 0.2126 * paper.r + 0.7152 * paper.g + 0.0722 * paper.b
+        : 0;
+    }
   }
   // 透明背景預設不帶光暈與光芒（見 index.html 的 exportGlowField）：輸出期間暫時
   // 關掉，結束後還原。
@@ -220,7 +240,7 @@ async function runExport(settings) {
     P.streaksEnabled = false;
   }
   const frameSettings = {
-    ...settings, width, height, renderWidth, renderHeight, staticMatte, lightPaperMatte,
+    ...settings, width, height, renderWidth, renderHeight, staticMatte, matteReference,
   };
 
   try {
@@ -277,6 +297,7 @@ async function runExport(settings) {
     getUniforms().uStudioFloorTone.value = saved.floorTone;
     getUniforms().uStudioShadowStrength.value = saved.shadowStrength;
     getUniforms().uResearchPaperShade.value = 0;
+    getUniforms().uResearchMatteLookLum.value = -1;
     P.bloomEnabled = savedGlow.bloom;
     P.streaksEnabled = savedGlow.streaks;
     resetPreviousDropT();
