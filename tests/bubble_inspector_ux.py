@@ -240,7 +240,7 @@ def check_static(browser, base_url: str) -> dict[str, object]:
     )
     # 風格已經拿掉；造型那一區還在面板裡（手機用），桌面上藏起來、改由右側卡片操作。
     # 舊的「進階」拆成燈光與後期；透射率回到玻璃區、邊緣光與光譜取樣不開給使用者，
-    # 抗鋸齒是右上角的「畫質」。「更多與管理」在桌面上搬進右上角的 ⋯（面板裡那一區
+    # 抗鋸齒在右上角。「更多與管理」在桌面上搬進右上角的 ⋯（面板裡那一區
     # 只留給手機）。
     assert sections == ["造型", "玻璃", "地板", "燈光", "鏡頭", "背景", "後期", "更多與管理"], sections
     assert page.locator("#panel .inspectorUtilities.inspectorTopBarMirrored").is_hidden()
@@ -268,7 +268,7 @@ def check_static(browser, base_url: str) -> dict[str, object]:
         "el => { el.checked = false; el.dispatchEvent(new Event('change', { bubbles: true })); }")
     assert page.locator("#inspectorPage-studio #fresnel").count() == 0
     assert page.locator("#inspectorPage-studio #spectralSamples").count() == 0
-    # 右上角由右而左：面板、⋯、輸出、畫質；靜態沒有播放鍵。
+    # 右上角由右而左：面板、⋯、輸出、抗鋸齒；靜態沒有播放鍵。
     top = page.evaluate("""() => Object.fromEntries(['qualityBtn', 'exportBtn', 'moreBtn', 'toggleBtn', 'playCtl'].map(id => {
         const el = document.getElementById(id);
         const r = el.getBoundingClientRect();
@@ -513,7 +513,7 @@ def check_studio_motion(browser, base_url: str) -> dict[str, object]:
     assert not any("形狀" in text for text in labels), labels
     assert any("檔案類型" in text for text in labels), labels
     assert page.locator("#cameraFov").input_value() == "28"
-    # 會動的模組：播放鍵在畫質左邊（跟輸出換了位置）。
+    # 會動的模組：播放鍵在抗鋸齒左邊（跟輸出換了位置）。
     play = page.locator("#playCtl").bounding_box()
     aa = page.locator("#qualityBtn").bounding_box()
     export = page.locator("#exportBtn").bounding_box()

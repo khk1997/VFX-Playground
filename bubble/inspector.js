@@ -965,10 +965,10 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     return { root, sync };
   }
 
-  // 右上角那一組（桌面）：由右而左「面板、⋯、輸出、畫質、深淺底、播放」。
+  // 右上角那一組（桌面）：由右而左「面板、⋯、輸出、抗鋸齒、深淺底、播放」。
   //
-  // - 畫質：抗鋸齒（#antialiasLevel，超取樣倍率），點開是四個等級的選單。面板裡
-  //   不再有「畫質」區；光譜取樣不開給使用者。
+  // - 抗鋸齒（#antialiasLevel，超取樣倍率），點開是四個等級的選單。以前叫「畫質」，
+  //   但它只管邊緣平滑度，跟自動畫質分級是兩回事，所以直接用它的名字。光譜取樣不開給使用者。
   // - ⋯：參數檔（複製、貼上、下載、開啟）、操作提示、全部重設 —— 偶爾才用、跟畫面
   //   本身無關的操作。參數檔就是原本面板裡那個 #presetIO，整個搬進選單，行為不變。
   //   面板底部的「更多與管理」在桌面上藏起來；手機沒有這一組按鈕，留在抽屜裡。
@@ -1019,10 +1019,10 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       }
     }, true);
 
-    // 畫質（抗鋸齒）。
+    // 抗鋸齒。
     const source = $('antialiasLevel');
     let qualityItems = [];
-    const quality = topMenu('quality', '畫質', '畫質（邊緣平滑度）', menu => {
+    const quality = topMenu('quality', '抗鋸齒', '抗鋸齒（邊緣平滑度）', menu => {
       qualityItems = [...source.options].map(option => {
         const item = button(option.textContent.replace(/（.*?）/, ''), () => {
           writeControl('antialiasLevel', option.value);
@@ -1040,8 +1040,8 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       const current = source.value;
       for (const item of qualityItems) item.setAttribute('aria-checked', String(item.dataset.value === current));
       const label = qualityItems.find(item => item.dataset.value === current)?.textContent ?? '';
-      quality.trigger.title = `畫質：${label}`;
-      quality.trigger.setAttribute('aria-label', `畫質：${label}`);
+      quality.trigger.title = `抗鋸齒：${label}`;
+      quality.trigger.setAttribute('aria-label', `抗鋸齒：${label}`);
     };
     antialiasSync();
 
@@ -1235,8 +1235,8 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     stack.id = 'studioSideStack';
     document.body.append(stack);
     const align = () => {
-      // 欄位從「輸出」的左緣到「面板」的右緣（中間是 ⋯）。畫質與播放鍵在它更左邊，
-      // 不算進來：有沒有播放鍵（靜態沒有）、畫質的字寬都不該改變卡片的寬度。
+      // 欄位從「輸出」的左緣到「面板」的右緣（中間是 ⋯）。抗鋸齒與播放鍵在它更左邊，
+      // 不算進來：有沒有播放鍵（靜態沒有）、抗鋸齒的字寬都不該改變卡片的寬度。
       const first = $('exportBtn')?.getBoundingClientRect();
       const last = $('toggleBtn')?.getBoundingClientRect();
       if (!first?.width || !last?.width) return;
@@ -1488,7 +1488,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
       });
     }).observe(panel, { subtree: true, attributes: true, attributeFilter: ['class', 'hidden'] });
 
-    // 存檔、提示與整個模組的重設。抗鋸齒在右上角的「畫質」。
+    // 存檔、提示與整個模組的重設。抗鋸齒在右上角。
     $('resetBtn').textContent = '全部重設';
     share.before($('presetIO'));
     share.hidden = true;
@@ -1706,7 +1706,7 @@ export function buildInspector({ defaults, modeDefault = () => undefined, launch
     backgroundBlock.classList.add('studioDesktopMirrored');
 
     // 光譜取樣不開給使用者，用預設值（畫質分級另外會壓低）。抗鋸齒是右上角的
-    // 「AA」按鈕（見 buildAntialiasButton）。
+    // 「抗鋸齒」選單（見 buildTopBar）。
     const postBlock = group('後期', []);
     postBlock.append($('bloomGroup'));
     postBlock.classList.add('studioPostCard');

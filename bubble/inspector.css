@@ -204,7 +204,7 @@
 #exportBtn:hover { background: #28adff !important; }
 #exportBtn[aria-expanded="true"] { background: #007dcc !important; box-shadow: inset 0 0 0 1px #ffffff1f !important; }
 #toggleBtn[aria-expanded="true"] { background: #38383b !important; border-color: #ffffff35 !important; }
-/* 右上角那一組自己加的按鈕（畫質、⋯，見 inspector.js 的 buildTopBar）。外觀比照
+/* 右上角那一組自己加的按鈕（抗鋸齒、⋯，見 inspector.js 的 buildTopBar）。外觀比照
    播放鍵；right 由 layoutTopBar 依實際寬度排，這裡不寫。 */
 .topBarButton {
   position: fixed; z-index: 12; top: 12px; height: 34px; min-width: 40px; padding: 0 12px;
@@ -436,7 +436,7 @@ body:has(#panel.collapsed) .studioSideStack > * { pointer-events: none; }
   /* 靜態模組的面板內容比較少，窄一點（其他模式維持 380px）。 */
   #panel.inspector[data-layout="studio"] { width: 340px; }
   /* 標題區只留大標題：英文副標與「預覽 · 品質」標籤收掉（品質狀態仍在 DOM 裡更新，
-     右上角的「畫質」選單才是調它的地方）。 */
+     右上角的「抗鋸齒」選單才是調它的地方）。 */
   #panel.inspector[data-layout="studio"] .inspectorHeader .sub,
   #panel.inspector[data-layout="studio"] .inspectorHeader .inspectorDepth { display: none !important; }
   #panel.inspector[data-layout="studio"] .inspectorIdentity { margin-bottom: 0; }
