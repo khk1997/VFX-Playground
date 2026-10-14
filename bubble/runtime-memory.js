@@ -101,7 +101,7 @@ export const BACKDROP_SCOPED_KEYS = new Set([
   'rayBeamIntensity', 'rayBeamSeparation', 'rayBeamChroma',
   'rayBeamZoom', 'rayBeamRings',
   'rayBeamAzimuth', 'rayBeamElevation', 'rayBeamRefract',
-  'rayBeamFresnelMask', 'rayBeamNoiseScale',
+  'rayBeamFresnelMask', 'rayBeamNoiseScale', 'rayBeamNoiseMask',
   // 淺底預設關閉 RAY 模擬色散；列入底色記憶後，切回深底仍會恢復深底的開啟
   // 狀態，使用者在任一底色手動切換也只會改到該底色自己的記憶格。
   'rayDispersionEnabled',
@@ -184,9 +184,12 @@ const BACKDROP_OVERRIDES = {
 // 某個模式在某個底色下自己的起點，優先於 BACKDROP_OVERRIDES。
 // 安裝中的淺底：換一張 HDRI（registry 的 hdriLight），角度與模糊照那張調；環境
 // 折射讓 HDRI 的明暗透進玻璃 —— 外殼改走 OpenPBR 之後（見 optics.js 的
-// surfaceMaterial），透過玻璃看到的只有背景紙，玻璃裡才有明暗。深底維持原值。
+// surfaceMaterial），透過玻璃看到的只有背景紙，玻璃裡才有明暗。
+// 安裝中的深底：RAY 光芒的兩個遮罩各收到一半（使用者 2026-10-14 定案）。淺底的
+// RAY 預設是關的，遮罩維持 registry 的值。
 const MOTION_BACKDROP_OVERRIDES = {
   research: {
+    dark: { rayBeamFresnelMask: 0.5, rayBeamNoiseMask: 0.5 },
     light: { hdriYaw: -35, hdriPitch: -62, hdriBlur: 0.2, envRefraction: 0.17 },
   },
 };
